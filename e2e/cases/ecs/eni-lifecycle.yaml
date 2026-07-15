@@ -1,0 +1,133 @@
+# ECS ENI full lifecycle: create -> read-back -> list -> differential -> update
+# -> attach -> detach -> delete.
+#
+# attach/detach need a real ECS instance that is NOT part of the shared stack
+# (private prerequisite). We create a throwaway host as the first step, attach
+# the ENI to it, detach, then delete the ENI; the host is torn down via its own
+# teardown. Its instance type comes from the shared ECS inventory resolver.
+resource: ecs/eni
+requires_params: [ecs.instance_type]
+parameter_constraints:
+  ecs:
+    min_eni_quantity: 2
+needs: [vpc, vswitch, security_group, image]
+
+steps:
+  - name: create attach host (private prerequisite)
+    run: >
+      ecctl ecs instance create
+      --type {{.params.ecs.instance_type}}
+      --image {{.stack.image}}
+      --sg {{.stack.security_group}}
+      --vswitch {{.stack.vswitch}}
+      --name {{.run_name}}-eni-host
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.instance
+    expect:
+      id: { type: string, prefix: i- }
+      status: Running
+    capture:
+      instance_id: id
+    teardown: ecctl ecs instance delete {{.instance_id}} --force
+
+  - name: create
+    run: >
+      ecctl ecs eni create
+      --vswitch {{.stack.vswitch}}
+      --sg {{.stack.security_group}}
+      --name {{.run_name}}-eni
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.eni
+    expect:
+      id: { type: string, prefix: eni- }
+      name: { eq: "{{.run_name}}-eni" }
+      vswitch: { eq: "{{.stack.vswitch}}" }
+      status: Available
+    capture:
+      eni_id: id
+    teardown: ecctl ecs eni delete {{.eni_id}}
+
+  - name: get (read-back)
+    run: ecctl ecs eni get {{.eni_id}}
+    at: $.eni
+    expect:
+      id: { eq: "{{.eni_id}}" }
+      vswitch: { eq: "{{.stack.vswitch}}" }
+      vpc: { eq: "{{.stack.vpc}}" }
+      security_group_ids: { type: array, min_len: 1 }
+      status: { oneof: [Available, InUse] }
+    capture:
+      hi_status: status
+
+  - name: list (find ours)
+    run: ecctl ecs eni list --filter vswitch={{.stack.vswitch}}
+    # "$" in expect is the response root (a map), so it can't assert the array;
+    # the assert checks $.enis directly (same pattern as the sg/keypair cases).
+    assert:
+      - len($.enis) >= 1
+
+  - name: differential vs raw DescribeNetworkInterfaces
+    # NetworkInterfaceId is a RepeatList; the JSON-array form is silently ignored
+    # (returns all ENIs), so use the indexed .1 form to actually filter.
+    run: ecctl call ecs DescribeNetworkInterfaces --NetworkInterfaceId.1 {{.eni_id}}
+    expect:
+      $.response.NetworkInterfaceSets.NetworkInterfaceSet[0].NetworkInterfaceId: { eq: "{{.eni_id}}" }   # call wraps under .response
+      $.response.NetworkInterfaceSets.NetworkInterfaceSet[0].Status: { eq: "{{.hi_status}}" }
+      $.response.NetworkInterfaceSets.NetworkInterfaceSet[0].VSwitchId: { eq: "{{.stack.vswitch}}" }
+
+  - name: update
+    run: ecctl ecs eni update {{.eni_id}} --name {{.run_name}}-eni-renamed --description ecctl-e2e
+    at: $.eni
+    expect:
+      id: { eq: "{{.eni_id}}" }
+      name: { eq: "{{.run_name}}-eni-renamed" }
+
+  - name: get (read-back after update)
+    run: ecctl ecs eni get {{.eni_id}}
+    at: $.eni
+    expect:
+      id: { eq: "{{.eni_id}}" }
+      name: { eq: "{{.run_name}}-eni-renamed" }
+    capture:
+      hi_name: name
+
+  - name: stop host for ENI operations
+    run: ecctl ecs instance stop {{.instance_id}}
+    at: $.instance
+    expect:
+      status: Stopped
+
+  - name: attach
+    run: ecctl ecs eni attach {{.eni_id}} --instance {{.instance_id}}
+    at: $.eni
+    expect:
+      id: { eq: "{{.eni_id}}" }
+      instance: { eq: "{{.instance_id}}" }
+      status: InUse
+
+  - name: get (read-back attached)
+    run: ecctl ecs eni get {{.eni_id}}
+    at: $.eni
+    expect:
+      id: { eq: "{{.eni_id}}" }
+      instance: { eq: "{{.instance_id}}" }
+      status: InUse
+
+  - name: detach
+    run: ecctl ecs eni detach {{.eni_id}} --instance {{.instance_id}}
+    at: $.eni
+    expect:
+      id: { eq: "{{.eni_id}}" }
+      status: Available
+
+  - name: restart host after ENI operations
+    run: ecctl ecs instance start {{.instance_id}}
+    at: $.instance
+    expect:
+      status: Running
+
+  - name: delete
+    run: ecctl ecs eni delete {{.eni_id}}
+    at: $
+    expect:
+      deleted: true

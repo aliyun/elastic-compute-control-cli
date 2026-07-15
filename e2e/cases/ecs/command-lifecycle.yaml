@@ -1,0 +1,108 @@
+# ECS Cloud Assistant command lifecycle:
+#   create -> read-back -> differential -> update -> list -> invoke -> stop -> delete.
+#
+# create/get/list/update/delete operate on the command template alone and need no
+# instance. invoke (and stop of the resulting invocation) require a target ECS
+# instance running the Cloud Assistant agent, so this case first provisions a
+# private host from the shared stack, then tears it down in reverse. The guest
+# agent may not be ready the instant the host boots, so invoke/stop assertions are
+# kept structural; concrete invocation outcomes are left to the human (TODO).
+#
+# Structural matchers (type/prefix) come from specs/ecs/command.yaml; the command
+# id prefix is `c-`. Waiting is ecctl's default (pass --no-wait to skip).
+resource: ecs/command
+requires_params: [ecs.instance_type]
+needs: [vpc, vswitch, security_group, image]
+serial: true
+
+steps:
+  - name: provision command host
+    run: >
+      ecctl ecs instance create
+      --type {{.params.ecs.instance_type}}
+      --image {{.stack.image}}
+      --sg {{.stack.security_group}}
+      --vswitch {{.stack.vswitch}}
+      --name {{.run_name}}-command-host
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.instance
+    expect:
+      id: { type: string, prefix: i- }
+      status: Running
+    capture:
+      instance_id: id
+    teardown: ecctl ecs instance delete {{.instance_id}} --force
+
+  - name: install assistant agent
+    run: ecctl ecs assistant install --instance-ids '["{{.instance_id}}"]'
+    expect:
+      $.statuses: { type: array, min_len: 1 }
+
+  - name: create
+    run: >
+      ecctl ecs command create
+      --name {{.run_name}}-cmd
+      --type RunShellScript
+      --command-content 'sleep 300'
+      --description "ecctl e2e {{.run_id}}"
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.command
+    expect:
+      id: { type: string, prefix: c- }
+      name: { eq: "{{.run_name}}-cmd" }
+      type: { eq: RunShellScript }
+    capture:
+      command_id: id
+    teardown: ecctl ecs command delete {{.command_id}}
+
+  - name: get (read-back)
+    run: ecctl ecs command get {{.command_id}}
+    at: $.command
+    expect:
+      id: { eq: "{{.command_id}}" }
+      name: { eq: "{{.run_name}}-cmd" }
+      type: { eq: RunShellScript }
+      command_content: { type: string, min_len: 1 }
+    capture:
+      hi_content: command_content
+
+  - name: differential vs raw DescribeCommands
+    run: ecctl call ecs DescribeCommands --CommandId {{.command_id}}
+    expect:
+      $.response.Commands.Command[0].CommandId: { eq: "{{.command_id}}" }   # call wraps under .response
+      $.response.Commands.Command[0].CommandContent: { eq: "{{.hi_content}}" }
+
+  - name: update
+    run: ecctl ecs command update {{.command_id}} --description "ecctl e2e updated {{.run_id}}"
+    at: $.command
+    expect:
+      id: { eq: "{{.command_id}}" }
+
+  - name: get (after update)
+    run: ecctl ecs command get {{.command_id}}
+    at: $.command
+    expect:
+      id: { eq: "{{.command_id}}" }
+      description: { eq: "ecctl e2e updated {{.run_id}}" }
+
+  - name: list (find ours)
+    run: ecctl ecs command list --filter type=RunShellScript
+    assert:
+      - len($.commands) >= 0
+
+  - name: invoke
+    run: ecctl ecs command invoke {{.command_id}} --instance-ids '["{{.instance_id}}"]' --no-wait
+    expect:
+      $.invoke_id: { type: string, min_len: 1 }
+    capture:
+      invoke_id: $.invoke_id
+
+  - name: stop
+    run: ecctl ecs command stop {{.invoke_id}} --instance-ids '["{{.instance_id}}"]' --force --no-wait
+    expect:
+      $.invocation.invoke_id: { eq: "{{.invoke_id}}" }
+
+  - name: delete
+    run: ecctl ecs command delete {{.command_id}}
+    expect:
+      $.deleted: { eq: true }

@@ -1,0 +1,27 @@
+schema_version: 1
+product: ecs
+priority: 1
+resources:
+  - instance
+  - disk
+  - image
+  - sg
+  - eni
+  - keypair
+  - snapshot
+  - snapshot-group
+  - auto-snapshot-policy
+  - command
+  - launch-template
+  - prefix-list
+  - port-range-list
+  - region
+  - zone
+  - assistant
+description:
+  en: Manage Elastic Compute Service (ECS) resources, including instances, block storage disks and snapshots, images, security groups, elastic network interfaces, key pairs, launch templates, and Cloud Assistant commands.
+  zh-CN: 管理云服务器 ECS 资源，涵盖实例、块存储云盘与快照、镜像、安全组、弹性网卡（ENI）、密钥对、启动模板以及云助手命令。
+examples:
+  - ecctl ecs instance list --filter status=Running
+  - ecctl ecs instance create --type <instance-type> --image <image-id> --sg <sg-id> --vswitch <vswitch-id> --name web-01
+  - ecctl ecs sg create --vpc <vpc-id> --name web-sg

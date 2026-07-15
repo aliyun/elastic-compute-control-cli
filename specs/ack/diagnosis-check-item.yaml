@@ -1,0 +1,88 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: check-item
+parent: diagnosis
+kind: regional
+aliases: [items]
+display_name:
+  en: diagnosis check item
+  zh-CN: 诊断检查项
+description:
+  en: List ACK diagnosis check items
+  zh-CN: 列出 ACK 诊断检查项
+examples:
+  - ecctl ack diagnosis check-item list --cluster <cluster-id> --type node
+  - ecctl ack diagnosis check-item list --cluster <cluster-id> --type pod
+
+identity:
+  field: name
+  output_root:
+    one: check_item
+    many: check_items
+
+schema:
+  fields:
+    name:
+      type: string
+      description:
+        en: check item name
+        zh-CN: 检查项名称
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    type:
+      type: string
+      description:
+        en: diagnosis type
+        zh-CN: 诊断类型
+      enum: [node, ingress, cluster, memory, pod, service, network]
+    language:
+      type: string
+      description:
+        en: query language
+        zh-CN: 查询语言
+
+probes:
+  list:
+    api: GetClusterDiagnosisCheckItems
+    request:
+      cluster_id: $.cluster
+      diagnosis_id: $.type
+      language: $.language
+    response:
+      items: $.check_items
+      request_id: $.request_id
+      id: $.name
+      fields:
+        name: $.name
+        display: $.display
+        group: $.group
+        level: $.level
+        message: $.message
+        refer: $.refer
+        value: $.value
+        description: $.desc
+      extra_fields:
+        code: $.code
+        is_success: $.is_success
+
+operations:
+  list:
+    examples:
+      - ecctl ack diagnosis check-item list
+    description:
+      en: List ACK diagnosis check items
+      zh-CN: 列出 ACK 诊断检查项
+    input:
+      fields:
+        - cluster:
+            required: true
+        - type:
+            required: true
+        - language
+    workflow:
+      - probe: list
+        many: true

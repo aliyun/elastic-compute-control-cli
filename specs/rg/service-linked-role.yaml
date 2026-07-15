@@ -1,0 +1,134 @@
+schema_version: 2
+product: rg
+api_product: ResourceManager
+resource: service-linked-role
+aliases: [slr]
+kind: regional
+display_name:
+  en: service-linked role
+  zh-CN: 服务关联角色
+description:
+  en: Manage service-linked roles
+  zh-CN: 管理服务关联角色
+examples:
+  - ecctl rg service-linked-role create --service-name polardb.aliyuncs.com
+  - ecctl rg slr delete AliyunServiceRoleForPolarDB
+
+identity:
+  field: name
+  output_root:
+    one: role
+    many: roles
+
+schema:
+  fields:
+    name:
+      type: string
+      description:
+        en: role name
+        zh-CN: 角色名称
+    service_name:
+      type: string
+      description:
+        en: cloud service name (e.g. polardb.aliyuncs.com)
+        zh-CN: 云服务名称（例如 polardb.aliyuncs.com）
+    custom_suffix:
+      type: string
+      description:
+        en: custom suffix for the role name
+        zh-CN: 角色名称自定义后缀
+    description:
+      type: string
+      description:
+        en: role description
+        zh-CN: 角色描述
+
+controls:
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  deletion_status:
+    api: GetServiceLinkedRoleDeletionStatus
+    request:
+      DeletionTaskId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      state: $.Status
+      fields:
+        status: $.Status
+        reason: $.Reason
+
+waiters:
+  deleted_after_delete:
+    probe: deletion_status
+    target: SUCCEEDED
+    interval: 2s
+    timeout: 300s
+    failure:
+      states: [FAILED, INTERNAL_ERROR]
+
+bindings:
+  create_role:
+    api: CreateServiceLinkedRole
+    request:
+      ServiceName: $.service_name
+      CustomSuffix: $.custom_suffix
+      Description: $.description
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  delete_role:
+    api: DeleteServiceLinkedRole
+    request:
+      RoleName: $.name
+      ApiParam:
+        raw: $.api_param
+    id_from: $.DeletionTaskId
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+
+operations:
+  create:
+    examples:
+      - ecctl rg service-linked-role create --service-name <service-name>
+    description:
+      en: Create service-linked role
+      zh-CN: 创建服务关联角色
+    input:
+      fields:
+        - service_name:
+            required: true
+        - custom_suffix
+        - description
+      controls:
+        - api_param
+    workflow:
+      - binding: create_role
+      - emit:
+          fields:
+            service_name: $input.service_name
+  delete:
+    examples:
+      - ecctl rg service-linked-role delete my-name
+    description:
+      en: Delete service-linked role
+      zh-CN: 删除服务关联角色
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+      controls:
+        - api_param
+    workflow:
+      - binding: delete_role
+      - emit:
+          fields:
+            name: $input.name
+          deleted: true

@@ -1,0 +1,39 @@
+name: 部署文档
+
+triggers:
+  push:
+    branches: '**'
+    paths:
+      - 'website/**'
+
+jobs:
+  deploy:
+    name: 部署文档
+    image: alios-8u
+    steps:
+      - name: 拉代码
+        uses: checkout
+
+      # https://cd.aone.alibaba-inc.com/unite/component/1134/detail
+      - name: 准备环境
+        uses: setup-env
+        inputs:
+          node-version: 24
+          tnpm-version: 10
+
+      - name: 构建文档网站
+        id: build-website                         # 构建website
+        envs:
+          SITE_URL: https://ecctl.io.alibaba-inc.com
+          BASE_URL: /
+        run: |
+          cd website
+          npm install --registry=https://registry.anpm.alibaba-inc.com
+          npm run build
+
+      - name: 部署到 Aone Pages
+        uses: deploy-pages
+        inputs:
+          deploy-dir: website/build/              # 构建后的静态资源目录
+          production-branch: master               # 触发部署[正式版本]的分支，否则为[预览版本]
+          site-name: ecctl                        # 站点名称（可选），仓库 Pages 设置中未配置时，正式部署会用该名称自动初始化站点

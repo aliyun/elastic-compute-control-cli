@@ -1,0 +1,254 @@
+schema_version: 2
+product: lingjun
+api_product: eflo-controller
+resource: vsc
+kind: regional
+display_name:
+  en: VSC
+  zh-CN: 灵骏虚拟串行卡
+description:
+  en: Manage Lingjun virtual serial cards
+  zh-CN: 管理灵骏虚拟串行卡
+examples:
+  - ecctl lingjun vsc list --filter node=<node-id>
+  - ecctl lingjun vsc get <vsc-id>
+  - ecctl lingjun vsc create --node <node-id> --type primary --name serial-a
+  - ecctl lingjun vsc delete <vsc-id>
+
+identity:
+  field: id
+  prefix: vsc-
+  output_root:
+    one: vsc
+    many: vscs
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: VSC ID
+        zh-CN: VSC ID
+    node:
+      type: string
+      description:
+        en: Lingjun node ID
+        zh-CN: 灵骏节点 ID
+    nodes:
+      type: string_array
+      description:
+        en: Lingjun node IDs
+        zh-CN: 灵骏节点 ID 列表
+    name:
+      type: string
+      description:
+        en: VSC name
+        zh-CN: VSC 名称
+    type:
+      type: string
+      enum: [primary, standard]
+      description:
+        en: VSC type
+        zh-CN: VSC 类型
+    status:
+      type: string
+      description:
+        en: VSC status
+        zh-CN: VSC 状态
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  next_token:
+    type: string
+    description:
+      en: token for the next result page
+      zh-CN: 下一页查询 token
+  no_wait:
+    type: boolean
+    description:
+      en: skip VSC readback
+      zh-CN: 跳过 VSC 回读
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  get:
+    api: DescribeVsc
+    request:
+      VscId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      id: $.VscId
+      state: $.Status
+      fields:
+        id: $.VscId
+        name: $.VscName
+        node: $.NodeId
+        type: $.VscType
+        status: $.Status
+        resource_group: $.ResourceGroupId
+  list:
+    api: ListVscs
+    request:
+      MaxResults: $.limit
+      NextToken: $.next_token
+      NodeIds: $.nodes
+      VscName: $.name
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+    response:
+      items: $.Vscs
+      total: $.TotalCount
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.VscId
+      state: $.Status
+      fields:
+        id: $.VscId
+        name: $.VscName
+        node: $.NodeId
+        type: $.VscType
+        status: $.Status
+        resource_group: $.ResourceGroupId
+        tags:
+          from: $.Tags
+          each:
+            key: $.TagKey
+            value: $.TagValue
+
+bindings:
+  create_vsc:
+    api: CreateVsc
+    idempotency:
+      field: ClientToken
+      prefix: vsc-create
+    request:
+      NodeId: $.node
+      VscName: $.name
+      VscType: $.type
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+    id_from: $.VscId
+    request_id_from: $.RequestId
+  delete_vsc:
+    api: DeleteVsc
+    idempotency:
+      field: ClientToken
+      prefix: vsc-delete
+    request:
+      VscId: $.id
+    request_id_from: $.RequestId
+
+operations:
+  create:
+    examples:
+      - ecctl lingjun vsc create --node <node-id>
+      - ecctl lingjun vsc create --node <node-id> --name my-name --tag env=prod
+    description:
+      en: Create VSC
+      zh-CN: 创建 VSC
+    input:
+      fields:
+        - node:
+            required: true
+        - name
+        - type
+        - resource_group
+        - tag
+      controls:
+        - no_wait
+        - api_param
+    workflow:
+      - binding: create_vsc
+      - probe: get
+        ids:
+          - $context.id
+        unless: input.no_wait
+  delete:
+    examples:
+      - ecctl lingjun vsc delete <vsc-id>
+    description:
+      en: Delete VSC
+      zh-CN: 删除 VSC
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - api_param
+    workflow:
+      - binding: delete_vsc
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get VSC
+      zh-CN: 获取 VSC
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+    workflow:
+      - probe: get
+        ids:
+          - $input.id
+        not_found: error
+  list:
+    examples:
+      - ecctl lingjun vsc list
+      - ecctl lingjun vsc list --filter name=<value>
+      - ecctl lingjun vsc list --filter tag.env=prod
+    description:
+      en: List VSCs
+      zh-CN: 列出 VSC
+    input:
+      controls:
+        - filter
+        - limit
+        - next_token
+    filters:
+      node:
+        target: nodes
+      name:
+        target: name
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true

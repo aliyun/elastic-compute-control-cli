@@ -1,0 +1,121 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: policy
+kind: regional
+display_name:
+  en: ACK policy
+  zh-CN: ACK 策略
+description:
+  en: Manage ACK policy catalog entries
+  zh-CN: 管理 ACK 策略库条目
+examples:
+  - ecctl ack policy list
+  - ecctl ack policy get ACKAllowedRepos
+
+identity:
+  field: name
+  output_root:
+    one: policy
+    many: policies
+
+schema:
+  fields:
+    name:
+      type: string
+      description:
+        en: policy name
+        zh-CN: 策略名称
+    category:
+      type: string
+      description:
+        en: policy category
+        zh-CN: 策略类别
+    severity:
+      type: string
+      description:
+        en: policy severity
+        zh-CN: 策略等级
+    action:
+      type: string
+      description:
+        en: default policy action
+        zh-CN: 默认策略动作
+    description:
+      type: string
+      description:
+        en: policy description
+        zh-CN: 策略描述
+    template:
+      type: string
+      description:
+        en: policy template content
+        zh-CN: 策略模板内容
+
+controls:
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+
+probes:
+  list:
+    api: DescribePolicies
+    request: {}
+    response:
+      items: $.policies
+      request_id: $.request_id
+      id: $.name
+      fields:
+        name: $.name
+        category: $.category
+        severity: $.severity
+        action: $.action
+        description: $.description
+  detail:
+    api: DescribePolicyDetails
+    request:
+      policy_name: $.name
+    response:
+      item: $
+      request_id: $.request_id
+      id: $.name
+      fields:
+        name: $.name
+        category: $.category
+        severity: $.severity
+        action: $.action
+        description: $.description
+        template: $.template
+
+operations:
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get ACK policy catalog details
+      zh-CN: 获取 ACK 策略库详情
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+    workflow:
+      - probe: detail
+        ids:
+          - $input.name
+        not_found: error
+  list:
+    examples:
+      - ecctl ack policy list
+    description:
+      en: List ACK policy catalog entries
+      zh-CN: 列出 ACK 策略库条目
+    input:
+      controls:
+        - limit
+    workflow:
+      - probe: list
+        many: true

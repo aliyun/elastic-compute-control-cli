@@ -1,0 +1,730 @@
+schema_version: 2
+product: ack
+api_product: cs
+resource: ack
+kind: regional
+aliases: [cluster]
+display_name:
+  en: ACK cluster
+  zh-CN: ACK 集群
+description:
+  en: Manage ACK clusters
+  zh-CN: 管理 ACK 集群
+examples:
+  - ecctl ack list
+  - ecctl ack get <cluster-id> --with-resources --with-tags
+  - ecctl ack create --name prod --type ManagedKubernetes --vswitch <vsw-id>
+  - ecctl ack upgrade <cluster-id> --version <kubernetes-version>
+
+identity:
+  field: id
+  prefix: c
+  output_root:
+    one: cluster
+    many: clusters
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    ids:
+      type: string_array
+      description:
+        en: ACK cluster IDs
+        zh-CN: ACK 集群 ID 列表
+    name:
+      type: string
+      description:
+        en: cluster name
+        zh-CN: 集群名称
+    type:
+      type: string
+      description:
+        en: cluster type
+        zh-CN: 集群类型
+      enum: [Kubernetes, ManagedKubernetes, ExternalKubernetes]
+    edition:
+      type: string
+      description:
+        en: cluster edition or specification; common values include ack.standard, ack.pro.small, ack.pro.xlarge, ack.pro.2xlarge, ack.pro.4xlarge
+        zh-CN: 集群版本规格；常见值包括 ack.standard、ack.pro.small、ack.pro.xlarge、ack.pro.2xlarge、ack.pro.4xlarge
+    profile:
+      type: string
+      description:
+        en: ACK cluster scenario profile. To use both config and ACK profiles, put the config profile before the resource command, for example ecctl --profile prod ack create --profile Serverless.
+        zh-CN: ACK 集群场景类型。如需同时指定配置 profile 和 ACK profile，请将配置 profile 放在资源命令前，例如 ecctl --profile prod ack create --profile Serverless。
+      enum: [Default, Serverless, Edge, Lingjun]
+    to_edition:
+      type: string
+      description:
+        en: target cluster edition for migration
+        zh-CN: 迁移目标集群版本规格
+    version:
+      type: string
+      description:
+        en: target Kubernetes version
+        zh-CN: 目标 Kubernetes 版本
+    vpc:
+      type: string
+      description:
+        en: VPC ID
+        zh-CN: VPC ID
+    vswitch:
+      type: string_array
+      description:
+        en: VSwitch IDs for cluster networking
+        zh-CN: 集群网络使用的交换机 ID
+    zone:
+      type: string_array
+      description:
+        en: zone IDs for ACK CreateCluster zone_ids
+        zh-CN: ACK CreateCluster zone_ids 使用的可用区 ID
+    pod_cidr:
+      type: cidr
+      description:
+        en: Pod network CIDR; sent to ACK CreateCluster as container_cidr
+        zh-CN: Pod 网络 CIDR，作为 ACK CreateCluster 的 container_cidr 发送
+    service_cidr:
+      type: cidr
+      description:
+        en: Service network CIDR
+        zh-CN: Service 网络 CIDR
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    api_server_public:
+      type: boolean
+      description:
+        en: expose the API server through a public endpoint
+        zh-CN: 通过公网端点开放 API Server
+    api_server_eip_id:
+      type: string
+      description:
+        en: EIP ID to bind when exposing the API server publicly
+        zh-CN: 开放 API Server 公网访问时绑定的 EIP ID
+    snat_entry:
+      type: boolean
+      description:
+        en: create an SNAT entry for cluster outbound access where ACK supports it
+        zh-CN: 在 ACK 支持时创建用于集群出站访问的 SNAT 条目
+    maintenance_window:
+      type: object
+      description:
+        en: maintenance window as JSON or @file using ACK field names
+        zh-CN: 维护窗口，使用 ACK 字段名的 JSON 或 @file
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+    remove_tag:
+      type: string_array
+      description:
+        en: tag keys to remove
+        zh-CN: 要移除的标签键
+    tag_replace:
+      type: key_value
+      repeatable: true
+      description:
+        en: complete replacement tag set key=value
+        zh-CN: 全量替换标签集合 key=value
+    delete_options:
+      type: object
+      description:
+        en: ACK delete_options JSON or @file
+        zh-CN: ACK delete_options JSON 或 @file
+    retain_all_resources:
+      type: boolean
+      description:
+        en: retain all cloud resources when deleting the cluster
+        zh-CN: 删除集群时保留全部云资源
+    retain_resources:
+      type: string_array
+      description:
+        en: cloud resource IDs to retain during deletion
+        zh-CN: 删除时保留的云资源 ID
+    master_only:
+      type: boolean
+      description:
+        en: upgrade master nodes only
+        zh-CN: 仅升级控制面节点
+    max_parallelism:
+      type: integer
+      description:
+        en: maximum nodes upgraded in parallel
+        zh-CN: 最大并行升级节点数
+    rolling_policy:
+      type: object
+      description:
+        en: upgrade rolling policy JSON or @file using ACK field names
+        zh-CN: 升级滚动策略，使用 ACK 字段名的 JSON 或 @file
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum clusters to return
+      zh-CN: 最多返回集群数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  cross_account:
+    type: boolean
+    description:
+      en: use the regional cross-account cluster list API
+      zh-CN: 使用地域维度跨账号集群列表 API
+  with_resources:
+    type: boolean
+    description:
+      en: include cloud resources associated with the cluster
+      zh-CN: 附带集群关联云资源
+  with_tags:
+    type: boolean
+    description:
+      en: include cluster tags
+      zh-CN: 附带集群标签
+  with_policy_governance:
+    type: boolean
+    description:
+      en: include policy governance summary
+      zh-CN: 附带策略治理概览
+  force:
+    type: boolean
+    default: false
+    description:
+      en: delete cluster resources instead of retaining them
+      zh-CN: 删除集群关联资源而不是保留它们
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 600s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  detail:
+    api: DescribeClusterDetail
+    request:
+      ClusterId: $.id
+    response:
+      item: $
+      request_id: $.request_id
+      id: $.cluster_id
+      state: $.state
+      fields:
+        id: $.cluster_id
+        name: $.name
+        status: $.state
+        type: $.cluster_type
+        edition: $.cluster_spec
+        version: $.current_version
+        region: $.region_id
+        created: $.created
+        resource_group: $.resource_group_id
+        deletion_protection: $.deletion_protection
+        api_server_public: $.api_server_eip
+        maintenance_window: $.maintenance_window
+  list:
+    api: DescribeClustersV1
+    request:
+      region_id: $context.region
+      cluster_id: $.ids
+      name: $.name
+      cluster_type: $.type
+      cluster_spec: $.edition
+      page_number: $.page
+      page_size: $.limit
+    response:
+      items: $.clusters
+      total: $.page_info.total_count
+      request_id: $.request_id
+      id: $.cluster_id
+      state: $.state
+      fields:
+        id: $.cluster_id
+        name: $.name
+        status: $.state
+        type: $.cluster_type
+        edition: $.cluster_spec
+        version: $.current_version
+        region: $.region_id
+  list_for_region:
+    api: DescribeClustersForRegion
+    request:
+      region_id: $context.region
+      cluster_id: $.ids
+      name: $.name
+      cluster_type: $.type
+      cluster_spec: $.edition
+      page_number: $.page
+      page_size: $.limit
+    response:
+      items: $.clusters
+      total: $.page_info.total_count
+      request_id: $.request_id
+      id: $.cluster_id
+      state: $.state
+      fields:
+        id: $.cluster_id
+        name: $.name
+        status: $.state
+        type: $.cluster_type
+        edition: $.cluster_spec
+        version: $.current_version
+        region: $.region_id
+  resources:
+    api: DescribeClusterResources
+    request:
+      ClusterId: $.id
+    response:
+      item: $
+      request_id: $.request_id
+      fields:
+        resources: $.items
+  tags:
+    api: ListTagResources
+    request:
+      region_id: $context.region
+      resource_type: CLUSTER
+      resource_ids: $list($.id)
+    response:
+      item: $
+      request_id: $.request_id
+      fields:
+        tags:
+          from: $.tag_resources.tag_resource
+          each:
+            Key: $.tag_key
+            Value: $.tag_value
+  policy_governance:
+    api: DescribePolicyGovernanceInCluster
+    request:
+      cluster_id: $.id
+    response:
+      item: $
+      request_id: $.request_id
+      fields:
+        policy_governance: $
+  task:
+    api: DescribeTaskInfo
+    request:
+      task_id: $context.task_id
+    response:
+      item: $
+      request_id: $.request_id
+      id: $.task_id
+      state: $.state
+      fields:
+        task_id: $.task_id
+        status: $.state
+        task_type: $.task_type
+        error: $.error
+        task_result: $.task_result
+
+waiters:
+  running_after_create:
+    probe: detail
+    target: running
+    interval: 10s
+    timeout: 1800s
+    failure:
+      states: [failed]
+  running_after_update:
+    probe: detail
+    target: running
+    interval: 10s
+    timeout: 1800s
+    failure:
+      states: [failed]
+  deleted_after_delete:
+    probe: list
+    target: absent
+    interval: 10s
+    timeout: 1800s
+  upgrade_task_succeeded:
+    probe: task
+    target: success
+    interval: 2s
+    timeout: 3600s
+    failure:
+      states: [fail, failed]
+  running_after_upgrade:
+    probe: detail
+    target: running
+    interval: 10s
+    timeout: 1800s
+    failure:
+      states: [failed]
+
+bindings:
+  create_cluster:
+    api: CreateCluster
+    request:
+      body:
+        region_id: $context.region
+        name: $.name
+        cluster_type: $.type
+        kubernetes_version: $.version
+        cluster_spec: $.edition
+        profile: $.profile
+        vpcid: $.vpc
+        vswitch_ids: $list($.vswitch)
+        zone_ids: $list($.zone)
+        container_cidr: $.pod_cidr
+        service_cidr: $.service_cidr
+        endpoint_public_access: $.api_server_public
+        snat_entry: $.snat_entry
+        resource_group_id: $.resource_group
+        tags: $kv_pairs($.tag)
+      ApiParam:
+        raw: $.api_param
+    id_from: $.cluster_id
+    request_id_from: $.request_id
+    wait: running_after_create
+  modify_cluster:
+    api: ModifyCluster
+    request:
+      ClusterId: $.id
+      body:
+        cluster_name: $.name
+        api_server_eip: $.api_server_public
+        api_server_eip_id: $.api_server_eip_id
+        resource_group_id: $.resource_group
+        maintenance_window:
+          from: $.maintenance_window
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.request_id
+    wait: running_after_update
+  migrate_cluster:
+    api: MigrateCluster
+    request:
+      cluster_id: $.id
+      body:
+        cluster_spec: $.to_edition
+      ApiParam:
+        raw: $.api_param
+    id_from: $.cluster_id
+    request_id_from: $.request_id
+    wait: running_after_update
+  replace_tags:
+    api: ModifyClusterTags
+    request:
+      ClusterId: $.id
+      body: $kv_json($.tag_replace)
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.request_id
+  tag_resources:
+    api: TagResources
+    request:
+      body:
+        region_id: $context.region
+        resource_type: CLUSTER
+        resource_ids: $list($.id)
+        tags: $kv_pairs($.tag)
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  untag_resources:
+    api: UntagResources
+    request:
+      region_id: $context.region
+      resource_type: CLUSTER
+      resource_ids: $list($.id)
+      tag_keys: $list($.remove_tag)
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  delete_cluster:
+    api: DeleteCluster
+    request:
+      ClusterId: $.id
+      delete_options:
+        from: $.delete_options
+      retain_all_resources: $.retain_all_resources
+      retain_resources:
+        each: $.retain_resources
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.request_id
+    wait: deleted_after_delete
+  upgrade_cluster:
+    api: UpgradeCluster
+    request:
+      ClusterId: $.id
+      body:
+        next_version: $.version
+        master_only: $.master_only
+        rolling_policy:
+          from: $.rolling_policy
+      body.rolling_policy.max_parallelism: $.max_parallelism
+      ApiParam:
+        raw: $.api_param
+    id_from: $.cluster_id
+    request_id_from: $.request_id
+    context_from:
+      task_id: $.task_id
+    wait: upgrade_task_succeeded
+
+operations:
+  create:
+    examples:
+      - ecctl ack create --name my-name --type <type> --version <kubernetes-version> --edition ack.pro.small
+      - ecctl ack create --name my-name --type <type> --tag env=prod
+      - ecctl --profile prod ack create --profile Default --name my-name --type <type>
+    description:
+      en: Create ACK cluster
+      zh-CN: 创建 ACK 集群
+    input:
+      fields:
+        - name:
+            required: true
+        - type:
+            required: true
+        - version
+        - edition
+        - profile
+        - vpc
+        - vswitch
+        - zone
+        - pod_cidr
+        - service_cidr
+        - api_server_public
+        - snat_entry
+        - resource_group
+        - tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_cluster
+        wait_unless: input.no_wait
+      - probe: detail
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            type: $input.type
+            version: $input.version
+            edition: $input.edition
+            region: $context.region
+  update:
+    examples:
+      - ecctl ack update <ack-id>
+      - ecctl ack update <ack-id> --name my-name
+    description:
+      en: Update ACK cluster
+      zh-CN: 更新 ACK 集群
+    conflicts:
+      - any: [tag_replace]
+        with_any: [tag, remove_tag]
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - api_server_public
+        - api_server_eip_id
+        - resource_group
+        - maintenance_window
+        - to_edition
+        - tag
+        - remove_tag
+        - tag_replace
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: modify_cluster
+        when: has(input.name) || has(input.api_server_public) || has(input.api_server_eip_id) || has(input.resource_group) || has(input.maintenance_window)
+        wait_unless: input.no_wait
+      - binding: migrate_cluster
+        when: has(input.to_edition)
+        wait_unless: input.no_wait
+      - binding: replace_tags
+        when: has(input.tag_replace)
+      - binding: tag_resources
+        when: has(input.tag)
+      - binding: untag_resources
+        when: has(input.remove_tag)
+      - probe: detail
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - probe: tags
+        ids:
+          - $input.id
+        merge: true
+        unless: input.no_wait
+  delete:
+    examples:
+      - ecctl ack delete <ack-id>
+    description:
+      en: Delete ACK cluster
+      zh-CN: 删除 ACK 集群
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - delete_options
+        - retain_all_resources
+        - retain_resources
+      controls:
+        - force
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_cluster
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get ACK cluster
+      zh-CN: 获取 ACK 集群
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - with_resources
+        - with_tags
+        - with_policy_governance
+    workflow:
+      - probe: detail
+        ids:
+          - $input.id
+        not_found: error
+      - probe: resources
+        ids:
+          - $input.id
+        when: input.with_resources
+        merge: true
+      - probe: tags
+        ids:
+          - $input.id
+        when: input.with_tags
+        merge: true
+      - probe: policy_governance
+        ids:
+          - $input.id
+        when: input.with_policy_governance
+        merge: true
+  list:
+    examples:
+      - ecctl ack list
+      - ecctl ack list --filter name=<value>
+    description:
+      en: List ACK clusters
+      zh-CN: 列出 ACK 集群
+    input:
+      fields:
+        - ids:
+            positional_many: true
+      controls:
+        - filter
+        - limit
+        - page
+        - cross_account
+    filters:
+      id:
+        target: ids
+      ids:
+        target: ids
+      cluster:
+        target: ids
+      cluster.id:
+        target: ids
+      name:
+        target: name
+      type:
+        target: type
+      edition:
+        target: edition
+    workflow:
+      - probe: list_for_region
+        many: true
+        when: input.cross_account
+      - probe: list
+        many: true
+        unless: input.cross_account
+  upgrade:
+    examples:
+      - ecctl ack upgrade <ack-id> --version <version>
+    description:
+      en: Upgrade ACK cluster
+      zh-CN: 升级 ACK 集群
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - version:
+            required: true
+        - master_only
+        - max_parallelism
+        - rolling_policy
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: upgrade_cluster
+        wait_unless: input.no_wait
+      - wait: running_after_upgrade
+        ids:
+          - $input.id
+        unless: input.no_wait
+      - probe: detail
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            version: $input.version
+            region: $context.region

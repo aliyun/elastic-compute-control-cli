@@ -1,0 +1,51 @@
+# Export a custom ECS image to the region's lifecycle-managed OSS prefix.
+resource: ecs/image
+requires_params: [ecs.instance_type]
+requires_prerequisites: [ecs.image]
+needs: [vpc, vswitch, security_group, image]
+timeout: 60m
+serial: true
+
+steps:
+  - name: provision image export host
+    run: >
+      ecctl ecs instance create
+      --type {{.params.ecs.instance_type}}
+      --image {{.stack.image}}
+      --sg {{.stack.security_group}}
+      --vswitch {{.stack.vswitch}}
+      --name {{.run_name}}-image-export-host
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 30m
+    at: $.instance
+    expect:
+      id: { type: string, prefix: i- }
+      status: Running
+    capture:
+      instance_id: id
+    teardown: ecctl ecs instance delete {{.instance_id}} --force
+
+  - name: create export image
+    run: >
+      ecctl ecs image create
+      --instance {{.instance_id}}
+      --name {{.run_name}}-export-image
+      --description ecctl-e2e-export-image-{{.run_id}}
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 60m
+    at: $.image
+    expect:
+      id: { type: string, prefix: m- }
+    capture:
+      export_image_id: id
+    teardown: ecctl ecs image delete {{.export_image_id}} --force
+
+  - name: export
+    run: >
+      ecctl ecs image export {{.export_image_id}}
+      --oss-bucket {{.prerequisites.ecs.image.oss_bucket}}
+      --oss-prefix {{.oss_export_prefix}}
+      --timeout 60m
+    expect:
+      $.task_id: { type: string, min_len: 1 }
+      $.image: { eq: "{{.export_image_id}}" }

@@ -1,0 +1,9 @@
+{
+  "label": "VPC",
+  "position": 4,
+  "link": {
+    "type": "generated-index",
+    "title": "VPC 资源",
+    "description": "管理专有网络 VPC，涵盖隔离的 VPC 网络及其交换机（vSwitch），用于按可用区划分子网与 IP 地址规划。"
+  }
+}

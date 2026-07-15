@@ -1,0 +1,83 @@
+schema_version: 2
+product: rg
+api_product: ResourceManager
+resource: notification
+aliases: [notify]
+kind: regional
+display_name:
+  en: notification
+  zh-CN: 事件通知
+description:
+  en: Manage resource group event notifications
+  zh-CN: 管理资源组事件通知
+examples:
+  - ecctl rg notification get
+  - ecctl rg notification enable
+  - ecctl rg notification disable
+
+identity:
+  output_root:
+    one: notification_setting
+
+schema:
+  fields:
+    status:
+      type: boolean
+      description:
+        en: resource group notification enable status
+        zh-CN: 资源组事件通知启用状态
+
+probes:
+  setting:
+    api: GetResourceGroupNotificationSetting
+    request: {}
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        status: $.ResourceGroupNotificationEnableStatus
+
+bindings:
+  enable_notification:
+    api: EnableResourceGroupNotification
+    request: {}
+    request_id_from: $.RequestId
+  disable_notification:
+    api: DisableResourceGroupNotification
+    request: {}
+    request_id_from: $.RequestId
+
+operations:
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get resource group notification setting
+      zh-CN: 获取资源组事件通知设置
+    input:
+      fields: []
+    workflow:
+      - probe: setting
+  enable:
+    examples:
+      - ecctl rg notification enable
+    description:
+      en: Enable resource group notification
+      zh-CN: 启用资源组事件通知
+    input:
+      fields: []
+    workflow:
+      - binding: enable_notification
+      - probe: setting
+        as: final
+  disable:
+    examples:
+      - ecctl rg notification disable
+    description:
+      en: Disable resource group notification
+      zh-CN: 禁用资源组事件通知
+    input:
+      fields: []
+    workflow:
+      - binding: disable_notification
+      - probe: setting
+        as: final

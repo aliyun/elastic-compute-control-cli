@@ -1,0 +1,70 @@
+schema_version: 2
+product: rg
+api_product: ResourceManager
+resource: admin-setting
+aliases: [as]
+kind: regional
+display_name:
+  en: admin setting
+  zh-CN: 管理员设置
+description:
+  en: Manage resource group administrator settings
+  zh-CN: 管理资源组管理员设置
+examples:
+  - ecctl rg admin-setting get
+  - ecctl rg admin-setting update --creator-as-admin=true
+
+identity:
+  output_root:
+    one: admin_setting
+
+schema:
+  fields:
+    creator_as_admin:
+      type: boolean
+      description:
+        en: whether the creator is an administrator
+        zh-CN: 创建者是否为管理员
+
+probes:
+  attribute:
+    api: GetResourceGroupAdminSetting
+    request: {}
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        creator_as_admin: $.CreatorAsAdmin
+
+bindings:
+  update_setting:
+    api: UpdateResourceGroupAdminSetting
+    request:
+      CreatorAsAdmin: $.creator_as_admin
+    request_id_from: $.RequestId
+
+operations:
+  update:
+    examples:
+      - ecctl rg admin-setting update --creator-as-admin <creator-as-admin>
+    description:
+      en: Update resource group admin setting
+      zh-CN: 更新资源组管理员设置
+    input:
+      fields:
+        - creator_as_admin:
+            required: true
+    workflow:
+      - binding: update_setting
+      - probe: attribute
+        as: final
+
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get resource group admin setting
+      zh-CN: 获取资源组管理员设置
+    input:
+      fields: []
+    workflow:
+      - probe: attribute

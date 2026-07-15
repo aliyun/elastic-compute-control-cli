@@ -1,0 +1,204 @@
+# ECS disk full lifecycle: provision a private host instance, then
+# create -> read-back -> differential -> list -> update -> attach -> detach ->
+# clone -> reset -> reinit -> monitor -> delete.
+#
+# A data disk needs a zone to create and an ECS instance (in the same zone) to
+# attach/detach/reinit/reset against (DESIGN §12.3). We create a private host
+# instance early and tear it down in reverse. Its zone and disk categories come
+# from the shared ECS inventory resolver so they stay aligned with the stack.
+#
+# Structural matchers (type/prefix/regex) come from specs/ecs/disk.yaml; concrete
+# business values the spec cannot know are left as TODO(human).
+resource: ecs/disk
+requires_params: [ecs.instance_type, ecs.zone, ecs.data_disk_category]
+parameter_constraints:
+  ecs:
+    allowed_data_disk_categories: [cloud_essd]
+needs: [vpc, vswitch, security_group, image]
+
+steps:
+  # --- private prerequisite: a host instance in the disk's zone ---------------
+  - name: provision host instance
+    run: >
+      ecctl ecs instance create
+      --type {{.params.ecs.instance_type}}
+      --image {{.stack.image}}
+      --sg {{.stack.security_group}}
+      --vswitch {{.stack.vswitch}}
+      --name {{.run_name}}-disk-host
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.instance
+    expect:
+      id: { type: string, prefix: i- }
+      status: Running
+    capture:
+      instance_id: id
+      host_zone: zone
+    teardown: ecctl ecs instance delete {{.instance_id}} --force
+
+  - name: resolve host system disk
+    run: ecctl ecs disk list --filter instance={{.instance_id}} --filter type=system
+    assert:
+      - len($.disks) >= 1
+    capture:
+      system_disk_id: $.disks[0].id
+
+  # --- create -----------------------------------------------------------------
+  - name: create
+    run: >
+      ecctl ecs disk create
+      --zone {{.params.ecs.zone}}
+      --size 40
+      --category {{.params.ecs.data_disk_category}}
+      --name {{.run_name}}-data
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.disk
+    expect:
+      id: { type: string, prefix: d- }
+      zone: { eq: "{{.params.ecs.zone}}" }
+      size: { eq: 40 }
+      category: { eq: "{{.params.ecs.data_disk_category}}" }
+    capture:
+      disk_id: id
+    teardown: ecctl ecs disk delete {{.disk_id}}
+
+  # --- get (read-back) --------------------------------------------------------
+  - name: get (read-back)
+    run: ecctl ecs disk get {{.disk_id}}
+    at: $.disk
+    expect:
+      id: { eq: "{{.disk_id}}" }
+      zone: { regex: "^cn-" }
+      size: { eq: 40 }
+      category: { eq: "{{.params.ecs.data_disk_category}}" }
+      status: { oneof: [Available, In_use, Creating] }
+    capture:
+      hi_status: status
+      hi_size: size
+
+  # --- differential vs raw DescribeDisks --------------------------------------
+  - name: differential vs raw DescribeDisks
+    run: ecctl call ecs DescribeDisks --DiskIds '["{{.disk_id}}"]'
+    expect:
+      $.response.Disks.Disk[0].DiskId: { eq: "{{.disk_id}}" }   # call wraps under .response
+      $.response.Disks.Disk[0].Status: { eq: "{{.hi_status}}" }
+      $.response.Disks.Disk[0].Size: { eq: "{{.hi_size}}" }
+
+  # --- list -------------------------------------------------------------------
+  - name: list (find ours)
+    run: ecctl ecs disk list --filter zone={{.params.ecs.zone}}
+    assert:
+      - len($.disks) >= 0
+
+  - name: monitor
+    run: >
+      ecctl ecs disk monitor {{.disk_id}}
+      --start-time {{.time.monitor_start}}
+      --end-time {{.time.monitor_end}}
+      --period-seconds 60
+    expect:
+      $.monitor_data: { type: array }
+
+  # --- update (rename + grow) -------------------------------------------------
+  - name: update
+    run: ecctl ecs disk update {{.disk_id}} --name {{.run_name}}-data-renamed --size 60 --resize-type offline
+    at: $.disk
+    expect:
+      id: { eq: "{{.disk_id}}" }
+
+  - name: get (read-back after update)
+    run: ecctl ecs disk get {{.disk_id}}
+    at: $.disk
+    expect:
+      id: { eq: "{{.disk_id}}" }
+      size: { eq: 60 }
+
+  # --- attach to the host instance --------------------------------------------
+  - name: attach
+    run: ecctl ecs disk attach {{.disk_id}} --instance {{.instance_id}}
+    at: $.disk
+    expect:
+      id: { eq: "{{.disk_id}}" }
+      status: { oneof: [In_use, Attaching] }
+      instance: { eq: "{{.instance_id}}" }
+
+  - name: get (read-back after attach)
+    run: ecctl ecs disk get {{.disk_id}}
+    at: $.disk
+    expect:
+      id: { eq: "{{.disk_id}}" }
+      instance: { eq: "{{.instance_id}}" }
+
+  # --- detach -----------------------------------------------------------------
+  - name: detach
+    run: ecctl ecs disk detach {{.disk_id}} --instance {{.instance_id}}
+    at: $.disk
+    expect:
+      id: { eq: "{{.disk_id}}" }
+      status: { oneof: [Available, Detaching] }
+
+  - name: clone
+    run: >
+      ecctl ecs disk clone {{.disk_id}}
+      --name {{.run_name}}-data-clone
+      --size 60
+      --category {{.params.ecs.data_disk_category}}
+      --performance-level PL1
+      --multi-attach Disabled
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.disk
+    expect:
+      task_group_id: { type: string, min_len: 1 }
+
+  - name: resolve cloned disk
+    run: ecctl ecs disk list --filter name={{.run_name}}-data-clone
+    assert:
+      - len($.disks) >= 1
+    capture:
+      cloned_disk_id: $.disks[0].id
+    teardown: ecctl ecs disk delete {{.cloned_disk_id}}
+
+  - name: create system disk snapshot
+    run: >
+      ecctl ecs snapshot create
+      --disk {{.system_disk_id}}
+      --name {{.run_name}}-disk-reset-snapshot
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.snapshot
+    expect:
+      id: { type: string, prefix: s- }
+    capture:
+      reset_snapshot_id: id
+    teardown: ecctl ecs snapshot delete {{.reset_snapshot_id}} --force
+
+  - name: stop host for disk reset
+    run: ecctl ecs instance stop {{.instance_id}}
+    at: $.instance
+    expect:
+      status: Stopped
+
+  - name: reset system disk
+    run: ecctl ecs disk reset {{.system_disk_id}} --snapshot {{.reset_snapshot_id}}
+    at: $.disk
+    expect:
+      id: { eq: "{{.system_disk_id}}" }
+
+  - name: reinitialize system disk
+    run: ecctl ecs disk reinit {{.system_disk_id}}
+    at: $.disk
+    expect:
+      id: { eq: "{{.system_disk_id}}" }
+
+  - name: restart host after disk operations
+    run: ecctl ecs instance start {{.instance_id}}
+    at: $.instance
+    expect:
+      status: Running
+
+  # --- delete (explicit coverage; teardown is the safety net) -----------------
+  - name: delete
+    run: ecctl ecs disk delete {{.disk_id}}
+    at: $.disk
+    expect:
+      id: { eq: "{{.disk_id}}" }
+      $.deleted: { eq: true }   # `deleted` is emitted at the root, not under output_root

@@ -1,0 +1,30 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: inspect
+kind: regional
+display_name:
+  en: inspect
+  zh-CN: 巡检
+description:
+  en: Manage ACK cluster inspection configs and reports
+  zh-CN: 管理 ACK 集群巡检配置和报告
+examples:
+  - ecctl ack inspect config get --cluster <cluster-id>
+  - ecctl ack inspect report create --cluster <cluster-id>
+
+identity:
+  field: id
+  output_root:
+    one: inspect
+    many: inspections
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: inspect resource ID
+        zh-CN: 巡检资源 ID
+
+operations: {}

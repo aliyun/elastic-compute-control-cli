@@ -1,0 +1,163 @@
+schema_version: 2
+product: rg
+api_product: ResourceManager
+resource: associated-transfer
+aliases: [at]
+kind: regional
+display_name:
+  en: associated transfer
+  zh-CN: 关联资源随转
+description:
+  en: Manage associated resource follow transfer group settings
+  zh-CN: 管理关联资源随转组设置
+examples:
+  - ecctl rg associated-transfer list
+  - ecctl rg at enable
+  - ecctl rg at disable
+  - ecctl rg at update --status Enable --rule-setting associated-resource-type=disk,associated-service=ecs,master-resource-type=instance,master-service=ecs,status=Enable
+
+identity:
+  output_root:
+    one: associated_transfer_setting
+    many: associated_transfer_settings
+
+schema:
+  fields:
+    status:
+      type: string
+      description:
+        en: associated transfer status
+        zh-CN: 关联资源随转状态
+      enum: [Enable, Disable]
+    enable_existing_resources_transfer:
+      type: string
+      description:
+        en: whether to transfer existing associated resources
+        zh-CN: 是否转移存量关联资源
+      enum: ["true", "false"]
+    rule_setting:
+      type: array
+      description:
+        en: rule settings for associated resource transfer
+        zh-CN: 关联资源随转规则设置
+      items:
+        type: object
+        fields:
+          associated_resource_type:
+            type: string
+            description:
+              en: associated resource type
+              zh-CN: 关联资源类型
+          associated_service:
+            type: string
+            description:
+              en: associated service
+              zh-CN: 关联服务
+          master_resource_type:
+            type: string
+            description:
+              en: master resource type
+              zh-CN: 主资源类型
+          master_service:
+            type: string
+            description:
+              en: master service
+              zh-CN: 主服务
+          status:
+            type: string
+            description:
+              en: rule status
+              zh-CN: 规则状态
+            enum: [Enable, Disable]
+
+probes:
+  setting:
+    api: ListAssociatedTransferSetting
+    request: {}
+    response:
+      item: $.AssociatedTransferSetting
+      request_id: $.RequestId
+      fields:
+        status: $.Status
+        enable_existing_resources_transfer: $.EnableExistingResourcesTransfer
+        rule_settings: $.RuleSettings.RuleSetting
+
+bindings:
+  enable_transfer:
+    api: EnableAssociatedTransfer
+    request: {}
+    request_id_from: $.RequestId
+  disable_transfer:
+    api: DisableAssociatedTransfer
+    request: {}
+    request_id_from: $.RequestId
+  update_setting:
+    api: UpdateAssociatedTransferSetting
+    request:
+      Status: $.status
+      EnableExistingResourcesTransfer: $.enable_existing_resources_transfer
+      RuleSettings:
+        each: $.rule_setting
+        fields:
+          AssociatedResourceType: $.associated_resource_type
+          AssociatedService: $.associated_service
+          MasterResourceType: $.master_resource_type
+          MasterService: $.master_service
+          Status: $.status
+    request_id_from: $.RequestId
+
+operations:
+  update:
+    examples:
+      - ecctl rg associated-transfer update
+    description:
+      en: Update associated resource transfer setting
+      zh-CN: 更新关联资源随转设置
+    require_any:
+      - raw: $.status
+      - raw: $.enable_existing_resources_transfer
+      - raw: $.rule_setting
+    input:
+      fields:
+        - status
+        - enable_existing_resources_transfer
+        - rule_setting
+    workflow:
+      - binding: update_setting
+      - probe: setting
+        as: final
+  list:
+    examples:
+      - ecctl rg associated-transfer list
+    description:
+      en: List associated resource transfer setting
+      zh-CN: 查看关联资源随转设置
+    input:
+      fields: []
+    workflow:
+      - probe: setting
+
+  enable:
+    examples:
+      - ecctl rg associated-transfer enable
+    description:
+      en: Enable associated resource transfer
+      zh-CN: 启用关联资源随转
+    input:
+      fields: []
+    workflow:
+      - binding: enable_transfer
+      - probe: setting
+        as: final
+  disable:
+    examples:
+      - ecctl rg associated-transfer disable
+    description:
+      en: Disable associated resource transfer
+      zh-CN: 禁用关联资源随转
+    input:
+      fields: []
+    workflow:
+      - binding: disable_transfer
+      - probe: setting
+        as: final

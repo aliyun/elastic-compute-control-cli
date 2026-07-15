@@ -1,0 +1,51 @@
+# 语法见 https://yuque.alibaba-inc.com/aoneci/gncflv/zn9dhevbwby6715s
+name: 单元测试
+
+triggers:
+  push:
+    branches: '**'
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - 'specs/**'
+      - '.aoneci/unittest.yaml'
+
+jobs:
+  unittest:
+    name: 单元测试
+    image: alios-8u
+    steps:
+      - name: 拉代码
+        uses: checkout
+
+      # https://cd.aone.alibaba-inc.com/unite/component/1134/detail
+      - uses: setup-env
+        name: 准备环境
+        inputs:
+          go-version: "1.25.0"
+
+      - name: 代码检查
+        run: |
+          make lint
+
+      - name: 运行用例
+        run: |
+          make ci-test
+        continue-on-error: true
+
+      # https://cd.aone.alibaba-inc.com/unite/component/1298/detail
+      - name: 上传用例
+        uses: test-report-upload
+        inputs:
+          testcase_file: "reports/testcase.xml"
+          coverage_file: "reports/coverage.xml"
+          compare_to: master
+
+      # https://cd.aone.alibaba-inc.com/unite/component/1355/detail
+      - name: 检查覆盖率
+        uses: coverage-threshold
+        inputs:
+          line: 80 # 行覆盖率
+          line_incremental: 80 # 行增量覆盖率

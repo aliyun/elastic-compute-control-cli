@@ -1,0 +1,229 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: check
+kind: regional
+display_name:
+  en: check
+  zh-CN: 集群检查
+description:
+  en: Manage ACK cluster check reports
+  zh-CN: 管理 ACK 集群检查报告
+examples:
+  - ecctl ack check create --cluster <cluster-id> --type ClusterUpgrade
+  - ecctl ack check get <check-id> --cluster <cluster-id>
+  - ecctl ack check list --cluster <cluster-id> --filter type=ClusterUpgrade
+
+identity:
+  field: id
+  output_root:
+    one: check
+    many: checks
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: cluster check ID
+        zh-CN: 集群检查 ID
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    type:
+      type: string
+      description:
+        en: check type, such as ClusterUpgrade, MasterUpgrade, NodePoolUpgrade, or ClusterMigrate
+        zh-CN: 检查类型，例如 ClusterUpgrade、MasterUpgrade、NodePoolUpgrade 或 ClusterMigrate
+    target:
+      type: string
+      description:
+        en: check target, such as a node pool ID for NodePoolUpgrade checks
+        zh-CN: 检查目标，例如 NodePoolUpgrade 检查的节点池 ID
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum checks to return
+      zh-CN: 最多返回检查数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  no_wait:
+    type: boolean
+    description:
+      en: return before check completion
+      zh-CN: 检查完成前返回
+  timeout:
+    type: duration
+    default: 600s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+
+probes:
+  detail:
+    api: GetClusterCheck
+    request:
+      cluster_id: $.cluster
+      check_id: $.id
+    response:
+      item: $
+      request_id: $.request_id
+      id: $.check_id
+      state: $.status
+      fields:
+        id: $.check_id
+        check_id: $.check_id
+        type: $.type
+        status: $.status
+        message: $.message
+        created_at: $.created_at
+        finished_at: $.finished_at
+        check_items: $.check_items
+  list:
+    api: ListClusterChecks
+    request:
+      cluster_id: $.cluster
+      type: $.type
+      target: $.target
+      PageSize: $.limit
+      PageNumber: $.page
+    response:
+      items: $.checks
+      request_id: $.request_id
+      id: $.check_id
+      state: $.status
+      fields:
+        id: $.check_id
+        check_id: $.check_id
+        type: $.type
+        status: $.status
+        message: $.message
+        created_at: $.created_at
+        finished_at: $.finished_at
+
+waiters:
+  succeeded_after_create:
+    probe: detail
+    target: Succeeded
+    interval: 5s
+    timeout: 600s
+    failure:
+      states: [Failed]
+
+bindings:
+  create_check:
+    api: RunClusterCheck
+    request:
+      cluster_id: $.cluster
+      body:
+        type: $.type
+        target: $.target
+    require_all:
+      - raw: $.cluster
+      - request: body.type
+    id_from: $.check_id
+    request_id_from: $.request_id
+    wait: succeeded_after_create
+
+operations:
+  create:
+    examples:
+      - ecctl ack check create --cluster <cluster-id> --type <type>
+    description:
+      en: Create an ACK cluster check
+      zh-CN: 创建 ACK 集群检查
+    input:
+      fields:
+        - cluster:
+            required: true
+        - type:
+            required: true
+        - target
+      controls:
+        - no_wait
+        - timeout
+    workflow:
+      - binding: create_check
+        wait_unless: input.no_wait
+    output:
+      fields:
+        actions: $result.actions
+        check:
+          id: $result.id
+          check_id: $result.id
+          cluster: $input.cluster
+          type: $input.type
+          target: $input.target
+          status:
+            value: $result.item.status
+            unless: $input.no_wait
+          message:
+            value: $result.item.message
+            unless: $input.no_wait
+          created_at:
+            value: $result.item.created_at
+            unless: $input.no_wait
+          finished_at:
+            value: $result.item.finished_at
+            unless: $input.no_wait
+          check_items:
+            value: $result.item.check_items
+            unless: $input.no_wait
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get an ACK cluster check
+      zh-CN: 查询 ACK 集群检查
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+    workflow:
+      - probe: detail
+        ids:
+          - $input.id
+        not_found: error
+  list:
+    examples:
+      - ecctl ack check list
+      - ecctl ack check list --filter type=<value>
+    description:
+      en: List ACK cluster checks
+      zh-CN: 列出 ACK 集群检查
+    input:
+      fields:
+        - cluster:
+            required: true
+        - type
+        - target
+      controls:
+        - filter
+        - limit
+        - page
+    filters:
+      type:
+        target: type
+      target:
+        target: target
+    workflow:
+      - probe: list
+        many: true

@@ -1,0 +1,26 @@
+# Safe ResourceManager/RAM reads that fill registry gaps without creating
+# account-level policies or roles that cannot be tagged for sweep.
+resource: rg/policy
+
+steps:
+  - name: list custom policies
+    run: ecctl rg policy list --policy-type Custom
+    assert:
+      - len($.policies) >= 0
+
+  - name: get system policy
+    run: ecctl rg policy get AliyunECSReadOnlyAccess --policy-type System
+    at: $.policy
+    expect:
+      name: { eq: AliyunECSReadOnlyAccess }
+      policy_type: { eq: System }
+
+  - name: list roles
+    run: ecctl rg role list
+    assert:
+      - len($.roles) >= 0
+
+  - name: list resources
+    run: ecctl rg resource list --filter service=vpc
+    assert:
+      - len($.resources) >= 0

@@ -1,0 +1,9 @@
+{
+  "label": "ACK",
+  "position": 1,
+  "link": {
+    "type": "generated-index",
+    "title": "ACK 资源",
+    "description": "管理容器服务 Kubernetes 版（ACK）集群的完整生命周期，涵盖节点池、组件（Addon）、kubeconfig 访问、版本升级、诊断巡检与巡检报告以及告警规则。"
+  }
+}

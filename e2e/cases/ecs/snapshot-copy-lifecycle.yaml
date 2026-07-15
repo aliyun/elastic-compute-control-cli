@@ -1,0 +1,66 @@
+# Copy an ECS snapshot to a distinct destination region and clean both sides.
+resource: ecs/snapshot
+requires_params: [ecs.instance_type]
+needs: [vpc, vswitch, security_group, image]
+region_requirements:
+  destination:
+    distinct_from: primary
+timeout: 60m
+serial: true
+
+steps:
+  - name: provision snapshot copy host
+    run: >
+      ecctl ecs instance create
+      --type {{.params.ecs.instance_type}}
+      --image {{.stack.image}}
+      --sg {{.stack.security_group}}
+      --vswitch {{.stack.vswitch}}
+      --name {{.run_name}}-snapshot-copy-host
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 30m
+    at: $.instance
+    expect:
+      id: { type: string, prefix: i- }
+      status: Running
+    capture:
+      instance_id: id
+    teardown: ecctl ecs instance delete {{.instance_id}} --force
+
+  - name: resolve source disk
+    run: ecctl ecs disk list --filter instance={{.instance_id}} --filter type=system
+    assert:
+      - len($.disks) >= 1
+    capture:
+      source_disk_id: $.disks[0].id
+
+  - name: create source snapshot
+    run: >
+      ecctl ecs snapshot create
+      --disk {{.source_disk_id}}
+      --name {{.run_name}}-snapshot-copy-source
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 30m
+    at: $.snapshot
+    expect:
+      id: { type: string, prefix: s- }
+    capture:
+      source_snapshot_id: id
+    teardown: ecctl ecs snapshot delete {{.source_snapshot_id}} --force
+
+  - name: copy
+    run: >
+      ecctl ecs snapshot copy {{.source_snapshot_id}}
+      --destination-region {{.regions.destination.id}}
+      --destination-name {{.run_name}}-snapshot-copy
+      --destination-description ecctl-e2e-snapshot-copy-{{.run_id}}
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 60m
+    at: $.snapshot
+    expect:
+      id: { type: string, prefix: s- }
+      destination_region: { eq: "{{.regions.destination.id}}" }
+    capture:
+      copied_snapshot_id: id
+    teardown: ecctl ecs snapshot delete {{.copied_snapshot_id}} --force
+    teardown_region: destination

@@ -1,0 +1,63 @@
+# ECS launch-template lifecycle: create -> read-back -> differential -> list ->
+# update (new version) -> delete. Consumes the shared stack (image/sg/vswitch)
+# to populate the template body; the instance type comes from the shared ECS
+# inventory resolver. No instance is needed.
+#
+# Flag-name notes (from spec operations[].input.fields overrides):
+#   --tag            => template_tag (launch-template tag)
+#   --resource-tag   => tag         (tags for resources created FROM the template)
+# We tag the template itself with --tag so the e2e sweeper can find it.
+resource: ecs/launch-template
+requires_params: [ecs.instance_type]
+needs: [vpc, vswitch, security_group, image]
+
+steps:
+  - name: create
+    run: >
+      ecctl ecs launch-template create
+      --name {{.run_name}}-lt
+      --image {{.stack.image}}
+      --type {{.params.ecs.instance_type}}
+      --sg {{.stack.security_group}}
+      --vswitch {{.stack.vswitch}}
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.launch_template
+    expect:
+      id: { type: string, prefix: lt- }
+      name: { eq: "{{.run_name}}-lt" }
+    capture:
+      lt_id: id
+    teardown: ecctl ecs launch-template delete {{.lt_id}}
+
+  - name: get (read-back)
+    run: ecctl ecs launch-template get {{.lt_id}} --with-versions
+    at: $.launch_template
+    expect:
+      id: { eq: "{{.lt_id}}" }
+      name: { eq: "{{.run_name}}-lt" }
+      default_version: { type: number }
+    capture:
+      hi_default: default_version
+
+  - name: differential vs raw DescribeLaunchTemplates
+    run: ecctl call ecs DescribeLaunchTemplates --LaunchTemplateId.1 {{.lt_id}}
+    expect:
+      $.response.LaunchTemplateSets.LaunchTemplateSet[0].LaunchTemplateId: { eq: "{{.lt_id}}" }   # call wraps under .response
+
+  - name: list (find ours)
+    # launch-template list supports tag.<key> filters, not a bare run-id.
+    run: ecctl ecs launch-template list --filter tag.run-id={{.run_id}}
+    assert:
+      - len($.launch_templates) >= 1
+
+  - name: update (create a new version)
+    run: ecctl ecs launch-template update {{.lt_id}} --create-version --type {{.params.ecs.instance_type}} --image {{.stack.image}}
+    at: $.launch_template
+    expect:
+      id: { eq: "{{.lt_id}}" }
+
+  - name: delete
+    run: ecctl ecs launch-template delete {{.lt_id}}
+    at: $.launch_template
+    expect:
+      id: { eq: "{{.lt_id}}" }

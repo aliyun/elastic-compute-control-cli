@@ -1,0 +1,779 @@
+schema_version: 2
+product: ecs
+resource: sg
+kind: regional
+display_name:
+  en: security group
+  zh-CN: 安全组
+description:
+  en: Manage security group resources
+  zh-CN: 管理安全组资源
+examples:
+  - ecctl ecs sg list --filter vpc=<vpc-id>
+  - ecctl ecs sg create --name web-sg --vpc <vpc-id>
+  - ecctl ecs sg authorize <sg-id> --rule tcp:80@0.0.0.0/0 --rule icmp:-1@0.0.0.0/0
+  - ecctl ecs sg revoke <sg-id> --rule tcp:80@0.0.0.0/0
+
+identity:
+  field: id
+  prefix: sg-
+  output_root:
+    one: security_group
+    many: security_groups
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: security group ID
+        zh-CN: 安全组 ID
+    ids:
+      type: array
+      description:
+        en: security group IDs
+        zh-CN: 安全组 ID 列表
+      items:
+        type: string
+    name:
+      type: string
+      description:
+        en: security group name
+        zh-CN: 安全组名称
+    description:
+      type: string
+      description:
+        en: security group description
+        zh-CN: 安全组描述
+    vpc:
+      type: string
+      description:
+        en: VPC ID
+        zh-CN: VPC ID
+    type:
+      type: string
+      default: normal
+      description:
+        en: security group type
+        zh-CN: 安全组类型
+      enum: [normal, enterprise]
+    inner_access_policy:
+      type: string
+      description:
+        en: internal access policy
+        zh-CN: 组内连通策略
+      enum: [accept, drop]
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+    rule:
+      type: string
+      repeatable: true
+      description:
+        en: security group rule, for example ingress:tcp:80:0.0.0.0/0 or tcp:80@0.0.0.0/0
+        zh-CN: 安全组规则，例如 ingress:tcp:80:0.0.0.0/0 或 tcp:80@0.0.0.0/0
+    rule_id:
+      type: string
+      description:
+        en: security group rule ID
+        zh-CN: 安全组规则 ID
+    direction:
+      type: string
+      description:
+        en: rule direction
+        zh-CN: 规则方向
+      enum: [ingress, egress]
+    protocol:
+      type: string
+      description:
+        en: rule protocol
+        zh-CN: 规则协议
+    port:
+      type: string
+      description:
+        en: rule port or port range
+        zh-CN: 规则端口或端口范围
+    cidr:
+      type: cidr
+      description:
+        en: rule IPv4 CIDR block
+        zh-CN: 规则 IPv4 CIDR 网段
+    policy:
+      type: string
+      description:
+        en: rule policy
+        zh-CN: 规则策略
+      enum: [accept, drop]
+    priority:
+      type: integer
+      description:
+        en: rule priority
+        zh-CN: 规则优先级
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  next_token:
+    type: string
+    description:
+      en: token for the next result page
+      zh-CN: 下一页查询 token
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  with_references:
+    type: boolean
+    description:
+      en: include security group references
+      zh-CN: 附带安全组引用关系
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: DescribeSecurityGroups
+    request:
+      RegionId: $context.region
+      SecurityGroupId: $.id
+      SecurityGroupIds: $.ids
+      SecurityGroupName: $.name
+      VpcId: $.vpc
+      SecurityGroupType: $.type
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      MaxResults: $.limit
+      NextToken: $.next_token
+    response:
+      items: $.SecurityGroups.SecurityGroup
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.SecurityGroupId
+      fields:
+        id: $.SecurityGroupId
+        name: $.SecurityGroupName
+        description: $.Description
+        vpc: $.VpcId
+        type: $.SecurityGroupType
+        region: $.RegionId
+        resource_group: $.ResourceGroupId
+        creation_time: $.CreationTime
+        available_instance_amount: $.AvailableInstanceAmount
+        ecs_count: $.EcsCount
+        group_to_group_rule_count: $.GroupToGroupRuleCount
+        rule_count: $.RuleCount
+        service_id: $.ServiceID
+        service_managed: $.ServiceManaged
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+  attribute:
+    api: DescribeSecurityGroupAttribute
+    request:
+      RegionId: $context.region
+      SecurityGroupId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      id: $.SecurityGroupId
+      fields:
+        id: $.SecurityGroupId
+        name: $.SecurityGroupName
+        description: $.Description
+        vpc: $.VpcId
+        region: $.RegionId
+        inner_access_policy: $.InnerAccessPolicy
+        next_token: $.NextToken
+        snapshot_policy_ids: $.SnapshotPolicyIds.SnapshotPolicyId
+        permissions: $.Permissions.Permission
+        rules:
+          from: $.Permissions.Permission
+          each:
+            id: $.SecurityGroupRuleId
+            direction:
+              lower: $.Direction
+            protocol:
+              lower: $.IpProtocol
+            port:
+              port: $.PortRange
+            cidr:
+              first: [$.SourceCidrIp, $.DestCidrIp]
+            policy:
+              lower: $.Policy
+            priority:
+              int: $.Priority
+  references:
+    api: DescribeSecurityGroupReferences
+    request:
+      RegionId: $context.region
+      SecurityGroupId:
+        each: $list(input.id)
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        references: $.SecurityGroupReferences.SecurityGroupReference
+
+bindings:
+  create_to_available:
+    api: CreateSecurityGroup
+    idempotency:
+      field: ClientToken
+      prefix: sg-create
+    request:
+      RegionId: $context.region
+      VpcId: $.vpc
+      SecurityGroupName: $.name
+      Description: $.description
+      SecurityGroupType: $.type
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    id_from: $.SecurityGroupId
+    request_id_from: $.RequestId
+  update_attributes:
+    api: ModifySecurityGroupAttribute
+    request:
+      RegionId: $context.region
+      SecurityGroupId: $.id
+      SecurityGroupName: $.name
+      Description: $.description
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - request: SecurityGroupName
+      - request: Description
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  update_policy:
+    api: ModifySecurityGroupPolicy
+    request:
+      RegionId: $context.region
+      SecurityGroupId: $.id
+      InnerAccessPolicy: $.inner_access_policy
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - request: InnerAccessPolicy
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  update_rule:
+    api: ModifySecurityGroupRule
+    hooks:
+      before: [normalize_security_group_rule_request]
+    request:
+      RegionId: $context.region
+      SecurityGroupId: $.id
+      SecurityGroupRuleId: $.rule_id
+      IpProtocol: $.protocol
+      PortRange: $.port
+      SourceCidrIp: $.cidr
+      Policy: $.policy
+      Priority: $.priority
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.rule_id
+    require_any:
+      - request: IpProtocol
+      - request: PortRange
+      - request: SourceCidrIp
+      - request: Policy
+      - request: Priority
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  update_rule_egress:
+    api: ModifySecurityGroupEgressRule
+    hooks:
+      before: [normalize_security_group_rule_request]
+    request:
+      RegionId: $context.region
+      SecurityGroupId: $.id
+      SecurityGroupRuleId: $.rule_id
+      IpProtocol: $.protocol
+      PortRange: $.port
+      DestCidrIp: $.cidr
+      Policy: $.policy
+      Priority: $.priority
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.rule_id
+    require_any:
+      - request: IpProtocol
+      - request: PortRange
+      - request: DestCidrIp
+      - request: Policy
+      - request: Priority
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  delete_to_absent:
+    api: DeleteSecurityGroup
+    request:
+      RegionId: $context.region
+      SecurityGroupId: $.id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  authorize_rules:
+    api: AuthorizeSecurityGroup
+    idempotency:
+      field: ClientToken
+      prefix: sg-authorize
+    request:
+      RegionId: $context.region
+      SecurityGroupId: $.id
+      Permissions:
+        capture: rule_permissions
+        each:
+          normalize: security_group_rule
+          sources:
+            - source: $.rule
+            - from_fields:
+                direction: $.direction
+                protocol: $.protocol
+                port: $.port
+                cidr: $.cidr
+                policy: $.policy
+                priority: $.priority
+              when_any: [protocol, port, cidr]
+          defaults:
+            direction: ingress
+            policy: accept
+            priority: 1
+          enum:
+            direction: [ingress]
+        fields:
+          IpProtocol: $.protocol
+          PortRange: $.port_range
+          SourceCidrIp: $.cidr
+          Policy: $.policy
+          Priority: $.priority
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - request: Permissions
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  authorize_rules_egress:
+    api: AuthorizeSecurityGroupEgress
+    idempotency:
+      field: ClientToken
+      prefix: sg-authorize-egress
+    request:
+      RegionId: $context.region
+      SecurityGroupId: $.id
+      Permissions:
+        capture: rule_permissions
+        each:
+          normalize: security_group_rule
+          sources:
+            - source: $.rule
+            - from_fields:
+                direction: $.direction
+                protocol: $.protocol
+                port: $.port
+                cidr: $.cidr
+                policy: $.policy
+                priority: $.priority
+              when_any: [protocol, port, cidr]
+          defaults:
+            direction: egress
+            policy: accept
+            priority: 1
+          enum:
+            direction: [egress]
+        fields:
+          IpProtocol: $.protocol
+          PortRange: $.port_range
+          DestCidrIp: $.cidr
+          Policy: $.policy
+          Priority: $.priority
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - request: Permissions
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  revoke_rules:
+    api: RevokeSecurityGroup
+    idempotency:
+      field: ClientToken
+      prefix: sg-revoke
+    request:
+      RegionId: $context.region
+      SecurityGroupId: $.id
+      Permissions:
+        capture: rule_permissions
+        each:
+          normalize: security_group_rule
+          sources:
+            - source: $.rule
+          defaults:
+            direction: ingress
+            policy: accept
+            priority: 1
+          enum:
+            direction: [ingress]
+        fields:
+          IpProtocol: $.protocol
+          PortRange: $.port_range
+          SourceCidrIp: $.cidr
+          Policy: $.policy
+          Priority: $.priority
+      SecurityGroupRuleId:
+        each: $.rule_id
+        capture:
+          name: rule_ids
+          fields:
+            id: $
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - request: Permissions
+      - each: $.rule_id
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  revoke_rules_egress:
+    api: RevokeSecurityGroupEgress
+    idempotency:
+      field: ClientToken
+      prefix: sg-revoke-egress
+    request:
+      RegionId: $context.region
+      SecurityGroupId: $.id
+      Permissions:
+        capture: rule_permissions
+        each:
+          normalize: security_group_rule
+          sources:
+            - source: $.rule
+          defaults:
+            direction: egress
+            policy: accept
+            priority: 1
+          enum:
+            direction: [egress]
+        fields:
+          IpProtocol: $.protocol
+          PortRange: $.port_range
+          DestCidrIp: $.cidr
+          Policy: $.policy
+          Priority: $.priority
+      SecurityGroupRuleId:
+        each: $.rule_id
+        capture:
+          name: rule_ids
+          fields:
+            id: $
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - request: Permissions
+      - each: $.rule_id
+      - raw: $.api_param
+    request_id_from: $.RequestId
+
+operations:
+  create:
+    examples:
+      - ecctl ecs sg create --vpc <vpc-id> --name web-sg
+      - ecctl ecs sg create --vpc <vpc-id> --name web-sg --type enterprise
+      - ecctl ecs sg create --vpc <vpc-id> --name web-sg --tag env=prod --description "production web SG"
+    description:
+      en: Create security group
+      zh-CN: 创建安全组
+    input:
+      fields:
+        - vpc:
+            required: true
+        - name
+        - description
+        - type
+        - resource_group
+        - tag
+      controls:
+        - api_param
+    workflow:
+      - binding: create_to_available
+      - probe: attribute
+        ids:
+          - $context.id
+        as: final
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            vpc: $input.vpc
+            type: $input.type
+  update:
+    examples:
+      - ecctl ecs sg update <sg-id> --name renamed-sg
+      - ecctl ecs sg update <sg-id> --description "production web SG v2"
+      - ecctl ecs sg update <sg-id> --rule-id <rule-id> --port 8080 --priority 5
+    description:
+      en: Update security group
+      zh-CN: 更新安全组
+    require_any:
+      - raw: $.name
+      - raw: $.description
+      - raw: $.inner_access_policy
+      - raw: $.rule_id
+      - raw: $.protocol
+      - raw: $.port
+      - raw: $.cidr
+      - raw: $.policy
+      - raw: $.priority
+    require_when:
+      - when_any: [protocol, port, cidr, policy, priority]
+        require_any: [rule_id]
+      - when_any: [rule_id]
+        require_any: [protocol, port, cidr, policy, priority, api_param]
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - description
+        - inner_access_policy
+        - rule_id
+        - direction
+        - protocol
+        - port
+        - cidr
+        - policy
+        - priority
+      controls:
+        - no_wait:
+            description:
+              en: skip security group readback
+              zh-CN: 跳过安全组回读
+        - timeout:
+            description:
+              en: security group readback timeout
+              zh-CN: 安全组回读超时时间
+        - api_param
+    workflow:
+      - binding: update_attributes
+        when_any: [input.name, input.description]
+      - binding: update_policy
+        when_any: [input.inner_access_policy]
+      - binding: update_rule
+        unless: input.direction == egress
+        when_any: [input.rule_id, input.protocol, input.port, input.cidr, input.policy, input.priority]
+      - binding: update_rule_egress
+        when: input.direction == egress
+        when_any: [input.rule_id, input.protocol, input.port, input.cidr, input.policy, input.priority]
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+  delete:
+    examples:
+      - ecctl ecs sg delete <sg-id>
+    description:
+      en: Delete security group
+      zh-CN: 删除安全组
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get security group
+      zh-CN: 获取安全组
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - with_references
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        as: attribute
+        not_found: error
+      - probe: references
+        ids:
+          - $input.id
+        when: input.with_references
+        merge: true
+  list:
+    examples:
+      - ecctl ecs sg list
+      - ecctl ecs sg list --filter name=<value>
+      - ecctl ecs sg list --filter tag.env=prod
+    description:
+      en: List security groups
+      zh-CN: 列出安全组
+    input:
+      fields:
+        - ids:
+            positional_many: true
+      controls:
+        - filter
+        - limit
+        - next_token
+    filters:
+      id:
+        target: id
+      ids:
+        target: ids
+      sg:
+        target: id
+      sg.id:
+        target: id
+      security-group:
+        target: id
+      security-group.id:
+        target: id
+      vpc:
+        target: vpc
+      vpc.id:
+        target: vpc
+      name:
+        target: name
+      type:
+        target: type
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true
+  authorize:
+    description:
+      en: Authorize security group rules
+      zh-CN: 授权安全组规则
+    examples:
+      - ecctl ecs sg authorize <sg-id> --rule tcp:22@0.0.0.0/0
+      - ecctl ecs sg authorize <sg-id> --rule icmp:-1@0.0.0.0/0
+      - ecctl ecs sg authorize <sg-id> --rule tcp:80@0.0.0.0/0 --rule tcp:443@0.0.0.0/0 --rule tcp:22@0.0.0.0/0
+      - ecctl ecs sg authorize <sg-id> --protocol tcp --port 443 --cidr 0.0.0.0/0 --policy drop --priority 10
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - rule
+        - direction:
+            default: ingress
+        - protocol
+        - port
+        - cidr
+        - policy:
+            default: accept
+        - priority:
+            default: 1
+      controls:
+        - api_param
+    workflow:
+      - binding: authorize_rules
+        unless: input.direction == egress
+      - binding: authorize_rules_egress
+        when: input.direction == egress
+      - probe: attribute
+        ids:
+          - $input.id
+    output:
+      fields:
+        actions: $result.actions
+        security_group:
+          id: $input.id
+      select:
+        - from: $result.item.rules
+          match: $captures.rule_permissions.items
+          by: [direction, protocol, port, cidr]
+          fields: [id, direction, protocol, port, cidr, policy, priority]
+          single_key: rule
+          many_key: rules
+          use_match_when_missing: true
+  revoke:
+    description:
+      en: Revoke security group rules
+      zh-CN: 撤销安全组规则
+    examples:
+      - ecctl ecs sg revoke <sg-id> --rule tcp:22@0.0.0.0/0
+      - ecctl ecs sg revoke <sg-id> --rule tcp:80@10.0.0.0/16 --direction ingress
+      - ecctl ecs sg revoke <sg-id> --rule-id <rule-id>
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - rule_id
+        - direction:
+            default: ingress
+        - rule
+      controls:
+        - api_param
+    workflow:
+      - binding: revoke_rules
+        unless: input.direction == egress
+      - binding: revoke_rules_egress
+        when: input.direction == egress
+      - probe: attribute
+        ids:
+          - $input.id
+    output:
+      fields:
+        actions: $result.actions
+        revoked: true
+        security_group:
+          id: $input.id
+      select:
+        - from: $captures.rule_ids.items
+          fields: [id]
+          single_key: rule
+          first: true
+        - from: $captures.rule_permissions.items
+          fields: [id, direction, protocol, port, cidr, policy, priority]
+          single_key: rule
+          first: true

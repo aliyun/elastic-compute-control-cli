@@ -1,0 +1,316 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: node
+kind: regional
+display_name:
+  en: node
+  zh-CN: 节点
+description:
+  en: Manage ACK cluster nodes
+  zh-CN: 管理 ACK 集群节点
+examples:
+  - ecctl ack node list --cluster <cluster-id>
+  - ecctl ack node get <node-id> --cluster <cluster-id>
+  - ecctl ack node delete <node-id> --cluster <cluster-id> --release
+  - ecctl ack node attach --cluster <cluster-id> --instance <instance-id>
+
+identity:
+  field: id
+  prefix: i-
+  output_root:
+    one: node
+    many: nodes
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: ACK node ECS instance ID
+        zh-CN: ACK 节点 ECS 实例 ID
+    node:
+      type: string
+      description:
+        en: ACK node ID
+        zh-CN: ACK 节点 ID
+    ids:
+      type: array
+      description:
+        en: ACK node ECS instance IDs
+        zh-CN: ACK 节点 ECS 实例 ID 列表
+      items:
+        type: string
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    nodepool:
+      type: string
+      description:
+        en: ACK node pool ID
+        zh-CN: ACK 节点池 ID
+    release:
+      type: boolean
+      default: false
+      description:
+        en: release ECS instances after removing nodes from the cluster
+        zh-CN: 从集群移除节点后释放 ECS 实例
+
+controls:
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum nodes to return
+      zh-CN: 最多返回节点数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  force:
+    type: boolean
+    default: false
+    description:
+      en: force the delete command after caller confirmation
+      zh-CN: 调用方确认后强制执行删除命令
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: DescribeClusterNodes
+    request:
+      RegionId: $context.region
+      ClusterId: $.cluster
+      nodepool_id: $.nodepool
+      pageNumber: $.page
+      pageSize: $.limit
+    response:
+      items: $.nodes
+      total: $.page.total_count
+      id: $.instance_id
+      state: $.node_status
+      fields:
+        id: $.instance_id
+        name: $.instance_name
+        node_name: $.node_name
+        status: $.node_status
+        state: $.state
+        instance_status: $.instance_status
+        nodepool: $.nodepool_id
+  by_id:
+    api: DescribeClusterNodes
+    request:
+      RegionId: $context.region
+      ClusterId: $.cluster
+      instanceIds: $.id
+    response:
+      items: $.nodes
+      total: $.page.total_count
+      id: $.instance_id
+      state: $.node_status
+      fields:
+        id: $.instance_id
+        name: $.instance_name
+        node_name: $.node_name
+        status: $.node_status
+        state: $.state
+        instance_status: $.instance_status
+        nodepool: $.nodepool_id
+      absent:
+        when_empty_for_requested_ids: true
+  by_ids:
+    api: DescribeClusterNodes
+    request:
+      RegionId: $context.region
+      ClusterId: $.cluster
+      instanceIds: $.ids
+    response:
+      items: $.nodes
+      total: $.page.total_count
+      id: $.instance_id
+      state: $.node_status
+      fields:
+        id: $.instance_id
+        name: $.instance_name
+        node_name: $.node_name
+        status: $.node_status
+        state: $.state
+        instance_status: $.instance_status
+        nodepool: $.nodepool_id
+      absent:
+        when_empty_for_requested_ids: true
+  attach_task:
+    api: DescribeTaskInfo
+    request:
+      task_id: $context.attach_task_id
+    response:
+      item: $
+      id: $.task_id
+      state: $.state
+      fields:
+        task_id: $.task_id
+        status: $.state
+        task_type: $.task_type
+        error: $.error
+        task_result: $.task_result
+
+waiters:
+  absent_after_delete:
+    probe: by_ids
+    target: absent
+    interval: 2s
+    timeout: 300s
+  attach_task_succeeded:
+    probe: attach_task
+    target: success
+    interval: 2s
+    timeout: 300s
+    failure:
+      states: [fail, failed]
+
+bindings:
+  delete_to_absent:
+    api: DeleteClusterNodes
+    request:
+      RegionId: $context.region
+      ClusterId: $.cluster
+      body:
+        nodes: $.ids
+        release_node: $.release
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: ClusterId
+      - request: body.nodes
+    request_id_from: $.request_id
+    wait: absent_after_delete
+  attach_to_ready:
+    api: AttachInstances
+    request:
+      RegionId: $context.region
+      ClusterId: $.cluster
+      body:
+        instances: $list(input.id)
+        nodepool_id: $.nodepool
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: ClusterId
+      - request: body.instances
+    context_from:
+      attach_task_id: $.task_id
+    wait: attach_task_succeeded
+
+operations:
+  delete:
+    examples:
+      - ecctl ack node delete <node-id> --cluster <cluster-id>
+    description:
+      en: Remove nodes from an ACK cluster
+      zh-CN: 从 ACK 集群移除节点
+    input:
+      fields:
+        - ids:
+            positional_many: true
+        - cluster:
+            required: true
+        - release
+      controls:
+        - force
+        - no_wait
+        - timeout
+        - api_param
+    require_any:
+      - raw: $.ids
+    workflow:
+      - binding: delete_to_absent
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $first(input.ids)
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get ACK node
+      zh-CN: 获取 ACK 节点
+    input:
+      fields:
+        - node:
+            required: true
+            positional: true
+            flag_name: node-id
+        - cluster:
+            required: true
+    workflow:
+      - probe: by_id
+        ids:
+          - $input.node
+        not_found: error
+  list:
+    examples:
+      - ecctl ack node list
+    description:
+      en: List ACK nodes
+      zh-CN: 列出 ACK 节点
+    input:
+      fields:
+        - cluster:
+            required: true
+        - nodepool
+      controls:
+        - limit
+        - page
+    workflow:
+      - probe: list
+        many: true
+  attach:
+    examples:
+      - ecctl ack node attach --cluster <cluster-id> --id <node-id>
+    description:
+      en: Attach an ECS instance directly to an ACK cluster
+      zh-CN: 将 ECS 实例直接加入 ACK 集群
+    input:
+      fields:
+        - cluster:
+            required: true
+        - id:
+            flag_name: instance
+            required: true
+        - nodepool
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: attach_to_ready
+        wait_unless: input.no_wait
+      - probe: by_id
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id

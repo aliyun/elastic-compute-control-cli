@@ -1,0 +1,790 @@
+schema_version: 2
+product: ecs
+resource: command
+kind: regional
+display_name:
+  en: command
+  zh-CN: 云助手命令
+description:
+  en: Manage ECS Cloud Assistant command templates and invocations
+  zh-CN: 管理 ECS 云助手命令模板与执行记录
+examples:
+  - ecctl ecs command list --filter type=RunShellScript
+  - ecctl ecs command get <command-id>
+  - ecctl ecs command create --name uptime --type RunShellScript --command-content 'uptime'
+  - ecctl ecs command invoke <command-id> --instance <instance-id>
+
+identity:
+  field: id
+  prefix: c-
+  output_root:
+    one: command
+    many: commands
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: command ID
+        zh-CN: 云助手命令 ID
+    name:
+      type: string
+      description:
+        en: command name
+        zh-CN: 云助手命令名称
+    description:
+      type: string
+      description:
+        en: command description
+        zh-CN: 云助手命令描述
+    type:
+      type: string
+      description:
+        en: command type
+        zh-CN: 云助手命令类型
+      enum: [RunShellScript, RunBatScript, RunPowerShellScript]
+    command_content:
+      type: string
+      input_style: text|@file
+      description:
+        en: command content to run on the instance
+        zh-CN: 在实例上执行的命令内容
+    content_encoding:
+      type: string
+      description:
+        en: command content encoding
+        zh-CN: 命令内容编码方式
+      enum: [Base64, PlainText]
+    working_dir:
+      type: string
+      description:
+        en: command working directory
+        zh-CN: 命令工作目录
+    command_timeout:
+      type: integer
+      description:
+        en: command timeout in seconds
+        zh-CN: 命令超时时间，单位秒
+    enable_parameter:
+      type: boolean
+      description:
+        en: enable custom parameters in the command
+        zh-CN: 启用命令中的自定义参数
+    launcher:
+      type: string
+      description:
+        en: command launcher
+        zh-CN: 命令启动器
+    provider:
+      type: string
+      description:
+        en: command provider
+        zh-CN: 命令提供方
+    latest:
+      type: boolean
+      description:
+        en: only return the latest command versions
+        zh-CN: 仅返回最新版本的命令
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    invocation_id:
+      type: string
+      description:
+        en: invocation (execution record) ID
+        zh-CN: 执行记录 ID
+    invocation_status:
+      type: string
+      description:
+        en: invocation status filter
+        zh-CN: 执行状态过滤
+      enum:
+        - Pending
+        - Scheduled
+        - Running
+        - Success
+        - Failed
+        - Stopping
+        - Stopped
+        - PartialFailed
+        - Finished
+    instance_ids:
+      type: array
+      description:
+        en: instance IDs to target
+        zh-CN: 目标实例 ID 列表
+      items:
+        type: string
+    instance:
+      type: string
+      description:
+        en: single instance ID filter
+        zh-CN: 实例 ID 过滤
+    parameters:
+      type: string
+      input_style: text|@file
+      description:
+        en: command parameters as a JSON object
+        zh-CN: 命令参数（JSON 对象）
+    timed:
+      type: boolean
+      description:
+        en: whether the invocation is scheduled
+        zh-CN: 是否为定时执行
+    frequency:
+      type: string
+      description:
+        en: scheduled execution frequency (cron expression)
+        zh-CN: 定时执行频率（cron 表达式）
+    repeat_mode:
+      type: string
+      description:
+        en: execution repeat mode
+        zh-CN: 执行重复模式
+      enum: [Once, Period, NextRebootOnly, EveryReboot]
+    username:
+      type: string
+      description:
+        en: username to run the command as
+        zh-CN: 执行命令的用户名
+    windows_password_name:
+      type: string
+      description:
+        en: encrypted Windows password key name
+        zh-CN: Windows 加密密码键名
+    container_id:
+      type: string
+      description:
+        en: container ID
+        zh-CN: 容器 ID
+    container_name:
+      type: string
+      description:
+        en: container name
+        zh-CN: 容器名称
+    include_output:
+      type: boolean
+      description:
+        en: include invocation output in the response
+        zh-CN: 返回执行输出内容
+    include_history:
+      type: boolean
+      description:
+        en: include historical invocation results
+        zh-CN: 返回历史执行结果
+    invoke_record_status:
+      type: string
+      description:
+        en: invocation record status filter
+        zh-CN: 执行结果状态过滤
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 50
+    max: 50
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  next_token:
+    type: string
+    description:
+      en: token for the next result page
+      zh-CN: 下一页查询 token
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 600s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  force:
+    type: boolean
+    default: false
+    description:
+      en: force stop the invocation when supported by the API (must be set explicitly)
+      zh-CN: 在 API 支持时强制停止执行（必须显式指定）
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+  invocations:
+    type: boolean
+    description:
+      en: list invocation records instead of command templates
+      zh-CN: 列出执行记录而非命令模板
+  with_results:
+    type: boolean
+    description:
+      en: include invocation results in the response
+      zh-CN: 返回执行结果
+
+probes:
+  state:
+    api: DescribeCommands
+    request:
+      RegionId: $context.region
+      CommandId: $.id
+      Name: $.name
+      Type: $.type
+      Description: $.description
+      Provider: $.provider
+      Latest: $.latest
+      ContentEncoding: $.content_encoding
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      MaxResults: $.limit
+      NextToken: $.next_token
+    response:
+      items: $.Commands.Command
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.CommandId
+      fields:
+        id: $.CommandId
+        name: $.Name
+        description: $.Description
+        type: $.Type
+        command_content: $.CommandContent
+        working_dir: $.WorkingDir
+        timeout: $.Timeout
+        enable_parameter: $.EnableParameter
+        parameter_names: $.ParameterNames.ParameterName
+        creation_time: $.CreationTime
+        resource_group: $.ResourceGroupId
+        provider: $.Provider
+        category: $.Category
+        launcher: $.Launcher
+        latest: $.Latest
+        version: $.Version
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+  invocation:
+    api: DescribeInvocations
+    request:
+      RegionId: $context.region
+      InvokeId: $.id
+      CommandId: $.command_id
+      CommandName: $.name
+      CommandType: $.type
+      InstanceId: $.instance
+      InvokeStatus: $.invocation_status
+      Timed: $.timed
+      IncludeOutput: $.include_output
+      ContentEncoding: $.content_encoding
+      Tag: $.tag
+      MaxResults: $.limit
+      NextToken: $.next_token
+    response:
+      items: $.Invocations.Invocation
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.InvokeId
+      state: $.InvokeStatus
+      fields:
+        id: $.InvokeId
+        command_id: $.CommandId
+        command_name: $.CommandName
+        command_type: $.CommandType
+        command_content: $.CommandContent
+        status: $.InvokeStatus
+        timed: $.Timed
+        frequency: $.Frequency
+        repeat_mode: $.RepeatMode
+        creation_time: $.CreationTime
+        parameters: $.Parameters
+        username: $.Username
+        invoke_instances: $.InvokeInstances.InvokeInstance
+        tags: $.Tags.Tag
+  invocation_result:
+    api: DescribeInvocationResults
+    request:
+      RegionId: $context.region
+      InvokeId: $.id
+      InstanceId: $.instance
+      CommandId: $.command_id
+      InvokeRecordStatus: $.invoke_record_status
+      IncludeHistory: $.include_history
+      ContentEncoding: $.content_encoding
+      MaxResults: $.limit
+      NextToken: $.next_token
+    response:
+      items: $.Invocation.InvocationResults.InvocationResult
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.InvokeId
+      state: $.InvocationStatus
+      fields:
+        invoke_id: $.InvokeId
+        command_id: $.CommandId
+        instance: $.InstanceId
+        status: $.InvocationStatus
+        exit_code: $.ExitCode
+        output: $.Output
+        error_code: $.ErrorCode
+        error_info: $.ErrorInfo
+        start_time: $.StartTime
+        finished_time: $.FinishedTime
+
+waiters:
+  finished_after_invoke:
+    probe: invocation
+    target: Finished
+    interval: 5s
+    timeout: 600s
+    failure:
+      states: [Failed, PartialFailed, Stopped]
+  stopped_after_stop:
+    probe: invocation
+    target: Stopped
+    interval: 5s
+    timeout: 300s
+  deleted_after_delete:
+    probe: state
+    target: absent
+    interval: 2s
+    timeout: 120s
+
+bindings:
+  create_to_available:
+    api: CreateCommand
+    idempotency:
+      field: ClientToken
+      prefix: command-create
+    request:
+      RegionId: $context.region
+      Name: $.name
+      Description: $.description
+      Type: $.type
+      CommandContent: $.command_content
+      ContentEncoding: $.content_encoding
+      WorkingDir: $.working_dir
+      Timeout: $.command_timeout
+      EnableParameter: $.enable_parameter
+      Launcher: $.launcher
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: Name
+      - request: Type
+      - request: CommandContent
+    id_from: $.CommandId
+    request_id_from: $.RequestId
+  update_attributes:
+    api: ModifyCommand
+    request:
+      RegionId: $context.region
+      CommandId: $.id
+      Name: $.name
+      Description: $.description
+      CommandContent: $.command_content
+      WorkingDir: $.working_dir
+      Timeout: $.command_timeout
+      Launcher: $.launcher
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    require_any:
+      - request: Name
+      - request: Description
+      - request: CommandContent
+      - request: WorkingDir
+      - request: Timeout
+      - request: Launcher
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  update_invocation_attribute:
+    api: ModifyInvocationAttribute
+    request:
+      RegionId: $context.region
+      InvokeId: $.invocation_id
+      Frequency: $.frequency
+      RepeatMode: $.repeat_mode
+      Timed: $.timed
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.invocation_id
+    require_any:
+      - request: Frequency
+      - request: RepeatMode
+      - request: Timed
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  delete_to_absent:
+    api: DeleteCommand
+    request:
+      RegionId: $context.region
+      CommandId: $.id
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+  invoke_command:
+    api: InvokeCommand
+    idempotency:
+      field: ClientToken
+      prefix: command-invoke
+    request:
+      RegionId: $context.region
+      CommandId: $.id
+      InstanceId:
+        each: $.instance_ids
+      Parameters: $.parameters
+      Timed: $.timed
+      Frequency: $.frequency
+      RepeatMode: $.repeat_mode
+      Username: $.username
+      WindowsPasswordName: $.windows_password_name
+      ContainerId: $.container_id
+      ContainerName: $.container_name
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+      - request: InstanceId
+    id_from: $.InvokeId
+    request_id_from: $.RequestId
+    wait: finished_after_invoke
+  stop_invocation:
+    api: StopInvocation
+    request:
+      RegionId: $context.region
+      InvokeId: $.invocation_id
+      InstanceId:
+        each: $.instance_ids
+      Force: $.force
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.invocation_id
+    request_id_from: $.RequestId
+    wait: stopped_after_stop
+
+operations:
+  create:
+    examples:
+      - ecctl ecs command create --name my-name --type <type> --command-content <command-content>
+      - ecctl ecs command create --name my-name --type <type> --command-content <command-content> --tag env=prod
+    description:
+      en: Create cloud assistant command template
+      zh-CN: 创建云助手命令模板
+    input:
+      fields:
+        - name:
+            required: true
+        - type:
+            required: true
+        - command_content:
+            required: true
+        - description
+        - content_encoding
+        - working_dir
+        - command_timeout
+        - enable_parameter
+        - launcher
+        - resource_group
+        - tag
+      controls:
+        - api_param
+    workflow:
+      - binding: create_to_available
+      - probe: state
+        ids:
+          - $context.id
+        as: final
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            type: $input.type
+            region: $context.region
+  update:
+    examples:
+      - ecctl ecs command update <command-id>
+      - ecctl ecs command update <command-id> --name my-name
+    description:
+      en: Update command template or invocation attribute
+      zh-CN: 更新命令模板或执行记录属性
+    input:
+      fields:
+        - id:
+            positional: true
+        - invocation_id
+        - name
+        - description
+        - command_content
+        - working_dir
+        - command_timeout
+        - launcher
+        - frequency
+        - repeat_mode
+        - timed
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    require_any:
+      - raw: $.id
+      - raw: $.invocation_id
+    conflicts:
+      - any:
+          - name
+          - description
+          - command_content
+          - working_dir
+          - command_timeout
+          - launcher
+        with_any:
+          - invocation_id
+    workflow:
+      - binding: update_invocation_attribute
+        when: input.invocation_id
+      - binding: update_attributes
+        when: input.id
+      - probe: invocation
+        ids:
+          - $input.invocation_id
+        as: final
+        when: input.invocation_id
+        unless: input.no_wait
+      - probe: state
+        ids:
+          - $input.id
+        as: final
+        when: input.id
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            invocation_id: $input.invocation_id
+  delete:
+    examples:
+      - ecctl ecs command delete <command-id>
+    description:
+      en: Delete command template
+      zh-CN: 删除命令模板
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get command template, invocation, or invocation results
+      zh-CN: 获取命令模板、执行记录或执行结果
+    input:
+      fields:
+        - id:
+            positional: true
+        - invocation_id
+        - include_output
+        - include_history
+        - invoke_record_status
+        - instance
+      controls:
+        - with_results
+    require_any:
+      - raw: $.id
+      - raw: $.invocation_id
+    workflow:
+      - probe: invocation
+        ids:
+          - $input.invocation_id
+        when: input.invocation_id
+        not_found: error
+      - probe: invocation_result
+        ids:
+          - $input.invocation_id
+        when_any: [input.with_results]
+        merge: true
+      - probe: state
+        ids:
+          - $input.id
+        when: input.id
+        not_found: error
+  list:
+    examples:
+      - ecctl ecs command list
+      - ecctl ecs command list --filter name=<value>
+      - ecctl ecs command list --filter tag.env=prod
+    description:
+      en: List command templates or invocation records
+      zh-CN: 列出命令模板或执行记录
+    input:
+      fields:
+        - id:
+            positional: true
+        - content_encoding
+        - include_output
+      controls:
+        - invocations
+        - filter
+        - limit
+        - next_token
+    filters:
+      id:
+        target: id
+      command:
+        target: id
+      command.id:
+        target: id
+      name:
+        target: name
+      type:
+        target: type
+      provider:
+        target: provider
+      latest:
+        target: latest
+      status:
+        target: invocation_status
+      invoke-status:
+        target: invocation_status
+      instance:
+        target: instance
+      instance.id:
+        target: instance
+      timed:
+        target: timed
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+      description:
+        target: description
+    workflow:
+      - probe: invocation
+        when: input.invocations
+        many: true
+      - probe: state
+        unless: input.invocations
+        many: true
+  invoke:
+    examples:
+      - ecctl ecs command invoke <command-id> --instance-ids <instance-ids>
+    description:
+      en: Invoke a command on target instances
+      zh-CN: 在目标实例上执行命令
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - instance_ids:
+            required: true
+        - parameters
+        - timed
+        - frequency
+        - repeat_mode
+        - username
+        - windows_password_name
+        - container_id
+        - container_name
+        - resource_group
+        - tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: invoke_command
+        wait_unless: input.no_wait
+      - probe: invocation_result
+        ids:
+          - $context.id
+        as: final
+        many: true
+        unless: input.no_wait
+      - emit:
+          fields:
+            invoke_id: $context.id
+            command: $input.id
+            instance_ids: $input.instance_ids
+    output:
+      fields:
+        actions: $result.actions
+        invoke_id: $result.id
+        results: $result.items
+  stop:
+    examples:
+      - ecctl ecs command stop <invocation-id>
+    description:
+      en: Stop a running invocation
+      zh-CN: 停止正在执行的命令
+    input:
+      fields:
+        - invocation_id:
+            required: true
+            positional: true
+        - instance_ids
+      controls:
+        - force
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: stop_invocation
+        wait_unless: input.no_wait
+      - probe: invocation
+        ids:
+          - $input.invocation_id
+        as: final
+        unless: input.no_wait
+      - probe: invocation_result
+        ids:
+          - $input.invocation_id
+        as: results
+        many: true
+        unless: input.no_wait
+      - emit:
+          fields:
+            invoke_id: $input.invocation_id
+            instance_ids: $input.instance_ids
+    output:
+      fields:
+        actions: $result.actions
+        invoke_id: $result.id
+        invocation: $result.item

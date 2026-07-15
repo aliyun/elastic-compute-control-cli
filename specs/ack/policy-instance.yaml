@@ -1,0 +1,253 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: instance
+parent: policy
+kind: regional
+display_name:
+  en: ACK policy instance
+  zh-CN: ACK 策略实例
+description:
+  en: Manage ACK policy instances in a cluster
+  zh-CN: 管理集群中的 ACK 策略实例
+examples:
+  - ecctl ack policy instance list --cluster c-xxx
+  - ecctl ack policy instance get ACKAllowedRepos --cluster c-xxx
+  - ecctl ack policy instance create ACKAllowedRepos --cluster c-xxx --action warn --parameters @policy-params.json
+
+identity:
+  field: instance_name
+  output_root:
+    one: instance
+    many: instances
+
+schema:
+  fields:
+    policy_name:
+      type: string
+      description:
+        en: policy name
+        zh-CN: 策略名称
+    instance_name:
+      type: string
+      description:
+        en: policy instance name
+        zh-CN: 策略实例名称
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    action:
+      type: string
+      description:
+        en: policy action
+        zh-CN: 策略动作
+      enum: [warn, deny]
+    namespaces:
+      type: array
+      description:
+        en: namespaces the policy applies to, as a JSON array
+        zh-CN: 策略生效命名空间 JSON 数组
+      items:
+        type: string
+    parameters:
+      type: object
+      description:
+        en: policy instance parameter JSON object or @file
+        zh-CN: 策略实例参数 JSON 对象或 @file
+    policy_category:
+      type: string
+      description:
+        en: policy category
+        zh-CN: 策略类别
+    policy_description:
+      type: string
+      description:
+        en: policy description
+        zh-CN: 策略描述
+    policy_severity:
+      type: string
+      description:
+        en: policy severity
+        zh-CN: 策略等级
+    policy_instances_count:
+      type: integer
+      description:
+        en: number of deployed instances for this policy
+        zh-CN: 该策略已部署实例数量
+
+probes:
+  list:
+    api: DescribePolicyInstances
+    request:
+      cluster_id: $.cluster
+      policy_name: $.policy_name
+      instance_name: $.instance_name
+    response:
+      items: $.instances
+      request_id: $.request_id
+      id: $.instance_name
+      fields:
+        instance_name: $.instance_name
+        policy_name: $.policy_name
+        cluster: $.cluster_id
+        action: $.policy_action
+        parameters: $.policy_parameters
+        namespaces: $.policy_scope
+        policy_category: $.policy_category
+        policy_description: $.policy_description
+        policy_severity: $.policy_severity
+  status:
+    api: DescribePolicyInstancesStatus
+    request:
+      cluster_id: $.cluster
+    response:
+      items: $.policy_instances
+      request_id: $.request_id
+      id: $.policy_name
+      fields:
+        policy_name: $.policy_name
+        policy_category: $.policy_category
+        policy_description: $.policy_description
+        policy_instances_count: $.policy_instances_count
+        policy_severity: $.policy_severity
+      extra_fields:
+        instances_severity_count: $.instances_severity_count
+
+bindings:
+  deploy_policy_instance:
+    api: DeployPolicyInstance
+    request:
+      cluster_id: $.cluster
+      policy_name: $.policy_name
+      action: $.action
+      namespaces: $.namespaces
+      parameters: $.parameters
+    id_from: $.instances
+    request_id_from: $.request_id
+  modify_policy_instance:
+    api: ModifyPolicyInstance
+    request:
+      cluster_id: $.cluster
+      policy_name: $.policy_name
+      instance_name: $.instance_name
+      action: $.action
+      namespaces: $.namespaces
+      parameters: $.parameters
+    require_any:
+      - request: action
+      - request: namespaces
+      - request: parameters
+    request_id_from: $.request_id
+  delete_policy_instance:
+    api: DeletePolicyInstance
+    request:
+      cluster_id: $.cluster
+      policy_name: $.policy_name
+      instance_name: $.instance_name
+    request_id_from: $.request_id
+
+operations:
+  create:
+    examples:
+      - ecctl ack policy instance create <policy-name> --cluster <cluster-id> --action <action>
+    description:
+      en: Create an ACK policy instance
+      zh-CN: 创建 ACK 策略实例
+    input:
+      fields:
+        - policy_name:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+        - action:
+            required: true
+        - namespaces
+        - parameters
+    workflow:
+      - binding: deploy_policy_instance
+      - probe: status
+        ids:
+          - $input.policy_name
+        as: final
+  update:
+    examples:
+      - ecctl ack policy instance update <policy-name> --cluster <cluster-id>
+    description:
+      en: Update an ACK policy instance
+      zh-CN: 更新 ACK 策略实例
+    input:
+      fields:
+        - policy_name:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+        - instance_name
+        - action
+        - namespaces
+        - parameters
+    workflow:
+      - binding: modify_policy_instance
+      - probe: status
+        ids:
+          - $input.policy_name
+        as: final
+  delete:
+    examples:
+      - ecctl ack policy instance delete <policy-name> --cluster <cluster-id> --instance-name <instance-name>
+    description:
+      en: Delete an ACK policy instance
+      zh-CN: 删除 ACK 策略实例
+    input:
+      fields:
+        - policy_name:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+        - instance_name:
+            required: true
+    workflow:
+      - binding: delete_policy_instance
+      - probe: list
+        many: true
+      - emit:
+          fields:
+            policy_name: $input.policy_name
+            instance_name: $input.instance_name
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get ACK policy instance status
+      zh-CN: 获取 ACK 策略实例状态
+    input:
+      fields:
+        - policy_name:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+    workflow:
+      - probe: status
+        ids:
+          - $input.policy_name
+        not_found: error
+  list:
+    examples:
+      - ecctl ack policy instance list
+    description:
+      en: List ACK policy instances in a cluster
+      zh-CN: 列出集群中的 ACK 策略实例
+    input:
+      fields:
+        - cluster:
+            required: true
+        - policy_name
+        - instance_name
+    workflow:
+      - probe: list
+        many: true

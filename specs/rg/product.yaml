@@ -1,0 +1,21 @@
+schema_version: 1
+product: rg
+priority: 4
+resources:
+  - group
+  - resource
+  - policy
+  - policy-version
+  - role
+  - service-linked-role
+  - associated-transfer
+  - admin-setting
+  - notification
+description:
+  en: Manage resource group governance resources
+  zh-CN: 管理资源组治理资源
+examples:
+  - ecctl rg group list
+  - ecctl rg group get <group-id>
+  - ecctl rg policy list --filter policy-type=Custom
+  - ecctl rg policy version list --policy-name my-policy --policy-type Custom

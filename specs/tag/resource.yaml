@@ -1,0 +1,233 @@
+schema_version: 2
+product: tag
+resource: resource
+kind: regional
+display_name:
+  en: tagged resource
+  zh-CN: 标签资源
+description:
+  en: Manage tags on cross-product resources
+  zh-CN: 管理跨产品资源标签
+examples:
+  - ecctl tag resource list --filter arn=<resource-arn>
+  - ecctl tag resource apply --arn <resource-arn> --tag env=prod
+  - ecctl tag resource remove --arn <resource-arn> --tag-key env
+  - ecctl tag resource list --filter tag.env=prod --resource-type ALIYUN::VPC::VPC
+
+identity:
+  field: arn
+  prefix: "arn:acs:"
+  output_root:
+    one: resource
+    many: resources
+
+schema:
+  fields:
+    arn:
+      type: string
+      repeatable: true
+      description:
+        en: resource ARN
+        zh-CN: 资源 ARN
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment or filter key=value
+        zh-CN: 标签赋值或过滤 key=value
+    tag_key:
+      type: string
+      repeatable: true
+      description:
+        en: tag key to remove
+        zh-CN: 要解绑的标签键
+    resource_type:
+      type: string
+      description:
+        en: resource type for tag reverse lookup
+        zh-CN: 标签反查资源类型
+    fuzzy_type:
+      type: string
+      description:
+        en: reverse lookup matching mode
+        zh-CN: 反查匹配模式
+      enum: [EQUAL, NOT]
+    category:
+      type: string
+      description:
+        en: tag category
+        zh-CN: 标签类型
+      enum: [Custom, System, All]
+    include_all_tags:
+      type: boolean
+      description:
+        en: include all resource tags in reverse lookup results
+        zh-CN: 反查结果附带资源全部标签
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 1000
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  next_token:
+    type: string
+    description:
+      en: token for the next result page
+      zh-CN: 下一页查询 token
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  tag_resources:
+    api: ListTagResources
+    request:
+      RegionId: $context.region
+      ResourceARN:
+        each: $.arn
+      Tags: $kv_json($.tag)
+      Category: $.category
+      NextToken: $.next_token
+      PageSize: $.limit
+      ApiParam:
+        raw: $.api_param
+    response:
+      items: $.TagResources
+      next_token: $.NextToken
+      request_id: $.RequestId
+      fields:
+        arn: $.ResourceARN
+        tags: $.Tags
+  resources_by_tag:
+    api: ListResourcesByTag
+    request:
+      RegionId: $context.region
+      ResourceType: $.resource_type
+      FuzzyType: $.fuzzy_type
+      TagFilter.Key: $kv_key($.tag)
+      TagFilter.Value: $kv_value($.tag)
+      IncludeAllTags: $.include_all_tags
+      NextToken: $.next_token
+      MaxResult: $.limit
+      ApiParam:
+        raw: $.api_param
+    response:
+      items: $.Resources
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.ResourceId
+      fields:
+        id: $.ResourceId
+        tags: $.Tags
+
+bindings:
+  apply_tags:
+    api: TagResources
+    request:
+      RegionId: $context.region
+      ResourceARN:
+        each: $.arn
+      Tags: $kv_json($.tag)
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  remove_tags:
+    api: UntagResources
+    request:
+      RegionId: $context.region
+      ResourceARN:
+        each: $.arn
+      TagKey:
+        each: $.tag_key
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+
+operations:
+  list:
+    examples:
+      - ecctl tag resource list
+      - ecctl tag resource list --filter arn=<value>
+      - ecctl tag resource list --filter tag.env=prod
+    description:
+      en: List tags for resources or resources by tag
+      zh-CN: 列出资源标签或按标签反查资源
+    require_when:
+      - when_any: [resource_type, fuzzy_type, include_all_tags]
+        require_any: [tag]
+      - when_any: [fuzzy_type, include_all_tags]
+        require_any: [resource_type]
+    conflicts:
+      - any: [arn]
+        with_any: [resource_type, fuzzy_type, include_all_tags]
+      - any: [category]
+        with_any: [resource_type, fuzzy_type, include_all_tags]
+    input:
+      fields:
+        - resource_type
+        - fuzzy_type
+        - include_all_tags
+      controls:
+        - filter
+        - limit
+        - next_token
+        - api_param
+    filters:
+      tag.:
+        target: tag
+        key_prefix: tag.
+      arn:
+        target: arn
+      category:
+        target: category
+    workflow:
+      - probe: resources_by_tag
+        many: true
+        when_any: [input.resource_type, input.fuzzy_type, input.include_all_tags]
+      - probe: tag_resources
+        many: true
+        unless: input.resource_type || input.fuzzy_type || input.include_all_tags
+  apply:
+    examples:
+      - ecctl tag resource apply --arn <arn> --tag env=prod
+    description:
+      en: Apply tags to resources
+      zh-CN: 为资源绑定标签
+    input:
+      fields:
+        - arn:
+            required: true
+        - tag:
+            required: true
+      controls:
+        - api_param
+    workflow:
+      - binding: apply_tags
+  remove:
+    examples:
+      - ecctl tag resource remove --arn <arn> --tag-key <tag-key>
+    description:
+      en: Remove tags from resources
+      zh-CN: 解绑资源标签
+    input:
+      fields:
+        - arn:
+            required: true
+        - tag_key:
+            required: true
+      controls:
+        - api_param
+    workflow:
+      - binding: remove_tags

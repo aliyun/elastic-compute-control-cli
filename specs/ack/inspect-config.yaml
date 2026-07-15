@@ -1,0 +1,164 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: config
+parent: inspect
+kind: regional
+display_name:
+  en: inspect config
+  zh-CN: 巡检配置
+description:
+  en: Manage cluster inspection config
+  zh-CN: 管理集群巡检配置
+examples:
+  - ecctl ack inspect config get --cluster <cluster-id>
+  - ecctl ack inspect config update --cluster <cluster-id> --enabled --schedule daily
+
+identity:
+  field: cluster
+  output_root:
+    one: config
+    many: configs
+
+schema:
+  fields:
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    enabled:
+      type: boolean
+      description:
+        en: enable periodic inspection
+        zh-CN: 启用周期性巡检
+    schedule:
+      type: string
+      description:
+        en: inspection schedule
+        zh-CN: 巡检周期
+    scope:
+      type: string
+      description:
+        en: inspection scope
+        zh-CN: 巡检范围
+    config:
+      type: string
+      input_style: json|@file
+      description:
+        en: raw inspection config JSON or @file
+        zh-CN: 原始巡检配置 JSON 或 @file
+
+controls:
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  detail:
+    api: GetClusterInspectConfig
+    request:
+      cluster_id: $.cluster
+      ApiParam:
+        raw: $.api_param
+    response:
+      item: $
+      request_id: $.requestId
+      id: $.cluster_id
+      fields:
+        cluster_id: $.cluster_id
+        enabled: $.enabled
+        schedule: $.schedule
+        scope: $.scope
+        config: $.config
+
+bindings:
+  create_config:
+    api: CreateClusterInspectConfig
+    request:
+      cluster_id: $.cluster
+      body.enabled: $.enabled
+      body.schedule: $.schedule
+      body.scope: $.scope
+      body.config: $.config
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.requestId
+  update_config:
+    api: UpdateClusterInspectConfig
+    request:
+      cluster_id: $.cluster
+      body.enabled: $.enabled
+      body.schedule: $.schedule
+      body.scope: $.scope
+      body.config: $.config
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.requestId
+  delete_config:
+    api: DeleteClusterInspectConfig
+    request:
+      cluster_id: $.cluster
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.requestId
+
+operations:
+  update:
+    examples:
+      - ecctl ack inspect config update --cluster <cluster-id>
+    description:
+      en: Update inspection config
+      zh-CN: 更新巡检配置
+    input:
+      fields:
+        - cluster:
+            required: true
+        - enabled
+        - schedule
+        - scope
+        - config
+      controls:
+        - api_param
+    workflow:
+      - probe: detail
+        as: existing
+      - binding: create_config
+        unless: has(context.existing)
+      - binding: update_config
+        when: has(context.existing)
+      - probe: detail
+  delete:
+    examples:
+      - ecctl ack inspect config delete --cluster <cluster-id>
+    description:
+      en: Delete inspection config
+      zh-CN: 删除巡检配置
+    input:
+      fields:
+        - cluster:
+            required: true
+      controls:
+        - api_param
+    workflow:
+      - binding: delete_config
+      - emit:
+          deleted: true
+          fields:
+            cluster: $.cluster
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get inspection config
+      zh-CN: 查询巡检配置
+    input:
+      fields:
+        - cluster:
+            required: true
+      controls:
+        - api_param
+    workflow:
+      - probe: detail

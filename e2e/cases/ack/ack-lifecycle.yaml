@@ -1,0 +1,58 @@
+# ACK cluster lifecycle backed by the primary region's dedicated E2E network.
+resource: ack/ack
+requires_params: [ack.cluster_type, ack.version, ack.edition, ack.profile, ack.zone]
+needs: [vpc, vswitch]
+timeout: 2h
+serial: true
+
+steps:
+  - name: create
+    run: >
+      ecctl ack create
+      --name {{.resource_prefix}}-ack-crud
+      --type {{.params.ack.cluster_type}}
+      --version {{.params.ack.version}}
+      --edition {{.params.ack.edition}}
+      --profile {{.params.ack.profile}}
+      --vpc {{.stack.vpc}}
+      --vswitch {{.stack.vswitch}}
+      --zone {{.params.ack.zone}}
+      --pod-cidr 172.20.0.0/16
+      --service-cidr 172.21.0.0/20
+      --snat-entry
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 30m
+    at: $.cluster
+    expect:
+      id: { type: string, prefix: c }
+      name: { eq: "{{.resource_prefix}}-ack-crud" }
+      status: { oneof: [running, Running] }
+      version: { eq: "{{.params.ack.version}}" }
+    capture:
+      cluster_id: id
+    teardown: ecctl ack delete {{.cluster_id}} --force --timeout 30m
+
+  - name: get
+    run: ecctl ack get {{.cluster_id}} --with-tags
+    at: $.cluster
+    expect:
+      id: { eq: "{{.cluster_id}}" }
+      name: { eq: "{{.resource_prefix}}-ack-crud" }
+      version: { eq: "{{.params.ack.version}}" }
+
+  - name: list
+    run: ecctl ack list --filter name={{.resource_prefix}}-ack-crud --limit 10
+    assert:
+      - len($.clusters) >= 1
+
+  - name: update
+    run: ecctl ack update {{.cluster_id}} --name {{.resource_prefix}}-ack-crud-updated --tag validation=e2e --timeout 30m
+    at: $.cluster
+    expect:
+      id: { eq: "{{.cluster_id}}" }
+      name: { eq: "{{.resource_prefix}}-ack-crud-updated" }
+
+  - name: delete
+    run: ecctl ack delete {{.cluster_id}} --force --timeout 30m
+    expect:
+      $.deleted: { eq: true }

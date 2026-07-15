@@ -1,0 +1,9 @@
+{
+  "label": "ACK",
+  "position": 1,
+  "link": {
+    "type": "generated-index",
+    "title": "ACK resources",
+    "description": "Manage Container Service for Kubernetes (ACK) clusters across their full lifecycle, including node pools, addons, kubeconfig access, version upgrades, diagnostics and inspection reports, and alert rules."
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "sidebar.docsSidebar.category.Getting Started": {
+    "message": "快速开始",
+    "description": "The label for category 'Getting Started' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.User Guide": {
+    "message": "用户指南",
+    "description": "The label for category 'User Guide' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Resource-specific Optimizations": {
+    "message": "资源专项优化",
+    "description": "The label for category 'Resource-specific Optimizations' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Reference": {
+    "message": "参考",
+    "description": "The label for category 'Reference' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Products": {
+    "message": "产品",
+    "description": "The label for category 'Products' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Contributing": {
+    "message": "贡献",
+    "description": "The label for category 'Contributing' in sidebar 'docsSidebar'"
+  },
+  "version.label": {
+    "message": "Next",
+    "description": "The label for version current"
+  },
+  "sidebar.docsSidebar.category.ACK": {
+    "message": "ACK",
+    "description": "The label for category 'ACK' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.ACK.link.generated-index.title": {
+    "message": "ACK 资源",
+    "description": "The generated-index page title for category 'ACK' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.ACK.link.generated-index.description": {
+    "message": "管理容器服务 Kubernetes 版（ACK）集群的完整生命周期，涵盖节点池、组件（Addon）、kubeconfig 访问、版本升级、诊断巡检与巡检报告以及告警规则。",
+    "description": "The generated-index page description for category 'ACK' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.ECS": {
+    "message": "ECS",
+    "description": "The label for category 'ECS' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.ECS.link.generated-index.title": {
+    "message": "ECS 资源",
+    "description": "The generated-index page title for category 'ECS' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.ECS.link.generated-index.description": {
+    "message": "管理云服务器 ECS 资源，涵盖实例、块存储云盘与快照、镜像、安全组、弹性网卡（ENI）、密钥对、启动模板以及云助手命令。",
+    "description": "The generated-index page description for category 'ECS' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.LINGJUN": {
+    "message": "LINGJUN",
+    "description": "The label for category 'LINGJUN' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.LINGJUN.link.generated-index.title": {
+    "message": "LINGJUN 资源",
+    "description": "The generated-index page title for category 'LINGJUN' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.LINGJUN.link.generated-index.description": {
+    "message": "通过公开的集群和 VPD 命令管理灵骏智算及高性能网络资源。",
+    "description": "The generated-index page description for category 'LINGJUN' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.VPC": {
+    "message": "VPC",
+    "description": "The label for category 'VPC' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.VPC.link.generated-index.title": {
+    "message": "VPC 资源",
+    "description": "The generated-index page title for category 'VPC' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.VPC.link.generated-index.description": {
+    "message": "管理专有网络 VPC，涵盖隔离的 VPC 网络及其交换机（vSwitch），用于按可用区划分子网与 IP 地址规划。",
+    "description": "The generated-index page description for category 'VPC' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.RG": {
+    "message": "RG",
+    "description": "The label for category 'RG' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.RG.link.generated-index.title": {
+    "message": "RG 资源",
+    "description": "The generated-index page title for category 'RG' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.RG.link.generated-index.description": {
+    "message": "管理资源组治理资源",
+    "description": "The generated-index page description for category 'RG' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.TAG": {
+    "message": "TAG",
+    "description": "The label for category 'TAG' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.TAG.link.generated-index.title": {
+    "message": "TAG 资源",
+    "description": "The generated-index page title for category 'TAG' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.TAG.link.generated-index.description": {
+    "message": "管理标签治理资源",
+    "description": "The generated-index page description for category 'TAG' in sidebar 'docsSidebar'"
+  }
+}

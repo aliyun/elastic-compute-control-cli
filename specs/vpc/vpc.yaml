@@ -1,0 +1,526 @@
+schema_version: 2
+product: vpc
+resource: vpc
+kind: regional
+display_name:
+  en: VPC
+  zh-CN: VPC
+description:
+  en: Manage VPC resources
+  zh-CN: 管理 VPC 资源
+examples:
+  - ecctl vpc list
+  - ecctl vpc create --name prod-vpc --cidr 10.0.0.0/16
+  - ecctl vpc get <vpc-id>
+  - ecctl vpc vswitch create --vpc <vpc-id> --zone cn-beijing-a --cidr 10.0.1.0/24
+
+identity:
+  field: id
+  prefix: vpc-
+  output_root:
+    one: vpc
+    many: vpcs
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: VPC ID
+        zh-CN: VPC ID
+    ids:
+      type: array
+      description:
+        en: VPC IDs
+        zh-CN: VPC ID 列表
+      items:
+        type: string
+    name:
+      type: string
+      description:
+        en: VPC name
+        zh-CN: VPC 名称
+    cidr:
+      type: cidr
+      description:
+        en: CIDR block
+        zh-CN: CIDR 网段
+    description:
+      type: string
+      description:
+        en: VPC description
+        zh-CN: VPC 描述
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    enable_ipv6:
+      type: boolean
+      description:
+        en: enable IPv6
+        zh-CN: 启用 IPv6
+    ipv6_cidr:
+      type: string
+      description:
+        en: IPv6 CIDR block
+        zh-CN: IPv6 CIDR 网段
+    user_cidr:
+      type: string
+      description:
+        en: user CIDR block
+        zh-CN: 用户 CIDR 网段
+    ipv6_isp:
+      type: string
+      description:
+        en: IPv6 ISP
+        zh-CN: IPv6 线路类型
+      enum: [BGP, ChinaMobile, ChinaUnicom, ChinaTelecom]
+    ipv4_ipam_pool:
+      type: string
+      description:
+        en: IPv4 IPAM pool ID
+        zh-CN: IPv4 IPAM 地址池 ID
+    ipv4_cidr_mask:
+      type: integer
+      description:
+        en: IPv4 IPAM CIDR mask
+        zh-CN: IPv4 IPAM CIDR 掩码
+    enable_dns_hostname:
+      type: boolean
+      description:
+        en: enable DNS hostnames
+        zh-CN: 启用 DNS 主机名
+    ipv6_ipam_pool:
+      type: string
+      description:
+        en: IPv6 IPAM pool ID
+        zh-CN: IPv6 IPAM 地址池 ID
+    ipv6_cidr_mask:
+      type: integer
+      description:
+        en: IPv6 IPAM CIDR mask
+        zh-CN: IPv6 IPAM CIDR 掩码
+    default:
+      type: boolean
+      description:
+        en: filter default VPCs
+        zh-CN: 筛选默认 VPC
+    owner_id:
+      type: integer
+      description:
+        en: VPC owner ID
+        zh-CN: VPC 所有者 ID
+    dhcp_options_set:
+      type: string
+      description:
+        en: DHCP options set ID
+        zh-CN: DHCP 选项集 ID
+    force:
+      type: boolean
+      description:
+        en: force delete VPC
+        zh-CN: 强制删除 VPC
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 50
+    max: 50
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  dry_run:
+    type: boolean
+    description:
+      en: validate without applying changes
+      zh-CN: 只校验不执行
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: DescribeVpcs
+    request:
+      RegionId: $context.region
+      VpcId: $.ids
+      VpcName: $.name
+      IsDefault: $.default
+      ResourceGroupId: $.resource_group
+      VpcOwnerId: $.owner_id
+      DhcpOptionsSetId: $.dhcp_options_set
+      EnableIpv6: $.enable_ipv6
+      Tag: $.tag
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.Vpcs.Vpc
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.VpcId
+      state: $.Status
+      fields:
+        id: $.VpcId
+        name: $.VpcName
+        cidr: $.CidrBlock
+        status: $.Status
+        region: $.RegionId
+        creation_time: $.CreationTime
+        description: $.Description
+        owner_id: $.OwnerId
+        resource_group: $.ResourceGroupId
+        default: $.IsDefault
+        cen_status: $.CenStatus
+        router: $.VRouterId
+        ipv6_cidr: $.Ipv6CidrBlock
+        ipv6_cidr_blocks: $.Ipv6CidrBlocks.Ipv6CidrBlock
+        enable_ipv6: $.EnabledIpv6
+        dns_hostname_status: $.DnsHostnameStatus
+        dhcp_options_set: $.DhcpOptionsSetId
+        dhcp_options_set_status: $.DhcpOptionsSetStatus
+        nat_gateway_ids: $.NatGatewayIds.NatGatewayIds
+        router_table_ids: $.RouterTableIds.RouterTableIds
+        secondary_cidr_blocks: $.SecondaryCidrBlocks.SecondaryCidrBlock
+        tags: $.Tags.Tag
+        user_cidrs: $.UserCidrs.UserCidr
+        vswitch_ids: $.VSwitchIds.VSwitchId
+      absent:
+        when_empty_for_requested_ids: true
+  attribute:
+    api: DescribeVpcAttribute
+    request:
+      RegionId: $context.region
+      VpcId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      id: $.VpcId
+      state: $.Status
+      fields:
+        id: $.VpcId
+        name: $.VpcName
+        cidr: $.CidrBlock
+        status: $.Status
+        region: $.RegionId
+        creation_time: $.CreationTime
+        description: $.Description
+        owner_id: $.OwnerId
+        resource_group: $.ResourceGroupId
+        default: $.IsDefault
+        classic_link_enabled: $.ClassicLinkEnabled
+        router: $.VRouterId
+        ipv6_cidr: $.Ipv6CidrBlock
+        ipv6_cidr_blocks: $.Ipv6CidrBlocks.Ipv6CidrBlock
+        enable_ipv6: $.EnabledIpv6
+        dns_hostname_status: $.DnsHostnameStatus
+        dhcp_options_set: $.DhcpOptionsSetId
+        dhcp_options_set_status: $.DhcpOptionsSetStatus
+        ipv4_gateway: $.Ipv4GatewayId
+        support_ipv4_gateway: $.SupportIpv4Gateway
+        associated_cens: $.AssociatedCens.AssociatedCen
+        associated_propagation_sources: $.AssociatedPropagationSources.AssociatedPropagationSources
+        cloud_resources: $.CloudResources.CloudResourceSetType
+        secondary_cidr_blocks: $.SecondaryCidrBlocks.SecondaryCidrBlock
+        tags: $.Tags.Tag
+        user_cidrs: $.UserCidrs.UserCidr
+        vswitch_ids: $.VSwitchIds.VSwitchId
+
+waiters:
+  available_after_create:
+    probe: attribute
+    target: Available
+    interval: 1s
+    timeout: 300s
+    pending:
+      - field: dns_hostname_status
+        values: [ENABLING, DISABLING, MODIFYING]
+      - field: dhcp_options_set_status
+        values: [Pending]
+  available_after_update:
+    probe: attribute
+    target: Available
+    interval: 1s
+    timeout: 300s
+    pending:
+      - field: dns_hostname_status
+        values: [ENABLING, DISABLING, MODIFYING]
+      - field: dhcp_options_set_status
+        values: [Pending]
+  deleted_after_delete:
+    probe: list
+    target: absent
+    interval: 1s
+    timeout: 300s
+
+bindings:
+  create_to_available:
+    api: CreateVpc
+    idempotency:
+      field: ClientToken
+      prefix: vpc-create
+    request:
+      RegionId: $context.region
+      VpcName: $.name
+      CidrBlock: $.cidr
+      Description: $.description
+      ResourceGroupId: $.resource_group
+      EnableIpv6: $.enable_ipv6
+      Ipv6CidrBlock: $.ipv6_cidr
+      UserCidr: $.user_cidr
+      Ipv6Isp: $.ipv6_isp
+      Ipv4IpamPoolId: $.ipv4_ipam_pool
+      Ipv4CidrMask: $.ipv4_cidr_mask
+      EnableDnsHostname: $.enable_dns_hostname
+      Ipv6IpamPoolId: $.ipv6_ipam_pool
+      Ipv6CidrMask: $.ipv6_cidr_mask
+      DryRun: $.dry_run
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    id_from: $.VpcId
+    request_id_from: $.RequestId
+    wait: available_after_create
+  update_attributes:
+    api: ModifyVpcAttribute
+    retry:
+      policy: initializing_grace
+      errors:
+        - OperationFailed.ModifyVpcDnsHostname
+      initial_interval: 5s
+      max_interval: 10s
+      timeout: 120s
+    request:
+      RegionId: $context.region
+      VpcId: $.id
+      VpcName: $.name
+      Description: $.description
+      CidrBlock: $.cidr
+      EnableIPv6: $.enable_ipv6
+      Ipv6CidrBlock: $.ipv6_cidr
+      Ipv6Isp: $.ipv6_isp
+      EnableDnsHostname: $.enable_dns_hostname
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: available_after_update
+  delete_to_absent:
+    api: DeleteVpc
+    idempotency:
+      field: ClientToken
+      prefix: vpc-delete
+    request:
+      RegionId: $context.region
+      VpcId: $.id
+      ForceDelete: $.force
+      DryRun: $.dry_run
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+
+operations:
+  create:
+    examples:
+      - ecctl vpc create --name prod-vpc --cidr 10.0.0.0/16
+      - ecctl vpc create --name prod-vpc --cidr 10.0.0.0/16 --enable-ipv6 --tag env=prod
+    description:
+      en: Create a VPC
+      zh-CN: 创建 VPC
+    input:
+      fields:
+        - name
+        - cidr
+        - description
+        - resource_group
+        - enable_ipv6
+        - ipv6_cidr
+        - user_cidr:
+            brief: false
+        - ipv6_isp:
+            brief: false
+        - ipv4_ipam_pool:
+            brief: false
+        - ipv4_cidr_mask:
+            brief: false
+        - enable_dns_hostname:
+            brief: false
+        - ipv6_ipam_pool:
+            brief: false
+        - ipv6_cidr_mask:
+            brief: false
+        - tag
+      controls:
+        - dry_run
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_to_available
+        wait_unless: input.no_wait
+      - probe: attribute
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            cidr: $input.cidr
+            region: $context.region
+  update:
+    examples:
+      - ecctl vpc update <vpc-id> --name new-prod-vpc
+      - ecctl vpc update <vpc-id> --description "production VPC"
+    description:
+      en: Update VPC attributes
+      zh-CN: 更新 VPC 属性
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - cidr
+        - description
+        - enable_ipv6
+        - ipv6_cidr
+        - ipv6_isp
+        - enable_dns_hostname
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: update_attributes
+        wait_unless: input.no_wait
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+  delete:
+    examples:
+      - ecctl vpc delete <vpc-id>
+      - ecctl vpc delete <vpc-id> --force
+    description:
+      en: Delete VPC
+      zh-CN: 删除 VPC
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - force
+      controls:
+        - dry_run
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+        wait_unless: input.no_wait
+      - emit:
+          root: vpc
+          fields:
+            id: $input.id
+          deleted: true
+
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get VPC
+      zh-CN: 获取 VPC
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        not_found: error
+  list:
+    examples:
+      - ecctl vpc list
+      - ecctl vpc list --filter name=prod-vpc
+      - ecctl vpc list --filter status=Available
+      - ecctl vpc list --filter tag.env=prod
+    description:
+      en: List VPC resources
+      zh-CN: 列出 VPC 资源
+    input:
+      fields:
+        - ids:
+            positional_many: true
+      controls:
+        - filter
+        - limit
+        - page
+    filters:
+      id:
+        target: ids
+      ids:
+        target: ids
+      vpc:
+        target: ids
+      vpc.id:
+        target: ids
+      name:
+        target: name
+      default:
+        target: default
+      resource-group:
+        target: resource_group
+      owner-id:
+        target: owner_id
+      dhcp-options-set:
+        target: dhcp_options_set
+      enable-ipv6:
+        target: enable_ipv6
+      status:
+        target: status
+        type: string
+        description:
+          en: VPC status (Pending, Available)
+          zh-CN: VPC 状态 (Pending, Available)
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true

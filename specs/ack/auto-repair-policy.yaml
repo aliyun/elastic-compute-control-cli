@@ -1,0 +1,199 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: auto-repair-policy
+kind: regional
+aliases: [arp]
+display_name:
+  en: auto repair policy
+  zh-CN: 节点自愈规则
+description:
+  en: Manage ACK auto repair policies
+  zh-CN: 管理 ACK 节点自愈规则
+examples:
+  - ecctl ack auto-repair-policy list --cluster <cluster-id>
+  - ecctl ack auto-repair-policy get <policy-id> --cluster <cluster-id>
+  - ecctl ack auto-repair-policy create --cluster <cluster-id> --policy @policy.json
+  - ecctl ack auto-repair-policy update <policy-id> --cluster <cluster-id> --policy @policy.json
+
+identity:
+  field: id
+  prefix: r-
+  output_root:
+    one: policy
+    many: policies
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: auto repair policy ID
+        zh-CN: 自愈规则 ID
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    policy:
+      type: object
+      description:
+        en: auto repair policy request body as a JSON object or @file
+        zh-CN: 自愈规则请求体，使用 JSON 对象或 @file
+
+probes:
+  detail:
+    api: DescribeAutoRepairPolicy
+    request:
+      cluster_id: $.cluster
+      policy_id: $.id
+    response:
+      item: $
+      request_id: $.request_id
+      id: $.id
+      fields:
+        id: $.id
+        name: $.name
+        resource_type: $.resource_type
+        resource_sub_type: $.resource_sub_type
+        resource_ids: $.resource_ids
+        rules: $.rules
+  list:
+    api: ListAutoRepairPolicies
+    request:
+      cluster_id: $.cluster
+    response:
+      items: $.items
+      request_id: $.request_id
+      id: $.id
+      fields:
+        id: $.id
+        name: $.name
+        resource_type: $.resource_type
+        resource_sub_type: $.resource_sub_type
+        resource_ids: $.resource_ids
+        rules: $.rules
+
+bindings:
+  create_policy:
+    api: CreateAutoRepairPolicy
+    request:
+      cluster_id: $.cluster
+      body:
+        from: $.policy
+    require_all:
+      - request: cluster_id
+      - request: body
+    id_from: $.policy_id
+    request_id_from: $.request_id
+  update_policy:
+    api: ModifyAutoRepairPolicy
+    request:
+      cluster_id: $.cluster
+      policy_id: $.id
+      body:
+        from: $.policy
+    require_all:
+      - request: cluster_id
+      - request: policy_id
+      - request: body
+    request_id_from: $.request_id
+  delete_policy:
+    api: DeleteAutoRepairPolicy
+    request:
+      cluster_id: $.cluster
+      policy_id: $.id
+    require_all:
+      - request: cluster_id
+      - request: policy_id
+    request_id_from: $.request_id
+
+operations:
+  create:
+    examples:
+      - ecctl ack auto-repair-policy create --cluster <cluster-id> --policy <policy-name>
+    description:
+      en: Create auto repair policy
+      zh-CN: 创建自愈规则
+    input:
+      fields:
+        - cluster:
+            required: true
+        - policy:
+            required: true
+    workflow:
+      - binding: create_policy
+      - probe: detail
+        ids:
+          - $context.id
+        as: final
+  update:
+    examples:
+      - ecctl ack auto-repair-policy update <auto-repair-policy-id> --cluster <cluster-id> --policy <policy-name>
+    description:
+      en: Update auto repair policy
+      zh-CN: 更新自愈规则
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+        - policy:
+            required: true
+    workflow:
+      - binding: update_policy
+      - probe: detail
+        ids:
+          - $input.id
+        as: final
+  delete:
+    examples:
+      - ecctl ack auto-repair-policy delete <auto-repair-policy-id> --cluster <cluster-id>
+    description:
+      en: Delete auto repair policy
+      zh-CN: 删除自愈规则
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+    workflow:
+      - binding: delete_policy
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get auto repair policy
+      zh-CN: 获取自愈规则
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+    workflow:
+      - probe: detail
+        ids:
+          - $input.id
+        not_found: error
+  list:
+    examples:
+      - ecctl ack auto-repair-policy list
+    description:
+      en: List auto repair policies
+      zh-CN: 列出自愈规则
+    input:
+      fields:
+        - cluster:
+            required: true
+    workflow:
+      - probe: list
+        many: true

@@ -1,0 +1,245 @@
+schema_version: 2
+product: rg
+api_product: ResourceManager
+resource: role
+kind: regional
+display_name:
+  en: role
+  zh-CN: 角色
+description:
+  en: Manage RAM roles
+  zh-CN: 管理 RAM 角色
+examples:
+  - ecctl rg role list
+  - ecctl rg role get <role-name>
+  - ecctl rg role create --name my-role --assume-role-policy-document @trust.json
+  - ecctl rg role update <role-name> --description "updated role"
+
+identity:
+  field: name
+  output_root:
+    one: role
+    many: roles
+
+schema:
+  fields:
+    name:
+      type: string
+      description:
+        en: role name
+        zh-CN: 角色名称
+    description:
+      type: string
+      description:
+        en: role description
+        zh-CN: 角色描述
+    assume_role_policy_document:
+      type: string
+      input_style: json|@file
+      description:
+        en: trust policy JSON or @file
+        zh-CN: 信任策略 JSON 或 @file
+    max_session_duration:
+      type: integer
+      description:
+        en: maximum session duration in seconds
+        zh-CN: 最大会话持续时间（秒）
+    language:
+      type: string
+      description:
+        en: language for role info
+        zh-CN: 角色信息语言
+
+controls:
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  attribute:
+    api: GetRole
+    request:
+      RoleName: $.name
+      Language: $.language
+    response:
+      item: $.Role
+      request_id: $.RequestId
+      id: $.RoleName
+      fields:
+        name: $.RoleName
+        arn: $.Arn
+        role_id: $.RoleId
+        role_principal_name: $.RolePrincipalName
+        description: $.Description
+        assume_role_policy_document: $.AssumeRolePolicyDocument
+        max_session_duration: $.MaxSessionDuration
+        is_service_linked_role: $.IsServiceLinkedRole
+        create_date: $.CreateDate
+        update_date: $.UpdateDate
+  list:
+    api: ListRoles
+    request:
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.Roles.Role
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.RoleName
+      fields:
+        name: $.RoleName
+        arn: $.Arn
+        role_id: $.RoleId
+        role_principal_name: $.RolePrincipalName
+        description: $.Description
+        max_session_duration: $.MaxSessionDuration
+        is_service_linked_role: $.IsServiceLinkedRole
+        create_date: $.CreateDate
+        update_date: $.UpdateDate
+
+bindings:
+  create_role:
+    api: CreateRole
+    request:
+      RoleName: $.name
+      Description: $.description
+      AssumeRolePolicyDocument: $.assume_role_policy_document
+      MaxSessionDuration: $.max_session_duration
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  update_role:
+    api: UpdateRole
+    request:
+      RoleName: $.name
+      NewDescription: $.description
+      NewAssumeRolePolicyDocument: $.assume_role_policy_document
+      NewMaxSessionDuration: $.max_session_duration
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - request: NewDescription
+      - request: NewAssumeRolePolicyDocument
+      - request: NewMaxSessionDuration
+    request_id_from: $.RequestId
+  delete_role:
+    api: DeleteRole
+    request:
+      RoleName: $.name
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+
+operations:
+  create:
+    examples:
+      - ecctl rg role create --name my-name --assume-role-policy-document <assume-role-policy-document>
+    description:
+      en: Create role
+      zh-CN: 创建角色
+    input:
+      fields:
+        - name:
+            required: true
+        - assume_role_policy_document:
+            required: true
+        - description
+        - max_session_duration
+      controls:
+        - api_param
+    workflow:
+      - binding: create_role
+      - probe: attribute
+        ids:
+          - $input.name
+        as: final
+      - emit:
+          fields:
+            name: $input.name
+  update:
+    examples:
+      - ecctl rg role update my-name
+    description:
+      en: Update role
+      zh-CN: 更新角色
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+        - description
+        - assume_role_policy_document
+        - max_session_duration
+      controls:
+        - api_param
+    workflow:
+      - binding: update_role
+      - probe: attribute
+        ids:
+          - $input.name
+        as: final
+  delete:
+    examples:
+      - ecctl rg role delete my-name
+    description:
+      en: Delete role
+      zh-CN: 删除角色
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+      controls:
+        - api_param
+    workflow:
+      - binding: delete_role
+      - emit:
+          fields:
+            name: $input.name
+          deleted: true
+
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get role
+      zh-CN: 获取角色
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+        - language
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.name
+        not_found: error
+  list:
+    examples:
+      - ecctl rg role list
+    description:
+      en: List roles
+      zh-CN: 列出角色
+    input:
+      controls:
+        - limit
+        - page
+    workflow:
+      - probe: list
+        many: true

@@ -1,0 +1,420 @@
+schema_version: 2
+product: ecs
+resource: auto-snapshot-policy
+kind: regional
+aliases: [sp]
+display_name:
+  en: auto snapshot policy
+  zh-CN: 自动快照策略
+description:
+  en: Manage automatic snapshot policies
+  zh-CN: 管理自动快照策略
+examples:
+  - ecctl ecs auto-snapshot-policy list
+  - ecctl ecs auto-snapshot-policy create --name daily --time-points '["0"]' --repeat-weekdays '["1"]' --retention-days 7
+  - ecctl ecs auto-snapshot-policy update <policy-id> --attach-disk-id '["d-xxx"]'
+
+identity:
+  field: id
+  prefix: sp-
+  output_root:
+    one: policy
+    many: policies
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: auto snapshot policy ID
+        zh-CN: 自动快照策略 ID
+    name:
+      type: string
+      description:
+        en: auto snapshot policy name
+        zh-CN: 自动快照策略名称
+    time_points:
+      type: string
+      input_style: text|@file
+      description:
+        en: JSON array of snapshot time points, e.g. '["0","12"]'
+        zh-CN: 创建快照的时间点 JSON 数组，例如 '["0","12"]'
+    repeat_weekdays:
+      type: string
+      input_style: text|@file
+      description:
+        en: JSON array of repeat weekdays, e.g. '["1","7"]'
+        zh-CN: 重复执行的星期 JSON 数组，例如 '["1","7"]'
+    retention_days:
+      type: integer
+      description:
+        en: snapshot retention days (-1 for permanent)
+        zh-CN: 快照保留天数（-1 表示永久保留）
+    copied_snapshots_retention_days:
+      type: integer
+      description:
+        en: cross-region copied snapshot retention days
+        zh-CN: 跨地域复制快照的保留天数
+    enable_cross_region_copy:
+      type: boolean
+      description:
+        en: enable cross-region snapshot copy
+        zh-CN: 启用跨地域快照复制
+    target_copy_regions:
+      type: string
+      input_style: text|@file
+      description:
+        en: JSON array of target copy regions
+        zh-CN: 跨地域复制的目标地域 JSON 数组
+    attach_disk_id:
+      type: array
+      description:
+        en: disk IDs to apply this policy to
+        zh-CN: 应用该策略的云盘 ID 列表
+      items:
+        type: string
+    detach_disk_id:
+      type: array
+      description:
+        en: disk IDs to cancel this policy from
+        zh-CN: 取消该策略的云盘 ID 列表
+      items:
+        type: string
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  next_token:
+    type: string
+    description:
+      en: token for the next result page
+      zh-CN: 下一页查询 token
+  no_wait:
+    type: boolean
+    description:
+      en: return before read-back completion
+      zh-CN: 回读完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  with_associations:
+    type: boolean
+    description:
+      en: include disk association information
+      zh-CN: 附带云盘关联关系
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: DescribeAutoSnapshotPolicyEx
+    request:
+      RegionId: $context.region
+      autoSnapshotPolicyId: $.id
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.AutoSnapshotPolicies.AutoSnapshotPolicy
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.AutoSnapshotPolicyId
+      state: $.Status
+      fields:
+        id: $.AutoSnapshotPolicyId
+        name: $.AutoSnapshotPolicyName
+        status: $.Status
+        region: $.RegionId
+        time_points: $.TimePoints.TimePoint
+        repeat_weekdays: $.RepeatWeekdays.Weekday
+        retention_days: $.RetentionDays
+        creation_time: $.CreationTime
+        disk_nums: $.DiskNums
+        volume_nums: $.VolumeNums
+        enable_cross_region_copy: $.EnableCrossRegionCopy
+        copied_snapshots_retention_days: $.CopiedSnapshotsRetentionDays
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+  associations:
+    api: DescribeAutoSnapshotPolicyAssociations
+    request:
+      RegionId: $context.region
+      autoSnapshotPolicyId: $.id
+      MaxResults: $.limit
+      NextToken: $.next_token
+    response:
+      items: $.AutoSnapshotPolicyAssociations.AutoSnapshotPolicyAssociation
+      next_token: $.NextToken
+      request_id: $.RequestId
+      fields:
+        disk_id: $.DiskId
+        associated_time: $.AssociatedTime
+
+bindings:
+  create_to_available:
+    api: CreateAutoSnapshotPolicy
+    request:
+      regionId: $context.region
+      autoSnapshotPolicyName: $.name
+      timePoints: $.time_points
+      repeatWeekdays: $.repeat_weekdays
+      retentionDays: $.retention_days
+      copiedSnapshotsRetentionDays: $.copied_snapshots_retention_days
+      enableCrossRegionCopy: $.enable_cross_region_copy
+      targetCopyRegions: $.target_copy_regions
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: timePoints
+      - request: repeatWeekdays
+      - request: retentionDays
+    id_from: $.AutoSnapshotPolicyId
+    request_id_from: $.RequestId
+  update_attributes:
+    api: ModifyAutoSnapshotPolicyEx
+    request:
+      regionId: $context.region
+      autoSnapshotPolicyId: $.id
+      autoSnapshotPolicyName: $.name
+      timePoints: $.time_points
+      repeatWeekdays: $.repeat_weekdays
+      retentionDays: $.retention_days
+      copiedSnapshotsRetentionDays: $.copied_snapshots_retention_days
+      enableCrossRegionCopy: $.enable_cross_region_copy
+      targetCopyRegions: $.target_copy_regions
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    require_any:
+      - request: autoSnapshotPolicyName
+      - request: timePoints
+      - request: repeatWeekdays
+      - request: retentionDays
+      - request: copiedSnapshotsRetentionDays
+      - request: enableCrossRegionCopy
+      - request: targetCopyRegions
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  apply_to_disks:
+    api: ApplyAutoSnapshotPolicy
+    request:
+      regionId: $context.region
+      autoSnapshotPolicyId: $.id
+      diskIds: $.attach_disk_id
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+      - request: diskIds
+    request_id_from: $.RequestId
+  cancel_from_disks:
+    api: CancelAutoSnapshotPolicy
+    request:
+      regionId: $context.region
+      diskIds: $.detach_disk_id
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: diskIds
+    request_id_from: $.RequestId
+  delete_to_absent:
+    api: DeleteAutoSnapshotPolicy
+    request:
+      regionId: $context.region
+      autoSnapshotPolicyId: $.id
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    request_id_from: $.RequestId
+
+operations:
+  create:
+    examples:
+      - ecctl ecs auto-snapshot-policy create --time-points <time-points> --repeat-weekdays <repeat-weekdays> --retention-days <retention-days>
+      - ecctl ecs auto-snapshot-policy create --time-points <time-points> --repeat-weekdays <repeat-weekdays> --retention-days <retention-days> --name my-name --tag env=prod
+    description:
+      en: Create auto snapshot policy
+      zh-CN: 创建自动快照策略
+    input:
+      fields:
+        - name
+        - time_points:
+            required: true
+        - repeat_weekdays:
+            required: true
+        - retention_days:
+            required: true
+        - copied_snapshots_retention_days
+        - enable_cross_region_copy
+        - target_copy_regions
+        - resource_group
+        - tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_to_available
+      - probe: list
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            region: $context.region
+  update:
+    examples:
+      - ecctl ecs auto-snapshot-policy update <auto-snapshot-policy-id>
+      - ecctl ecs auto-snapshot-policy update <auto-snapshot-policy-id> --name my-name
+    description:
+      en: Update an auto snapshot policy or its disk associations
+      zh-CN: 更新自动快照策略或其云盘关联
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - time_points
+        - repeat_weekdays
+        - retention_days
+        - copied_snapshots_retention_days
+        - enable_cross_region_copy
+        - target_copy_regions
+        - attach_disk_id
+        - detach_disk_id
+      controls:
+        - no_wait
+        - timeout
+        - with_associations
+        - api_param
+    workflow:
+      - binding: update_attributes
+        when_any: [input.name, input.time_points, input.repeat_weekdays, input.retention_days, input.copied_snapshots_retention_days, input.enable_cross_region_copy, input.target_copy_regions]
+      - binding: apply_to_disks
+        when: input.attach_disk_id
+      - binding: cancel_from_disks
+        when: input.detach_disk_id
+      - probe: list
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - probe: associations
+        ids:
+          - $input.id
+        when: input.with_associations
+        merge: true
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            name: $input.name
+  delete:
+    examples:
+      - ecctl ecs auto-snapshot-policy delete <auto-snapshot-policy-id>
+    description:
+      en: Delete auto snapshot policy
+      zh-CN: 删除自动快照策略
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get auto snapshot policy
+      zh-CN: 获取自动快照策略
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - with_associations
+    workflow:
+      - probe: list
+        ids:
+          - $input.id
+        not_found: error
+      - probe: associations
+        ids:
+          - $input.id
+        when: input.with_associations
+        merge: true
+  list:
+    examples:
+      - ecctl ecs auto-snapshot-policy list
+    description:
+      en: List auto snapshot policies
+      zh-CN: 列出自动快照策略
+    input:
+      fields:
+        - id:
+            positional: true
+      controls:
+        - filter
+        - limit
+        - page
+    filters:
+      id:
+        target: id
+      policy:
+        target: id
+      policy.id:
+        target: id
+    workflow:
+      - probe: list
+        many: true

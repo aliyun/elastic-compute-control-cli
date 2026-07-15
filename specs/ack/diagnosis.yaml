@@ -1,0 +1,188 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: diagnosis
+kind: regional
+aliases: [diag]
+display_name:
+  en: diagnosis
+  zh-CN: 诊断
+description:
+  en: Manage ACK cluster diagnosis reports
+  zh-CN: 管理 ACK 集群诊断报告
+examples:
+  - ecctl ack diagnosis create --cluster <cluster-id> --type node --target name=<node-name>
+  - ecctl ack diag get <diagnosis-id> --cluster <cluster-id>
+
+identity:
+  field: id
+  output_root:
+    one: diagnosis
+    many: diagnoses
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: diagnosis ID
+        zh-CN: 诊断 ID
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    type:
+      type: string
+      description:
+        en: diagnosis type
+        zh-CN: 诊断类型
+      enum: [node, ingress, cluster, memory, pod, service, network]
+    target:
+      type: object
+      description:
+        en: diagnosis target as inline key=value, JSON object, or @file
+        zh-CN: 诊断目标，支持内联 key=value、JSON 对象或 @file
+      fields:
+        name:
+          type: string
+          description:
+            en: target object name
+            zh-CN: 目标对象名称
+        namespace:
+          type: string
+          description:
+            en: Kubernetes namespace
+            zh-CN: Kubernetes 命名空间
+        src:
+          type: string
+          description:
+            en: source address for network diagnosis
+            zh-CN: 网络诊断源地址
+        dst:
+          type: string
+          description:
+            en: destination address for network diagnosis
+            zh-CN: 网络诊断目标地址
+        dport:
+          type: string
+          description:
+            en: destination port for network diagnosis
+            zh-CN: 网络诊断目标端口
+        url:
+          type: string
+          description:
+            en: URL for ingress diagnosis
+            zh-CN: Ingress 诊断 URL
+        node:
+          type: string
+          description:
+            en: node name for memory diagnosis
+            zh-CN: 内存诊断节点名称
+    language:
+      type: string
+      description:
+        en: query language
+        zh-CN: 查询语言
+
+controls:
+  no_wait:
+    type: boolean
+    description:
+      en: return before diagnosis result readback
+      zh-CN: 诊断结果回读前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: diagnosis wait timeout
+      zh-CN: 诊断等待超时时间
+
+probes:
+  result:
+    api: GetClusterDiagnosisResult
+    request:
+      cluster_id: $.cluster
+      diagnosis_id: $.id
+      language: $.language
+    response:
+      item: $
+      request_id: $.request_id
+      id: $.diagnosis_id
+      state: $.message
+      fields:
+        id: $.diagnosis_id
+        cluster: $.cluster_id
+        type: $.type
+        code: $.code
+        status_code: $.status
+        message: $.message
+        created: $.created
+        finished: $.finished
+        target: $.target
+        result: $.result
+
+waiters:
+  completed_after_create:
+    probe: result
+    target: success
+    interval: 2s
+    timeout: 300s
+    failure:
+      states: [failed, error]
+
+bindings:
+  create_diagnosis:
+    api: CreateClusterDiagnosis
+    request:
+      cluster_id: $.cluster
+      body:
+        type: $.type
+        target:
+          from: $.target
+    id_from: $.diagnosis_id
+    request_id_from: $.request_id
+    wait: completed_after_create
+
+operations:
+  create:
+    examples:
+      - ecctl ack diagnosis create --cluster <cluster-id> --type <type>
+    description:
+      en: Create an ACK cluster diagnosis
+      zh-CN: 创建 ACK 集群诊断
+    input:
+      fields:
+        - cluster:
+            required: true
+        - type:
+            required: true
+        - target
+      controls:
+        - no_wait
+        - timeout
+    workflow:
+      - binding: create_diagnosis
+        wait_unless: input.no_wait
+      - probe: result
+        ids:
+          - $context.id
+        unless: input.no_wait
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get an ACK cluster diagnosis result
+      zh-CN: 查询 ACK 集群诊断结果
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+        - language
+    workflow:
+      - probe: result
+        ids:
+          - $input.id
+        not_found: error

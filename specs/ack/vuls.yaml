@@ -1,0 +1,147 @@
+schema_version: 2
+product: ack
+api_product: cs
+resource: vuls
+kind: regional
+display_name:
+  en: vuls
+  zh-CN: 漏洞
+description:
+  en: Manage ACK vulnerability scans and vulnerability views
+  zh-CN: 管理 ACK 漏洞扫描和漏洞视图
+examples:
+  - ecctl ack vuls create --cluster c-xxx
+  - ecctl ack vuls list --cluster c-xxx
+  - ecctl ack vuls list --cluster c-xxx --nodepool np-xxx
+
+identity:
+  field: id
+  output_root:
+    one: vul
+    many: vuls
+
+schema:
+  fields:
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    nodepool:
+      type: string
+      description:
+        en: Node pool ID for nodepool-level vulnerability view
+        zh-CN: 节点池粒度漏洞视图的节点池 ID
+    severity:
+      type: string
+      enum: [asap, later, nntf]
+      description:
+        en: Vulnerability fix necessity for nodepool-level results
+        zh-CN: 节点池漏洞修复必要性等级
+
+controls:
+  no_wait:
+    type: boolean
+    description:
+      en: Return after creating the scan task without reading vulnerabilities
+      zh-CN: 创建扫描任务后立即返回，不回读漏洞
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: Wait timeout
+      zh-CN: 等待超时时间
+
+probes:
+  cluster_vuls:
+    api: DescribeClusterVuls
+    request:
+      cluster_id: $.cluster
+    response:
+      items: $.vul_records
+      request_id: $.request_id
+      id: $.vul_name
+      fields:
+        id: $.vul_name
+        name: $.vul_name
+        alias_name: $.vul_alias_name
+        type: $.vul_type
+        severity: $.necessity
+        nodepool: $.nodepool_id
+        nodepool_name: $.nodepool_name
+        node_count: $.node_count
+        cves: $.cve_list
+  nodepool_vuls:
+    api: DescribeNodePoolVuls
+    request:
+      cluster_id: $.cluster
+      nodepool_id: $.nodepool
+      necessity: $.severity
+    response:
+      items: $.vul_records
+      request_id: $.request_id
+      id: $.instance_id
+      extra_fields:
+        vuls_fix_service_purchased: $.vuls_fix_service_purchased
+      fields:
+        id: $.instance_id
+        instance: $.instance_id
+        node_name: $.node_name
+        vulnerabilities: $.vul_list
+
+bindings:
+  scan_cluster:
+    api: ScanClusterVuls
+    request:
+      cluster_id: $.cluster
+    id_from: $.task_id
+    request_id_from: $.request_id
+
+operations:
+  create:
+    examples:
+      - ecctl ack vuls create --cluster <cluster-id>
+    description:
+      en: Create an ACK vulnerability scan task
+      zh-CN: 创建一次 ACK 漏洞扫描任务
+    input:
+      fields:
+        - cluster:
+            required: true
+      controls:
+        - no_wait
+        - timeout
+    workflow:
+      - binding: scan_cluster
+      - probe: cluster_vuls
+        many: true
+        unless: input.no_wait
+      - emit:
+          fields:
+            task_id: $context.id
+    output:
+      fields:
+        actions: $result.actions
+        task_id: $result.id
+        vuls:
+          value: $result.items
+          unless: $input.no_wait
+  list:
+    examples:
+      - ecctl ack vuls list
+    description:
+      en: List ACK vulnerabilities for a cluster or node pool
+      zh-CN: 列出 ACK 集群或节点池漏洞
+    input:
+      fields:
+        - cluster:
+            required: true
+        - nodepool
+        - severity
+    workflow:
+      - probe: cluster_vuls
+        many: true
+        unless: input.nodepool
+      - probe: nodepool_vuls
+        many: true
+        when: input.nodepool

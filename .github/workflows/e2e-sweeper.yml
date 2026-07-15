@@ -1,0 +1,88 @@
+name: e2e-sweeper
+
+on:
+  schedule:
+    - cron: "0 */2 * * *" # every 2h
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "audit runs dry-run only; cleanup runs dry-run then deletion"
+        default: cleanup
+        type: choice
+        options:
+          - audit
+          - cleanup
+      region:
+        description: "Optional single-region override; empty uses e2e.yaml candidates"
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read # read run status for --mode finished-run
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    environment: live-e2e
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: build ecctl + ecctl-e2e
+        run: |
+          go build -o bin/ecctl ./cmd/ecctl
+          go -C e2e build -o "$GITHUB_WORKSPACE/bin/ecctl-e2e" ./cmd/ecctl-e2e
+          echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+
+      - name: configure Alibaba Cloud credentials (OIDC)
+        uses: aliyun/configure-aliyun-credentials-action@v1
+        with:
+          role-to-assume: acs:ram::${{ vars.ALI_ACCOUNT_ID }}:role/ecctl-e2e-ci
+          oidc-provider-arn: acs:ram::${{ vars.ALI_ACCOUNT_ID }}:oidc-provider/github-actions
+          audience: sts.aliyuncs.com
+
+      - name: check sweep config
+        working-directory: e2e
+        run: ecctl-e2e sweep check --cases cases --config sweep.yaml
+
+      - name: sweep dry-run audit and optional cleanup
+        working-directory: e2e
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          SWEEP_MODE: ${{ github.event.inputs.mode || 'cleanup' }}
+          SWEEP_REGION: ${{ github.event.inputs.region }}
+        run: |
+          set -euo pipefail
+          mkdir -p reports/sweeper
+          if [ -n "$SWEEP_REGION" ]; then
+            regions=("$SWEEP_REGION")
+          else
+            mapfile -t regions < <(sed -n 's/^    - id: \([^ #]*\).*/\1/p' e2e.yaml)
+          fi
+          if [ "${#regions[@]}" -eq 0 ]; then
+            echo "no sweep regions found" >&2
+            exit 1
+          fi
+          for region in "${regions[@]}"; do
+            ecctl-e2e sweep --mode finished-run --region "$region" --dry-run 2>&1 \
+              | tee "reports/sweeper/${region}-dry-run.log"
+            if [ "$SWEEP_MODE" = "cleanup" ]; then
+              ecctl-e2e sweep --mode finished-run --region "$region" 2>&1 \
+                | tee "reports/sweeper/${region}-cleanup.log"
+            else
+              printf 'audit mode: cleanup skipped\n' \
+                | tee "reports/sweeper/${region}-cleanup.log"
+            fi
+          done
+
+      - name: Upload sweeper reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-sweeper-reports
+          path: e2e/reports/sweeper/*

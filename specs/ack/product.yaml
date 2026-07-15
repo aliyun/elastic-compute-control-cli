@@ -1,0 +1,40 @@
+schema_version: 1
+product: ack
+priority: 1
+resources:
+  - ack
+  - addon
+  - alert
+  - alert-contact
+  - alert-contact-group
+  - audit
+  - audit-control-plane-log
+  - auto-repair-policy
+  - check
+  - diagnosis
+  - diagnosis-check-item
+  - event
+  - inspect
+  - inspect-config
+  - inspect-report
+  - kubeconfig
+  - node
+  - nodepool
+  - operation-plan
+  - permission
+  - policy
+  - policy-instance
+  - region
+  - task
+  - template
+  - trigger
+  - version
+  - vuls
+description:
+  en: Manage Container Service for Kubernetes (ACK) clusters across their full lifecycle, including node pools, addons, kubeconfig access, version upgrades, diagnostics and inspection reports, and alert rules.
+  zh-CN: 管理容器服务 Kubernetes 版（ACK）集群的完整生命周期，涵盖节点池、组件（Addon）、kubeconfig 访问、版本升级、诊断巡检与巡检报告以及告警规则。
+examples:
+  - ecctl ack list
+  - ecctl ack get <cluster-id> --with-resources --with-tags
+  - ecctl ack create --name prod --type ManagedKubernetes --vswitch <vsw-id>
+  - ecctl ack upgrade <cluster-id> --version <kubernetes-version>

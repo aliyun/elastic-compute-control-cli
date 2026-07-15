@@ -1,0 +1,15 @@
+schema_version: 1
+product: tag
+priority: 5
+resources:
+  - resource
+  - policy
+  - associated-resource-rule
+description:
+  en: Manage tag governance resources
+  zh-CN: 管理标签治理资源
+examples:
+  - ecctl tag resource list --filter arn=<resource-arn>
+  - ecctl tag resource apply --arn <resource-arn> --tag env=prod
+  - ecctl tag policy list
+  - ecctl tag associated-resource-rule list

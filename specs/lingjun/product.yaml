@@ -1,0 +1,22 @@
+schema_version: 1
+product: lingjun
+priority: 3
+resources:
+  - cluster
+  - node
+  - node-group
+  - vpd
+  - subnet
+  - vcc
+  - er
+  - eni
+  - lni
+  - vsc
+  - net-test
+description:
+  en: Manage Lingjun intelligent-computing and high-performance network resources through public cluster and VPD commands.
+  zh-CN: 通过公开的集群和 VPD 命令管理灵骏智算及高性能网络资源。
+examples:
+  - ecctl lingjun cluster list
+  - ecctl lingjun cluster create --name train-cluster --cluster-type <type> --node-groups @node-groups.json
+  - ecctl lingjun vpd create --name train-vpd --cidr 10.0.0.0/16

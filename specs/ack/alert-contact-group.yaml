@@ -1,0 +1,115 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: contact-group
+parent: alert
+kind: regional
+aliases: [groups]
+display_name:
+  en: alert contact group
+  zh-CN: 报警联系人分组
+description:
+  en: Manage ACK alert contact groups
+  zh-CN: 管理 ACK 报警联系人分组
+examples:
+  - ecctl ack alert contact-group update --cluster <cluster-id> --ruleset-id <ruleset-id> --group-id <group-id>
+  - ecctl ack alert contact-group delete <group-id>
+
+identity:
+  field: id
+  output_root:
+    one: contact_group
+    many: contact_groups
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: alert contact group ID
+        zh-CN: 报警联系人分组 ID
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    rule_id:
+      type: string
+      description:
+        en: alert rule ID
+        zh-CN: 报警规则 ID
+    ruleset_id:
+      type: string
+      description:
+        en: alert ruleset ID
+        zh-CN: 报警规则集 ID
+    group_ids:
+      type: string_array
+      description:
+        en: alert contact group IDs to bind
+        zh-CN: 需要绑定的报警联系人分组 ID
+
+bindings:
+  update_contact_group:
+    api: UpdateContactGroupForAlert
+    request:
+      ClusterId: $.cluster
+      alert_rule_name: $.rule_id
+      alert_rule_group_name: $.ruleset_id
+      contact_group_ids:
+        each: $.group_ids
+    request_id_from: $.RequestId
+  delete_contact_group:
+    api: DeleteAlertContactGroup
+    request:
+      contact_group_ids:
+        each: $list($.id)
+    request_id_from: $.RequestId
+
+operations:
+  update:
+    examples:
+      - ecctl ack alert contact-group update --cluster <cluster-id> --group-ids <group-ids>
+    description:
+      en: Update contact groups bound to an ACK alert rule or ruleset
+      zh-CN: 更新 ACK 报警规则或规则集绑定的联系人分组
+    require_when:
+      - when_any: [group_ids]
+        require_any: [rule_id, ruleset_id]
+    conflicts:
+      - any: [rule_id]
+        with_any: [ruleset_id]
+    input:
+      fields:
+        - cluster:
+            required: true
+        - rule_id
+        - ruleset_id
+        - group_ids:
+            required: true
+            flag_name: group-id
+    workflow:
+      - binding: update_contact_group
+      - emit:
+          fields:
+            cluster: $input.cluster
+            rule_id: $input.rule_id
+            ruleset_id: $input.ruleset_id
+            group_ids: $input.group_ids
+  delete:
+    examples:
+      - ecctl ack alert contact-group delete <contact-group-id>
+    description:
+      en: Delete an ACK alert contact group
+      zh-CN: 删除 ACK 报警联系人分组
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+    workflow:
+      - binding: delete_contact_group
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true

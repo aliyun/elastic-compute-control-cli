@@ -1,0 +1,571 @@
+schema_version: 2
+product: lingjun
+resource: eni
+api_product: eflo
+kind: regional
+display_name:
+  en: Lingjun elastic network interface
+  zh-CN: 灵骏弹性网卡
+description:
+  en: Manage Lingjun elastic network interfaces
+  zh-CN: 管理灵骏弹性网卡
+examples:
+  - ecctl lingjun eni list --filter status=Available
+  - ecctl lingjun eni get <leni-id> --with-ips
+  - ecctl lingjun eni create --subnet <subnet-id> --vpd <vpd-id> --zone cn-wulanchabu-b --security-group <sg-id>
+  - ecctl lingjun eni attach <leni-id> --node <node-id>
+
+identity:
+  field: id
+  prefix: leni-
+  output_root:
+    one: eni
+    many: enis
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: Lingjun ENI ID
+        zh-CN: 灵骏弹性网卡 ID
+    description:
+      type: string
+      description:
+        en: ENI description
+        zh-CN: 弹性网卡描述
+    status:
+      type: string
+      description:
+        en: ENI status
+        zh-CN: 弹性网卡状态
+    type:
+      type: string
+      description:
+        en: ENI type
+        zh-CN: 弹性网卡类型
+    vpd:
+      type: string
+      description:
+        en: VPD ID
+        zh-CN: 灵骏网段 ID
+    subnet:
+      type: string
+      description:
+        en: subnet ID
+        zh-CN: 灵骏子网 ID
+    zone:
+      type: string
+      description:
+        en: zone ID
+        zh-CN: 可用区 ID
+    node:
+      type: string
+      description:
+        en: Lingjun node ID
+        zh-CN: 灵骏节点 ID
+    security_group:
+      type: string
+      description:
+        en: security group ID
+        zh-CN: 安全组 ID
+    private_ip:
+      type: string
+      description:
+        en: primary private IP address
+        zh-CN: 主私网 IP 地址
+    ip_changes:
+      type: string
+      repeatable: true
+      description:
+        en: "IP change; prefix with + to assign or - to release"
+        zh-CN: "IP 变更，使用 + 前缀分配或 - 前缀释放"
+    enable_jumbo_frame:
+      type: boolean
+      description:
+        en: enable jumbo frame
+        zh-CN: 启用巨帧
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  no_wait:
+    type: boolean
+    description:
+      en: return before readback or waiter completion
+      zh-CN: 回读或等待完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+  with_ips:
+    type: boolean
+    description:
+      en: include secondary private IP addresses
+      zh-CN: 附带查询辅助私网 IP 地址
+
+probes:
+  attribute:
+    api: GetElasticNetworkInterface
+    request:
+      RegionId: $context.region
+      ElasticNetworkInterfaceId: $.id
+    response:
+      item: $.Content
+      request_id: $.RequestId
+      id: $.ElasticNetworkInterfaceId
+      state: $.Status
+      fields:
+        id: $.ElasticNetworkInterfaceId
+        description: $.Description
+        status: $.Status
+        type: $.Type
+        vpd: $.VpcId
+        subnet: $.VSwitchId
+        zone: $.ZoneId
+        node: $.NodeId
+        private_ip: $.Ip
+        private_ips: $.PrivateIpAddresses
+        ipv6_addresses: $.Ipv6Addresses
+        mac_address: $.Mac
+        gateway: $.Gateway
+        mask: $.Mask
+        security_group: $.SecurityGroupId
+        resource_group: $.ResourceGroupId
+        enable_jumbo_frame: $.EnableJumboFrame
+        create_time: $.CreateTime
+        modified_time: $.GmtModified
+        tags: $.Tags
+  list:
+    api: ListElasticNetworkInterfaces
+    request:
+      RegionId: $context.region
+      ElasticNetworkInterfaceId: $.id
+      VpcId: $.vpd
+      VSwitchId: $.subnet
+      ZoneId: $.zone
+      NodeId: $.node
+      Ip: $.private_ip
+      Status: $.status
+      Type: $.type
+      ResourceGroupId: $.resource_group
+      Tag:
+        each:
+          sources:
+            - source: $.tag
+        fields:
+          Key: $kv_key($.value)
+          Value: $kv_value($.value)
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.Content.Data
+      total: $.Content.Total
+      request_id: $.RequestId
+      id: $.ElasticNetworkInterfaceId
+      state: $.Status
+      fields:
+        id: $.ElasticNetworkInterfaceId
+        description: $.Description
+        status: $.Status
+        type: $.Type
+        vpd: $.VpcId
+        subnet: $.VSwitchId
+        zone: $.ZoneId
+        node: $.NodeId
+        private_ip: $.Ip
+        mac_address: $.Mac
+        gateway: $.Gateway
+        mask: $.Mask
+        security_group: $.SecurityGroupId
+        resource_group: $.ResourceGroupId
+        create_time: $.CreateTime
+        modified_time: $.GmtModified
+        tags: $.Tags
+      absent:
+        when_empty_for_requested_ids: true
+  private_ips:
+    api: ListLeniPrivateIpAddresses
+    request:
+      RegionId: $context.region
+      ElasticNetworkInterfaceId: $.id
+    response:
+      items: $.Content.Data
+      total: $.Content.Total
+      request_id: $.RequestId
+      id: $.IpName
+      state: $.Status
+      fields:
+        id: $.IpName
+        eni: $.ElasticNetworkInterfaceId
+        private_ip: $.PrivateIpAddress
+        description: $.Description
+        status: $.Status
+        region: $.RegionId
+        resource_group: $.ResourceGroupId
+        create_time: $.GmtCreate
+        modified_time: $.GmtModified
+
+waiters:
+  available_after_create:
+    probe: attribute
+    target: Available
+    interval: 2s
+    timeout: 300s
+  deleted_after_delete:
+    probe: list
+    target: absent
+    interval: 2s
+    timeout: 300s
+
+bindings:
+  create_to_available:
+    api: CreateElasticNetworkInterface
+    idempotency:
+      field: ClientToken
+      prefix: lingjun-eni-create
+    request:
+      RegionId: $context.region
+      VSwitchId: $.subnet
+      VpcId: $.vpd
+      ZoneId: $.zone
+      Description: $.description
+      EnableJumboFrame: $.enable_jumbo_frame
+      NodeId: $.node
+      SecurityGroupId: $.security_group
+      ResourceGroupId: $.resource_group
+      Tag:
+        each:
+          sources:
+            - source: $.tag
+        fields:
+          Key: $kv_key($.value)
+          Value: $kv_value($.value)
+    id_from: $.Content.ElasticNetworkInterfaceId
+    request_id_from: $.RequestId
+    wait: available_after_create
+  update_attributes:
+    api: UpdateElasticNetworkInterface
+    idempotency:
+      field: ClientToken
+      prefix: lingjun-eni-update
+    request:
+      RegionId: $context.region
+      ElasticNetworkInterfaceId: $.id
+      Description: $.description
+      SecurityGroupId: $.security_group
+    request_id_from: $.RequestId
+  assign_private_ip:
+    api: AssignLeniPrivateIpAddress
+    each: $prefixed_kv_objects($.ip_changes,"+","ip")
+    idempotency:
+      field: ClientToken
+      prefix: lingjun-eni-assign-ip
+    request:
+      RegionId: $context.region
+      ElasticNetworkInterfaceId: $input.id
+      PrivateIpAddress: $.ip
+    request_id_from: $.RequestId
+  unassign_private_ip:
+    api: UnassignLeniPrivateIpAddress
+    each: $prefixed_kv_objects($.ip_changes,"-","ip")
+    idempotency:
+      field: ClientToken
+      prefix: lingjun-eni-unassign-ip
+    request:
+      RegionId: $context.region
+      ElasticNetworkInterfaceId: $input.id
+      IpName: $.ip
+    request_id_from: $.RequestId
+  attach_to_node:
+    api: AttachElasticNetworkInterface
+    request:
+      RegionId: $context.region
+      ElasticNetworkInterfaceId: $.id
+      NodeId: $.node
+    request_id_from: $.RequestId
+  detach_from_node:
+    api: DetachElasticNetworkInterface
+    request:
+      RegionId: $context.region
+      ElasticNetworkInterfaceId: $.id
+      NodeId: $.node
+    request_id_from: $.RequestId
+  delete_to_absent:
+    api: DeleteElasticNetworkInterface
+    request:
+      RegionId: $context.region
+      ElasticNetworkInterfaceId: $.id
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+
+operations:
+  create:
+    examples:
+      - ecctl lingjun eni create --subnet <subnet-id> --vpd <vpd-id> --zone <zone-id>
+      - ecctl lingjun eni create --subnet <subnet-id> --vpd <vpd-id> --zone <zone-id> --tag env=prod
+    description:
+      en: Create Lingjun ENI
+      zh-CN: 创建灵骏弹性网卡
+    input:
+      fields:
+        - subnet:
+            required: true
+        - vpd:
+            required: true
+        - zone:
+            required: true
+        - security_group
+        - description
+        - enable_jumbo_frame
+        - node
+        - resource_group
+        - tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_to_available
+        wait_unless: input.no_wait
+      - probe: attribute
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            vpd: $input.vpd
+            subnet: $input.subnet
+            zone: $input.zone
+        when: input.no_wait
+  update:
+    examples:
+      - ecctl lingjun eni update <eni-id>
+    description:
+      en: Update Lingjun ENI
+      zh-CN: 更新灵骏弹性网卡
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - description
+        - security_group
+        - ip_changes:
+            flag_name: ip
+      controls:
+        - no_wait
+        - api_param
+    require_any:
+      - raw: $.description
+      - raw: $.security_group
+      - raw: $.ip_changes
+    workflow:
+      - binding: update_attributes
+        when_any:
+          - has(input.description)
+          - has(input.security_group)
+      - binding: assign_private_ip
+        when: has($prefixed_kv_objects($.ip_changes,"+","ip"))
+      - binding: unassign_private_ip
+        when: has($prefixed_kv_objects($.ip_changes,"-","ip"))
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            description: $input.description
+            security_group: $input.security_group
+  delete:
+    examples:
+      - ecctl lingjun eni delete <eni-id>
+    description:
+      en: Delete Lingjun ENI
+      zh-CN: 删除灵骏弹性网卡
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get Lingjun ENI
+      zh-CN: 获取灵骏弹性网卡
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - with_ips
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        not_found: error
+      - probe: private_ips
+        ids:
+          - $input.id
+        many: true
+        as: ips
+        when: input.with_ips
+    output:
+      fields:
+        eni: $result.item
+        private_ips:
+          value: $captures.ips.items
+          when: $input.with_ips
+  list:
+    examples:
+      - ecctl lingjun eni list
+      - ecctl lingjun eni list --filter zone=<value>
+      - ecctl lingjun eni list --filter tag.env=prod
+    description:
+      en: List Lingjun ENIs
+      zh-CN: 列出灵骏弹性网卡
+    input:
+      controls:
+        - filter
+        - limit
+        - page
+    filters:
+      id:
+        target: id
+      eni:
+        target: id
+      eni.id:
+        target: id
+      vpd:
+        target: vpd
+      vpd.id:
+        target: vpd
+      subnet:
+        target: subnet
+      subnet.id:
+        target: subnet
+      zone:
+        target: zone
+      node:
+        target: node
+      node.id:
+        target: node
+      status:
+        target: status
+      type:
+        target: type
+      private-ip:
+        target: private_ip
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true
+  attach:
+    examples:
+      - ecctl lingjun eni attach <eni-id> --node <node-id>
+    description:
+      en: Attach Lingjun ENI to a node
+      zh-CN: 将灵骏弹性网卡绑定到节点
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - node:
+            required: true
+      controls:
+        - no_wait
+        - api_param
+    workflow:
+      - binding: attach_to_node
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            node: $input.node
+  detach:
+    examples:
+      - ecctl lingjun eni detach <eni-id> --node <node-id>
+    description:
+      en: Detach Lingjun ENI from a node
+      zh-CN: 将灵骏弹性网卡从节点解绑
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - node:
+            required: true
+      controls:
+        - no_wait
+        - api_param
+    workflow:
+      - binding: detach_from_node
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            node: $input.node

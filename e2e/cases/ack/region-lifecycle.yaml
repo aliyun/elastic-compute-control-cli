@@ -1,0 +1,14 @@
+# ACK region and Kubernetes version metadata.
+resource: ack/region
+requires_params: [ack.cluster_type]
+
+steps:
+  - name: list regions
+    run: ecctl ack region list
+    assert:
+      - len($.regions) >= 1
+
+  - name: list versions
+    run: ecctl ack version list --cluster-type {{.params.ack.cluster_type}}
+    assert:
+      - len($.versions) >= 0

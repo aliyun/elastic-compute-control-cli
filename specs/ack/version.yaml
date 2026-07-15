@@ -1,0 +1,134 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: version
+kind: regional
+display_name:
+  en: Kubernetes version metadata
+  zh-CN: Kubernetes 版本元数据
+description:
+  en: Query ACK Kubernetes version metadata
+  zh-CN: 查询 ACK Kubernetes 版本元数据
+examples:
+  - ecctl ack version list --region cn-beijing --cluster-type ManagedKubernetes
+  - ecctl ack version list --region cn-beijing --filter cluster-type=ManagedKubernetes --runtime containerd
+  - ecctl ack version list --region cn-beijing --cluster-type ManagedKubernetes --kubernetes-version 1.31.1-aliyun.1 --query-upgradable-version
+
+identity:
+  field: id
+  output_root:
+    one: version
+    many: versions
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: Kubernetes version ID
+        zh-CN: Kubernetes 版本 ID
+    cluster_type:
+      type: string
+      description:
+        en: ACK cluster type to query
+        zh-CN: 要查询的 ACK 集群类型
+      enum: [Kubernetes, ManagedKubernetes, ExternalKubernetes]
+    kubernetes_version:
+      type: string
+      description:
+        en: Kubernetes version to query
+        zh-CN: 要查询的 Kubernetes 版本
+    scenario:
+      type: string
+      description:
+        en: ACK cluster scenario profile
+        zh-CN: ACK 集群场景类型
+      enum: [Default, Edge, Serverless, Lingjun]
+    runtime:
+      type: string
+      description:
+        en: Container runtime used to filter supported OS images
+        zh-CN: 用于过滤支持操作系统镜像的容器运行时
+      enum: [docker, containerd, Sandboxed-Container.runv]
+    mode:
+      type: string
+      description:
+        en: Version query mode
+        zh-CN: 版本查询模式
+      enum: [supported, creatable]
+    query_upgradable_version:
+      type: boolean
+      description:
+        en: Query versions available for upgrade when a Kubernetes version is specified
+        zh-CN: 指定 Kubernetes 版本时查询可升级版本
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: Filter expression key=value
+      zh-CN: 过滤表达式 key=value
+
+probes:
+  list:
+    api: DescribeKubernetesVersionMetadata
+    request:
+      Region: $context.region
+      ClusterType: $.cluster_type
+      KubernetesVersion: $.kubernetes_version
+      Profile: $.scenario
+      runtime: $.runtime
+      Mode: $.mode
+      QueryUpgradableVersion: $.query_upgradable_version
+    response:
+      items: $.versions
+      id: $.version
+      fields:
+        id: $.version
+        version: $.version
+        release_date: $.release_date
+        expiration_date: $.expiration_date
+        creatable: $.creatable
+        upgradable_versions: $.upgradable_versions
+        capabilities: $.capabilities
+        images: $.images
+        meta_data: $.meta_data
+        runtimes: $.runtimes
+
+operations:
+  list:
+    examples:
+      - ecctl ack version list
+      - ecctl ack version list --filter cluster-type=<value>
+    description:
+      en: List Kubernetes version metadata
+      zh-CN: 列出 Kubernetes 版本元数据
+    input:
+      fields:
+        - cluster_type
+        - kubernetes_version
+        - scenario
+        - runtime
+        - mode
+        - query_upgradable_version
+      controls:
+        - filter
+    require_any:
+      - raw: $.cluster_type
+    filters:
+      cluster-type:
+        target: cluster_type
+      kubernetes-version:
+        target: kubernetes_version
+      profile:
+        target: scenario
+      runtime:
+        target: runtime
+      mode:
+        target: mode
+      query-upgradable-version:
+        target: query_upgradable_version
+    workflow:
+      - probe: list
+        many: true

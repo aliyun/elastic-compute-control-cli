@@ -1,0 +1,467 @@
+schema_version: 2
+product: ack
+api_product: cs
+resource: addon
+kind: regional
+display_name:
+  en: addon
+  zh-CN: 组件
+description:
+  en: Manage ACK cluster addons
+  zh-CN: 管理 ACK 集群组件
+examples:
+  - ecctl ack addon list --cluster <cluster-id>
+  - ecctl ack addon list --catalog --cluster-type ManagedKubernetes --cluster-version 1.28.3-aliyun.1 --cluster-spec ack.pro.small --cluster-profile Default
+  - ecctl ack addon create coredns --cluster <cluster-id> --version <version> --config @config.json
+  - ecctl ack addon upgrade coredns --cluster <cluster-id> --version <version>
+
+identity:
+  field: name
+  output_root:
+    one: addon
+    many: addons
+
+schema:
+  fields:
+    name:
+      type: string
+      description:
+        en: addon name
+        zh-CN: 组件名称
+    names:
+      type: array
+      description:
+        en: addon names
+        zh-CN: 组件名称列表
+      items:
+        type: string
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    version:
+      type: string
+      description:
+        en: addon version
+        zh-CN: 组件版本
+    config:
+      type: string
+      input_style: JSON/YAML text|@file
+      description:
+        en: addon config as JSON/YAML text or @file
+        zh-CN: 组件配置，支持 JSON/YAML 文本或 @file
+    cluster_type:
+      type: string
+      description:
+        en: cluster type filter for catalog queries
+        zh-CN: 目录查询的集群类型过滤条件
+    cluster_version:
+      type: string
+      description:
+        en: Kubernetes version filter for catalog queries
+        zh-CN: 目录查询的 Kubernetes 版本过滤条件
+    cluster_spec:
+      type: string
+      description:
+        en: cluster spec filter for catalog queries
+        zh-CN: 目录查询的集群规格过滤条件
+    cluster_profile:
+      type: string
+      description:
+        en: cluster profile filter for catalog queries
+        zh-CN: 目录查询的集群 profile 过滤条件
+    policy:
+      type: string
+      enum: [overwrite, canary]
+      description:
+        en: addon upgrade policy
+        zh-CN: 组件升级策略
+
+controls:
+  catalog:
+    type: boolean
+    description:
+      en: query the installable addon catalog
+      zh-CN: 查询可安装组件目录
+  with_resources:
+    type: boolean
+    description:
+      en: include Kubernetes resources owned by the addon instance
+      zh-CN: 附带组件实例关联的 Kubernetes 资源
+  no_wait:
+    type: boolean
+    description:
+      en: return before addon readiness readback completes
+      zh-CN: 不等待组件就绪回读完成
+  timeout:
+    type: duration
+    default: 600s
+    description:
+      en: addon readiness wait timeout
+      zh-CN: 组件就绪等待超时时间
+  force:
+    type: boolean
+    default: false
+    description:
+      en: clean up addon-related cloud resources during uninstall
+      zh-CN: 卸载时清理组件关联云资源
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  instance:
+    api: GetClusterAddonInstance
+    request:
+      cluster_id: $.cluster
+      instance_name: $.name
+    response:
+      item: $
+      request_id: $.request_id
+      id: $.name
+      fields:
+        name: $.name
+        version: $.version
+        status: $.state
+        state: $.state
+        config: $.config
+        logging: $.logging
+  instance_resources:
+    api: ListClusterAddonInstanceResources
+    request:
+      cluster_id: $.cluster
+      instance_name: $.name
+    response:
+      item: $
+      request_id: $.request_id
+      fields:
+        resources: $.resources
+  instances:
+    api: ListClusterAddonInstances
+    request:
+      cluster_id: $.cluster
+    response:
+      items: $.addons
+      request_id: $.request_id
+      id: $.name
+      fields:
+        name: $.name
+        version: $.version
+        status: $.state
+        state: $.state
+  catalog_item:
+    api: DescribeAddon
+    request:
+      addon_name: $.name
+      cluster_id: $.cluster
+      region_id: $context.region
+      cluster_type: $.cluster_type
+      cluster_version: $.cluster_version
+      cluster_spec: $.cluster_spec
+      profile: $.cluster_profile
+      version: $.version
+    response:
+      item: $
+      request_id: $.request_id
+      id: $.name
+      fields:
+        name: $.name
+        version: $.version
+        category: $.category
+        config_schema: $.config_schema
+        install_by_default: $.install_by_default
+        managed: $.managed
+        architecture: $.architecture
+        supported_actions: $.supported_actions
+  catalog:
+    api: ListAddons
+    request:
+      cluster_id: $.cluster
+      region_id: $context.region
+      cluster_type: $.cluster_type
+      cluster_version: $.cluster_version
+      cluster_spec: $.cluster_spec
+      profile: $.cluster_profile
+    response:
+      items: $.addons
+      request_id: $.request_id
+      id: $.name
+      fields:
+        name: $.name
+        version: $.version
+        category: $.category
+        config_schema: $.config_schema
+        install_by_default: $.install_by_default
+        managed: $.managed
+        architecture: $.architecture
+        supported_actions: $.supported_actions
+
+waiters:
+  active:
+    probe: instance
+    target: active
+    interval: 5s
+    timeout: 600s
+    pending:
+      - field: status
+        values: [installing, updating, upgrading, deleting]
+    failure:
+      states: [failed]
+
+bindings:
+  install:
+    api: InstallClusterAddons
+    request:
+      ClusterId: $.cluster
+      body:
+        each:
+          sources:
+            - from_fields:
+                name: $.name
+                version: $.version
+                config: $.config
+              when_any: [name, version, config]
+        fields:
+          name: $.name
+          version: $.version
+          config: $.config
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - request: body
+      - raw: $.api_param
+    request_id_from: $.request_id
+    wait: active
+  modify_config:
+    api: ModifyClusterAddon
+    request:
+      cluster_id: $.cluster
+      component_id: $.name
+      body: $.config
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - request: body
+      - raw: $.api_param
+    request_id_from: $.request_id
+    wait: active
+  uninstall:
+    api: UnInstallClusterAddons
+    request:
+      ClusterId: $.cluster
+      addons:
+        each: $.names
+        fields:
+          name: $
+          cleanup_cloud_resources: $input.force
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - request: addons
+      - raw: $.api_param
+    request_id_from: $.request_id
+  upgrade:
+    api: UpgradeClusterAddons
+    request:
+      ClusterId: $.cluster
+      body:
+        each:
+          sources:
+            - from_fields:
+                component_name: $.name
+                next_version: $.version
+                config: $.config
+                policy: $.policy
+              when_any: [component_name, next_version, config, policy]
+        fields:
+          component_name: $.component_name
+          next_version: $.next_version
+          config: $.config
+          policy: $.policy
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - request: body
+      - raw: $.api_param
+    request_id_from: $.request_id
+    wait: active
+
+operations:
+  create:
+    examples:
+      - ecctl ack addon create my-name --cluster <cluster-id> --version <version>
+    description:
+      en: Install addon on a cluster
+      zh-CN: 在集群安装组件
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+        - version:
+            required: true
+        - config
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: install
+        wait_unless: input.no_wait
+  update:
+    examples:
+      - ecctl ack addon update my-name --cluster <cluster-id> --config <config-id>
+    description:
+      en: Update addon config
+      zh-CN: 更新组件配置
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+        - config:
+            required: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: modify_config
+        wait_unless: input.no_wait
+  delete:
+    examples:
+      - ecctl ack addon delete <names> --cluster <cluster-id>
+    description:
+      en: Uninstall addon from a cluster
+      zh-CN: 从集群卸载组件
+    input:
+      fields:
+        - names:
+            required: true
+            positional_many: true
+        - cluster:
+            required: true
+      controls:
+        - force
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: uninstall
+      - probe: instances
+        many: true
+        unless: input.no_wait
+      - emit:
+          deleted: true
+          fields:
+            names: $.names
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get addon instance or catalog metadata
+      zh-CN: 查询组件实例或目录元信息
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+        - cluster
+        - version
+        - cluster_type
+        - cluster_version
+        - cluster_spec
+        - cluster_profile
+      controls:
+        - catalog
+        - with_resources
+    conflicts:
+      - any: [catalog]
+        with_any: [with_resources]
+    require_any:
+      - raw: $.cluster
+      - raw: $.catalog
+    require_when:
+      - when_any: [catalog]
+        require_any: [cluster_type]
+      - when_any: [catalog]
+        require_any: [cluster_version]
+      - when_any: [catalog]
+        require_any: [cluster_spec]
+      - when_any: [catalog]
+        require_any: [cluster_profile]
+    workflow:
+      - probe: catalog_item
+        when: input.catalog
+        not_found: error
+      - probe: instance
+        unless: input.catalog
+        not_found: error
+      - probe: instance_resources
+        when: input.with_resources && !input.catalog
+        merge: true
+  list:
+    examples:
+      - ecctl ack addon list
+    description:
+      en: List addon instances or catalog metadata
+      zh-CN: 列出组件实例或目录元信息
+    input:
+      fields:
+        - cluster
+        - cluster_type
+        - cluster_version
+        - cluster_spec
+        - cluster_profile
+      controls:
+        - catalog
+    require_any:
+      - raw: $.cluster
+      - raw: $.catalog
+    require_when:
+      - when_any: [catalog]
+        require_any: [cluster_type]
+      - when_any: [catalog]
+        require_any: [cluster_version]
+      - when_any: [catalog]
+        require_any: [cluster_spec]
+      - when_any: [catalog]
+        require_any: [cluster_profile]
+    workflow:
+      - probe: catalog
+        many: true
+        when: input.catalog
+      - probe: instances
+        many: true
+        unless: input.catalog
+  upgrade:
+    examples:
+      - ecctl ack addon upgrade my-name --cluster <cluster-id> --version <version>
+    description:
+      en: Upgrade addon version
+      zh-CN: 升级组件版本
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+        - version:
+            required: true
+        - config
+        - policy
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: upgrade
+        wait_unless: input.no_wait

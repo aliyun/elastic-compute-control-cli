@@ -1,0 +1,1103 @@
+schema_version: 2
+product: ecs
+resource: image
+kind: regional
+display_name:
+  en: image
+  zh-CN: 镜像
+description:
+  en: Manage ECS image resources
+  zh-CN: 管理 ECS 镜像资源
+examples:
+  - ecctl ecs image list --filter owner-alias=self
+  - ecctl ecs image get <image-id>
+  - ecctl ecs image create --instance <instance-id> --name web-snapshot-01
+  - ecctl ecs image copy <image-id> --destination-region cn-hangzhou --name web-snapshot-01
+
+identity:
+  field: id
+  prefix: m-
+  output_root:
+    one: image
+    many: images
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: image ID
+        zh-CN: 镜像 ID
+    ids:
+      type: array
+      description:
+        en: image IDs
+        zh-CN: 镜像 ID 列表
+      items:
+        type: string
+    name:
+      type: string
+      description:
+        en: image name
+        zh-CN: 镜像名称
+    description:
+      type: string
+      description:
+        en: image description
+        zh-CN: 镜像描述
+    status:
+      type: string
+      description:
+        en: image status
+        zh-CN: 镜像状态
+      enum: [Creating, Waiting, Available, UnAvailable, CreateFailed, Deprecated]
+    family:
+      type: string
+      description:
+        en: image family name
+        zh-CN: 镜像族系名称
+    image_family:
+      type: string
+      description:
+        en: image family to associate when creating or updating the image
+        zh-CN: 创建或更新镜像时关联的镜像族系
+    instance:
+      type: string
+      description:
+        en: instance ID used as the image source
+        zh-CN: 用作镜像源的实例 ID
+    snapshot:
+      type: string
+      description:
+        en: snapshot ID used as the image source
+        zh-CN: 用作镜像源的快照 ID
+    platform:
+      type: string
+      description:
+        en: operating system platform
+        zh-CN: 操作系统平台
+    architecture:
+      type: string
+      description:
+        en: image architecture
+        zh-CN: 镜像架构
+      enum: [i386, x86_64, arm64]
+    os_type:
+      type: string
+      description:
+        en: operating system type
+        zh-CN: 操作系统类型
+      enum: [linux, windows]
+    boot_mode:
+      type: string
+      description:
+        en: boot mode
+        zh-CN: 启动模式
+      enum: [BIOS, UEFI, UEFI-Preferred]
+    license_type:
+      type: string
+      description:
+        en: license type
+        zh-CN: 许可证类型
+    image_version:
+      type: string
+      description:
+        en: image version
+        zh-CN: 镜像版本
+    detection_strategy:
+      type: string
+      description:
+        en: image detection strategy
+        zh-CN: 镜像检测策略
+    owner_alias:
+      type: string
+      description:
+        en: image owner alias
+        zh-CN: 镜像所属用户类型
+      enum: [system, self, others, marketplace]
+    usage:
+      type: string
+      description:
+        en: image usage
+        zh-CN: 镜像使用状态
+      enum: [instance, none]
+    is_public:
+      type: boolean
+      description:
+        en: whether the image is public
+        zh-CN: 是否为公共镜像
+    is_support_io_optimized:
+      type: boolean
+      description:
+        en: filter images supporting I/O optimized instances
+        zh-CN: 仅返回支持 I/O 优化实例的镜像
+    is_support_cloud_init:
+      type: boolean
+      description:
+        en: filter images supporting cloud-init
+        zh-CN: 仅返回支持 cloud-init 的镜像
+    show_expired:
+      type: boolean
+      description:
+        en: include expired marketplace images
+        zh-CN: 包含已过期的镜像市场镜像
+    image_owner_id:
+      type: string
+      description:
+        en: image owner UID for sharing queries
+        zh-CN: 镜像所有者 UID
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    encrypted:
+      type: boolean
+      description:
+        en: encrypt the destination image when copying
+        zh-CN: 复制镜像时加密目标镜像
+    kms_key_id:
+      type: string
+      description:
+        en: KMS key ID used to encrypt the destination image
+        zh-CN: 加密目标镜像使用的 KMS 密钥 ID
+    destination_region:
+      type: string
+      description:
+        en: destination region for copy
+        zh-CN: 复制镜像的目标地域
+    destination_name:
+      type: string
+      description:
+        en: destination image name for copy
+        zh-CN: 复制镜像的目标名称
+    destination_description:
+      type: string
+      description:
+        en: destination image description for copy
+        zh-CN: 复制镜像的目标描述
+    cancel:
+      type: boolean
+      description:
+        en: cancel an in-progress copy task on the image
+        zh-CN: 取消正在进行的复制镜像任务
+    oss_bucket:
+      type: string
+      description:
+        en: OSS bucket for image export or import
+        zh-CN: 导出或导入镜像使用的 OSS 存储桶
+    oss_object:
+      type: string
+      description:
+        en: OSS object key of the image file to import
+        zh-CN: 导入镜像的 OSS 对象键
+    oss_prefix:
+      type: string
+      description:
+        en: OSS object key prefix for image export
+        zh-CN: 导出镜像的 OSS 对象键前缀
+    image_format:
+      type: string
+      description:
+        en: image file format
+        zh-CN: 镜像文件格式
+      enum: [RAW, VHD, QCOW2, VMDK]
+    export_format:
+      type: string
+      description:
+        en: image export format
+        zh-CN: 镜像导出格式
+    role_name:
+      type: string
+      description:
+        en: RAM role name for OSS access
+        zh-CN: 访问 OSS 使用的 RAM 角色名称
+    action_type:
+      type: string
+      description:
+        en: action type for supported instance types query
+        zh-CN: 查询镜像支持实例规格时使用的操作类型
+    task_id:
+      type: string
+      description:
+        en: asynchronous task ID
+        zh-CN: 异步任务 ID
+    share_add:
+      type: string_array
+      description:
+        en: account IDs to add to the image share permission
+        zh-CN: 加入镜像共享权限的账号 ID 列表
+    share_remove:
+      type: string_array
+      description:
+        en: account IDs to remove from the image share permission
+        zh-CN: 移除镜像共享权限的账号 ID 列表
+    launch_permission:
+      type: string
+      description:
+        en: image launch permission setting
+        zh-CN: 镜像启动权限设置
+    status_action:
+      type: string
+      description:
+        en: target status when modifying the image
+        zh-CN: 修改镜像时的目标状态
+      enum: [Available, Deprecated]
+    features:
+      type: object
+      description:
+        en: image feature flags
+        zh-CN: 镜像功能开关
+      fields:
+        nvme_support:
+          type: string
+          description:
+            en: NVMe support setting
+            zh-CN: NVMe 支持配置
+    disk_device_mappings:
+      type: array
+      description:
+        en: disk device mappings used when creating or importing an image
+        zh-CN: 创建或导入镜像时使用的磁盘设备映射
+      items:
+        type: object
+        fields:
+          snapshot_id:
+            type: string
+            description:
+              en: snapshot ID for the disk
+              zh-CN: 磁盘对应的快照 ID
+          size:
+            type: integer
+            description:
+              en: disk size in GiB
+              zh-CN: 磁盘容量，单位 GiB
+          disk_type:
+            type: string
+            description:
+              en: disk type (system or data)
+              zh-CN: 磁盘用途类型（系统盘或数据盘）
+          device:
+            type: string
+            description:
+              en: device name in the image
+              zh-CN: 镜像中的设备名
+          format:
+            type: string
+            description:
+              en: disk image format
+              zh-CN: 磁盘镜像格式
+          oss_bucket:
+            type: string
+            description:
+              en: OSS bucket for the disk image
+              zh-CN: 磁盘镜像所在的 OSS 存储桶
+          oss_object:
+            type: string
+            description:
+              en: OSS object key for the disk image
+              zh-CN: 磁盘镜像的 OSS 对象键
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+    remove_tag:
+      type: string_array
+      description:
+        en: tag keys to remove
+        zh-CN: 要移除的标签键
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  dry_run:
+    type: boolean
+    description:
+      en: validate without executing
+      zh-CN: 只校验不执行
+  force:
+    type: boolean
+    default: false
+    description:
+      en: force image deletion even when referenced by an instance (must be set explicitly)
+      zh-CN: 即使被实例引用也强制删除镜像（必须显式指定）
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 1800s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+  with_share_permission:
+    type: boolean
+    description:
+      en: include image share permission
+      zh-CN: 附带镜像共享权限
+  with_supported_instance_types:
+    type: boolean
+    description:
+      en: include supported instance types
+      zh-CN: 附带支持的实例规格
+
+probes:
+  state:
+    api: DescribeImages
+    request:
+      RegionId: $context.region
+      ImageId: $.ids
+      ImageName: $.name
+      Status: $.status
+      ImageOwnerAlias: $.owner_alias
+      ImageFamily: $.image_family
+      OSType: $.os_type
+      Architecture: $.architecture
+      Usage: $.usage
+      IsPublic: $.is_public
+      IsSupportIoOptimized: $.is_support_io_optimized
+      IsSupportCloudinit: $.is_support_cloud_init
+      ShowExpired: $.show_expired
+      ResourceGroupId: $.resource_group
+      ImageOwnerId: $.image_owner_id
+      SnapshotId: $.snapshot
+      InstanceType: $.platform
+      Tag: $.tag
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.Images.Image
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.ImageId
+      state: $.Status
+      fields: &image_fields
+        id: $.ImageId
+        name: $.ImageName
+        description: $.Description
+        status: $.Status
+        region: $.RegionId
+        architecture: $.Architecture
+        os_type: $.OSType
+        os_name: $.OSName
+        os_name_en: $.OSNameEn
+        platform: $.Platform
+        size: $.Size
+        usage: $.Usage
+        is_public: $.IsPublic
+        is_copied: $.IsCopied
+        is_subscribed: $.IsSubscribed
+        is_self_shared: $.IsSelfShared
+        is_support_io_optimized: $.IsSupportIoOptimized
+        is_support_cloud_init: $.IsSupportCloudinit
+        image_family: $.ImageFamily
+        image_version: $.ImageVersion
+        image_owner_alias: $.ImageOwnerAlias
+        product_code: $.ProductCode
+        progress: $.Progress
+        creation_time: $.CreationTime
+        boot_mode: $.BootMode
+        login_as_non_root_supported: $.LoginAsNonRootSupported
+        resource_group: $.ResourceGroupId
+        disk_device_mappings: $.DiskDeviceMappings.DiskDeviceMapping
+        features: $.Features
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+  destination_state:
+    api: DescribeImages
+    request:
+      RegionId: $.destination_region
+      ImageId: $.ids
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.Images.Image
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.ImageId
+      state: $.Status
+      fields: *image_fields
+      absent:
+        when_empty_for_requested_ids: true
+  share_permission:
+    api: DescribeImageSharePermission
+    request:
+      RegionId: $context.region
+      ImageId: $.id
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      item: $
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.ImageId
+      fields:
+        id: $.ImageId
+        region: $.RegionId
+        accounts: $.Accounts.Account
+        share_groups: $.ShareGroups.ShareGroup
+        launch_permission: $.ImageShareLaunchPermission
+  from_family:
+    api: DescribeImageFromFamily
+    request:
+      RegionId: $context.region
+      ImageFamily: $.family
+    response:
+      item: $.Image
+      request_id: $.RequestId
+      id: $.ImageId
+      state: $.Status
+      fields:
+        id: $.ImageId
+        name: $.ImageName
+        description: $.Description
+        status: $.Status
+        region: $.RegionId
+        architecture: $.Architecture
+        os_type: $.OSType
+        platform: $.Platform
+        size: $.Size
+        image_family: $.ImageFamily
+        image_version: $.ImageVersion
+        creation_time: $.CreationTime
+        boot_mode: $.BootMode
+        disk_device_mappings: $.DiskDeviceMappings.DiskDeviceMapping
+  supported_instance_types:
+    api: DescribeImageSupportInstanceTypes
+    request:
+      RegionId: $context.region
+      ImageId: $.id
+      ActionType: $.action_type
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        supported_instance_types: $.InstanceTypes.InstanceType
+  task_attribute:
+    api: DescribeTaskAttribute
+    request:
+      RegionId: $context.region
+      TaskId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      id: $.TaskId
+      state: $.TaskStatus
+      fields:
+        id: $.TaskId
+        status: $.TaskStatus
+        action: $.TaskAction
+        process: $.TaskProcess
+        progress: $.OperationProgress
+        created_time: $.CreationTime
+        finished_time: $.FinishedTime
+        failed_code: $.FailedCode
+        failed_message: $.FailedMessage
+
+waiters:
+  available_after_create:
+    probe: state
+    target: Available
+    interval: 10s
+    timeout: 1800s
+    failure:
+      states: [CreateFailed, UnAvailable]
+  available_after_import:
+    probe: state
+    target: Available
+    interval: 15s
+    timeout: 3600s
+    failure:
+      states: [CreateFailed, UnAvailable]
+  available_after_copy:
+    probe: destination_state
+    target: Available
+    interval: 15s
+    timeout: 3600s
+    failure:
+      states: [CreateFailed, UnAvailable]
+  deleted_after_delete:
+    probe: state
+    target: absent
+    interval: 5s
+    timeout: 600s
+  task_finished:
+    probe: task_attribute
+    target: Finished
+    interval: 15s
+    timeout: 3600s
+    failure:
+      states: [Failed]
+
+bindings:
+  create_to_available:
+    api: CreateImage
+    idempotency:
+      field: ClientToken
+      prefix: image-create
+    request:
+      RegionId: $context.region
+      ImageName: $.name
+      Description: $.description
+      InstanceId: $.instance
+      SnapshotId: $.snapshot
+      Platform: $.platform
+      Architecture: $.architecture
+      ImageFamily: $.image_family
+      BootMode: $.boot_mode
+      ResourceGroupId: $.resource_group
+      ImageVersion: $.image_version
+      DetectionStrategy: $.detection_strategy
+      Tag: $.tag
+      DryRun: $.dry_run
+      DiskDeviceMapping:
+        each: $.disk_device_mappings
+        fields:
+          SnapshotId: $.snapshot_id
+          Size: $.size
+          DiskType: $.disk_type
+          Device: $.device
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - request: InstanceId
+      - request: SnapshotId
+      - request: DiskDeviceMapping
+      - raw: $.api_param
+    id_from: $.ImageId
+    request_id_from: $.RequestId
+    wait: available_after_create
+  update_attributes:
+    api: ModifyImageAttribute
+    request:
+      RegionId: $context.region
+      ImageId: $.id
+      ImageName: $.name
+      Description: $.description
+      ImageFamily: $.image_family
+      BootMode: $.boot_mode
+      LicenseType: $.license_type
+      Status: $.status_action
+      Features:
+        from: $.features
+        fields:
+          NvmeSupport: $.nvme_support
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    require_any:
+      - request: ImageName
+      - request: Description
+      - request: ImageFamily
+      - request: BootMode
+      - request: LicenseType
+      - request: Status
+      - request: Features
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  update_share_permission:
+    api: ModifyImageSharePermission
+    request:
+      RegionId: $context.region
+      ImageId: $.id
+      LaunchPermission: $.launch_permission
+      AddAccount:
+        each: $.share_add
+      RemoveAccount:
+        each: $.share_remove
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    require_any:
+      - request: AddAccount
+      - request: RemoveAccount
+      - request: LaunchPermission
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  delete_to_absent:
+    api: DeleteImage
+    request:
+      RegionId: $context.region
+      ImageId: $.id
+      Force: $.force
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+  copy_to_destination:
+    api: CopyImage
+    idempotency:
+      field: ClientToken
+      prefix: image-copy
+    request:
+      RegionId: $context.region
+      ImageId: $.id
+      DestinationRegionId: $.destination_region
+      DestinationImageName: $.destination_name
+      DestinationDescription: $.destination_description
+      Encrypted: $.encrypted
+      KMSKeyId: $.kms_key_id
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+      - request: DestinationRegionId
+    id_from: $.ImageId
+    request_id_from: $.RequestId
+  cancel_copy:
+    api: CancelCopyImage
+    request:
+      RegionId: $context.region
+      ImageId: $.id
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    request_id_from: $.RequestId
+  export_to_oss:
+    api: ExportImage
+    request:
+      RegionId: $context.region
+      ImageId: $.id
+      OSSBucket: $.oss_bucket
+      OSSPrefix: $.oss_prefix
+      ImageFormat: $.image_format
+      ExportFormat: $.export_format
+      RoleName: $.role_name
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+      - request: OSSBucket
+    id_from: $.TaskId
+    request_id_from: $.RequestId
+  import_from_oss:
+    api: ImportImage
+    idempotency:
+      field: ClientToken
+      prefix: image-import
+    request:
+      RegionId: $context.region
+      ImageName: $.name
+      Description: $.description
+      Platform: $.platform
+      Architecture: $.architecture
+      OSType: $.os_type
+      BootMode: $.boot_mode
+      ImageFamily: $.image_family
+      LicenseType: $.license_type
+      RoleName: $.role_name
+      ResourceGroupId: $.resource_group
+      ImageVersion: $.image_version
+      DetectionStrategy: $.detection_strategy
+      Tag: $.tag
+      DiskDeviceMapping:
+        each: $.disk_device_mappings
+        fields:
+          OSSBucket: $.oss_bucket
+          OSSObject: $.oss_object
+          Format: $.format
+          DiskImageSize: $.size
+          DiskImSize: $.size
+          Device: $.device
+          DiskType: $.disk_type
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: DiskDeviceMapping
+    id_from: $.ImageId
+    request_id_from: $.RequestId
+    wait: available_after_import
+
+operations:
+  create:
+    examples:
+      - ecctl ecs image create --instance <instance-id> --name web-snapshot-01
+      - ecctl ecs image create --snapshot <snapshot-id> --name web-snapshot-01 --tag env=prod
+      - ecctl ecs image create --instance <instance-id> --name web-snapshot-01 --description "release v1.0"
+    description:
+      en: Create custom image
+      zh-CN: 创建自定义镜像
+    input:
+      fields:
+        - name
+        - description
+        - instance
+        - snapshot
+        - platform
+        - architecture
+        - image_family
+        - boot_mode
+        - image_version
+        - detection_strategy
+        - resource_group
+        - tag
+        - disk_device_mappings
+      controls:
+        - dry_run
+        - no_wait
+        - timeout
+        - api_param
+    require_any:
+      - raw: $.instance
+      - raw: $.snapshot
+      - raw: $.disk_device_mappings
+    workflow:
+      - binding: create_to_available
+        wait_unless: input.no_wait
+      - probe: state
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            instance: $input.instance
+            snapshot: $input.snapshot
+            region: $context.region
+  update:
+    examples:
+      - ecctl ecs image update <image-id> --name renamed-image
+      - ecctl ecs image update <image-id> --description "release v2.0"
+    description:
+      en: Update image attributes or share permission
+      zh-CN: 更新镜像属性或共享权限
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - description
+        - image_family
+        - boot_mode
+        - license_type
+        - status_action
+        - features
+        - share_add
+        - share_remove
+        - launch_permission
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: update_attributes
+        when_any: [input.name, input.description, input.image_family, input.boot_mode, input.license_type, input.status_action, input.features]
+      - binding: update_share_permission
+        when_any: [input.share_add, input.share_remove, input.launch_permission]
+      - probe: state
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - probe: share_permission
+        ids:
+          - $input.id
+        when_any: [input.share_add, input.share_remove, input.launch_permission]
+        merge: true
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            name: $input.name
+            description: $input.description
+  delete:
+    examples:
+      - ecctl ecs image delete <image-id>
+      - ecctl ecs image delete <image-id> --force
+    description:
+      en: Delete image
+      zh-CN: 删除镜像
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - force
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get image
+      zh-CN: 获取镜像
+    examples:
+      - ecctl ecs image get <image-id>
+      - ecctl ecs image get --family acs:alibaba_cloud_linux_3_2104_lts_x64
+    input:
+      fields:
+        - id:
+            positional: true
+        - family
+        - action_type
+      controls:
+        - with_share_permission
+        - with_supported_instance_types
+    require_any:
+      - raw: $.id
+      - raw: $.family
+    workflow:
+      - probe: from_family
+        when: input.family
+        not_found: error
+      - probe: state
+        ids:
+          - $input.id
+        not_found: error
+        when: input.id
+      - probe: share_permission
+        ids:
+          - $input.id
+        when: input.with_share_permission
+        merge: true
+      - probe: supported_instance_types
+        ids:
+          - $input.id
+        when: input.with_supported_instance_types
+        merge: true
+  list:
+    examples:
+      - ecctl ecs image list
+      - ecctl ecs image list --filter name=<value>
+      - ecctl ecs image list --filter tag.env=prod
+    description:
+      en: List image resources
+      zh-CN: 列出镜像资源
+    input:
+      fields:
+        - ids:
+            positional_many: true
+      controls:
+        - filter
+        - limit
+        - page
+    filters:
+      id:
+        target: ids
+      ids:
+        target: ids
+      image:
+        target: ids
+      image.id:
+        target: ids
+      name:
+        target: name
+      status:
+        target: status
+      owner-alias:
+        target: owner_alias
+      family:
+        target: image_family
+      image-family:
+        target: image_family
+      os-type:
+        target: os_type
+      architecture:
+        target: architecture
+      usage:
+        target: usage
+      public:
+        target: is_public
+      resource-group:
+        target: resource_group
+      snapshot:
+        target: snapshot
+      snapshot.id:
+        target: snapshot
+      tag.:
+        target: tag
+        key_prefix: tag.
+      show-expired:
+        target: show_expired
+      image-owner-id:
+        target: image_owner_id
+      io-optimized:
+        target: is_support_io_optimized
+      cloud-init:
+        target: is_support_cloud_init
+    workflow:
+      - probe: state
+        many: true
+  copy:
+    examples:
+      - ecctl ecs image copy <image-id>
+    description:
+      en: Copy image across regions
+      zh-CN: 跨地域复制镜像
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - destination_region
+        - destination_name
+        - destination_description
+        - encrypted
+        - kms_key_id
+        - resource_group
+        - tag
+        - cancel
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    require_when:
+      - when_any: [cancel]
+        require_any: [id]
+      - when_any: [destination_region]
+        require_any: [destination_region]
+    conflicts:
+      - any:
+          - cancel
+        with_any:
+          - destination_region
+          - destination_name
+          - destination_description
+          - encrypted
+          - kms_key_id
+    workflow:
+      - binding: cancel_copy
+        when: input.cancel
+      - binding: copy_to_destination
+        when: "!input.cancel"
+      - wait: available_after_copy
+        ids:
+          - $context.id
+        when: "!input.cancel"
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            source_image: $input.id
+            destination_region: $input.destination_region
+            destination_name: $input.destination_name
+        when: "!input.cancel"
+      - emit:
+          fields:
+            id: $input.id
+            cancelled: true
+        when: input.cancel
+  export:
+    examples:
+      - ecctl ecs image export <image-id> --oss-bucket <oss-bucket>
+    description:
+      en: Export image to OSS
+      zh-CN: 导出镜像到 OSS
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - oss_bucket:
+            required: true
+        - oss_prefix
+        - image_format
+        - export_format
+        - role_name
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: export_to_oss
+      - wait: task_finished
+        ids:
+          - $context.id
+        unless: input.no_wait
+      - probe: task_attribute
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            task_id: $context.id
+            image: $input.id
+            oss_bucket: $input.oss_bucket
+            oss_prefix: $input.oss_prefix
+  import:
+    examples:
+      - ecctl ecs image import --disk-device-mappings <disk-device-mappings>
+    description:
+      en: Import image from OSS
+      zh-CN: 从 OSS 导入镜像
+    input:
+      fields:
+        - name
+        - description
+        - platform
+        - architecture
+        - os_type
+        - boot_mode
+        - image_family
+        - license_type
+        - role_name
+        - resource_group
+        - image_version
+        - detection_strategy
+        - tag
+        - disk_device_mappings:
+            required: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: import_from_oss
+        wait_unless: input.no_wait
+      - probe: state
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            region: $context.region

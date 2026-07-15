@@ -1,0 +1,9 @@
+{
+  "label": "ECS",
+  "position": 2,
+  "link": {
+    "type": "generated-index",
+    "title": "ECS 资源",
+    "description": "管理云服务器 ECS 资源，涵盖实例、块存储云盘与快照、镜像、安全组、弹性网卡（ENI）、密钥对、启动模板以及云助手命令。"
+  }
+}
