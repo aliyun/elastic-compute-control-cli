@@ -1,0 +1,497 @@
+schema_version: 2
+product: lingjun
+api_product: eflo
+resource: vpd
+kind: regional
+display_name:
+  en: Lingjun VPD
+  zh-CN: 灵骏网段
+description:
+  en: Manage Lingjun VPD resources
+  zh-CN: 管理灵骏网段资源
+examples:
+  - ecctl lingjun vpd list
+  - ecctl lingjun vpd create --name train-vpd --cidr 10.0.0.0/16
+  - ecctl lingjun vpd get <vpd-id> --with-routes --with-grants
+  - ecctl lingjun vpd update <vpd-id> --cidr +172.16.0.0/16
+
+identity:
+  field: id
+  prefix: vpd-
+  output_root:
+    one: vpd
+    many: vpds
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: VPD ID
+        zh-CN: VPD ID
+    name:
+      type: string
+      description:
+        en: VPD name
+        zh-CN: VPD 名称
+    cidr:
+      type: cidr
+      description:
+        en: VPD CIDR block
+        zh-CN: VPD 网段
+    status:
+      type: string
+      description:
+        en: VPD status
+        zh-CN: VPD 状态
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    er:
+      type: string
+      description:
+        en: Lingjun HUB (ER) ID
+        zh-CN: 灵骏 HUB (ER) ID
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+    subnets:
+      type: array
+      description:
+        en: subnets to create with the VPD
+        zh-CN: 随 VPD 创建的子网
+      items:
+        type: object
+        fields:
+          name:
+            type: string
+            description:
+              en: subnet name
+              zh-CN: 子网名称
+          cidr:
+            type: cidr
+            description:
+              en: subnet CIDR block
+              zh-CN: 子网网段
+          region:
+            type: string
+            description:
+              en: subnet region ID
+              zh-CN: 子网地域 ID
+          zone:
+            type: string
+            description:
+              en: subnet zone ID
+              zh-CN: 子网可用区 ID
+          type:
+            type: string
+            description:
+              en: subnet usage type
+              zh-CN: 子网用途类型
+    cidr_changes:
+      type: string
+      repeatable: true
+      description:
+        en: secondary CIDR change; prefix with + to associate or - to unassociate
+        zh-CN: 辅助网段变更，使用 + 前缀关联或 - 前缀解除关联
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  with_routes:
+    type: boolean
+    description:
+      en: include VPD route entries
+      zh-CN: 附带 VPD 路由条目
+  with_grants:
+    type: boolean
+    description:
+      en: include VPD grant rules
+      zh-CN: 附带 VPD 授权规则
+  no_wait:
+    type: boolean
+    description:
+      en: return before readback completion
+      zh-CN: 回读完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: ListVpds
+    request:
+      RegionId: $context.region
+      VpdId: $.id
+      VpdName: $.name
+      Status: $.status
+      ResourceGroupId: $.resource_group
+      FilterErId: $.er
+      Tag: $.tag
+      EnablePage: true
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.Content.Data
+      total: $.Content.Total
+      request_id: $.RequestId
+      id: $.VpdId
+      state: $.Status
+      fields:
+        id: $.VpdId
+        name: $.VpdName
+        cidr: $.Cidr
+        status: $.Status
+        region: $.RegionId
+        resource_group: $.ResourceGroupId
+        message: $.Message
+        create_time: $.CreateTime
+        modified_time: $.GmtModified
+        service_cidr: $.ServiceCidr
+        tenant_id: $.TenantId
+        nc_count: $.NcCount
+        subnet_count: $.SubnetCount
+        network_interface_count: $.NetworkInterfaceCount
+        tags: $.Tags
+        er_infos: $.ErInfos
+      absent:
+        when_empty_for_requested_ids: true
+  attribute:
+    api: GetVpd
+    request:
+      RegionId: $context.region
+      VpdId: $.id
+    response:
+      item: $.Content
+      request_id: $.RequestId
+      id: $.VpdId
+      state: $.Status
+      fields:
+        id: $.VpdId
+        name: $.VpdName
+        cidr: $.Cidr
+        status: $.Status
+        region: $.RegionId
+        resource_group: $.ResourceGroupId
+        message: $.Message
+        create_time: $.CreateTime
+        modified_time: $.GmtModified
+        service_cidr: $.ServiceCidr
+        tenant_id: $.TenantId
+        quota: $.Quota
+        nc_count: $.NcCount
+        subnet_count: $.SubnetCount
+        network_interface_count: $.NetworkInterfaceCount
+        private_ip_count: $.PrivateIpCount
+        attach_er_status: $.AttachErStatus
+        secondary_cidr_blocks: $.SecondaryCidrBlocks
+        tags: $.Tags
+        er_infos: $.ErInfos
+  routes:
+    api: ListVpdRouteEntries
+    request:
+      RegionId: $context.region
+      VpdId: $.id
+      EnablePage: true
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        routes:
+          from: $.Content.Data
+          each:
+            id: $.VpdRouteEntryId
+            destination_cidr: $.DestinationCidrBlock
+            next_hop: $.NextHopId
+            next_hop_type: $.NextHopType
+            route_type: $.RouteType
+            status: $.Status
+            region: $.RegionId
+            resource_group: $.ResourceGroupId
+            modified_time: $.GmtModified
+            tenant_id: $.TenantId
+            resource_tenant_id: $.ResourceTenantId
+  grants:
+    api: ListVpdGrantRules
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      EnablePage: true
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        grants:
+          from: $.Content.Data
+          each:
+            id: $.GrantRuleId
+            instance: $.InstanceId
+            instance_name: $.InstanceName
+            er: $.ErId
+            grant_tenant_id: $.GrantTenantId
+            product: $.Product
+            used: $.Used
+            region: $.RegionId
+            resource_group: $.ResourceGroupId
+            create_time: $.CreateTime
+            tenant_id: $.TenantId
+
+waiters:
+  available_after_change:
+    probe: attribute
+    target: Available
+    interval: 2s
+    timeout: 300s
+    pending:
+      - field: status
+        values: [Executing]
+    failure:
+      states: ["Not Available"]
+  deleted_after_delete:
+    probe: list
+    target: absent
+    interval: 2s
+    timeout: 300s
+  update_converged:
+    probe: attribute
+    target: matched
+    interval: 2s
+    timeout: 300s
+    match:
+      fields:
+        name: $.name
+      contains:
+        secondary_cidr_blocks: $prefixed_values($.cidr_changes,"+")
+      excludes:
+        secondary_cidr_blocks: $prefixed_values($.cidr_changes,"-")
+
+bindings:
+  create_vpd:
+    api: CreateVpd
+    request:
+      RegionId: $context.region
+      VpdName: $.name
+      Cidr: $.cidr
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      Subnets:
+        each: $.subnets
+        fields:
+          SubnetName: $.name
+          Cidr: $.cidr
+          RegionId: $.region
+          ZoneId: $.zone
+          Type: $.type
+    id_from: $.Content.VpdId
+    request_id_from: $.RequestId
+    wait: available_after_change
+  update_vpd:
+    api: UpdateVpd
+    request:
+      RegionId: $context.region
+      VpdId: $.id
+      VpdName: $.name
+    require_any:
+      - request: VpdName
+    request_id_from: $.RequestId
+  associate_cidr:
+    api: AssociateVpdCidrBlock
+    each: $prefixed_kv_objects($.cidr_changes,"+","cidr")
+    request:
+      RegionId: $context.region
+      VpdId: $input.id
+      SecondaryCidrBlock: $.cidr
+    request_id_from: $.RequestId
+  unassociate_cidr:
+    api: UnAssociateVpdCidrBlock
+    each: $prefixed_kv_objects($.cidr_changes,"-","cidr")
+    request:
+      RegionId: $context.region
+      VpdId: $input.id
+      SecondaryCidrBlock: $.cidr
+    request_id_from: $.RequestId
+  delete_vpd:
+    api: DeleteVpd
+    request:
+      RegionId: $context.region
+      VpdId: $.id
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+
+operations:
+  create:
+    examples:
+      - ecctl lingjun vpd create --name my-name --cidr 10.0.0.0/16
+      - ecctl lingjun vpd create --name my-name --cidr 10.0.0.0/16 --tag env=prod
+    description:
+      en: Create VPD
+      zh-CN: 创建 VPD
+    input:
+      fields:
+        - name:
+            required: true
+        - cidr:
+            required: true
+        - resource_group
+        - tag
+        - subnets
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_vpd
+        wait_unless: input.no_wait
+      - probe: attribute
+        ids:
+          - $context.id
+        unless: input.no_wait
+  update:
+    examples:
+      - ecctl lingjun vpd update <vpd-id>
+      - ecctl lingjun vpd update <vpd-id> --name my-name
+    description:
+      en: Update VPD
+      zh-CN: 更新 VPD
+    require_any:
+      - raw: $.name
+      - raw: $.cidr_changes
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - cidr_changes:
+            flag_name: cidr
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: update_vpd
+        when_any: [input.name]
+      - binding: associate_cidr
+        when: has($prefixed_kv_objects($.cidr_changes,"+","cidr"))
+      - binding: unassociate_cidr
+        when: has($prefixed_kv_objects($.cidr_changes,"-","cidr"))
+      - wait: update_converged
+        unless: input.no_wait
+  delete:
+    examples:
+      - ecctl lingjun vpd delete <vpd-id>
+    description:
+      en: Delete VPD
+      zh-CN: 删除 VPD
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_vpd
+        wait_unless: input.no_wait
+      - emit:
+          root: vpd
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get VPD
+      zh-CN: 获取 VPD
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - with_routes
+        - with_grants
+        - limit
+        - page
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        not_found: error
+      - probe: routes
+        ids:
+          - $input.id
+        when: input.with_routes
+        merge: true
+      - probe: grants
+        ids:
+          - $input.id
+        when: input.with_grants
+        merge: true
+  list:
+    examples:
+      - ecctl lingjun vpd list
+      - ecctl lingjun vpd list --filter name=<value>
+      - ecctl lingjun vpd list --filter tag.env=prod
+    description:
+      en: List VPDs
+      zh-CN: 列出 VPD
+    input:
+      controls:
+        - filter
+        - limit
+        - page
+    filters:
+      id:
+        target: id
+      name:
+        target: name
+      status:
+        target: status
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+      er:
+        target: er
+    workflow:
+      - probe: list
+        many: true

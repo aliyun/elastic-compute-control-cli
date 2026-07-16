@@ -1,0 +1,16 @@
+surface: full
+resource: ack/policy
+
+steps:
+  - name: list policies
+    run: ecctl ack policy list
+    expect:
+      $.policies: { type: array, min_len: 1 }
+    capture:
+      policy_name: $.policies[0].name
+
+  - name: get policy
+    run: ecctl ack policy get {{.policy_name}}
+    at: $.policy
+    expect:
+      name: { eq: "{{.policy_name}}" }

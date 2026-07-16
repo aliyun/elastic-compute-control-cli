@@ -1,0 +1,92 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: alert
+kind: regional
+display_name:
+  en: alert
+  zh-CN: 报警
+description:
+  en: Manage ACK alert rule state
+  zh-CN: 管理 ACK 报警规则状态
+examples:
+  - ecctl ack alert update --cluster <cluster-id> --enabled=true --rule-id <rule-id>
+  - ecctl ack alert update --cluster <cluster-id> --enabled=false --ruleset-id <ruleset-id>
+
+identity:
+  output_root:
+    one: alert
+    many: alerts
+
+schema:
+  fields:
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    enabled:
+      type: boolean
+      description:
+        en: desired alert state; use --enabled=true to start or --enabled=false to stop
+        zh-CN: 期望报警状态；使用 --enabled=true 启动，--enabled=false 停止
+    rule_id:
+      type: string
+      description:
+        en: alert rule ID
+        zh-CN: 报警规则 ID
+    ruleset_id:
+      type: string
+      description:
+        en: alert ruleset ID
+        zh-CN: 报警规则集 ID
+
+bindings:
+  start_alert:
+    api: StartAlert
+    request:
+      ClusterId: $.cluster
+      alert_rule_name: $.rule_id
+      alert_rule_group_name: $.ruleset_id
+    request_id_from: $.RequestId
+  stop_alert:
+    api: StopAlert
+    request:
+      ClusterId: $.cluster
+      alert_rule_name: $.rule_id
+      alert_rule_group_name: $.ruleset_id
+    request_id_from: $.RequestId
+
+operations:
+  update:
+    examples:
+      - ecctl ack alert update --cluster <cluster-id>
+    description:
+      en: Start or stop an ACK alert rule or ruleset
+      zh-CN: 启动或停止 ACK 报警规则或规则集
+    require_any:
+      - raw: $.enabled
+    require_when:
+      - when_any: [enabled]
+        require_any: [rule_id, ruleset_id]
+    conflicts:
+      - any: [rule_id]
+        with_any: [ruleset_id]
+    input:
+      fields:
+        - cluster:
+            required: true
+        - enabled
+        - rule_id
+        - ruleset_id
+    workflow:
+      - binding: start_alert
+        when: input.enabled
+      - binding: stop_alert
+        unless: input.enabled
+      - emit:
+          fields:
+            cluster: $input.cluster
+            enabled: $input.enabled
+            rule_id: $input.rule_id
+            ruleset_id: $input.ruleset_id

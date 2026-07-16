@@ -1,0 +1,382 @@
+schema_version: 2
+product: ecs
+resource: snapshot-group
+kind: regional
+aliases: [ssg]
+display_name:
+  en: snapshot group
+  zh-CN: 快照一致性组
+description:
+  en: Manage snapshot-consistent groups
+  zh-CN: 管理快照一致性组
+examples:
+  - ecctl ecs snapshot-group list
+  - ecctl ecs snapshot-group create --instance i-xxx --name app-group
+  - ecctl ecs snapshot-group get <snapshot-group-id>
+
+identity:
+  field: id
+  prefix: ssg-
+  output_root:
+    one: snapshot_group
+    many: snapshot_groups
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: snapshot group ID
+        zh-CN: 快照一致性组 ID
+    ids:
+      type: array
+      description:
+        en: snapshot group IDs
+        zh-CN: 快照一致性组 ID 列表
+      items:
+        type: string
+    name:
+      type: string
+      description:
+        en: snapshot group name
+        zh-CN: 快照一致性组名称
+    description:
+      type: string
+      description:
+        en: snapshot group description
+        zh-CN: 快照一致性组描述
+    status:
+      type: string
+      description:
+        en: snapshot group status
+        zh-CN: 快照一致性组状态
+      enum: [progressing, accomplished, failed]
+    instance:
+      type: string
+      description:
+        en: source instance ID
+        zh-CN: 源实例 ID
+    disk_ids:
+      type: array
+      description:
+        en: disk IDs to include in the group
+        zh-CN: 纳入一致性组的云盘 ID 列表
+      items:
+        type: string
+    exclude_disk_ids:
+      type: array
+      description:
+        en: disk IDs to exclude from the group
+        zh-CN: 排除在一致性组之外的云盘 ID 列表
+      items:
+        type: string
+    instant_access:
+      type: boolean
+      description:
+        en: enable instant access for the group snapshots
+        zh-CN: 为组内快照启用快速可用
+    instant_access_retention_days:
+      type: integer
+      description:
+        en: instant access retention days
+        zh-CN: 快速可用保留天数
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  next_token:
+    type: string
+    description:
+      en: token for the next result page
+      zh-CN: 下一页查询 token
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 600s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: DescribeSnapshotGroups
+    request:
+      RegionId: $context.region
+      SnapshotGroupId:
+        each: $.ids
+      InstanceId: $.instance
+      SnapshotGroupName: $.name
+      Status:
+        each: $list(input.status)
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      MaxResults: $.limit
+      NextToken: $.next_token
+    response:
+      items: $.SnapshotGroups.SnapshotGroup
+      total: $.TotalCount
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.SnapshotGroupId
+      state: $.Status
+      fields:
+        id: $.SnapshotGroupId
+        name: $.Name
+        description: $.Description
+        status: $.Status
+        instance: $.InstanceId
+        region: $.RegionId
+        creation_time: $.CreationTime
+        snapshots: $.Snapshots.Snapshot
+        resource_group: $.ResourceGroupId
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+
+waiters:
+  accomplished_after_create:
+    probe: list
+    target: accomplished
+    interval: 5s
+    timeout: 600s
+    failure:
+      states: [failed]
+  deleted_after_delete:
+    probe: list
+    target: absent
+    interval: 5s
+    timeout: 300s
+
+bindings:
+  create_to_accomplished:
+    api: CreateSnapshotGroup
+    idempotency:
+      field: ClientToken
+      prefix: snapshot-group-create
+    request:
+      RegionId: $context.region
+      InstanceId: $.instance
+      SnapshotGroupName: $.name
+      Description: $.description
+      DiskId:
+        each: $.disk_ids
+      ExcludeDiskId:
+        each: $.exclude_disk_ids
+      InstantAccess: $.instant_access
+      InstantAccessRetentionDays: $.instant_access_retention_days
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: InstanceId
+    id_from: $.SnapshotGroupId
+    request_id_from: $.RequestId
+    wait: accomplished_after_create
+  update_attributes:
+    api: ModifySnapshotGroup
+    request:
+      RegionId: $context.region
+      SnapshotGroupId: $.id
+      Name: $.name
+      Description: $.description
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    require_any:
+      - request: Name
+      - request: Description
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  delete_to_absent:
+    api: DeleteSnapshotGroup
+    request:
+      RegionId: $context.region
+      SnapshotGroupId: $.id
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+
+operations:
+  create:
+    examples:
+      - ecctl ecs snapshot-group create --instance <instance-id>
+      - ecctl ecs snapshot-group create --instance <instance-id> --name my-name --tag env=prod
+    description:
+      en: Create snapshot group
+      zh-CN: 创建快照一致性组
+    input:
+      fields:
+        - instance:
+            required: true
+        - name
+        - description
+        - disk_ids
+        - exclude_disk_ids
+        - instant_access
+        - instant_access_retention_days
+        - resource_group
+        - tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_to_accomplished
+        wait_unless: input.no_wait
+      - probe: list
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            instance: $input.instance
+            region: $context.region
+  update:
+    examples:
+      - ecctl ecs snapshot-group update <snapshot-group-id>
+      - ecctl ecs snapshot-group update <snapshot-group-id> --name my-name
+    description:
+      en: Update snapshot group
+      zh-CN: 更新快照一致性组
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - description
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: update_attributes
+      - probe: list
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            name: $input.name
+            description: $input.description
+  delete:
+    examples:
+      - ecctl ecs snapshot-group delete <snapshot-group-id>
+    description:
+      en: Delete snapshot group
+      zh-CN: 删除快照一致性组
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get snapshot group
+      zh-CN: 获取快照一致性组
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+    workflow:
+      - probe: list
+        ids:
+          - $input.id
+        not_found: error
+  list:
+    examples:
+      - ecctl ecs snapshot-group list
+      - ecctl ecs snapshot-group list --filter name=<value>
+      - ecctl ecs snapshot-group list --filter tag.env=prod
+    description:
+      en: List snapshot groups
+      zh-CN: 列出快照一致性组
+    input:
+      fields:
+        - ids:
+            positional_many: true
+      controls:
+        - filter
+        - limit
+        - next_token
+    filters:
+      id:
+        target: ids
+      ids:
+        target: ids
+      snapshot-group:
+        target: ids
+      snapshot-group.id:
+        target: ids
+      name:
+        target: name
+      status:
+        target: status
+      instance:
+        target: instance
+      instance.id:
+        target: instance
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true

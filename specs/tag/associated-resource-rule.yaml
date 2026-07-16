@@ -1,0 +1,249 @@
+schema_version: 2
+product: tag
+resource: associated-resource-rule
+kind: regional
+aliases: [arr]
+display_name:
+  en: associated resource rule
+  zh-CN: 关联资源标签规则
+description:
+  en: Manage associated resource tag rules
+  zh-CN: 管理关联资源标签规则
+examples:
+  - ecctl tag associated-resource-rule list
+  - ecctl tag arr list --filter status=Enable
+  - ecctl tag associated-resource-rule create --setting-name <setting-name> --tag-keys env,owner
+  - ecctl tag arr update <setting-name> --status Disable
+
+identity:
+  field: setting_name
+  output_root:
+    one: associated_resource_rule
+    many: associated_resource_rules
+
+schema:
+  fields:
+    setting_name:
+      type: string
+      description:
+        en: associated resource rule setting name
+        zh-CN: 关联资源标签规则设置名称
+    status:
+      type: string
+      description:
+        en: associated resource rule status
+        zh-CN: 关联资源标签规则状态
+      enum: [Enable, Disable]
+    tag_keys:
+      type: string_array
+      description:
+        en: tag keys applied by the associated resource rule
+        zh-CN: 关联资源标签规则作用的标签键列表
+    existing_status:
+      type: string
+      description:
+        en: whether to apply the rule to existing associated resources
+        zh-CN: 是否对存量关联资源生效
+      enum: [Enable, Disable]
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum rules to return
+      zh-CN: 最多返回规则数量
+  next_token:
+    type: string
+    description:
+      en: token for the next page
+      zh-CN: 下一页查询 Token
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: ListAssociatedResourceRules
+    request:
+      RegionId: $context.region
+      SettingName:
+        each: $list($.setting_name)
+      Status: $.status
+      MaxResult: $.limit
+      NextToken: $.next_token
+      ApiParam:
+        raw: $.api_param
+    response:
+      items: $.Rules
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.SettingName
+      fields:
+        setting_name: $.SettingName
+        status: $.Status
+        tag_keys: $.TagKeys
+        existing_status: $.ExistingStatus
+      absent:
+        when_empty_for_requested_ids: true
+
+bindings:
+  create_rule:
+    api: CreateAssociatedResourceRules
+    request:
+      RegionId: $context.region
+      CreateRulesList:
+        each: $list($.setting_name)
+        fields:
+          SettingName: $
+          Status: $input.status
+          TagKeys:
+            each: $input.tag_keys
+          ExistingStatus: $input.existing_status
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  update_rule:
+    api: UpdateAssociatedResourceRule
+    hooks:
+      before: [preserve_update_fields]
+      api_calls:
+        - hook: preserve_update_fields
+          api: ListAssociatedResourceRules
+          phase: preflight
+          condition: input.setting_name != "" && (input.status == "" || input.existing_status == "" || length(input.tag_keys) == 0)
+          purpose:
+            en: Read the existing rule so omitted fields are preserved during the update.
+            zh-CN: 更新前读取现有规则，以保留未指定的字段。
+    request:
+      RegionId: $context.region
+      SettingName: $.setting_name
+      Status: $.status
+      TagKeys:
+        each: $.tag_keys
+      ExistingStatus: $.existing_status
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - request: Status
+      - request: TagKeys
+      - request: ExistingStatus
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  delete_rule:
+    api: DeleteAssociatedResourceRule
+    request:
+      RegionId: $context.region
+      SettingName: $.setting_name
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+
+operations:
+  create:
+    examples:
+      - ecctl tag associated-resource-rule create --setting-name <setting-name>
+    description:
+      en: Create associated resource rule
+      zh-CN: 创建关联资源标签规则
+    input:
+      fields:
+        - setting_name:
+            required: true
+        - status:
+            default: Enable
+        - tag_keys
+        - existing_status
+      controls:
+        - api_param
+    workflow:
+      - binding: create_rule
+      - emit:
+          fields:
+            setting_name: $input.setting_name
+            status: $input.status
+            tag_keys: $input.tag_keys
+            existing_status: $input.existing_status
+  update:
+    examples:
+      - ecctl tag associated-resource-rule update <setting-name>
+    description:
+      en: Update associated resource rule
+      zh-CN: 更新关联资源标签规则
+    require_any:
+      - raw: $.status
+      - raw: $.tag_keys
+      - raw: $.existing_status
+      - raw: $.api_param
+    input:
+      fields:
+        - setting_name:
+            required: true
+            positional: true
+        - status
+        - tag_keys
+        - existing_status
+      controls:
+        - api_param
+    workflow:
+      - binding: update_rule
+      - probe: list
+        ids:
+          - $input.setting_name
+        as: final
+  delete:
+    examples:
+      - ecctl tag associated-resource-rule delete <setting-name>
+    description:
+      en: Delete associated resource rule
+      zh-CN: 删除关联资源标签规则
+    input:
+      fields:
+        - setting_name:
+            required: true
+            positional: true
+      controls:
+        - api_param
+    workflow:
+      - binding: delete_rule
+      - emit:
+          fields:
+            id: $input.setting_name
+            setting_name: $input.setting_name
+          deleted: true
+  list:
+    examples:
+      - ecctl tag associated-resource-rule list
+      - ecctl tag associated-resource-rule list --filter setting-name=<value>
+    description:
+      en: List associated resource rules
+      zh-CN: 列出关联资源标签规则
+    input:
+      fields:
+        - setting_name:
+            positional_many: true
+      controls:
+        - filter
+        - limit
+        - next_token
+        - api_param
+    filters:
+      setting-name:
+        target: setting_name
+      name:
+        target: setting_name
+      status:
+        target: status
+    workflow:
+      - probe: list
+        many: true

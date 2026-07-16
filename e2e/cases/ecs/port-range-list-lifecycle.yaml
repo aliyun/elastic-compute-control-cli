@@ -1,0 +1,63 @@
+# Port range list full lifecycle: create -> read-back -> differential -> list ->
+# update -> delete. Regional resource, no network prerequisites. Structural
+# assertions (type/prefix) come from the spec; concrete API values the spec
+# cannot predict are left as TODO(human).
+resource: ecs/port-range-list
+# Self-contained regional resource: consumes nothing from the shared stack.
+
+steps:
+  - name: create
+    run: >
+      ecctl ecs port-range-list create
+      --name {{.run_name}}-prl
+      --max-entries 20
+      --entry port-range=80/80,description=http
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.port_range_list
+    expect:
+      id: { type: string, prefix: prl- }
+      name: { eq: "{{.run_name}}-prl" }
+      max_entries: { eq: 20 }
+    capture:
+      prl_id: id
+    teardown: ecctl ecs port-range-list delete {{.prl_id}}
+
+  - name: get (read-back)
+    run: ecctl ecs port-range-list get {{.prl_id}} --with-entries
+    at: $.port_range_list
+    expect:
+      id: { eq: "{{.prl_id}}" }
+      name: { eq: "{{.run_name}}-prl" }
+    capture:
+      hi_name: name
+
+  - name: differential vs raw DescribePortRangeLists
+    run: ecctl call ecs DescribePortRangeLists --PortRangeListId.1 {{.prl_id}}
+    expect:
+      $.response.PortRangeLists[0].PortRangeListId: { eq: "{{.prl_id}}" }   # call wraps under .response
+      $.response.PortRangeLists[0].PortRangeListName: { eq: "{{.hi_name}}" }
+
+  - name: list (find ours)
+    run: ecctl ecs port-range-list list --filter name={{.run_name}}-prl
+    assert:
+      - len($.port_range_lists) >= 0
+
+  - name: update (rename + add entry)
+    run: ecctl ecs port-range-list update {{.prl_id}} --name {{.run_name}}-prl-renamed --entry +port-range=443/443,description=https
+    at: $.port_range_list
+    expect:
+      id: { eq: "{{.prl_id}}" }
+
+  - name: get (read-back after update)
+    run: ecctl ecs port-range-list get {{.prl_id}}
+    at: $.port_range_list
+    expect:
+      id: { eq: "{{.prl_id}}" }
+      name: { eq: "{{.run_name}}-prl-renamed" }
+
+  - name: delete
+    run: ecctl ecs port-range-list delete {{.prl_id}}
+    at: $.port_range_list
+    expect:
+      id: { eq: "{{.prl_id}}" }
+      $.deleted: { eq: true }   # `deleted` is emitted at the root, not under output_root

@@ -1,0 +1,812 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: nodepool
+kind: regional
+aliases: [np]
+display_name:
+  en: nodepool
+  zh-CN: 节点池
+description:
+  en: Manage ACK nodepool resources
+  zh-CN: 管理 ACK 节点池资源
+examples:
+  - ecctl ack nodepool list --cluster <cluster-id>
+  - ecctl ack nodepool get <nodepool-id> --cluster <cluster-id>
+  - ecctl ack nodepool update <nodepool-id> --cluster <cluster-id> --desired-size 3
+  - ecctl ack np attach <nodepool-id> --cluster <cluster-id> --instance <instance-id>
+
+identity:
+  field: id
+  output_root:
+    one: nodepool
+    many: nodepools
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: nodepool ID
+        zh-CN: 节点池 ID
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    name:
+      type: string
+      description:
+        en: nodepool name
+        zh-CN: 节点池名称
+    config:
+      type: object
+      description:
+        en: nodepool request body as a JSON object or @file
+        zh-CN: 节点池请求体，JSON 对象或 @file
+    vswitch:
+      type: string_array
+      description:
+        en: VSwitch IDs for the nodepool scaling group
+        zh-CN: 节点池伸缩组使用的交换机 ID
+    instance_type:
+      type: string_array
+      description:
+        en: ECS instance types for the nodepool scaling group
+        zh-CN: 节点池伸缩组使用的 ECS 实例规格
+    desired_size:
+      type: integer
+      description:
+        en: desired node count for the nodepool
+        zh-CN: 节点池期望节点数
+    system_disk_category:
+      type: string
+      description:
+        en: system disk category for nodepool instances
+        zh-CN: 节点池实例系统盘类型
+    system_disk_size:
+      type: integer
+      description:
+        en: system disk size in GiB for nodepool instances
+        zh-CN: 节点池实例系统盘大小，单位 GiB
+    internet_max_bandwidth_out:
+      type: integer
+      description:
+        en: maximum outbound public bandwidth in Mbit/s for nodepool instances
+        zh-CN: 节点池实例公网出方向最大带宽，单位 Mbit/s
+    runtime:
+      type: string
+      description:
+        en: container runtime for nodepool nodes
+        zh-CN: 节点池节点容器运行时
+      enum: [docker, containerd, Sandboxed-Container.runv]
+    runtime_version:
+      type: string
+      description:
+        en: container runtime version for nodepool nodes
+        zh-CN: 节点池节点容器运行时版本
+    with_node_config:
+      type: boolean
+      description:
+        en: route update to node-level configuration
+        zh-CN: 将 update 路由到节点级配置
+    node_config:
+      type: object
+      description:
+        en: node-level configuration request body as a JSON object or @file
+        zh-CN: 节点级配置请求体，JSON 对象或 @file
+    with_vuls:
+      type: boolean
+      description:
+        en: include nodepool vulnerability details
+        zh-CN: 附带节点池漏洞详情
+    vulnerabilities:
+      type: string_array
+      description:
+        en: vulnerability IDs to fix
+        zh-CN: 要修复的漏洞 ID
+    necessity:
+      type: string
+      description:
+        en: vulnerability necessity filter
+        zh-CN: 漏洞修复必要性过滤
+    print_script_only:
+      type: boolean
+      description:
+        en: print the attach script without attaching instances
+        zh-CN: 仅打印加入脚本，不执行实例加入
+    instance:
+      type: string_array
+      description:
+        en: ECS instance IDs
+        zh-CN: ECS 实例 ID
+    node:
+      type: string_array
+      description:
+        en: Kubernetes node names or IDs
+        zh-CN: Kubernetes 节点名称或 ID
+    drain_node:
+      type: boolean
+      description:
+        en: drain nodes before removing them
+        zh-CN: 移除前排空节点
+    concurrency:
+      type: boolean
+      description:
+        en: remove nodes concurrently when supported
+        zh-CN: 在支持时并发移除节点
+
+controls:
+  force:
+    type: boolean
+    default: false
+    description:
+      en: force deletion semantics when supported by the API
+      zh-CN: 在 API 支持时启用强制删除语义
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  detail:
+    api: DescribeClusterNodePoolDetail
+    request:
+      ClusterId: $.cluster
+      NodepoolId: $.id
+    response:
+      item: $
+      request_id: $.request_id
+      id: $.nodepool_info.nodepool_id
+      state: $.status.state
+      fields:
+        id: $.nodepool_info.nodepool_id
+        name: $.nodepool_info.name
+        status: $.status.state
+        cluster: $.cluster_id
+        nodepool_info: $.nodepool_info
+        scaling_group: $.scaling_group
+        kubernetes_config: $.kubernetes_config
+        node_config: $.node_config
+        auto_scaling: $.auto_scaling
+        management: $.management
+        tags: $.tags
+  list:
+    api: DescribeClusterNodePools
+    request:
+      ClusterId: $.cluster
+      NodepoolName: $.name
+    response:
+      items: $.nodepools
+      request_id: $.request_id
+      id: $.nodepool_info.nodepool_id
+      state: $.status.state
+      fields:
+        id: $.nodepool_info.nodepool_id
+        name: $.nodepool_info.name
+        status: $.status.state
+        cluster: $.cluster_id
+        nodepool_info: $.nodepool_info
+        scaling_group: $.scaling_group
+        kubernetes_config: $.kubernetes_config
+        auto_scaling: $.auto_scaling
+        management: $.management
+  vuls:
+    api: DescribeNodePoolVuls
+    request:
+      cluster_id: $.cluster
+      nodepool_id: $.id
+      necessity: $.necessity
+    response:
+      item: $
+      request_id: $.request_id
+      fields:
+        vuls: $.vuls
+  attach_scripts:
+    api: DescribeClusterAttachScripts
+    request:
+      ClusterId: $.cluster
+      body:
+        from: $.config
+    response:
+      item: $
+      request_id: $.request_id
+      fields:
+        script: $.script
+  task:
+    api: DescribeTaskInfo
+    request:
+      task_id: $context.task_id
+    response:
+      item: $
+      request_id: $.request_id
+      id: $.task_id
+      state: $.state
+      fields:
+        task_id: $.task_id
+        status: $.state
+        task_type: $.task_type
+        error: $.error
+        task_result: $.task_result
+
+waiters:
+  active_after_change:
+    probe: detail
+    target: active
+    interval: 10s
+    timeout: 600s
+    failure:
+      states: [failed]
+  absent_after_delete:
+    probe: list
+    target: absent
+    interval: 10s
+    timeout: 600s
+  task_succeeded:
+    probe: task
+    target: success
+    interval: 2s
+    timeout: 3600s
+    failure:
+      states: [fail, failed]
+
+bindings:
+  create_to_active:
+    api: CreateClusterNodePool
+    request:
+      ClusterId: $.cluster
+      body:
+        from: $.config
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: ClusterId
+      - request: body
+    id_from: $.nodepool_id
+    request_id_from: $.request_id
+    wait: active_after_change
+  create_from_fields:
+    api: CreateClusterNodePool
+    request:
+      ClusterId: $.cluster
+      body:
+        nodepool_info:
+          name: $.name
+        scaling_group:
+          vswitch_ids: $list($.vswitch)
+          instance_types: $list($.instance_type)
+          desired_size: $.desired_size
+          system_disk_category: $.system_disk_category
+          system_disk_size: $.system_disk_size
+          internet_max_bandwidth_out: $.internet_max_bandwidth_out
+        kubernetes_config:
+          runtime: $.runtime
+          runtime_version: $.runtime_version
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: ClusterId
+      - request: body.nodepool_info.name
+      - request: body.scaling_group.vswitch_ids
+      - request: body.scaling_group.instance_types
+    id_from: $.nodepool_id
+    request_id_from: $.request_id
+    wait: active_after_change
+  modify_config:
+    api: ModifyClusterNodePool
+    request:
+      ClusterId: $.cluster
+      NodepoolId: $.id
+      body:
+        from: $.config
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: ClusterId
+      - request: NodepoolId
+      - request: body
+    request_id_from: $.request_id
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
+  scale:
+    api: ScaleClusterNodePool
+    request:
+      ClusterId: $.cluster
+      NodepoolId: $.id
+      body:
+        desired_size: $.desired_size
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: ClusterId
+      - request: NodepoolId
+      - request: body.desired_size
+    request_id_from: $.request_id
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
+  modify_node_config:
+    api: ModifyNodePoolNodeConfig
+    request:
+      ClusterId: $.cluster
+      NodepoolId: $.id
+      body:
+        from: $.node_config
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: ClusterId
+      - request: NodepoolId
+      - request: body
+    request_id_from: $.request_id
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
+  delete_to_absent:
+    api: DeleteClusterNodepool
+    request:
+      ClusterId: $.cluster
+      NodepoolId: $.id
+      force: $.force
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: ClusterId
+      - request: NodepoolId
+    request_id_from: $.request_id
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
+  upgrade_to_active:
+    api: UpgradeClusterNodepool
+    request:
+      ClusterId: $.cluster
+      NodepoolId: $.id
+      body:
+        from: $.config
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: ClusterId
+      - request: NodepoolId
+      - request: body
+    request_id_from: $.request_id
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
+  repair_nodes:
+    api: RepairClusterNodePool
+    request:
+      cluster_id: $.cluster
+      nodepool_id: $.id
+      body.nodes: $list(input.node)
+      body:
+        from: $.config
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: cluster_id
+      - request: nodepool_id
+    require_any:
+      - request: body.nodes
+      - request: body
+      - raw: $.api_param
+    request_id_from: $.request_id
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
+  repair_vuls:
+    api: FixNodePoolVuls
+    request:
+      cluster_id: $.cluster
+      nodepool_id: $.id
+      vulnerabilities:
+        each: $.vulnerabilities
+      body:
+        from: $.config
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: cluster_id
+      - request: nodepool_id
+    require_any:
+      - request: vulnerabilities
+      - request: body
+      - raw: $.api_param
+    request_id_from: $.request_id
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
+  attach_instances:
+    api: AttachInstancesToNodePool
+    request:
+      ClusterId: $.cluster
+      NodepoolId: $.id
+      body.instances: $list(input.instance)
+      body:
+        from: $.config
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: ClusterId
+      - request: NodepoolId
+    require_any:
+      - request: body.instances
+      - request: body
+      - raw: $.api_param
+    request_id_from: $.request_id
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
+  detach_nodes:
+    api: RemoveNodePoolNodes
+    request:
+      ClusterId: $.cluster
+      NodepoolId: $.id
+      nodes: $list(input.node)
+      instance_ids: $list(input.instance)
+      release_node: $.force
+      drain_node: $.drain_node
+      concurrency: $.concurrency
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: ClusterId
+      - request: NodepoolId
+    require_any:
+      - request: nodes
+      - request: instance_ids
+      - raw: $.api_param
+    request_id_from: $.request_id
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
+
+operations:
+  create:
+    examples:
+      - ecctl ack nodepool create --cluster <cluster-id> --config @nodepool-create.json
+      - 'ecctl ack nodepool create --cluster <cluster-id> --timeout 10m --config ''{"nodepool_info":{"name":"default-pool"},"scaling_group":{"vswitch_ids":["<vsw-id>"],"instance_types":["ecs.g6.xlarge"],"system_disk_category":"cloud_essd","system_disk_size":120,"desired_size":3}}'''
+    description:
+      en: Create nodepool
+      zh-CN: 创建节点池
+    input:
+      fields:
+        - cluster:
+            required: true
+        - config
+        - name
+        - vswitch
+        - instance_type
+        - desired_size
+        - system_disk_category
+        - system_disk_size
+        - internet_max_bandwidth_out
+        - runtime
+        - runtime_version
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    require_any:
+      - raw: $.config
+      - raw: $.name
+      - raw: $.vswitch
+      - raw: $.instance_type
+      - raw: $.desired_size
+      - raw: $.system_disk_category
+      - raw: $.system_disk_size
+      - raw: $.internet_max_bandwidth_out
+      - raw: $.runtime
+      - raw: $.runtime_version
+    conflicts:
+      - any: [config]
+        with_any: [name, vswitch, instance_type, desired_size, system_disk_category, system_disk_size, internet_max_bandwidth_out, runtime, runtime_version]
+    workflow:
+      - binding: create_to_active
+        when: input.config
+        wait_unless: input.no_wait
+      - binding: create_from_fields
+        unless: input.config
+        wait_unless: input.no_wait
+      - probe: detail
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            cluster: $input.cluster
+  update:
+    examples:
+      - ecctl ack nodepool update <nodepool-id> --cluster <cluster-id>
+    description:
+      en: Update nodepool
+      zh-CN: 更新节点池
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+        - config
+        - desired_size
+        - with_node_config
+        - node_config
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    require_any:
+      - raw: $.config
+      - raw: $.desired_size
+      - raw: $.with_node_config
+      - raw: $.api_param
+    require_when:
+      - when_any: [with_node_config]
+        require_any: [node_config]
+    workflow:
+      - binding: modify_config
+        when: input.config
+        wait_unless: input.no_wait
+      - binding: scale
+        when: input.desired_size
+        wait_unless: input.no_wait
+      - binding: modify_node_config
+        when: input.with_node_config
+        wait_unless: input.no_wait
+      - probe: detail
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+  delete:
+    examples:
+      - ecctl ack nodepool delete <nodepool-id> --cluster <cluster-id>
+    description:
+      en: Delete nodepool
+      zh-CN: 删除节点池
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+      controls:
+        - force
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+        wait_unless: input.no_wait
+      - wait: absent_after_delete
+        ids:
+          - $input.id
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            cluster: $input.cluster
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get nodepool
+      zh-CN: 获取节点池
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+        - with_vuls
+        - necessity
+    workflow:
+      - probe: detail
+        ids:
+          - $input.id
+        not_found: error
+      - probe: vuls
+        when: input.with_vuls
+        merge: true
+  list:
+    examples:
+      - ecctl ack nodepool list
+    description:
+      en: List nodepools
+      zh-CN: 列出节点池
+    input:
+      fields:
+        - cluster:
+            required: true
+        - name
+    workflow:
+      - probe: list
+        many: true
+  upgrade:
+    examples:
+      - ecctl ack nodepool upgrade <nodepool-id> --cluster <cluster-id> --config @nodepool-config.json
+    description:
+      en: Upgrade nodepool
+      zh-CN: 升级节点池
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+        - config:
+            required: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: upgrade_to_active
+        wait_unless: input.no_wait
+      - probe: detail
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            cluster: $input.cluster
+  repair:
+    examples:
+      - ecctl ack nodepool repair <nodepool-id> --cluster <cluster-id>
+    description:
+      en: Repair nodepool
+      zh-CN: 修复节点池
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+        - node
+        - vulnerabilities
+        - config
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    require_any:
+      - raw: $.node
+      - raw: $.vulnerabilities
+      - raw: $.config
+      - raw: $.api_param
+    conflicts:
+      - any: [node]
+        with_any: [vulnerabilities]
+    workflow:
+      - binding: repair_nodes
+        when: input.node || input.config || input.api_param
+        wait_unless: input.no_wait
+      - binding: repair_vuls
+        when: input.vulnerabilities
+        wait_unless: input.no_wait
+      - probe: detail
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            cluster: $input.cluster
+  attach:
+    examples:
+      - ecctl ack nodepool attach <nodepool-id> --cluster <cluster-id>
+    description:
+      en: Attach instances to nodepool
+      zh-CN: 将实例加入节点池
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+        - instance
+        - print_script_only
+        - config
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    require_any:
+      - raw: $.instance
+      - raw: $.print_script_only
+      - raw: $.config
+      - raw: $.api_param
+    conflicts:
+      - any: [print_script_only]
+        with_any: [instance]
+    workflow:
+      - binding: attach_instances
+        unless: input.print_script_only
+        wait_unless: input.no_wait
+      - probe: attach_scripts
+        when: input.print_script_only
+      - probe: detail
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait || input.print_script_only
+      - emit:
+          fields:
+            id: $input.id
+            cluster: $input.cluster
+    output:
+      fields:
+        actions: $result.actions
+        nodepool:
+          value:
+            id: $input.id
+            cluster: $input.cluster
+          unless: $input.print_script_only
+        attach_script:
+          value:
+            script: $result.item.script
+          when: $input.print_script_only
+  detach:
+    examples:
+      - ecctl ack nodepool detach <nodepool-id> --cluster <cluster-id>
+    description:
+      en: Detach nodes from nodepool
+      zh-CN: 从节点池移除节点
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+        - node
+        - instance
+        - drain_node
+        - concurrency
+      controls:
+        - force
+        - no_wait
+        - timeout
+        - api_param
+    require_any:
+      - raw: $.node
+      - raw: $.instance
+      - raw: $.api_param
+    workflow:
+      - binding: detach_nodes
+        wait_unless: input.no_wait
+      - probe: detail
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            cluster: $input.cluster

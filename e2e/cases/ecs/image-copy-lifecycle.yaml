@@ -1,0 +1,60 @@
+# Copy a custom ECS image to a distinct destination region and clean both sides.
+resource: ecs/image
+requires_params: [ecs.instance_type]
+needs: [vpc, vswitch, security_group, image]
+region_requirements:
+  destination:
+    distinct_from: primary
+timeout: 60m
+serial: true
+
+steps:
+  - name: provision image copy host
+    run: >
+      ecctl ecs instance create
+      --type {{.params.ecs.instance_type}}
+      --image {{.stack.image}}
+      --sg {{.stack.security_group}}
+      --vswitch {{.stack.vswitch}}
+      --name {{.run_name}}-image-copy-host
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 30m
+    at: $.instance
+    expect:
+      id: { type: string, prefix: i- }
+      status: Running
+    capture:
+      instance_id: id
+    teardown: ecctl ecs instance delete {{.instance_id}} --force
+
+  - name: create source image
+    run: >
+      ecctl ecs image create
+      --instance {{.instance_id}}
+      --name {{.run_name}}-copy-source
+      --description ecctl-e2e-copy-source-{{.run_id}}
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 60m
+    at: $.image
+    expect:
+      id: { type: string, prefix: m- }
+    capture:
+      source_image_id: id
+    teardown: ecctl ecs image delete {{.source_image_id}} --force
+
+  - name: copy
+    run: >
+      ecctl ecs image copy {{.source_image_id}}
+      --destination-region {{.regions.destination.id}}
+      --destination-name {{.run_name}}-image-copy
+      --destination-description ecctl-e2e-image-copy-{{.run_id}}
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 60m
+    at: $.image
+    expect:
+      id: { type: string, prefix: m- }
+      destination_region: { eq: "{{.regions.destination.id}}" }
+    capture:
+      copied_image_id: id
+    teardown: ecctl ecs image delete {{.copied_image_id}} --force
+    teardown_region: destination

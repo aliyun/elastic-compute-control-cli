@@ -1,0 +1,262 @@
+schema_version: 2
+product: ecs
+resource: keypair
+kind: regional
+display_name:
+  en: keypair
+  zh-CN: 密钥对
+description:
+  en: Manage SSH key pairs
+  zh-CN: 管理 SSH 密钥对
+examples:
+  - ecctl ecs keypair list
+  - ecctl ecs keypair create --name web-key
+  - ecctl ecs keypair create --name imported-key --public-key "ssh-rsa AAAA..."
+  - ecctl ecs keypair delete web-key
+
+identity:
+  field: id
+  output_root:
+    one: keypair
+    many: keypairs
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: key pair name
+        zh-CN: 密钥对名称
+    ids:
+      type: array
+      description:
+        en: key pair names
+        zh-CN: 密钥对名称列表
+      items:
+        type: string
+    key_pair_id:
+      type: string
+      description:
+        en: key pair ID
+        zh-CN: 密钥对 ID
+    fingerprint:
+      type: string
+      description:
+        en: key pair fingerprint
+        zh-CN: 密钥对指纹
+    public_key:
+      type: string
+      input_style: text|@file
+      description:
+        en: existing public key to import (switches create to ImportKeyPair)
+        zh-CN: 要导入的已有公钥（创建时切换为导入密钥对）
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 50
+    max: 50
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: DescribeKeyPairs
+    request:
+      RegionId: $context.region
+      KeyPairName: $.id
+      KeyPairFingerPrint: $.fingerprint
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.KeyPairs.KeyPair
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.KeyPairName
+      fields:
+        id: $.KeyPairName
+        name: $.KeyPairName
+        key_pair_id: $.KeyPairId
+        fingerprint: $.KeyPairFingerPrint
+        resource_group: $.ResourceGroupId
+        creation_time: $.CreationTime
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+
+bindings:
+  create_to_available:
+    api: CreateKeyPair
+    request:
+      RegionId: $context.region
+      KeyPairName: $.id
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    id_from: $.KeyPairName
+    request_id_from: $.RequestId
+  import_to_available:
+    api: ImportKeyPair
+    request:
+      RegionId: $context.region
+      KeyPairName: $.id
+      PublicKeyBody: $.public_key
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+      - request: PublicKeyBody
+    id_from: $.KeyPairName
+    request_id_from: $.RequestId
+  delete_keypairs:
+    api: DeleteKeyPairs
+    request:
+      RegionId: $context.region
+      KeyPairNames: $json($.ids)
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.ids
+    request_id_from: $.RequestId
+
+operations:
+  create:
+    examples:
+      - ecctl ecs keypair create --name my-keypair
+      - ecctl ecs keypair create --name my-keypair --tag env=prod
+      - ecctl ecs keypair create --name my-keypair --public-key "ssh-rsa AAAA..."
+    description:
+      en: Create or import a key pair
+      zh-CN: 创建或导入密钥对
+    input:
+      fields:
+        - id:
+            required: true
+            flag_name: name
+        - public_key
+        - resource_group
+        - tag
+      controls:
+        - api_param
+    workflow:
+      - binding: import_to_available
+        when: input.public_key
+      - binding: create_to_available
+        when: "!input.public_key"
+      - probe: list
+        ids:
+          - $context.id
+        as: final
+      - emit:
+          fields:
+            id: $context.id
+            name: $context.id
+            region: $context.region
+  delete:
+    examples:
+      - ecctl ecs keypair delete <keypair-name>
+      - ecctl ecs keypair delete kp-1 kp-2
+    description:
+      en: Delete key pairs
+      zh-CN: 删除密钥对
+    input:
+      fields:
+        - ids:
+            required: true
+            positional_many: true
+      controls:
+        - api_param
+    workflow:
+      - binding: delete_keypairs
+      - emit:
+          fields:
+            ids: $input.ids
+          deleted: true
+
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get key pair
+      zh-CN: 获取密钥对
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+    workflow:
+      - probe: list
+        ids:
+          - $input.id
+        not_found: error
+  list:
+    examples:
+      - ecctl ecs keypair list
+      - ecctl ecs keypair list --filter name=<value>
+      - ecctl ecs keypair list --filter tag.env=prod
+    description:
+      en: List key pairs
+      zh-CN: 列出密钥对
+    input:
+      fields:
+        - id:
+            positional: true
+      controls:
+        - filter
+        - limit
+        - page
+    filters:
+      id:
+        target: id
+      name:
+        target: id
+      keypair:
+        target: id
+      keypair.id:
+        target: id
+      fingerprint:
+        target: fingerprint
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true

@@ -1,0 +1,14 @@
+schema_version: 1
+product: vpc
+priority: 2
+resources:
+  - vpc
+  - vswitch
+description:
+  en: Manage Virtual Private Cloud (VPC) networking, including isolated VPCs and the vSwitches that carve them into zone-level subnets for IP address planning.
+  zh-CN: 管理专有网络 VPC，涵盖隔离的 VPC 网络及其交换机（vSwitch），用于按可用区划分子网与 IP 地址规划。
+examples:
+  - ecctl vpc list
+  - ecctl vpc create --name prod-vpc --cidr 10.0.0.0/16
+  - ecctl vpc vswitch list --filter vpc=<vpc-id>
+  - ecctl vpc vswitch create --vpc <vpc-id> --zone cn-beijing-a --cidr 10.0.1.0/24

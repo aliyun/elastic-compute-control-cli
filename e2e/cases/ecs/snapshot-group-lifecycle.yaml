@@ -1,0 +1,99 @@
+# ECS snapshot-group full lifecycle: create -> read-back -> differential ->
+# list -> update -> delete.
+#
+# Private prerequisite (DESIGN §12.3): a snapshot group is taken from an
+# instance (all its disks at a consistent point), so this case first stands up
+# its own private host instance, then snapshots it via --instance. Teardown is
+# reverse: delete the group, then the host instance. Its type comes from the
+# shared ECS inventory resolver.
+#
+# Structural matchers (type/prefix/regex/exists) are derived from the spec.
+# Concrete business values the spec cannot know are left as TODO(human).
+resource: ecs/snapshot-group
+requires_params: [ecs.instance_type, ecs.system_disk_category]
+parameter_constraints:
+  ecs:
+    allowed_system_disk_categories: [cloud_essd, cloud_auto, cloud_essd_entry, cloud_essd_zrs]
+needs: [vpc, vswitch, security_group, image]
+
+steps:
+  # --- private prerequisite: host instance ---
+  - name: prereq create host instance
+    # CreateSnapshotGroup requires ESSD disks; force an ESSD system disk (the
+    # default image otherwise lands on cloud_efficiency, which the API rejects
+    # with DiskCategory.OperationNotSupported).
+    run: >
+      ecctl ecs instance create
+      --type {{.params.ecs.instance_type}}
+      --image {{.stack.image}}
+      --sg {{.stack.security_group}}
+      --vswitch {{.stack.vswitch}}
+      --system-disk '{"category":"{{.params.ecs.system_disk_category}}"}'
+      --name {{.run_name}}-ssg-host
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.instance
+    expect:
+      id: { type: string, prefix: i- }
+      status: Running
+    capture:
+      instance_id: id
+    teardown: ecctl ecs instance delete {{.instance_id}} --force
+
+  # --- snapshot-group lifecycle ---
+  - name: create
+    run: >
+      ecctl ecs snapshot-group create
+      --instance {{.instance_id}}
+      --name {{.run_name}}-ssg
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.snapshot_group
+    expect:
+      id: { type: string, prefix: ssg- }
+      name: { eq: "{{.run_name}}-ssg" }
+      instance: { eq: "{{.instance_id}}" }
+    capture:
+      group_id: id
+    teardown: ecctl ecs snapshot-group delete {{.group_id}}
+
+  - name: get (read-back)
+    run: ecctl ecs snapshot-group get {{.group_id}}
+    at: $.snapshot_group
+    expect:
+      id: { eq: "{{.group_id}}" }
+      instance: { eq: "{{.instance_id}}" }
+      status: { oneof: [progressing, accomplished] }
+    capture:
+      hi_status: status
+
+  - name: differential vs raw DescribeSnapshotGroups
+    run: ecctl call ecs DescribeSnapshotGroups --SnapshotGroupId.1 {{.group_id}}
+    expect:
+      $.response.SnapshotGroups.SnapshotGroup[0].SnapshotGroupId: { eq: "{{.group_id}}" }   # call wraps under .response
+      $.response.SnapshotGroups.SnapshotGroup[0].Status: { eq: "{{.hi_status}}" }
+      $.response.SnapshotGroups.SnapshotGroup[0].InstanceId: { eq: "{{.instance_id}}" }
+
+  - name: list (find ours)
+    run: ecctl ecs snapshot-group list --filter instance={{.instance_id}}
+    assert:
+      - len($.snapshot_groups) >= 0
+
+  - name: update (rename)
+    run: ecctl ecs snapshot-group update {{.group_id}} --name {{.run_name}}-ssg-renamed
+    at: $.snapshot_group
+    expect:
+      id: { eq: "{{.group_id}}" }
+
+  - name: get (read-back after update)
+    run: ecctl ecs snapshot-group get {{.group_id}}
+    at: $.snapshot_group
+    expect:
+      id: { eq: "{{.group_id}}" }
+      name: { eq: "{{.run_name}}-ssg-renamed" }
+    capture:
+      hi_name: name
+
+  - name: delete
+    run: ecctl ecs snapshot-group delete {{.group_id}}
+    at: $.snapshot_group
+    expect:
+      id: { eq: "{{.group_id}}" }

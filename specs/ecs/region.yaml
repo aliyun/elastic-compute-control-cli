@@ -1,0 +1,101 @@
+schema_version: 2
+product: ecs
+resource: region
+kind: regional
+display_name:
+  en: region
+  zh-CN: 地域
+description:
+  en: Query ECS regions
+  zh-CN: 查询 ECS 地域
+examples:
+  - ecctl ecs region list
+  - ecctl ecs region list --accept-language zh-CN
+
+identity:
+  field: id
+  output_root:
+    one: region
+    many: regions
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: region ID
+        zh-CN: 地域 ID
+    instance_charge_type:
+      type: string
+      description:
+        en: only return regions that support the given instance charge type
+        zh-CN: 仅返回支持该实例计费方式的地域
+      enum: [PrePaid, PostPaid]
+    resource_type:
+      type: string
+      description:
+        en: only return regions that support the given resource type
+        zh-CN: 仅返回支持该资源类型的地域
+    accept_language:
+      type: string
+      description:
+        en: language used for localized region names
+        zh-CN: 地域名称的展示语言
+      enum: [zh-CN, en-US, ja]
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: DescribeRegions
+    request:
+      RegionId: $context.region
+      InstanceChargeType: $.instance_charge_type
+      ResourceType: $.resource_type
+      AcceptLanguage: $.accept_language
+      ApiParam:
+        raw: $.api_param
+    response:
+      items: $.Regions.Region
+      request_id: $.RequestId
+      id: $.RegionId
+      fields:
+        id: $.RegionId
+        local_name: $.LocalName
+        endpoint: $.RegionEndpoint
+        status: $.Status
+
+operations:
+  list:
+    examples:
+      - ecctl ecs region list
+      - ecctl ecs region list --filter charge-type=<value>
+    description:
+      en: List regions
+      zh-CN: 列出地域
+    input:
+      fields:
+        - accept_language
+      controls:
+        - filter
+        - api_param
+    filters:
+      charge-type:
+        target: instance_charge_type
+      resource-type:
+        target: resource_type
+    workflow:
+      - probe: list
+        many: true

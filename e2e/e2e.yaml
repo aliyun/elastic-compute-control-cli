@@ -1,0 +1,32 @@
+# E2E 统一运行配置文件。地域候选和路径从这里读取。
+version: 2
+
+# 地域候选列表，按顺序尝试。地域绑定的前置资源必须放在对应 profile
+# 的 prerequisites 下，不能用环境变量覆盖。仓库默认配置不保存账号内
+# 资源 ID；运行需要前置资源的 case 时，请基于本文件创建 e2e.local.yaml。
+# 只有确认当前地域或可用区不支持时，才会尝试下一套完整地域分配；
+# 权限、配额、断言和清理失败不会触发切换。
+regions:
+  candidates:
+    - id: cn-zhangjiakou
+      # 每个地域只支持以下前置资源字段；当前不做字段白名单校验。
+      # 需要时复制为 e2e.local.yaml，并在对应地域下取消注释后填写：
+      # prerequisites:
+      #   ecs.image:
+      #     oss_bucket: bucket-in-cn-zhangjiakou
+      #   ecs.instance_renew:
+      #     instance_id: i-prepaid-instance
+      #   lingjun.cluster:
+      #     # 两个不同节点组，每个节点组至少有一个可用的专用空闲节点。
+      #     node_group_ids:
+      #       - ng-first
+      #       - ng-second
+    - id: cn-heyuan
+    - id: cn-hangzhou
+
+# 仓库内 E2E 文件路径。相对路径以本配置文件所在目录为基准。
+paths:
+  cases: cases
+  stack: fixtures/stack.yaml
+  coverage: coverage.yaml
+  parameter_policy: fixtures/parameter-policy.yaml

@@ -1,0 +1,25 @@
+# Renew the dedicated prepaid ECS instance declared by the selected region profile.
+resource: ecs/instance
+requires_prerequisites: [ecs.instance_renew]
+serial: true
+
+steps:
+  - name: get renewal target
+    run: ecctl ecs instance get {{.prerequisites.ecs.instance_renew.instance_id}}
+    at: $.instance
+    expect:
+      id: { eq: "{{.prerequisites.ecs.instance_renew.instance_id}}" }
+      charge_type: { eq: PrePaid }
+
+  - name: renew
+    run: >
+      ecctl ecs instance renew {{.prerequisites.ecs.instance_renew.instance_id}}
+      --period 1
+      --period-unit Month
+
+  - name: get renewed instance
+    run: ecctl ecs instance get {{.prerequisites.ecs.instance_renew.instance_id}}
+    at: $.instance
+    expect:
+      id: { eq: "{{.prerequisites.ecs.instance_renew.instance_id}}" }
+      expired_time: { type: string, min_len: 1 }

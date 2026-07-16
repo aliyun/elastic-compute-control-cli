@@ -1,0 +1,209 @@
+schema_version: 2
+product: ecs
+resource: assistant
+kind: regional
+display_name:
+  en: assistant
+  zh-CN: 云助手
+description:
+  en: Manage Cloud Assistant service settings and agent installation
+  zh-CN: 管理云助手服务配置与 Agent 安装
+examples:
+  - ecctl ecs assistant get --region cn-hangzhou
+  - ecctl ecs assistant install --instance-ids '["i-xxx"]' --region cn-hangzhou
+
+identity:
+  field: id
+  output_root:
+    one: assistant
+    many: assistants
+
+schema:
+  fields:
+    instance_ids:
+      type: array
+      description:
+        en: instance IDs to install the Cloud Assistant agent on
+        zh-CN: 要安装云助手 Agent 的实例 ID 列表
+      items:
+        type: string
+
+controls:
+  no_wait:
+    type: boolean
+    description:
+      en: return before read-back completion
+      zh-CN: 回读完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+  setting_types:
+    type: array
+    default: '["InvocationDelivery","SessionManagerDelivery","AgentUpgradeConfig","SessionManagerConfig"]'
+    items:
+      type: string
+    description:
+      en: Cloud Assistant setting types to query (DescribeCloudAssistantSettings requires at least one)
+      zh-CN: 要查询的云助手配置类型（DescribeCloudAssistantSettings 必须至少指定一个）
+  setting_type:
+    type: string
+    enum: [InvocationDelivery, SessionManagerDelivery, AgentUpgradeConfig, SessionManagerConfig]
+    description:
+      en: Cloud Assistant setting type to update
+      zh-CN: 要修改的云助手配置类型
+
+probes:
+  settings:
+    api: DescribeCloudAssistantSettings
+    request:
+      RegionId: $context.region
+      SettingType:
+        each: $.setting_types
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        agent_upgrade_enabled: $.AgentUpgradeConfig
+        agent_upgrade_timezone: $.AgentUpgradeConfig.TimeZone
+        session_manager_enabled: $.SessionManagerConfig.SessionManagerEnabled
+        oss_delivery_configs: $.OssDeliveryConfigs.OssDeliveryConfig
+        sls_delivery_configs: $.SlsDeliveryConfigs.SlsDeliveryConfig
+  updated_setting:
+    api: DescribeCloudAssistantSettings
+    request:
+      RegionId: $context.region
+      SettingType:
+        each: $list(input.setting_type)
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        agent_upgrade_enabled: $.AgentUpgradeConfig
+        agent_upgrade_timezone: $.AgentUpgradeConfig.TimeZone
+        session_manager_enabled: $.SessionManagerConfig.SessionManagerEnabled
+        oss_delivery_configs: $.OssDeliveryConfigs.OssDeliveryConfig
+        sls_delivery_configs: $.SlsDeliveryConfigs.SlsDeliveryConfig
+  status:
+    api: DescribeCloudAssistantStatus
+    request:
+      RegionId: $context.region
+      InstanceId:
+        each: $input.instance_ids
+    response:
+      items: $.InstanceCloudAssistantStatusSet.InstanceCloudAssistantStatus
+      request_id: $.RequestId
+      id: $.InstanceId
+      state: $.CloudAssistantStatus
+      fields:
+        instance: $.InstanceId
+        cloud_assistant_status: $.CloudAssistantStatus
+        os_type: $.OsType
+        support_session_manager: $.SupportSessionManager
+        last_heartbeat_time: $.LastHeartbeatTime
+        agent_version: $.CloudAssistantVersion
+
+waiters:
+  assistant_available:
+    probe: status
+    target: "true"
+    interval: 5s
+    timeout: 300s
+
+bindings:
+  update_settings:
+    api: ModifyCloudAssistantSettings
+    request:
+      RegionId: $context.region
+      SettingType: $.setting_type
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: SettingType
+    require_any:
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  install_agent:
+    api: InstallCloudAssistant
+    request:
+      RegionId: $context.region
+      InstanceId:
+        each: $.instance_ids
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: InstanceId
+    request_id_from: $.RequestId
+    wait: assistant_available
+
+operations:
+  update:
+    examples:
+      - ecctl ecs assistant update --setting-type AgentUpgradeConfig --api-param AgentUpgradeConfig.Enabled=false
+    description:
+      en: Update Cloud Assistant service settings
+      zh-CN: 修改云助手服务配置
+    input:
+      controls:
+        - no_wait
+        - api_param
+        - setting_type:
+            required: true
+    require_any:
+      - raw: $.api_param
+    workflow:
+      - binding: update_settings
+      - probe: updated_setting
+        as: final
+        unless: input.no_wait
+    output:
+      fields:
+        actions: $result.actions
+        assistant: $result.item
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get Cloud Assistant service settings
+      zh-CN: 查询云助手服务配置
+    input:
+      controls:
+        - setting_types
+    workflow:
+      - probe: settings
+    output:
+      fields:
+        assistant: $result.item
+  install:
+    examples:
+      - ecctl ecs assistant install --instance-ids <instance-ids>
+    description:
+      en: Install the Cloud Assistant agent on instances
+      zh-CN: 为实例安装云助手 Agent
+    input:
+      fields:
+        - instance_ids:
+            required: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: install_agent
+        wait_unless: input.no_wait
+      - probe: status
+        ids:
+          - $input.instance_ids
+        many: true
+        unless: input.no_wait
+    output:
+      fields:
+        actions: $result.actions
+        statuses: $result.items

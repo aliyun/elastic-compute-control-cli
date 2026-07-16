@@ -1,0 +1,301 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: template
+kind: regional
+display_name:
+  en: orchestration template
+  zh-CN: 编排模板
+description:
+  en: Manage ACK orchestration templates
+  zh-CN: 管理 ACK 编排模板
+examples:
+  - ecctl ack template list
+  - ecctl ack template get <template-id>
+  - ecctl ack template create --name web --content @template.yaml --template-type kubernetes
+  - ecctl ack template update <template-id> --content @template.yaml
+
+identity:
+  field: id
+  output_root:
+    one: template
+    many: templates
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: template ID
+        zh-CN: 编排模板 ID
+    name:
+      type: string
+      description:
+        en: template name
+        zh-CN: 编排模板名称
+    description:
+      type: string
+      description:
+        en: template description
+        zh-CN: 编排模板描述
+    content:
+      type: string
+      input_style: json|yaml|@file
+      description:
+        en: template content as JSON/YAML text or @file
+        zh-CN: 编排模板内容，JSON/YAML 文本或 @file
+    tags:
+      type: string
+      description:
+        en: template tags
+        zh-CN: 编排模板标签
+    template_type:
+      type: string
+      description:
+        en: template type
+        zh-CN: 编排模板类型
+    acl:
+      type: string
+      description:
+        en: template access control
+        zh-CN: 编排模板访问权限
+    created:
+      type: string
+      description:
+        en: template creation time
+        zh-CN: 编排模板创建时间
+    updated:
+      type: string
+      description:
+        en: template update time
+        zh-CN: 编排模板更新时间
+    template_with_hist_id:
+      type: string
+      description:
+        en: stable template history ID shared by template versions
+        zh-CN: 模板多版本共享的稳定模板 ID
+    version_id:
+      type: string
+      description:
+        en: concrete template version ID
+        zh-CN: 具体模板版本 ID
+
+controls:
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  no_wait:
+    type: boolean
+    description:
+      en: return before delete read-back completion
+      zh-CN: 删除回读完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: delete read-back timeout
+      zh-CN: 删除回读超时时间
+
+probes:
+  attribute:
+    api: DescribeTemplateAttribute
+    request:
+      TemplateId: $.id
+      template_type: $.template_type
+    response:
+      item: $.items
+      request_id: $.RequestId
+      id: $.id
+      fields:
+        id:
+          first:
+            - $.template_with_hist_id
+            - $.id
+        version_id: $.id
+        name: $.name
+        description: $.description
+        content: $.template
+        tags: $.tags
+        template_type: $.template_type
+        acl: $.acl
+        created: $.created
+        updated: $.updated
+        template_with_hist_id: $.template_with_hist_id
+      absent:
+        when_empty_for_requested_ids: true
+  list:
+    api: DescribeTemplates
+    request:
+      template_type: $.template_type
+      page_num: $.page
+      page_size: $.limit
+    response:
+      items: $.templates
+      total: $.page_info.total_count
+      request_id: $.RequestId
+      id: $.id
+      fields:
+        id:
+          first:
+            - $.template_with_hist_id
+            - $.id
+        version_id: $.id
+        name: $.name
+        description: $.description
+        content: $.template
+        tags: $.tags
+        template_type: $.template_type
+        acl: $.acl
+        created: $.created
+        updated: $.updated
+        template_with_hist_id: $.template_with_hist_id
+
+bindings:
+  create_template:
+    api: CreateTemplate
+    request:
+      body:
+        name: $.name
+        template: $.content
+        tags: $.tags
+        description: $.description
+        template_type: $.template_type
+    id_from: $.template_id
+    request_id_from: $.RequestId
+  update_template:
+    api: UpdateTemplate
+    request:
+      TemplateId: $.id
+      body:
+        name: $.name
+        template: $.content
+        tags: $.tags
+        description: $.description
+        template_type: $.template_type
+    require_any:
+      - request: body.name
+      - request: body.template
+      - request: body.tags
+      - request: body.description
+      - request: body.template_type
+    request_id_from: $.RequestId
+  delete_template:
+    api: DeleteTemplate
+    request:
+      TemplateId: $.id
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+
+waiters:
+  deleted_after_delete:
+    probe: attribute
+    target: absent
+    interval: 2s
+    timeout: 300s
+
+operations:
+  create:
+    examples:
+      - ecctl ack template create --name my-name --content <content>
+    description:
+      en: Create ACK orchestration template
+      zh-CN: 创建 ACK 编排模板
+    input:
+      fields:
+        - name:
+            required: true
+        - content:
+            required: true
+        - description
+        - tags
+        - template_type
+    workflow:
+      - binding: create_template
+      - probe: attribute
+        ids:
+          - $context.id
+  update:
+    examples:
+      - ecctl ack template update <template-id>
+      - ecctl ack template update <template-id> --name my-name
+    description:
+      en: Update ACK orchestration template
+      zh-CN: 更新 ACK 编排模板
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - content
+        - description:
+            allow_empty: true
+        - tags
+        - template_type
+    workflow:
+      - binding: update_template
+      - probe: attribute
+        ids:
+          - $input.id
+  delete:
+    examples:
+      - ecctl ack template delete <template-id>
+    description:
+      en: Delete ACK orchestration template
+      zh-CN: 删除 ACK 编排模板
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - no_wait
+        - timeout
+    workflow:
+      - binding: delete_template
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get ACK orchestration template
+      zh-CN: 获取 ACK 编排模板
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - template_type
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        not_found: error
+  list:
+    examples:
+      - ecctl ack template list
+    description:
+      en: List ACK orchestration templates
+      zh-CN: 列出 ACK 编排模板
+    input:
+      fields:
+        - template_type
+      controls:
+        - limit
+        - page
+    workflow:
+      - probe: list
+        many: true

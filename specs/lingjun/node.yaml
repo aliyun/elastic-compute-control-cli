@@ -1,0 +1,761 @@
+schema_version: 2
+product: lingjun
+api_product: eflo-controller
+resource: node
+kind: regional
+display_name:
+  en: Lingjun node
+  zh-CN: 灵骏节点
+description:
+  en: Manage Lingjun node resources
+  zh-CN: 管理灵骏节点资源
+examples:
+  - ecctl lingjun node list --free
+  - ecctl lingjun node get <node-id>
+  - ecctl lingjun node exec <node-id> --command "uptime"
+  - ecctl lingjun node sendfile <node-id> --content "hello" --name hello.txt --target /tmp
+
+identity:
+  field: id
+  output_root:
+    one: node
+    many: nodes
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: Lingjun node ID
+        zh-CN: 灵骏节点 ID
+    ids:
+      type: string_array
+      description:
+        en: Lingjun node IDs
+        zh-CN: 灵骏节点 ID 列表
+    nodes:
+      type: string_array
+      description:
+        en: target Lingjun node IDs
+        zh-CN: 目标灵骏节点 ID 列表
+    cluster:
+      type: string
+      description:
+        en: Lingjun cluster ID
+        zh-CN: 灵骏集群 ID
+    node_group:
+      type: string
+      description:
+        en: Lingjun node group ID
+        zh-CN: 灵骏节点组 ID
+    hostname:
+      type: string
+      description:
+        en: node hostname
+        zh-CN: 节点主机名
+    machine_type:
+      type: string
+      description:
+        en: node machine type
+        zh-CN: 节点机型
+    states:
+      type: string_array
+      description:
+        en: node operating states
+        zh-CN: 节点运行状态列表
+    status:
+      type: string_array
+      description:
+        en: hyper node statuses
+        zh-CN: 超节点状态列表
+    hpn_zone:
+      type: string
+      description:
+        en: HPN zone
+        zh-CN: HPN 分区
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    free:
+      type: boolean
+      description:
+        en: list free nodes
+        zh-CN: 列出空闲节点
+    hyper:
+      type: boolean
+      description:
+        en: use hyper node API
+        zh-CN: 使用超节点 API
+    ignore_failed_node_tasks:
+      type: boolean
+      description:
+        en: skip failed node tasks when possible
+        zh-CN: 允许跳过失败节点任务
+    command:
+      type: string
+      description:
+        en: shell command content
+        zh-CN: Shell 命令内容
+    command_id:
+      type: string
+      description:
+        en: command template ID
+        zh-CN: 命令模板 ID
+    content_encoding:
+      type: string
+      description:
+        en: content encoding
+        zh-CN: 内容编码
+      enum: [PlainText, Base64]
+    description_text:
+      type: string
+      description:
+        en: task description
+        zh-CN: 任务描述
+    enable_parameter:
+      type: boolean
+      description:
+        en: enable command parameters
+        zh-CN: 启用命令参数
+    frequency:
+      type: string
+      description:
+        en: command schedule expression
+        zh-CN: 命令调度表达式
+    launcher:
+      type: string
+      description:
+        en: command launcher
+        zh-CN: 命令启动器
+    name:
+      type: string
+      description:
+        en: command or file task name
+        zh-CN: 命令或文件任务名称
+    parameters:
+      type: string
+      description:
+        en: command parameters JSON string
+        zh-CN: 命令参数 JSON 字符串
+    repeat_mode:
+      type: string
+      description:
+        en: command repeat mode
+        zh-CN: 命令重复模式
+      enum: [Once, Period, NextRebootOnly, EveryReboot]
+    termination_mode:
+      type: string
+      description:
+        en: command termination mode
+        zh-CN: 命令终止模式
+      enum: [Process, ProcessTree]
+    timeout_seconds:
+      type: integer
+      description:
+        en: task timeout in seconds
+        zh-CN: 任务超时时间，单位秒
+    username:
+      type: string
+      description:
+        en: username to run the command
+        zh-CN: 运行命令的用户名
+    working_dir:
+      type: string
+      description:
+        en: command working directory
+        zh-CN: 命令工作目录
+    include_output:
+      type: boolean
+      default: true
+      description:
+        en: include command output in readback
+        zh-CN: 回读时包含命令输出
+    content:
+      type: string
+      description:
+        en: file content to send
+        zh-CN: 要发送的文件内容
+    content_type:
+      type: string
+      description:
+        en: file content type
+        zh-CN: 文件内容类型
+      enum: [PlainText, Base64]
+    file_group:
+      type: string
+      description:
+        en: file group
+        zh-CN: 文件用户组
+    file_mode:
+      type: string
+      description:
+        en: file mode
+        zh-CN: 文件权限
+    file_owner:
+      type: string
+      description:
+        en: file owner
+        zh-CN: 文件属主
+    overwrite:
+      type: boolean
+      description:
+        en: overwrite existing destination file
+        zh-CN: 覆盖目标已有文件
+    task_id:
+      type: string
+      description:
+        en: asynchronous task ID
+        zh-CN: 异步任务 ID
+    target:
+      type: string
+      description:
+        en: target directory
+        zh-CN: 目标目录
+    target_dir:
+      type: string
+      description:
+        en: target directory
+        zh-CN: 目标目录
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: Filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  next_token:
+    type: string
+    description:
+      en: token for the next result page
+      zh-CN: 下一页查询 token
+  no_wait:
+    type: boolean
+    description:
+      en: return before readback
+      zh-CN: 回读前返回
+  timeout:
+    type: duration
+    default: 1800s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  get:
+    api: DescribeNode
+    request:
+      NodeId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      id: $.NodeId
+      state: $.OperatingState
+      fields: &node_fields
+        id: $.NodeId
+        hostname: $.Hostname
+        cluster: $.ClusterId
+        cluster_name: $.ClusterName
+        machine_type: $.MachineType
+        node_group: $.NodeGroupId
+        node_group_name: $.NodeGroupName
+        status: $.OperatingState
+        resource_group: $.ResourceGroupId
+        zone: $.ZoneId
+        hyper_node: $.HyperNodeId
+        node_type: $.NodeType
+        hpn_zone: $.HpnZone
+        sn: $.Sn
+        image: $.ImageId
+        image_name: $.ImageName
+        create_time: $.CreateTime
+        expired_time: $.ExpiredTime
+        file_system_mount_enabled: $.FileSystemMountEnabled
+        networks: $.Networks
+        disks: $.Disks
+  list_hyper:
+    api: ListHyperNodes
+    request:
+      HpnZone: $.hpn_zone
+      MachineType: $.machine_type
+      MaxResults: $.limit
+      NextToken: $.next_token
+      ResourceGroupId: $.resource_group
+      Status:
+        each: $.status
+    response:
+      items: $.HyperNodes
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.HyperNodeId
+      state: $.Status
+      fields:
+        id: $.HyperNodeId
+        hostname: $.Hostname
+        machine_type: $.MachineType
+        status: $.Status
+        resource_group: $.ResourceGroupId
+        zone: $.ZoneId
+        hpn_zone: $.HpnZone
+        commodity_code: $.CommodityCode
+        create_time: $.CreateTime
+        expire_time: $.ExpireTime
+        tags: $.Tags
+  list_free:
+    api: ListFreeNodes
+    request:
+      HpnZone: $.hpn_zone
+      MachineType: $.machine_type
+      MaxResults: $.limit
+      NextToken: $.next_token
+      OperatingStates:
+        each: $.states
+      ResourceGroupId: $.resource_group
+    response:
+      items: $.Nodes
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.NodeId
+      state: $.OperatingState
+      fields: *node_fields
+  list_free_hyper:
+    api: ListFreeHyperNodes
+    request:
+      HpnZone: $.hpn_zone
+      MachineType: $.machine_type
+      MaxResults: $.limit
+      NextToken: $.next_token
+      ResourceGroupId: $.resource_group
+      Status:
+        each: $.status
+    response:
+      items: $.HyperNodes
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.HyperNodeId
+      state: $.Status
+      fields:
+        id: $.HyperNodeId
+        hostname: $.Hostname
+        machine_type: $.MachineType
+        status: $.Status
+        resource_group: $.ResourceGroupId
+        zone: $.ZoneId
+        hpn_zone: $.HpnZone
+        commodity_code: $.CommodityCode
+        create_time: $.CreateTime
+        expire_time: $.ExpireTime
+        tags: $.Tags
+  invocations:
+    api: DescribeInvocations
+    request:
+      InvokeId: $.id
+      IncludeOutput: $.include_output
+      ContentEncoding: $.content_encoding
+    response:
+      items: $.Invocations.Invocation
+      request_id: $.RequestId
+      id: $.InvokeId
+      state: $.InvocationStatus
+      fields:
+        invoke_id: $.InvokeId
+        command_id: $.CommandId
+        command: $.CommandContent
+        status: $.InvocationStatus
+        creation_time: $.CreationTime
+        finished_time: $.FinishedTime
+        node_count: $.NodeCount
+        invoke_nodes: $.InvokeNodes.InvokeNode
+  send_file_results:
+    api: DescribeSendFileResults
+    request:
+      InvokeId: $.id
+    response:
+      items: $.Invocations.Invocation
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.InvokeId
+      state: $.InvocationStatus
+      fields:
+        name: $.Name
+        status: $.InvocationStatus
+        content: $.Content
+        content_type: $.ContentType
+        target: $.TargetDir
+        overwrite: $.Overwrite
+        node_count: $.NodeCount
+        invoke_nodes: $.InvokeNodes.InvokeNode
+  task:
+    api: DescribeTask
+    request:
+      TaskId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      state: $.TaskState
+      fields:
+        task_id: $.TaskId
+        status: $.TaskState
+        type: $.TaskType
+        message: $.Message
+        create_time: $.CreateTime
+        update_time: $.UpdateTime
+
+waiters:
+  task_succeeded:
+    probe: task
+    target: execution_success
+    interval: 5s
+    timeout: 1800s
+    failure:
+      states: [execution_fail, execution_failed, execution_cancelled]
+  invocation_success:
+    probe: invocations
+    target: Success
+    interval: 5s
+    timeout: 1800s
+    failure:
+      states: [Failed, PartialFailed, Stopped]
+  send_file_success:
+    probe: send_file_results
+    target: Success
+    interval: 5s
+    timeout: 1800s
+    failure:
+      states: [Failed, PartialFailed]
+
+bindings:
+  delete_node:
+    api: DeleteNode
+    each: $.ids
+    request:
+      NodeId: $
+    request_id_from: $.RequestId
+  delete_hyper_node:
+    api: DeleteHyperNode
+    each: $.ids
+    request:
+      HyperNodeId: $
+    request_id_from: $.RequestId
+  reboot_nodes:
+    api: RebootNodes
+    request:
+      ClusterId: $.cluster
+      IgnoreFailedNodeTasks: $.ignore_failed_node_tasks
+      Nodes: $.ids
+      ApiParam:
+        raw: $.api_param
+    id_from: $.TaskId
+    request_id_from: $.RequestId
+    wait: task_succeeded
+  stop_nodes:
+    api: StopNodes
+    request:
+      IgnoreFailedNodeTasks: $.ignore_failed_node_tasks
+      Nodes: $.ids
+      ApiParam:
+        raw: $.api_param
+    id_from: $.TaskId
+    request_id_from: $.RequestId
+    wait: task_succeeded
+  run_command:
+    api: RunCommand
+    idempotency:
+      field: ClientToken
+      prefix: lingjun-node-exec
+    request:
+      NodeIdList: $.ids
+      CommandContent: $.command
+      CommandId: $.command_id
+      ContentEncoding: $.content_encoding
+      Description: $.description_text
+      EnableParameter: $.enable_parameter
+      Frequency: $.frequency
+      Launcher: $.launcher
+      Name: $.name
+      Parameters: $.parameters
+      RepeatMode: $.repeat_mode
+      TerminationMode: $.termination_mode
+      Timeout: $.timeout_seconds
+      Username: $.username
+      WorkingDir: $.working_dir
+      ApiParam:
+        raw: $.api_param
+    id_from: $.InvokeId
+    request_id_from: $.RequestId
+    wait: invocation_success
+  send_file_target:
+    api: SendFile
+    request: &send_file_request
+      NodeIdList: $.ids
+      Content: $.content
+      ContentType: $.content_type
+      Description: $.description_text
+      FileGroup: $.file_group
+      FileMode: $.file_mode
+      FileOwner: $.file_owner
+      Name: $.name
+      Overwrite: $.overwrite
+      TargetDir: $.target
+      Timeout: $.timeout_seconds
+      ApiParam:
+        raw: $.api_param
+    id_from: $.InvokeId
+    request_id_from: $.RequestId
+    wait: send_file_success
+  send_file_target_dir:
+    api: SendFile
+    request:
+      <<: *send_file_request
+      TargetDir: $.target_dir
+    id_from: $.InvokeId
+    request_id_from: $.RequestId
+    wait: send_file_success
+
+operations:
+  delete:
+    examples:
+      - ecctl lingjun node delete <node-id>
+    description:
+      en: Delete Lingjun nodes
+      zh-CN: 删除灵骏节点
+    input:
+      fields:
+        - ids:
+            required: true
+            positional_many: true
+        - hyper
+      controls:
+        - api_param
+    workflow:
+      - binding: delete_node
+        unless: input.hyper
+      - binding: delete_hyper_node
+        when: input.hyper
+      - emit:
+          fields:
+            ids: $input.ids
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get Lingjun node
+      zh-CN: 获取灵骏节点
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+    workflow:
+      - probe: get
+        ids:
+          - $input.id
+        not_found: error
+  list:
+    examples:
+      - ecctl lingjun node list
+      - ecctl lingjun node list --filter hpn-zone=<value>
+    description:
+      en: List Lingjun nodes
+      zh-CN: 列出灵骏节点
+    input:
+      fields:
+        - free
+        - hyper
+      controls:
+        - filter
+        - limit
+        - next_token
+    filters:
+      hpn-zone:
+        target: hpn_zone
+      machine-type:
+        target: machine_type
+      state:
+        target: states
+      status:
+        target: status
+      resource-group:
+        target: resource_group
+    require_any:
+      - raw: $.free
+      - raw: $.hyper
+    workflow:
+      - probe: list_free
+        many: true
+        when: input.free
+        unless: input.hyper
+      - probe: list_hyper
+        many: true
+        when: input.hyper
+        unless: input.free
+      - probe: list_free_hyper
+        many: true
+        when: input.free && input.hyper
+  reboot:
+    examples:
+      - ecctl lingjun node reboot <node-id>
+    description:
+      en: Reboot Lingjun nodes
+      zh-CN: 重启灵骏节点
+    input:
+      fields:
+        - ids:
+            required: true
+            positional_many: true
+        - cluster
+        - ignore_failed_node_tasks
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: reboot_nodes
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            task_id: $context.id
+            ids: $input.ids
+  stop:
+    examples:
+      - ecctl lingjun node stop <node-id>
+    description:
+      en: Stop Lingjun nodes
+      zh-CN: 停止灵骏节点
+    input:
+      fields:
+        - ids:
+            required: true
+            positional_many: true
+        - ignore_failed_node_tasks
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: stop_nodes
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            task_id: $context.id
+            ids: $input.ids
+  exec:
+    examples:
+      - ecctl lingjun node exec <node-id> --command <command-id>
+    description:
+      en: Execute a command on Lingjun nodes
+      zh-CN: 在灵骏节点上执行命令
+    input:
+      fields:
+        - ids:
+            required: true
+            positional_many: true
+        - command:
+            required: true
+        - command_id
+        - content_encoding
+        - description_text:
+            flag_name: description
+        - enable_parameter
+        - frequency
+        - launcher
+        - name
+        - parameters
+        - repeat_mode
+        - termination_mode
+        - timeout_seconds
+        - username
+        - working_dir
+        - include_output
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: run_command
+        wait_unless: input.no_wait
+      - probe: invocations
+        ids:
+          - $context.id
+        as: final
+        many: true
+        unless: input.no_wait
+      - emit:
+          fields:
+            invoke_id: $context.id
+    output:
+      fields:
+        actions: $result.actions
+        invoke_id: $result.id
+        results: $result.items
+  sendfile:
+    examples:
+      - ecctl lingjun node sendfile <node-id> --content <content> --name my-name
+    description:
+      en: Send file content to Lingjun nodes
+      zh-CN: 向灵骏节点发送文件内容
+    input:
+      fields:
+        - ids:
+            required: true
+            positional_many: true
+        - content:
+            required: true
+        - name:
+            required: true
+        - target
+        - target_dir
+        - content_type
+        - description_text:
+            flag_name: description
+        - file_group
+        - file_mode
+        - file_owner
+        - overwrite
+        - timeout_seconds
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    require_any:
+      - raw: $.target
+      - raw: $.target_dir
+    conflicts:
+      - any: [target]
+        with_any: [target_dir]
+    workflow:
+      - binding: send_file_target
+        when: input.target
+        wait_unless: input.no_wait
+      - binding: send_file_target_dir
+        when: input.target_dir
+        wait_unless: input.no_wait
+      - probe: send_file_results
+        ids:
+          - $context.id
+        as: final
+        many: true
+        unless: input.no_wait
+      - emit:
+          fields:
+            invoke_id: $context.id
+    output:
+      fields:
+        actions: $result.actions
+        invoke_id: $result.id
+        results: $result.items

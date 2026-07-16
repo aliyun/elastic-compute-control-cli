@@ -1,0 +1,238 @@
+schema_version: 2
+product: rg
+api_product: ResourceManager
+resource: version
+parent: policy
+kind: regional
+display_name:
+  en: policy version
+  zh-CN: 权限策略版本
+description:
+  en: Manage policy versions
+  zh-CN: 管理权限策略版本
+examples:
+  - ecctl rg policy version list --policy-name my-policy --policy-type Custom
+  - ecctl rg policy version get <version-id> --policy-name my-policy --policy-type Custom
+  - ecctl rg policy version create --policy-name my-policy --policy-document @policy.json
+  - ecctl rg policy version update <version-id> --policy-name my-policy --set-as-default
+
+identity:
+  field: version_id
+  prefix: v
+  output_root:
+    one: version
+    many: versions
+
+schema:
+  fields:
+    version_id:
+      type: string
+      description:
+        en: policy version ID
+        zh-CN: 权限策略版本 ID
+    policy_name:
+      type: string
+      description:
+        en: policy name
+        zh-CN: 权限策略名称
+    policy_type:
+      type: string
+      description:
+        en: policy type
+        zh-CN: 权限策略类型
+      enum: [Custom, System]
+    policy_document:
+      type: string
+      input_style: json|@file
+      description:
+        en: policy document JSON or @file
+        zh-CN: 权限策略内容 JSON 或 @file
+    set_as_default:
+      type: boolean
+      description:
+        en: set as the default version
+        zh-CN: 设置为默认版本
+
+controls:
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  detail:
+    api: GetPolicyVersion
+    request:
+      PolicyType: $.policy_type
+      PolicyName: $.policy_name
+      VersionId: $.version_id
+    response:
+      item: $.PolicyVersion
+      request_id: $.RequestId
+      fields:
+        version_id: $.VersionId
+        is_default_version: $.IsDefaultVersion
+        policy_document: $.PolicyDocument
+        create_date: $.CreateDate
+  list:
+    api: ListPolicyVersions
+    request:
+      PolicyType: $.policy_type
+      PolicyName: $.policy_name
+    response:
+      items: $.PolicyVersions.PolicyVersion
+      request_id: $.RequestId
+      id: $.VersionId
+      fields:
+        version_id: $.VersionId
+        is_default_version: $.IsDefaultVersion
+        create_date: $.CreateDate
+  policy_detail:
+    api: GetPolicy
+    request:
+      PolicyName: $.policy_name
+      PolicyType: Custom
+    response:
+      item: $.Policy
+      request_id: $.RequestId
+      fields:
+        name: $.PolicyName
+        policy_type: $.PolicyType
+        description: $.Description
+        default_version: $.DefaultVersion
+        create_date: $.CreateDate
+        update_date: $.UpdateDate
+
+bindings:
+  create_version:
+    api: CreatePolicyVersion
+    request:
+      PolicyName: $.policy_name
+      PolicyDocument: $.policy_document
+      SetAsDefault: $.set_as_default
+      ApiParam:
+        raw: $.api_param
+    id_from: $.PolicyVersion.VersionId
+    request_id_from: $.RequestId
+  delete_version:
+    api: DeletePolicyVersion
+    request:
+      PolicyName: $.policy_name
+      VersionId: $.version_id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  set_default:
+    api: SetDefaultPolicyVersion
+    request:
+      PolicyName: $.policy_name
+      VersionId: $.version_id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+
+operations:
+  create:
+    examples:
+      - ecctl rg policy version create --policy-name <policy-name> --policy-document <policy-document>
+    description:
+      en: Create policy version
+      zh-CN: 创建权限策略版本
+    input:
+      fields:
+        - policy_name:
+            required: true
+        - policy_document:
+            required: true
+        - set_as_default
+      controls:
+        - api_param
+    workflow:
+      - binding: create_version
+      - emit:
+          fields:
+            version_id: $context.id
+            policy_name: $input.policy_name
+  update:
+    examples:
+      - ecctl rg policy version update <version-id> --policy-name <policy-name>
+    description:
+      en: Update policy version
+      zh-CN: 更新权限策略版本
+    require_any:
+      - raw: $.set_as_default
+      - raw: $.api_param
+    input:
+      fields:
+        - version_id:
+            required: true
+            positional: true
+        - policy_name:
+            required: true
+        - set_as_default
+      controls:
+        - api_param
+    workflow:
+      - binding: set_default
+        when: input.set_as_default
+      - probe: policy_detail
+        as: final
+
+  delete:
+    examples:
+      - ecctl rg policy version delete <version-id> --policy-name <policy-name>
+    description:
+      en: Delete policy version
+      zh-CN: 删除权限策略版本
+    input:
+      fields:
+        - version_id:
+            required: true
+            positional: true
+        - policy_name:
+            required: true
+      controls:
+        - api_param
+    workflow:
+      - binding: delete_version
+      - emit:
+          fields:
+            version_id: $input.version_id
+            policy_name: $input.policy_name
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get policy version
+      zh-CN: 获取权限策略版本
+    input:
+      fields:
+        - version_id:
+            required: true
+            positional: true
+        - policy_name:
+            required: true
+        - policy_type:
+            required: true
+    workflow:
+      - probe: detail
+        ids:
+          - $input.version_id
+        not_found: error
+  list:
+    examples:
+      - ecctl rg policy version list
+    description:
+      en: List policy versions
+      zh-CN: 列出权限策略版本
+    input:
+      fields:
+        - policy_name:
+            required: true
+        - policy_type:
+            required: true
+    workflow:
+      - probe: list
+        many: true

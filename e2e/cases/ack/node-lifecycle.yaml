@@ -1,0 +1,44 @@
+# Attach and remove one dedicated ECS instance from the shared E2E cluster.
+resource: ack/node
+requires_params: [ack.instance_type]
+parameter_constraints:
+  ecs:
+    min_eni_quantity: 2
+    min_eni_private_ip_address_quantity: 6
+needs: [ack_shared_cluster, ack_shared_nodepool, ack_test_instance]
+timeout: 45m
+serial: true
+
+steps:
+  - name: attach
+    run: >
+      ecctl ack node attach
+      --cluster {{.stack.ack_shared_cluster}}
+      --nodepool {{.stack.ack_shared_nodepool}}
+      --instance {{.stack.ack_test_instance}}
+      --timeout 30m
+    at: $.node
+    expect:
+      id: { eq: "{{.stack.ack_test_instance}}" }
+    teardown: ecctl ack node delete {{.stack.ack_test_instance}} --cluster {{.stack.ack_shared_cluster}} --timeout 30m
+
+  - name: get
+    run: >
+      ecctl ack node get {{.stack.ack_test_instance}}
+      --cluster {{.stack.ack_shared_cluster}}
+    at: $.node
+    expect:
+      id: { eq: "{{.stack.ack_test_instance}}" }
+
+  - name: list
+    run: ecctl ack node list --cluster {{.stack.ack_shared_cluster}} --limit 100
+    assert:
+      - len($.nodes) >= 1
+
+  - name: delete
+    run: >
+      ecctl ack node delete {{.stack.ack_test_instance}}
+      --cluster {{.stack.ack_shared_cluster}}
+      --timeout 30m
+    expect:
+      $.deleted: { eq: true }

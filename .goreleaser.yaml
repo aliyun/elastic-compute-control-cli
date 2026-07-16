@@ -1,0 +1,57 @@
+version: 2
+
+project_name: ecctl
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: ecctl
+    main: ./cmd/ecctl
+    binary: ecctl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - >-
+        -s -w
+        -X ecctl/pkg/cli.version={{ .Version }}
+        -X ecctl/pkg/cli.commit={{ .Commit }}
+        -X ecctl/pkg/cli.date={{ .Date }}
+
+archives:
+  - id: ecctl
+    ids:
+      - ecctl
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

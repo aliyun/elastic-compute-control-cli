@@ -1,0 +1,353 @@
+schema_version: 2
+product: lingjun
+api_product: eflo-controller
+resource: node-group
+kind: regional
+aliases: [ng]
+display_name:
+  en: Lingjun Node Group
+  zh-CN: 灵骏节点组
+description:
+  en: Manage Lingjun node group resources
+  zh-CN: 管理灵骏节点组资源
+examples:
+  - ecctl lingjun node-group list --filter cluster=c-xxx
+  - ecctl lingjun node-group create --cluster c-xxx --name training-ng --node-group @node-group.json
+  - ecctl lingjun node-group update ng-xxx --name training-ng-renamed
+  - ecctl lingjun node-group delete ng-xxx
+
+identity:
+  field: id
+  prefix: ng-
+  output_root:
+    one: node_group
+    many: node_groups
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: node group ID
+        zh-CN: 节点组 ID
+    cluster:
+      type: string
+      description:
+        en: parent cluster ID
+        zh-CN: 所属集群 ID
+    name:
+      type: string
+      description:
+        en: node group name
+        zh-CN: 节点组名称
+    image:
+      type: string
+      description:
+        en: image ID
+        zh-CN: 镜像 ID
+    user_data:
+      type: string
+      description:
+        en: user data script
+        zh-CN: 用户自定义脚本
+    file_system_mount_enabled:
+      type: boolean
+      description:
+        en: enable file system mount
+        zh-CN: 启用文件系统挂载
+    key_pair:
+      type: string
+      description:
+        en: key pair name
+        zh-CN: 密钥对名称
+    login_password:
+      type: string
+      description:
+        en: 'login password (sensitive: prefer --key-pair; inject via @file or environment variable to avoid leaking through shell history)'
+        zh-CN: 登录密码（敏感：建议优先使用 --key-pair；通过 @file 或环境变量注入，避免出现在 shell 历史记录中）
+    ram_role:
+      type: string
+      description:
+        en: RAM role name
+        zh-CN: RAM 角色名称
+    node_group:
+      type: string
+      input_style: JSON object or @file
+      description:
+        en: |-
+          node group configuration JSON object matching the CreateNodeGroup NodeGroup body shape (e.g. {"NodeGroupName":"...","Az":"...","MachineType":"...","ImageId":"...",...}); pass inline JSON or @file path
+        zh-CN: |-
+          节点组配置 JSON 对象，结构与 CreateNodeGroup 的 NodeGroup body 一致（例如 {"NodeGroupName":"...","Az":"...","MachineType":"...","ImageId":"...",...}）；支持内联 JSON 或 @file 路径
+    node_unit:
+      type: string
+      input_style: JSON object or @file
+      description:
+        en: |-
+          node unit configuration JSON object matching the CreateNodeGroup NodeUnit body shape (e.g. {"NodeUnitId":"...","NodeUnitName":"...","ResourceGroupId":"...","MaxNodes":...}); pass inline JSON or @file path
+        zh-CN: |-
+          节点单元配置 JSON 对象，结构与 CreateNodeGroup 的 NodeUnit body 一致（例如 {"NodeUnitId":"...","NodeUnitName":"...","ResourceGroupId":"...","MaxNodes":...}）；支持内联 JSON 或 @file 路径
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  next_token:
+    type: string
+    description:
+      en: token for the next result page
+      zh-CN: 下一页查询 token
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 600s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: ListNodeGroups
+    request:
+      ClusterId: $.cluster
+      NodeGroupId: $.id
+      MaxResults: $.limit
+      NextToken: $.next_token
+    response:
+      items: $.Groups
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.GroupId
+      fields:
+        id: $.GroupId
+        name: $.GroupName
+        description: $.Description
+        cluster: $.ClusterId
+        cluster_name: $.ClusterName
+        machine_type: $.MachineType
+        image: $.ImageId
+        image_name: $.ImageName
+        node_count: $.NodeCount
+        zone: $.ZoneId
+        file_system_mount_enabled: $.FileSystemMountEnabled
+        virtual_gpu_enabled: $.VirtualGpuEnabled
+        create_time: $.CreateTime
+        modified_time: $.UpdateTime
+      absent:
+        when_empty_for_requested_ids: true
+  attribute:
+    api: DescribeNodeGroup
+    request:
+      NodeGroupId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      id: $.NodeGroupId
+      fields:
+        id: $.NodeGroupId
+        name: $.NodeGroupName
+        description: $.NodeGroupDescription
+        cluster: $.ClusterId
+        cluster_name: $.ClusterName
+        machine_type: $.MachineType
+        image: $.ImageId
+        image_name: $.ImageName
+        zone: $.Az
+        node_count: $.NodeCount
+        user_data: $.UserData
+        file_system_mount_enabled: $.FileSystemMountEnabled
+        virtual_gpu_enabled: $.VirtualGpuEnabled
+        key_pair: $.KeyPairName
+        login_type: $.LoginType
+        ram_role: $.RamRoleName
+        system_disk: $.SystemDisk
+        create_time: $.CreateTime
+        modified_time: $.UpdateTime
+      absent:
+        when_empty_for_requested_ids: true
+
+waiters:
+  deleted_after_delete:
+    probe: attribute
+    target: absent
+    interval: 5s
+    timeout: 600s
+
+bindings:
+  create_node_group:
+    api: CreateNodeGroup
+    request:
+      ClusterId: $.cluster
+      NodeGroup: $.node_group
+      NodeUnit: $.node_unit
+    require_all:
+      - request: ClusterId
+      - request: NodeGroup
+    id_from: $.NodeGroupId
+    request_id_from: $.RequestId
+  update_node_group:
+    api: UpdateNodeGroup
+    request:
+      NodeGroupId: $.id
+      NewNodeGroupName: $.name
+      ImageId: $.image
+      KeyPairName: $.key_pair
+      LoginPassword: $.login_password
+      RamRoleName: $.ram_role
+      UserData: $.user_data
+      FileSystemMountEnabled: $.file_system_mount_enabled
+    require_all:
+      - request: NodeGroupId
+    require_any:
+      - request: NewNodeGroupName
+      - request: ImageId
+      - request: KeyPairName
+      - request: LoginPassword
+      - request: RamRoleName
+      - request: UserData
+      - request: FileSystemMountEnabled
+    request_id_from: $.RequestId
+  delete_to_absent:
+    api: DeleteNodeGroup
+    request:
+      NodeGroupId: $.id
+      ClusterId: $.cluster
+    require_all:
+      - request: NodeGroupId
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+
+operations:
+  create:
+    examples:
+      - ecctl lingjun node-group create --cluster <cluster-id> --name my-name --node-group <node-group>
+    description:
+      en: Create Lingjun node group
+      zh-CN: 创建灵骏节点组
+    input:
+      fields:
+        - cluster:
+            required: true
+        - name:
+            required: true
+        - node_group:
+            required: true
+        - node_unit
+      controls:
+        - api_param
+    workflow:
+      - binding: create_node_group
+      - probe: attribute
+        ids:
+          - $context.id
+        as: final
+      - emit:
+          fields:
+            id: $context.id
+            cluster: $input.cluster
+            name: $input.name
+  update:
+    examples:
+      - ecctl lingjun node-group update <node-group-id>
+      - ecctl lingjun node-group update <node-group-id> --name my-name
+    description:
+      en: Update Lingjun node group
+      zh-CN: 更新灵骏节点组
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - image
+        - key_pair
+        - login_password
+        - ram_role
+        - user_data
+        - file_system_mount_enabled
+      controls:
+        - api_param
+    require_any:
+      - raw: $.name
+      - raw: $.image
+      - raw: $.key_pair
+      - raw: $.login_password
+      - raw: $.ram_role
+      - raw: $.user_data
+      - raw: $.file_system_mount_enabled
+    workflow:
+      - binding: update_node_group
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+      - emit:
+          fields:
+            id: $input.id
+            name: $input.name
+  delete:
+    examples:
+      - ecctl lingjun node-group delete <node-group-id>
+    description:
+      en: Delete Lingjun node group
+      zh-CN: 删除灵骏节点组
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - cluster
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  list:
+    examples:
+      - ecctl lingjun node-group list
+      - ecctl lingjun node-group list --filter cluster=<cluster-id>
+    description:
+      en: List Lingjun node groups
+      zh-CN: 列出灵骏节点组
+    input:
+      fields:
+        - cluster
+      controls:
+        - filter
+        - limit
+        - next_token
+    filters:
+      id:
+        target: id
+      cluster:
+        target: cluster
+      cluster.id:
+        target: cluster
+    workflow:
+      - probe: list
+        many: true

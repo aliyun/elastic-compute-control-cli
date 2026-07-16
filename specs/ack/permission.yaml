@@ -1,0 +1,283 @@
+schema_version: 2
+product: ack
+api_product: cs
+resource: permission
+kind: regional
+display_name:
+  en: permission
+  zh-CN: 权限
+description:
+  en: Manage ACK RAM user and role permissions
+  zh-CN: 管理 ACK RAM 用户和角色权限
+examples:
+  - ecctl ack permission list --user-id <ram-user-id>
+  - ecctl ack permission get --user-id <ram-user-id>
+  - ecctl ack permission update --user-id <ram-user-id> --permission cluster=<cluster-id>,role-type=cluster,role-name=dev
+  - ecctl ack permission delete --user-id <ram-user-id> --cluster <cluster-id>
+
+identity:
+  field: user_id
+  output_root:
+    one: permission
+    many: permissions
+
+schema:
+  fields:
+    user_id:
+      type: string
+      description:
+        en: RAM user or RAM role ID
+        zh-CN: RAM 用户或 RAM 角色 ID
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    permissions:
+      type: array
+      description:
+        en: Permission assignments, one per flag as inline key=value, JSON object, or @file.
+        zh-CN: 权限授权项，每个 flag 传一个内联 key=value、JSON 对象或 @file。
+      items:
+        type: object
+        fields:
+          cluster:
+            type: string
+            description:
+              en: ACK cluster ID, empty when role_type is all-clusters
+              zh-CN: ACK 集群 ID，role_type 为 all-clusters 时可为空
+          role_type:
+            type: string
+            required: true
+            description:
+              en: permission scope
+              zh-CN: 权限作用范围
+            enum: [cluster, namespace, all-clusters]
+          role_name:
+            type: string
+            required: true
+            description:
+              en: predefined ACK role or custom RBAC role name
+              zh-CN: ACK 预置角色或自定义 RBAC 角色名称
+          namespace:
+            type: string
+            description:
+              en: Kubernetes namespace for namespace-scoped permissions
+              zh-CN: namespace 级权限对应的 Kubernetes 命名空间
+          is_custom:
+            type: boolean
+            description:
+              en: whether role_name is a custom RBAC role
+              zh-CN: role_name 是否为自定义 RBAC 角色
+          is_ram_role:
+            type: boolean
+            description:
+              en: whether the authorized principal is a RAM role
+              zh-CN: 被授权主体是否为 RAM 角色
+    mode:
+      type: string
+      default: patch
+      description:
+        en: incremental update mode for UpdateUserPermissions
+        zh-CN: UpdateUserPermissions 的增量更新模式
+      enum: [patch, delete]
+    replace:
+      type: boolean
+      description:
+        en: replace all user permissions with GrantPermissions instead of incremental UpdateUserPermissions
+        zh-CN: 使用 GrantPermissions 覆盖该用户全部授权，而不是增量调用 UpdateUserPermissions
+    all_clusters:
+      type: boolean
+      description:
+        en: clean permissions from all clusters with CleanUserPermissions
+        zh-CN: 使用 CleanUserPermissions 清理所有集群权限
+    force:
+      type: boolean
+      default: false
+      description:
+        en: force kubeconfig cleanup; defaults to false
+        zh-CN: 强制清理 KubeConfig，默认 false
+
+controls:
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  user_permission:
+    api: DescribeUserPermission
+    request:
+      uid: $.user_id
+      ApiParam:
+        raw: $.api_param
+    response:
+      items: $.body
+      total: $.total
+      request_id: $.RequestId
+      id: $.resource_id
+      fields:
+        resource_id: $.resource_id
+        resource_type: $.resource_type
+        role_name: $.role_name
+        role_type: $.role_type
+        is_owner:
+          int: $.is_owner
+        is_ram_role:
+          int: $.is_ram_role
+
+bindings:
+  update_user_permissions:
+    api: UpdateUserPermissions
+    request:
+      uid: $.user_id
+      mode: $.mode
+      body:
+        each: $.permissions
+        fields:
+          cluster: $.cluster
+          role_type: $.role_type
+          role_name: $.role_name
+          namespace: $.namespace
+          is_custom: $.is_custom
+          is_ram_role: $.is_ram_role
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  grant_permissions:
+    api: GrantPermissions
+    request:
+      uid: $.user_id
+      body:
+        each: $.permissions
+        fields:
+          cluster: $.cluster
+          role_type: $.role_type
+          role_name: $.role_name
+          namespace: $.namespace
+          is_custom: $.is_custom
+          is_ram_role: $.is_ram_role
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  clean_cluster_user_permissions:
+    api: CleanClusterUserPermissions
+    request:
+      Uid: $.user_id
+      ClusterId: $.cluster
+      Force: $.force
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  clean_user_permissions:
+    api: CleanUserPermissions
+    request:
+      Uid: $.user_id
+      Force: $.force
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+
+operations:
+  update:
+    examples:
+      - ecctl ack permission update --user-id <user-id> --permissions <permissions>
+    description:
+      en: Update or replace ACK RBAC permissions for a RAM user or role
+      zh-CN: 更新或覆盖 RAM 用户/角色的 ACK RBAC 权限
+    input:
+      fields:
+        - user_id:
+            required: true
+        - permissions:
+            required: true
+        - mode
+        - replace
+      controls:
+        - api_param
+    workflow:
+      - binding: update_user_permissions
+        unless: input.replace
+      - binding: grant_permissions
+        when: input.replace
+      - probe: user_permission
+    output:
+      fields:
+        actions: $result.actions
+        permission:
+          user_id: $input.user_id
+          permissions: $result.items
+  delete:
+    examples:
+      - ecctl ack permission delete --user-id <user-id>
+      - ecctl ack permission delete --user-id <user-id> --force
+    description:
+      en: Revoke ACK RBAC permissions and kubeconfig access for a RAM user or role
+      zh-CN: 撤销 RAM 用户/角色的 ACK RBAC 权限和 KubeConfig 访问
+    require_any:
+      - raw: $.cluster
+      - raw: $.all_clusters
+    conflicts:
+      - any: [cluster]
+        with_any: [all_clusters]
+    input:
+      fields:
+        - user_id:
+            required: true
+        - cluster
+        - all_clusters
+        - force
+      controls:
+        - api_param
+    workflow:
+      - binding: clean_cluster_user_permissions
+        unless: input.all_clusters
+      - binding: clean_user_permissions
+        when: input.all_clusters
+      - probe: user_permission
+      - emit:
+          fields:
+            user_id: $input.user_id
+          deleted: true
+    output:
+      fields:
+        actions: $result.actions
+        deleted: true
+        permission:
+          user_id: $input.user_id
+          permissions: $result.items
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get ACK permissions for a RAM user or role
+      zh-CN: 查询 RAM 用户/角色的 ACK 权限详情
+    input:
+      fields:
+        - user_id:
+            required: true
+      controls:
+        - api_param
+    workflow:
+      - probe: user_permission
+    output:
+      fields:
+        permission:
+          user_id: $input.user_id
+          permissions: $result.items
+  list:
+    examples:
+      - ecctl ack permission list
+    description:
+      en: List ACK permissions for a RAM user or role
+      zh-CN: 列出 RAM 用户/角色的 ACK 权限
+    input:
+      fields:
+        - user_id:
+            required: true
+      controls:
+        - api_param
+    workflow:
+      - probe: user_permission
+        many: true

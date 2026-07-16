@@ -1,0 +1,197 @@
+:root {
+  --ifm-color-primary: #5c94eb;
+  --ifm-color-primary-dark: #4785e8;
+  --ifm-color-primary-darker: #3c7de7;
+  --ifm-color-primary-darkest: #1f63d6;
+  --ifm-color-primary-light: #71a3ee;
+  --ifm-color-primary-lighter: #7babef;
+  --ifm-color-primary-lightest: #99bff3;
+  --ifm-font-family-base:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ifm-heading-font-weight: 760;
+  --ifm-code-font-size: 92%;
+  --ifm-navbar-height: 64px;
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #71a3ee;
+  --ifm-color-primary-dark: #5c94eb;
+  --ifm-color-primary-darker: #518dec;
+  --ifm-color-primary-darkest: #3176ee;
+  --ifm-color-primary-light: #86b2f1;
+  --ifm-color-primary-lighter: #90b9f2;
+  --ifm-color-primary-lightest: #b0cdf5;
+  --ifm-background-color: #0b1117;
+  --ifm-background-surface-color: #121b24;
+}
+
+.navbar {
+  border-bottom: 1px solid rgba(120, 130, 145, 0.2);
+  box-shadow: none;
+}
+
+.navbar__brand {
+  font-weight: 800;
+}
+
+.navbar__logo img {
+  border-radius: 6px;
+}
+
+.theme-doc-sidebar-container {
+  border-right: 1px solid var(--ifm-toc-border-color);
+}
+
+.theme-doc-markdown h1,
+.theme-doc-markdown h2,
+.theme-doc-markdown h3 {
+  letter-spacing: 0;
+}
+
+.theme-doc-markdown h2 {
+  margin-top: 2.4rem;
+}
+
+.theme-doc-markdown table {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.theme-code-block {
+  border: 1px solid rgba(120, 130, 145, 0.22);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.language-bash .token.parameter + .token.plain + .token.number,
+.language-bash .token.parameter + .token.plain + .token.boolean,
+.language-bash .token.parameter + .token.plain + .token.function {
+  /* prism-react-renderer writes theme colors inline on token spans. */
+  color: inherit !important;
+}
+
+[data-theme='dark'] .language-json .token.property {
+  color: #8be9fd;
+}
+
+.button {
+  letter-spacing: 0;
+}
+
+.button.button--primary {
+  border-color: #3c7de7;
+  background: #3c7de7;
+  color: #ffffff;
+}
+
+.button.button--primary:hover,
+.button.button--primary:focus {
+  border-color: #1f63d6;
+  background: #1f63d6;
+  color: #ffffff;
+}
+
+.button.button--secondary {
+  border-color: rgba(92, 148, 235, 0.25);
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.button.button--secondary:hover,
+.button.button--secondary:focus {
+  border-color: #3c7de7;
+  background: #f6f9ff;
+  color: #0f172a;
+}
+
+.footer {
+  border-top: 1px solid rgba(92, 148, 235, 0.1);
+  background: #f6f9ff;
+  color: #000000;
+  padding: 46px 0 34px;
+}
+
+.footer.footer--light {
+  --ifm-footer-background-color: #f6f9ff;
+  --ifm-footer-color: #000000;
+  --ifm-footer-link-color: #000000;
+  --ifm-footer-title-color: #000000;
+}
+
+.footer__title {
+  color: #000000;
+  font-size: 1.05rem;
+  font-weight: 760;
+}
+
+.footer__links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2rem clamp(4rem, 16vw, 22rem);
+  margin: 0 0 1rem;
+}
+
+.footer__col {
+  flex: 0 1 auto;
+  width: max-content;
+  max-width: min(100%, 16rem);
+  margin: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.footer__link-item {
+  color: #000000;
+  font-size: 1rem;
+}
+
+.footer__link-item:hover {
+  color: #334155;
+  text-decoration: underline;
+}
+
+.footer__copyright {
+  color: #475569;
+  font-size: 0.9rem;
+  margin-top: 28px;
+  text-align: center;
+}
+
+[data-theme='dark'] .footer {
+  --ifm-footer-background-color: #1b1b1d;
+  --ifm-footer-color: #ffffff;
+  --ifm-footer-link-color: #cbd5e1;
+  --ifm-footer-title-color: #ffffff;
+}
+
+[data-theme='dark'] .footer__title,
+[data-theme='dark'] .footer__link-item {
+  color: inherit;
+}
+
+[data-theme='dark'] .footer__link-item:hover {
+  color: #ffffff;
+}
+
+@media screen and (max-width: 640px) {
+  .footer {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .footer__links {
+    justify-content: flex-start;
+    gap: 0;
+  }
+
+  .footer__col {
+    flex: 0 0 100%;
+    width: 100%;
+    max-width: 100%;
+    padding: 0 var(--ifm-spacing-horizontal);
+    text-align: left;
+  }
+}

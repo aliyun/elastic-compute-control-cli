@@ -1,0 +1,211 @@
+schema_version: 2
+product: ack
+api_product: cs
+resource: operation-plan
+aliases: [op]
+kind: regional
+display_name:
+  en: operation plan
+  zh-CN: 自动运维计划
+description:
+  en: Manage ACK automated O&M operation plans
+  zh-CN: 管理 ACK 自动运维计划
+examples:
+  - ecctl ack operation-plan list --cluster <cluster-id>
+  - ecctl ack op list --by-region --region cn-beijing --state Scheduled
+  - ecctl ack op get <plan-id>
+  - ecctl ack op cancel <plan-id>
+
+identity:
+  field: id
+  prefix: P-
+  output_root:
+    one: operation_plan
+    many: operation_plans
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: operation plan ID
+        zh-CN: 运维计划 ID
+    cluster:
+      type: string
+      description:
+        en: cluster ID filter
+        zh-CN: 集群 ID 过滤
+    type:
+      type: string
+      description:
+        en: operation plan type filter
+        zh-CN: 运维计划类型过滤
+    state:
+      type: string
+      description:
+        en: operation plan state filter for regional listing
+        zh-CN: 按地域查询时使用的运维计划状态过滤
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  by_region:
+    type: boolean
+    description:
+      en: list operation plans in the selected region
+      zh-CN: 按当前地域列出运维计划
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum operation plans to request; ACK returns up to the latest 100 plans
+      zh-CN: 最多请求的运维计划数量；ACK 最多返回最近 100 条计划
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  plans:
+    api: ListOperationPlans
+    request:
+      cluster_id: $.cluster
+      type: $.type
+      plan_id: $.id
+      ApiParam:
+        raw: $.api_param
+    response:
+      items: $.plans
+      request_id: $.request_id
+      id: $.plan_id
+      fields:
+        id: $.plan_id
+        cluster: $.cluster_id
+        created: $.created
+        start_time: $.start_time
+        end_time: $.end_time
+        state: $.state
+        state_reason: $.state_reason
+        type: $.type
+        target_type: $.target_type
+        target_id: $.target_id
+        task_id: $.task_id
+      absent:
+        when_empty_for_requested_ids: true
+  plans_for_region:
+    api: ListOperationPlansForRegion
+    request:
+      region_id: $context.region
+      cluster_id: $.cluster
+      type: $.type
+      state: $.state
+      ApiParam:
+        raw: $.api_param
+    response:
+      items: $.plans
+      request_id: $.request_id
+      id: $.plan_id
+      fields:
+        id: $.plan_id
+        cluster: $.cluster_id
+        created: $.created
+        start_time: $.start_time
+        end_time: $.end_time
+        state: $.state
+        state_reason: $.state_reason
+        type: $.type
+        target_type: $.target_type
+        target_id: $.target_id
+        task_id: $.task_id
+
+bindings:
+  cancel_plan:
+    api: CancelOperationPlan
+    request:
+      plan_id: $.id
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    request_id_from: $.request_id
+
+operations:
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get an operation plan
+      zh-CN: 查询运维计划
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - api_param
+    workflow:
+      - probe: plans
+        ids:
+          - $input.id
+        not_found: error
+  list:
+    examples:
+      - ecctl ack operation-plan list
+      - ecctl ack operation-plan list --filter type=<value>
+    description:
+      en: List operation plans
+      zh-CN: 列出运维计划
+    input:
+      fields:
+        - cluster
+        - type
+        - state
+      controls:
+        - by_region
+        - filter
+        - limit
+        - api_param
+    filters:
+      cluster:
+        target: cluster
+      cluster.id:
+        target: cluster
+      type:
+        target: type
+      state:
+        target: state
+    require_when:
+      - when_any: [state]
+        require_any: [by_region]
+    workflow:
+      - probe: plans_for_region
+        when: input.by_region
+        many: true
+      - probe: plans
+        unless: input.by_region
+        many: true
+  cancel:
+    examples:
+      - ecctl ack operation-plan cancel <operation-plan-id>
+    description:
+      en: Cancel a scheduled operation plan
+      zh-CN: 取消尚未执行的运维计划
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - api_param
+    workflow:
+      - binding: cancel_plan
+      - probe: plans
+        ids:
+          - $input.id
+        not_found: error

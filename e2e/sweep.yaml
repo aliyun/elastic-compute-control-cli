@@ -1,0 +1,191 @@
+# Sweepable resource kinds for `ecctl-e2e sweep` (cleanup safety net).
+# Each kind lists tagged resources and deletes orphans (by ttl or finished-run).
+# Paths (items_path/id_field/...) must match real ecctl JSON output — adjust as
+# the CLI output evolves.
+kinds:
+  # Snapshots leak from the snapshot-group case: creating a group auto-creates a
+  # per-disk snapshot that inherits the e2e tags but is not removed when the
+  # group (or its host) is torn down. They are independent leaf resources, so
+  # sweep them first.
+  - name: ecs-snapshot
+    resource: ecs/snapshot
+    list: ecctl ecs snapshot list --filter tag.ecctl-e2e=1
+    items_path: $.snapshots
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    delete: ecctl ecs snapshot delete {{.id}} --force
+
+  - name: ecs-snapshot-group
+    resource: ecs/snapshot-group
+    list: ecctl ecs snapshot-group list --filter tag.ecctl-e2e=1
+    items_path: $.snapshot_groups
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    delete: ecctl ecs snapshot-group delete {{.id}}
+
+  - name: ecs-instance
+    resource: ecs/instance
+    list: ecctl ecs instance list --filter tag.ecctl-e2e=1
+    items_path: $.instances
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    # --force so running leftovers are released too (sweep is a hard cleanup);
+    # without it a Running instance fails with IncorrectInstanceStatus.
+    delete: ecctl ecs instance delete {{.id}} --force --no-wait
+
+  - name: ecs-image
+    resource: ecs/image
+    list: ecctl ecs image list --filter tag.ecctl-e2e=1
+    items_path: $.images
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    delete: ecctl ecs image delete {{.id}} --force
+
+  - name: ecs-eni
+    resource: ecs/eni
+    list: ecctl ecs eni list --filter tag.ecctl-e2e=1
+    items_path: $.enis
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    delete: ecctl ecs eni delete {{.id}}
+
+  - name: ecs-disk
+    resource: ecs/disk
+    list: ecctl ecs disk list --filter tag.ecctl-e2e=1
+    items_path: $.disks
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    delete: ecctl ecs disk delete {{.id}} --force
+
+  - name: ecs-command
+    resource: ecs/command
+    list: ecctl ecs command list --filter tag.ecctl-e2e=1
+    items_path: $.commands
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    delete: ecctl ecs command delete {{.id}}
+
+  - name: ecs-keypair
+    resource: ecs/keypair
+    list: ecctl ecs keypair list --filter tag.ecctl-e2e=1
+    items_path: $.keypairs
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    delete: ecctl ecs keypair delete {{.id}}
+
+  - name: ecs-port-range-list
+    resource: ecs/port-range-list
+    list: ecctl ecs port-range-list list --filter tag.ecctl-e2e=1
+    items_path: $.port_range_lists
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    delete: ecctl ecs port-range-list delete {{.id}}
+
+  - name: ecs-prefix-list
+    resource: ecs/prefix-list
+    list: ecctl ecs prefix-list list --filter tag.ecctl-e2e=1
+    items_path: $.prefix_lists
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    delete: ecctl ecs prefix-list delete {{.id}}
+
+  - name: vpc-vswitch
+    resource: vpc/vswitch
+    list: ecctl vpc vswitch list --filter tag.ecctl-e2e=1
+    items_path: $.vswitches
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    delete: ecctl vpc vswitch delete {{.id}}
+
+  - name: ecs-sg
+    resource: ecs/sg
+    list: ecctl ecs sg list --filter tag.ecctl-e2e=1
+    items_path: $.security_groups
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    delete: ecctl ecs sg delete {{.id}}
+
+  # Launch templates are tagged so the sweeper can reclaim them; the per-account
+  # template quota is small, so leftovers from killed runs cause
+  # LaunchTemplateLimitExceed. Note: create_time (not creation_time) here.
+  - name: ecs-launch-template
+    resource: ecs/launch-template
+    list: ecctl ecs launch-template list --filter tag.ecctl-e2e=1
+    items_path: $.launch_templates
+    id_field: id
+    runid_field: tags.run-id
+    created_field: create_time
+    delete: ecctl ecs launch-template delete {{.id}}
+
+  - name: lingjun-cluster
+    resource: lingjun/cluster
+    list: ecctl lingjun cluster list --filter tag.ecctl-e2e=1
+    items_path: $.clusters
+    id_field: id
+    runid_field: tags.run-id
+    created_field: create_time
+    delete: ecctl lingjun cluster delete {{.id}}
+
+  - name: lingjun-vpd
+    resource: lingjun/vpd
+    list: ecctl lingjun vpd list --filter tag.ecctl-e2e=1
+    items_path: $.vpds
+    id_field: id
+    runid_field: tags.run-id
+    created_field: create_time
+    delete: ecctl lingjun vpd delete {{.id}}
+
+  - name: vpc
+    resource: vpc/vpc
+    list: ecctl vpc list --filter tag.ecctl-e2e=1
+    items_path: $.vpcs
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    delete: ecctl vpc delete {{.id}}
+
+  - name: rg-group
+    resource: rg/group
+    list: ecctl rg group list --filter tag.ecctl-e2e=1 --filter status=OK
+    items_path: $.groups
+    id_field: id
+    runid_field: tags.run-id
+    created_field: create_date
+    delete: ecctl rg group delete {{.id}}
+
+non_sweepable:
+  - resource: ecs/auto-snapshot-policy
+    reason: provider-no-list
+    review_after: "2026-10-06"
+  # RAM roles and Resource Manager policies cannot be selected by the E2E tag;
+  # their per-case teardown and cleanup journal are the recovery path.
+  - resource: rg/role
+    reason: provider-limitation
+    review_after: "2026-10-06"
+  - resource: rg/policy
+    reason: provider-limitation
+    review_after: "2026-10-06"
+  # ACK cluster listing cannot filter by tags; node pools and kubeconfigs can
+  # only be enumerated in the context of a configured cluster/principal. Their
+  # case teardown or short-lived revoke lifecycle remains the recovery path.
+  - resource: ack/ack
+    reason: provider-limitation
+    review_after: "2026-10-13"
+  - resource: ack/nodepool
+    reason: provider-limitation
+    review_after: "2026-10-13"
+  - resource: ack/kubeconfig
+    reason: provider-limitation
+    review_after: "2026-10-13"

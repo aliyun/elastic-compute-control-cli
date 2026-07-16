@@ -1,0 +1,52 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: region
+kind: regional
+display_name:
+  en: region
+  zh-CN: 地域
+description:
+  en: Query ACK-supported regions
+  zh-CN: 查询 ACK 支持的地域
+examples:
+  - ecctl ack region list
+  - ecctl ack region list --region cn-hangzhou
+
+identity:
+  field: id
+  output_root:
+    one: region
+    many: regions
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: region ID
+        zh-CN: 地域 ID
+
+probes:
+  list:
+    api: DescribeRegions
+    request:
+      RegionId: $context.region
+    response:
+      items: $.regions
+      request_id: $.requestId
+      id: $.regionId
+      fields:
+        id: $.regionId
+        local_name: $.localName
+
+operations:
+  list:
+    examples:
+      - ecctl ack region list
+    description:
+      en: List ACK-supported regions
+      zh-CN: 列出 ACK 支持的地域
+    workflow:
+      - probe: list
+        many: true

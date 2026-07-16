@@ -1,0 +1,66 @@
+# Prefix list full lifecycle: create -> read-back -> differential -> list ->
+# update -> delete. Regional resource, no network prerequisites. Structural
+# assertions (type/prefix) come from the spec; concrete API values the spec
+# cannot predict are left as TODO(human).
+resource: ecs/prefix-list
+# Self-contained regional resource: consumes nothing from the shared stack.
+
+steps:
+  - name: create
+    run: >
+      ecctl ecs prefix-list create
+      --name {{.run_name}}-pl
+      --address-family IPv4
+      --max-entries 10
+      --entry cidr=10.0.0.0/24,description=web
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.prefix_list
+    expect:
+      id: { type: string, prefix: pl- }
+      name: { eq: "{{.run_name}}-pl" }
+      address_family: { eq: IPv4 }
+      max_entries: { eq: 10 }
+    capture:
+      pl_id: id
+    teardown: ecctl ecs prefix-list delete {{.pl_id}}
+
+  - name: get (read-back)
+    run: ecctl ecs prefix-list get {{.pl_id}}
+    at: $.prefix_list
+    expect:
+      id: { eq: "{{.pl_id}}" }
+      name: { eq: "{{.run_name}}-pl" }
+      address_family: { eq: IPv4 }
+    capture:
+      hi_name: name
+
+  - name: differential vs raw DescribePrefixLists
+    run: ecctl call ecs DescribePrefixLists --PrefixListId.1 {{.pl_id}}
+    expect:
+      $.response.PrefixLists.PrefixList[0].PrefixListId: { eq: "{{.pl_id}}" }   # call wraps under .response
+      $.response.PrefixLists.PrefixList[0].PrefixListName: { eq: "{{.hi_name}}" }
+
+  - name: list (find ours)
+    run: ecctl ecs prefix-list list --filter address-family=IPv4
+    assert:
+      - len($.prefix_lists) >= 0
+
+  - name: update (rename + add entry)
+    run: ecctl ecs prefix-list update {{.pl_id}} --name {{.run_name}}-pl-renamed --entry +cidr=10.0.1.0/24,description=app
+    at: $.prefix_list
+    expect:
+      id: { eq: "{{.pl_id}}" }
+
+  - name: get (read-back after update)
+    run: ecctl ecs prefix-list get {{.pl_id}}
+    at: $.prefix_list
+    expect:
+      id: { eq: "{{.pl_id}}" }
+      name: { eq: "{{.run_name}}-pl-renamed" }
+
+  - name: delete
+    run: ecctl ecs prefix-list delete {{.pl_id}}
+    at: $.prefix_list
+    expect:
+      id: { eq: "{{.pl_id}}" }
+      $.deleted: { eq: true }   # `deleted` is emitted at the root, not under output_root

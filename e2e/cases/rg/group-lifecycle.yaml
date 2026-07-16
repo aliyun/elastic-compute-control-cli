@@ -1,0 +1,50 @@
+# Resource group lifecycle. Resource groups support e2e tags, so this case can
+# participate in both live cleanup and the sweeper safety net.
+resource: rg/group
+
+steps:
+  - name: create
+    run: >
+      ecctl rg group create
+      --name {{.run_name}}-rg
+      --display-name {{.run_id}}-rg
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.group
+    expect:
+      id: { type: string, prefix: rg- }
+      name: { eq: "{{.run_name}}-rg" }
+      display_name: { eq: "{{.run_id}}-rg" }
+    capture:
+      group_id: id
+    teardown: ecctl rg group delete {{.group_id}}
+
+  - name: get (read-back)
+    run: ecctl rg group get {{.group_id}}
+    at: $.group
+    expect:
+      id: { eq: "{{.group_id}}" }
+      name: { eq: "{{.run_name}}-rg" }
+      status: { oneof: [OK, Creating] }
+
+  - name: list (find ours)
+    run: ecctl rg group list --filter tag.ecctl-e2e=1
+    assert:
+      - len($.groups) >= 1
+
+  - name: list resources in group
+    run: ecctl rg resource list {{.group_id}}
+    assert:
+      - len($.resources) >= 0
+
+  - name: update
+    run: ecctl rg group update {{.group_id}} --display-name {{.run_id}}-rg2
+    at: $.group
+    expect:
+      id: { eq: "{{.group_id}}" }
+      display_name: { eq: "{{.run_id}}-rg2" }
+
+  - name: delete
+    run: ecctl rg group delete {{.group_id}}
+    at: $
+    expect:
+      deleted: true

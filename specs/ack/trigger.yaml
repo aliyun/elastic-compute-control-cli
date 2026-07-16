@@ -1,0 +1,262 @@
+schema_version: 2
+product: ack
+api_product: cs
+resource: trigger
+kind: regional
+display_name:
+  en: trigger
+  zh-CN: 应用触发器
+description:
+  en: Manage ACK application redeploy triggers
+  zh-CN: 管理 ACK 应用重新部署触发器
+examples:
+  - ecctl ack trigger list --cluster <cluster-id> --namespace default --name web
+  - ecctl ack trigger get <trigger-id> --cluster <cluster-id> --namespace default --name web
+  - ecctl ack trigger create --cluster <cluster-id> --project default/web --action redeploy
+  - ecctl ack trigger delete <trigger-id> --cluster <cluster-id>
+
+identity:
+  field: id
+  output_root:
+    one: trigger
+    many: triggers
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: trigger ID
+        zh-CN: 触发器 ID
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    project:
+      type: string
+      description:
+        en: trigger project in namespace/name form
+        zh-CN: 触发器项目，格式为 namespace/name
+    namespace:
+      type: string
+      description:
+        en: application namespace
+        zh-CN: 应用命名空间
+    name:
+      type: string
+      description:
+        en: application name
+        zh-CN: 应用名称
+    type:
+      type: string
+      description:
+        en: trigger type
+        zh-CN: 触发器类型
+      enum: [deployment, application]
+    action:
+      type: string
+      description:
+        en: trigger action
+        zh-CN: 触发器行为
+      enum: [redeploy]
+    token:
+      type: string
+      description:
+        en: trigger token URL or token value
+        zh-CN: 触发器 token URL 或 token 值
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  detail:
+    api: DescribeTrigger
+    request:
+      cluster_id: $.cluster
+      Id: $.id
+      Namespace: $.namespace
+      Name: $.name
+      Type: $.type
+      action: $.action
+      ApiParam:
+        raw: $.api_param
+    response:
+      items: $.items
+      id: $.id
+      fields:
+        id: $.id
+        name: $.name
+        cluster: $.cluster_id
+        project: $.project_id
+        type: $.type
+        action: $.action
+        token: $.token
+      absent:
+        when_empty_for_requested_ids: true
+  list:
+    api: DescribeTrigger
+    request:
+      cluster_id: $.cluster
+      Namespace: $.namespace
+      Name: $.name
+      Type: $.type
+      action: $.action
+      ApiParam:
+        raw: $.api_param
+    response:
+      items: $.items
+      id: $.id
+      fields:
+        id: $.id
+        name: $.name
+        cluster: $.cluster_id
+        project: $.project_id
+        type: $.type
+        action: $.action
+        token: $.token
+
+bindings:
+  create_trigger:
+    api: CreateTrigger
+    request:
+      cluster_id: $.cluster
+      body:
+        project_id: $.project
+        action: $.action
+        type: $.type
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: cluster_id
+      - request: body.project_id
+      - request: body.action
+    id_from: $.id
+  delete_trigger:
+    api: DeleteTrigger
+    request:
+      cluster_id: $.cluster
+      Id: $.id
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: cluster_id
+      - request: Id
+
+operations:
+  create:
+    examples:
+      - ecctl ack trigger create --cluster <cluster-id> --project <project> --action <action>
+    description:
+      en: Create trigger
+      zh-CN: 创建触发器
+    input:
+      fields:
+        - cluster:
+            required: true
+        - project:
+            required: true
+        - action:
+            required: true
+        - type
+      controls:
+        - api_param
+    workflow:
+      - binding: create_trigger
+      - emit:
+          fields:
+            id: $context.id
+            cluster: $input.cluster
+            project: $input.project
+            action: $input.action
+            type: $input.type
+  delete:
+    examples:
+      - ecctl ack trigger delete <trigger-id> --cluster <cluster-id>
+    description:
+      en: Delete trigger
+      zh-CN: 删除触发器
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+      controls:
+        - api_param
+    workflow:
+      - binding: delete_trigger
+      - emit:
+          fields:
+            id: $input.id
+            cluster: $input.cluster
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get trigger details
+      zh-CN: 获取触发器详情
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+        - namespace:
+            required: true
+        - name:
+            required: true
+        - type
+        - action
+      controls:
+        - api_param
+    workflow:
+      - probe: detail
+        ids:
+          - $input.id
+        not_found: error
+  list:
+    examples:
+      - ecctl ack trigger list
+      - ecctl ack trigger list --filter namespace=<value>
+    description:
+      en: List triggers for an ACK application
+      zh-CN: 列出 ACK 应用触发器
+    input:
+      fields:
+        - cluster:
+            required: true
+        - namespace:
+            required: true
+        - name:
+            required: true
+        - type
+        - action
+      controls:
+        - filter
+        - api_param
+    filters:
+      namespace:
+        target: namespace
+      name:
+        target: name
+      type:
+        target: type
+      action:
+        target: action
+    workflow:
+      - probe: list
+        many: true

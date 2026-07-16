@@ -1,0 +1,33 @@
+# RBAC lifecycle for a temporary RAM user reserved for E2E validation.
+resource: ack/permission
+needs: [ack_shared_cluster, ack_test_user]
+serial: true
+
+steps:
+  - name: update
+    run: >
+      ecctl ack permission update
+      --user-id {{.stack.ack_test_user_id}}
+      --permission role_name=admin,role_type=cluster,cluster={{.stack.ack_shared_cluster}}
+    assert:
+      - len($.permission.permissions) >= 1
+    teardown: ecctl ack permission delete --user-id {{.stack.ack_test_user_id}} --cluster {{.stack.ack_shared_cluster}} --force
+
+  - name: get
+    run: ecctl ack permission get --user-id {{.stack.ack_test_user_id}}
+    assert:
+      - len($.permission.permissions) >= 1
+
+  - name: list
+    run: ecctl ack permission list --user-id {{.stack.ack_test_user_id}}
+    assert:
+      - len($.permissions) >= 1
+
+  - name: delete
+    run: >
+      ecctl ack permission delete
+      --user-id {{.stack.ack_test_user_id}}
+      --cluster {{.stack.ack_shared_cluster}}
+      --force
+    assert:
+      - $.deleted == true

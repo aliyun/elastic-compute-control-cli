@@ -1,0 +1,56 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: contact
+parent: alert
+kind: regional
+display_name:
+  en: alert contact
+  zh-CN: 报警联系人
+description:
+  en: Manage ACK alert contacts
+  zh-CN: 管理 ACK 报警联系人
+examples:
+  - ecctl ack alert contact delete <contact-id>
+  - ecctl ack alert contact delete <contact-id> --region cn-beijing
+
+identity:
+  field: id
+  output_root:
+    one: contact
+    many: contacts
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: alert contact ID
+        zh-CN: 报警联系人 ID
+
+bindings:
+  delete_contact:
+    api: DeleteAlertContact
+    request:
+      contact_ids:
+        each: $list($.id)
+    request_id_from: $.RequestId
+
+operations:
+  delete:
+    examples:
+      - ecctl ack alert contact delete <contact-id>
+    description:
+      en: Delete an ACK alert contact
+      zh-CN: 删除 ACK 报警联系人
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+    workflow:
+      - binding: delete_contact
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true

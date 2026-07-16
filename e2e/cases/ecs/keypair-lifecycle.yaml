@@ -1,0 +1,52 @@
+# ECS keypair lifecycle: create -> read-back -> list -> differential -> delete.
+# Self-contained: a keypair only needs a region, so this case consumes nothing
+# from the shared stack (no `needs`). The keypair identity IS its name (the spec
+# has no id prefix); KeyPairName is both id and name.
+resource: ecs/keypair
+
+steps:
+  - name: create
+    run: >
+      ecctl ecs keypair create
+      --name {{.run_name}}-kp
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.keypair
+    expect:
+      id: { eq: "{{.run_name}}-kp" }
+      name: { eq: "{{.run_name}}-kp" }
+    capture:
+      keypair_id: id
+    teardown: ecctl ecs keypair delete {{.keypair_id}}
+
+  - name: get (read-back)
+    run: ecctl ecs keypair get {{.keypair_id}}
+    at: $.keypair
+    expect:
+      id: { eq: "{{.keypair_id}}" }
+      name: { eq: "{{.keypair_id}}" }
+      # key_pair_id is not returned for key pairs looked up by name (the spec
+      # maps it from KeyPairId, which DescribeKeyPairs omits here); identity is
+      # name + fingerprint, asserted here and in the differential step.
+      fingerprint: { type: string }
+    capture:
+      hi_fingerprint: fingerprint
+
+  - name: list (find ours)
+    run: ecctl ecs keypair list --filter name={{.keypair_id}}
+    # `at` narrows field-path expects, but "$" in expect still means the response
+    # root (a map), so it can't assert "the array is non-empty" — the assert
+    # below does that against $.keypairs directly (same pattern as the sg case).
+    assert:
+      - len($.keypairs) >= 1
+
+  - name: differential vs raw DescribeKeyPairs
+    run: ecctl call ecs DescribeKeyPairs --KeyPairName {{.keypair_id}}
+    expect:
+      $.response.KeyPairs.KeyPair[0].KeyPairName: { eq: "{{.keypair_id}}" }   # call wraps under .response
+      $.response.KeyPairs.KeyPair[0].KeyPairFingerPrint: { eq: "{{.hi_fingerprint}}" }
+
+  - name: delete
+    run: ecctl ecs keypair delete {{.keypair_id}}
+    at: $
+    expect:
+      deleted: true

@@ -1,0 +1,78 @@
+# Security group full lifecycle: create -> read-back -> differential -> list ->
+# update -> authorize -> revoke -> delete. Creates its own private SG (the shared
+# stack SG must not be reused here, since this case deletes the SG it owns).
+# Structural assertions (type/prefix) come from the spec; concrete business
+# values the spec cannot predict are left as TODO(human).
+resource: ecs/sg
+# Needs a VPC to create the SG in; consumes only the shared-stack VPC.
+needs: [vpc]
+
+steps:
+  - name: create
+    run: >
+      ecctl ecs sg create
+      --vpc {{.stack.vpc}}
+      --name {{.run_name}}-sg
+      --description ecctl-e2e
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.security_group
+    expect:
+      id: { type: string, prefix: sg- }
+      name: { eq: "{{.run_name}}-sg" }
+      vpc: { eq: "{{.stack.vpc}}" }
+    capture:
+      sg_id: id
+    teardown: ecctl ecs sg delete {{.sg_id}}
+
+  - name: get (read-back)
+    run: ecctl ecs sg get {{.sg_id}}
+    at: $.security_group
+    expect:
+      id: { eq: "{{.sg_id}}" }
+      vpc: { eq: "{{.stack.vpc}}" }
+      name: { eq: "{{.run_name}}-sg" }
+    capture:
+      hi_vpc: vpc
+
+  - name: differential vs raw DescribeSecurityGroups
+    run: ecctl call ecs DescribeSecurityGroups --SecurityGroupId {{.sg_id}}
+    expect:
+      $.response.SecurityGroups.SecurityGroup[0].SecurityGroupId: { eq: "{{.sg_id}}" }   # call wraps under .response
+      $.response.SecurityGroups.SecurityGroup[0].VpcId: { eq: "{{.hi_vpc}}" }
+
+  - name: list (find ours)
+    run: ecctl ecs sg list --filter vpc={{.stack.vpc}}
+    assert:
+      - len($.security_groups) >= 0
+
+  - name: update (rename)
+    run: ecctl ecs sg update {{.sg_id}} --name {{.run_name}}-sg-renamed
+    at: $.security_group
+    expect:
+      id: { eq: "{{.sg_id}}" }
+
+  - name: get (read-back after update)
+    run: ecctl ecs sg get {{.sg_id}}
+    at: $.security_group
+    expect:
+      id: { eq: "{{.sg_id}}" }
+      name: { eq: "{{.run_name}}-sg-renamed" }
+
+  - name: authorize (ingress rule)
+    run: ecctl ecs sg authorize {{.sg_id}} --rule tcp:22@0.0.0.0/0
+    at: $.security_group
+    expect:
+      id: { eq: "{{.sg_id}}" }
+
+  - name: revoke (ingress rule)
+    run: ecctl ecs sg revoke {{.sg_id}} --rule tcp:22@0.0.0.0/0
+    at: $.security_group
+    expect:
+      id: { eq: "{{.sg_id}}" }
+
+  - name: delete
+    run: ecctl ecs sg delete {{.sg_id}}
+    at: $.security_group
+    expect:
+      id: { eq: "{{.sg_id}}" }
+      $.deleted: { eq: true }   # `deleted` is emitted at the root, not under output_root

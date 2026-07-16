@@ -1,0 +1,1098 @@
+schema_version: 2
+product: ecs
+resource: eni
+kind: regional
+display_name:
+  en: elastic network interface
+  zh-CN: 弹性网卡
+description:
+  en: Manage elastic network interfaces
+  zh-CN: 管理弹性网卡
+examples:
+  - ecctl ecs eni list --filter status=Available
+  - ecctl ecs eni get <eni-id>
+  - ecctl ecs eni create --vswitch <vswitch-id> --sg <sg-id> --name web-eni
+  - ecctl ecs eni attach <eni-id> --instance <instance-id>
+
+identity:
+  field: id
+  prefix: eni-
+  output_root:
+    one: eni
+    many: enis
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: ENI ID
+        zh-CN: 弹性网卡 ID
+    ids:
+      type: array
+      description:
+        en: ENI IDs
+        zh-CN: 弹性网卡 ID 列表
+      items:
+        type: string
+    name:
+      type: string
+      description:
+        en: ENI name
+        zh-CN: 弹性网卡名称
+    description:
+      type: string
+      description:
+        en: ENI description
+        zh-CN: 弹性网卡描述
+    status:
+      type: string
+      description:
+        en: ENI status
+        zh-CN: 弹性网卡状态
+      enum: [Available, Attaching, InUse, Detaching, Deleting]
+    type:
+      type: string
+      description:
+        en: ENI type
+        zh-CN: 弹性网卡类型
+    vpc:
+      type: string
+      description:
+        en: VPC ID
+        zh-CN: VPC ID
+    vswitch:
+      type: string
+      description:
+        en: VSwitch ID
+        zh-CN: 交换机 ID
+    sg:
+      type: string
+      description:
+        en: security group ID
+        zh-CN: 安全组 ID
+    security_group_ids:
+      type: string_array
+      description:
+        en: security group IDs
+        zh-CN: 安全组 ID 列表
+    instance:
+      type: string
+      description:
+        en: ECS instance ID
+        zh-CN: ECS 实例 ID
+    attribute:
+      type: string
+      description:
+        en: ENI attribute to query
+        zh-CN: 要查询的弹性网卡属性
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    service_managed:
+      type: boolean
+      description:
+        en: whether the ENI is managed by an Alibaba Cloud service
+        zh-CN: 是否由云服务管理
+    primary_ip:
+      type: string
+      description:
+        en: primary private IPv4 address
+        zh-CN: 主私网 IPv4 地址
+    private_ip:
+      type: string
+      description:
+        en: private IPv4 address filter
+        zh-CN: 私网 IPv4 地址过滤条件
+    private_ips:
+      type: string_array
+      description:
+        en: secondary private IPv4 addresses
+        zh-CN: 辅助私网 IPv4 地址列表
+    ipv4_prefixes:
+      type: string_array
+      description:
+        en: IPv4 prefixes
+        zh-CN: IPv4 前缀列表
+    ipv6_addresses:
+      type: string_array
+      description:
+        en: IPv6 addresses
+        zh-CN: IPv6 地址列表
+    ipv6_prefixes:
+      type: string_array
+      description:
+        en: IPv6 prefixes
+        zh-CN: IPv6 前缀列表
+    ipv6_address_count:
+      type: integer
+      description:
+        en: number of IPv6 addresses
+        zh-CN: IPv6 地址数量
+    ipv4_prefix_count:
+      type: integer
+      description:
+        en: number of IPv4 prefixes
+        zh-CN: IPv4 前缀数量
+    ipv6_prefix_count:
+      type: integer
+      description:
+        en: number of IPv6 prefixes
+        zh-CN: IPv6 前缀数量
+    private_ip_count:
+      type: integer
+      description:
+        en: number of secondary private IPv4 addresses
+        zh-CN: 辅助私网 IPv4 地址数量
+    private_ip_updates:
+      type: string_array
+      input_style: +value|-value
+      description:
+        en: secondary private IPv4 address changes
+        zh-CN: 辅助私网 IPv4 地址变更
+    ipv4_prefix_updates:
+      type: string_array
+      input_style: +value|-value
+      description:
+        en: IPv4 prefix changes
+        zh-CN: IPv4 前缀变更
+    ipv6_address_updates:
+      type: string_array
+      input_style: +value|-value
+      description:
+        en: IPv6 address changes
+        zh-CN: IPv6 地址变更
+    ipv6_prefix_updates:
+      type: string_array
+      input_style: +value|-value
+      description:
+        en: IPv6 prefix changes
+        zh-CN: IPv6 前缀变更
+    network_card_index:
+      type: integer
+      description:
+        en: network card index
+        zh-CN: 网卡索引
+    trunk_network_instance_id:
+      type: string
+      description:
+        en: trunk ENI instance ID
+        zh-CN: Trunk ENI 实例 ID
+    wait_for_network_configuration_ready:
+      type: boolean
+      description:
+        en: wait for network configuration to become ready during attach
+        zh-CN: 附加时等待网络配置就绪
+    queue_number:
+      type: integer
+      description:
+        en: ENI queue number
+        zh-CN: 网卡队列数
+    queue_pair_number:
+      type: integer
+      description:
+        en: ENI queue pair number
+        zh-CN: 网卡队列对数量
+    rx_queue_size:
+      type: integer
+      description:
+        en: receive queue size
+        zh-CN: 接收队列深度
+    tx_queue_size:
+      type: integer
+      description:
+        en: transmit queue size
+        zh-CN: 发送队列深度
+    traffic_mode:
+      type: string
+      description:
+        en: ENI traffic mode
+        zh-CN: 网卡通讯模式
+    traffic_config:
+      type: object
+      description:
+        en: ENI traffic config
+        zh-CN: 网卡流量配置
+      fields:
+        network_interface_traffic_mode:
+          type: string
+          description:
+            en: ENI traffic mode
+            zh-CN: 网卡通讯模式
+        queue_number:
+          type: integer
+          description:
+            en: ENI queue number
+            zh-CN: 网卡队列数
+        queue_pair_number:
+          type: integer
+          description:
+            en: ENI queue pair number
+            zh-CN: 网卡队列对数量
+        rx_queue_size:
+          type: integer
+          description:
+            en: receive queue size
+            zh-CN: 接收队列深度
+        tx_queue_size:
+          type: integer
+          description:
+            en: transmit queue size
+            zh-CN: 发送队列深度
+    connection_tracking:
+      type: object
+      description:
+        en: connection tracking configuration JSON object
+        zh-CN: 连接跟踪配置 JSON 对象
+      fields:
+        tcp_established_timeout:
+          type: integer
+          description:
+            en: TCP established timeout
+            zh-CN: TCP 已建立连接超时时间
+        tcp_closed_and_time_wait_timeout:
+          type: integer
+          description:
+            en: TCP closed and time-wait timeout
+            zh-CN: TCP 关闭和 TIME_WAIT 超时时间
+        udp_timeout:
+          type: integer
+          description:
+            en: UDP timeout
+            zh-CN: UDP 超时时间
+    enhanced_network:
+      type: object
+      description:
+        en: enhanced network configuration JSON object
+        zh-CN: 增强网络配置 JSON 对象
+      fields:
+        enable_sriov:
+          type: boolean
+          description:
+            en: enable SR-IOV
+            zh-CN: 启用 SR-IOV
+        enable_rss:
+          type: boolean
+          description:
+            en: enable RSS
+            zh-CN: 启用 RSS
+        virtual_function_quantity:
+          type: integer
+          description:
+            en: virtual function quantity
+            zh-CN: 虚拟功能数量
+        virtual_function_total_queue_number:
+          type: integer
+          description:
+            en: total virtual function queue number
+            zh-CN: 虚拟功能总队列数
+    delete_on_release:
+      type: boolean
+      description:
+        en: delete ENI when instance is released
+        zh-CN: 释放实例时删除网卡
+    source_dest_check:
+      type: boolean
+      description:
+        en: enable source/destination check
+        zh-CN: 启用源/目标检查
+    visible:
+      type: boolean
+      description:
+        en: make the ENI visible
+        zh-CN: 网卡是否可见
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+    with_monitor:
+      type: boolean
+      description:
+        en: include ENI monitor data
+        zh-CN: 附带查询网卡监控数据
+    start_time:
+      type: string
+      description:
+        en: monitor start time
+        zh-CN: 监控开始时间
+    end_time:
+      type: string
+      description:
+        en: monitor end time
+        zh-CN: 监控结束时间
+    period:
+      type: integer
+      description:
+        en: monitor period in seconds
+        zh-CN: 监控周期，单位秒
+    qos:
+      type: object
+      description:
+        en: ENI QoS speed limit settings
+        zh-CN: 弹性网卡 QoS 限速配置
+      fields:
+        status:
+          type: string
+          required: true
+          enum: [enable, disable]
+          description:
+            en: QoS status
+            zh-CN: QoS 状态
+        bandwidth_tx:
+          type: integer
+          description:
+            en: outbound bandwidth limit
+            zh-CN: 出方向带宽限速
+        bandwidth_rx:
+          type: integer
+          description:
+            en: inbound bandwidth limit
+            zh-CN: 入方向带宽限速
+        pps_tx:
+          type: integer
+          description:
+            en: outbound packet rate limit
+            zh-CN: 出方向包速率限制
+        pps_rx:
+          type: integer
+          description:
+            en: inbound packet rate limit
+            zh-CN: 入方向包速率限制
+        concurrent_connections:
+          type: integer
+          description:
+            en: concurrent connection limit
+            zh-CN: 并发连接数限制
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 500
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  next_token:
+    type: string
+    description:
+      en: token for the next result page
+      zh-CN: 下一页查询 token
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: DescribeNetworkInterfaces
+    request:
+      RegionId: $context.region
+      NetworkInterfaceId:
+        each: $.ids
+      NetworkInterfaceName: $.name
+      Type: $.type
+      Status: $.status
+      VpcId: $.vpc
+      VSwitchId: $.vswitch
+      SecurityGroupId: $.sg
+      InstanceId: $.instance
+      Ipv6Address:
+        each: $.ipv6_addresses
+      PrimaryIpAddress: $.primary_ip
+      PrivateIpAddress:
+        each: $.private_ip
+      ResourceGroupId: $.resource_group
+      ServiceManaged: $.service_managed
+      Tag: $.tag
+      MaxResults: $.limit
+      NextToken: $.next_token
+    response:
+      items: $.NetworkInterfaceSets.NetworkInterfaceSet
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.NetworkInterfaceId
+      state: $.Status
+      fields:
+        id: $.NetworkInterfaceId
+        name: $.NetworkInterfaceName
+        description: $.Description
+        status: $.Status
+        type: $.Type
+        vpc: $.VpcId
+        vswitch: $.VSwitchId
+        zone: $.ZoneId
+        instance: $.InstanceId
+        mac_address: $.MacAddress
+        primary_ip: $.PrivateIpAddress
+        private_ip_sets: $.PrivateIpSets.PrivateIpSet
+        ipv6_sets: $.Ipv6Sets.Ipv6Set
+        ipv4_prefix_sets: $.Ipv4PrefixSets.Ipv4PrefixSet
+        ipv6_prefix_sets: $.Ipv6PrefixSets.Ipv6PrefixSet
+        security_group_ids: $.SecurityGroupIds.SecurityGroupId
+        resource_group: $.ResourceGroupId
+        service_id: $.ServiceID
+        service_managed: $.ServiceManaged
+        owner: $.OwnerId
+        traffic_mode: $.NetworkInterfaceTrafficMode
+        queue_number: $.QueueNumber
+        queue_pair_number: $.QueuePairNumber
+        attachment: $.Attachment
+        source_dest_check: $.SourceDestCheck
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+  attribute:
+    api: DescribeNetworkInterfaceAttribute
+    request:
+      RegionId: $context.region
+      NetworkInterfaceId: $.id
+      Attribute: $.attribute
+    response:
+      item: $
+      request_id: $.RequestId
+      id: $.NetworkInterfaceId
+      state: $.Status
+      fields:
+        id: $.NetworkInterfaceId
+        name: $.NetworkInterfaceName
+        description: $.Description
+        status: $.Status
+        type: $.Type
+        vpc: $.VpcId
+        vswitch: $.VSwitchId
+        zone: $.ZoneId
+        instance: $.InstanceId
+        mac_address: $.MacAddress
+        primary_ip: $.PrivateIpAddress
+        private_ip_sets: $.PrivateIpSets.PrivateIpSet
+        ipv6_sets: $.Ipv6Sets.Ipv6Set
+        ipv4_prefix_sets: $.Ipv4PrefixSets.Ipv4PrefixSet
+        ipv6_prefix_sets: $.Ipv6PrefixSets.Ipv6PrefixSet
+        security_group_ids: $.SecurityGroupIds.SecurityGroupId
+        resource_group: $.ResourceGroupId
+        service_id: $.ServiceID
+        service_managed: $.ServiceManaged
+        owner: $.OwnerId
+        traffic_mode: $.NetworkInterfaceTrafficMode
+        queue_number: $.QueueNumber
+        queue_pair_number: $.QueuePairNumber
+        source_dest_check: $.SourceDestCheck
+        tags: $.Tags.Tag
+  monitor:
+    api: DescribeEniMonitorData
+    request:
+      RegionId: $context.region
+      EniId: $.id
+      InstanceId: $.instance
+      StartTime: $.start_time
+      EndTime: $.end_time
+      Period: $.period
+    response:
+      items: $.MonitorData.EniMonitorData
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.EniId
+      fields:
+        id: $.EniId
+        timestamp: $.TimeStamp
+        intranet_rx: $.IntranetRx
+        intranet_tx: $.IntranetTx
+        packet_rx: $.PacketRx
+        packet_tx: $.PacketTx
+        drop_packet_rx: $.DropPacketRx
+        drop_packet_tx: $.DropPacketTx
+
+waiters:
+  available_after_create:
+    probe: attribute
+    target: Available
+    interval: 2s
+    timeout: 300s
+  deleted_after_delete:
+    probe: list
+    target: absent
+    interval: 2s
+    timeout: 300s
+  in_use_after_attach:
+    probe: attribute
+    target: InUse
+    interval: 2s
+    timeout: 300s
+  available_after_detach:
+    probe: attribute
+    target: Available
+    interval: 2s
+    timeout: 300s
+
+bindings:
+  create_to_available:
+    api: CreateNetworkInterface
+    idempotency:
+      field: ClientToken
+      prefix: eni-create
+    request:
+      RegionId: $context.region
+      VSwitchId: $.vswitch
+      InstanceType: $.type
+      NetworkInterfaceName: $.name
+      Description: $.description
+      PrimaryIpAddress: $.primary_ip
+      SecondaryPrivateIpAddressCount: $.private_ip_count
+      QueueNumber: $.queue_number
+      QueuePairNumber: $.queue_pair_number
+      NetworkInterfaceTrafficMode: $.traffic_mode
+      Visible: $.visible
+      ResourceGroupId: $.resource_group
+      DeleteOnRelease: $.delete_on_release
+      TxQueueSize: $.tx_queue_size
+      RxQueueSize: $.rx_queue_size
+      SourceDestCheck: $.source_dest_check
+      SecurityGroupIds:
+        each: $.security_group_ids
+      PrivateIpAddress:
+        each: $.private_ips
+      Ipv4Prefix:
+        each: $.ipv4_prefixes
+      Ipv4PrefixCount: $.ipv4_prefix_count
+      Ipv6Address:
+        each: $.ipv6_addresses
+      Ipv6AddressCount: $.ipv6_address_count
+      Ipv6Prefix:
+        each: $.ipv6_prefixes
+      Ipv6PrefixCount: $.ipv6_prefix_count
+      Tag: $.tag
+      NetworkInterfaceTrafficConfig:
+        from: $.traffic_config
+        fields:
+          NetworkInterfaceTrafficMode: $.network_interface_traffic_mode
+          QueueNumber: $.queue_number
+          QueuePairNumber: $.queue_pair_number
+          RxQueueSize: $.rx_queue_size
+          TxQueueSize: $.tx_queue_size
+      ConnectionTrackingConfiguration:
+        from: $.connection_tracking
+        fields:
+          TcpEstablishedTimeout: $.tcp_established_timeout
+          TcpClosedAndTimeWaitTimeout: $.tcp_closed_and_time_wait_timeout
+          UdpTimeout: $.udp_timeout
+      EnhancedNetwork:
+        from: $.enhanced_network
+        fields:
+          EnableSriov: $.enable_sriov
+          EnableRss: $.enable_rss
+          VirtualFunctionQuantity: $.virtual_function_quantity
+          VirtualFunctionTotalQueueNumber: $.virtual_function_total_queue_number
+      ApiParam:
+        raw: $.api_param
+    id_from: $.NetworkInterfaceId
+    request_id_from: $.RequestId
+    wait: available_after_create
+  update_attributes:
+    api: ModifyNetworkInterfaceAttribute
+    request:
+      RegionId: $context.region
+      NetworkInterfaceId: $.id
+      NetworkInterfaceName: $.name
+      Description: $.description
+      QueueNumber: $.queue_number
+      DeleteOnRelease: $.delete_on_release
+      RxQueueSize: $.rx_queue_size
+      TxQueueSize: $.tx_queue_size
+      SourceDestCheck: $.source_dest_check
+      SecurityGroupIds:
+        each: $.security_group_ids
+      NetworkInterfaceTrafficConfig:
+        from: $.traffic_config
+        fields:
+          NetworkInterfaceTrafficMode: $.network_interface_traffic_mode
+          QueueNumber: $.queue_number
+          QueuePairNumber: $.queue_pair_number
+          RxQueueSize: $.rx_queue_size
+          TxQueueSize: $.tx_queue_size
+      ConnectionTrackingConfiguration:
+        from: $.connection_tracking
+        fields:
+          TcpEstablishedTimeout: $.tcp_established_timeout
+          TcpClosedAndTimeWaitTimeout: $.tcp_closed_and_time_wait_timeout
+          UdpTimeout: $.udp_timeout
+      EnhancedNetwork:
+        from: $.enhanced_network
+        fields:
+          EnableSriov: $.enable_sriov
+          EnableRss: $.enable_rss
+          VirtualFunctionQuantity: $.virtual_function_quantity
+          VirtualFunctionTotalQueueNumber: $.virtual_function_total_queue_number
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  assign_private_ips:
+    api: AssignPrivateIpAddresses
+    idempotency:
+      field: ClientToken
+      prefix: eni-assign-ip
+    request:
+      RegionId: $context.region
+      NetworkInterfaceId: $.id
+      SecondaryPrivateIpAddressCount: $.private_ip_count
+      PrivateIpAddress:
+        each: $prefixed_values($.private_ip_updates,+)
+      Ipv4Prefix:
+        each: $prefixed_values($.ipv4_prefix_updates,+)
+      Ipv4PrefixCount: $.ipv4_prefix_count
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  unassign_private_ips:
+    api: UnassignPrivateIpAddresses
+    request:
+      RegionId: $context.region
+      NetworkInterfaceId: $.id
+      PrivateIpAddress:
+        each: $prefixed_values($.private_ip_updates,-)
+      Ipv4Prefix:
+        each: $prefixed_values($.ipv4_prefix_updates,-)
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  assign_ipv6_addresses:
+    api: AssignIpv6Addresses
+    idempotency:
+      field: ClientToken
+      prefix: eni-assign-ipv6
+    request:
+      RegionId: $context.region
+      NetworkInterfaceId: $.id
+      Ipv6Address:
+        each: $prefixed_values($.ipv6_address_updates,+)
+      Ipv6AddressCount: $.ipv6_address_count
+      Ipv6Prefix:
+        each: $prefixed_values($.ipv6_prefix_updates,+)
+      Ipv6PrefixCount: $.ipv6_prefix_count
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  unassign_ipv6_addresses:
+    api: UnassignIpv6Addresses
+    request:
+      RegionId: $context.region
+      NetworkInterfaceId: $.id
+      Ipv6Address:
+        each: $prefixed_values($.ipv6_address_updates,-)
+      Ipv6Prefix:
+        each: $prefixed_values($.ipv6_prefix_updates,-)
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  attach_to_instance:
+    api: AttachNetworkInterface
+    request:
+      RegionId: $context.region
+      NetworkInterfaceId: $.id
+      InstanceId: $.instance
+      NetworkCardIndex: $.network_card_index
+      TrunkNetworkInstanceId: $.trunk_network_instance_id
+      WaitForNetworkConfigurationReady: $.wait_for_network_configuration_ready
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: in_use_after_attach
+  detach_from_instance:
+    api: DetachNetworkInterface
+    request:
+      RegionId: $context.region
+      NetworkInterfaceId: $.id
+      InstanceId: $.instance
+      TrunkNetworkInstanceId: $.trunk_network_instance_id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: available_after_detach
+  enable_qos:
+    api: EnableNetworkInterfaceQoS
+    request:
+      RegionId: $context.region
+      NetworkInterfaceId: $.id
+      QoS:
+        from: $.qos
+        fields:
+          BandwidthTx: $.bandwidth_tx
+          BandwidthRx: $.bandwidth_rx
+          PpsTx: $.pps_tx
+          PpsRx: $.pps_rx
+          ConcurrentConnections: $.concurrent_connections
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  disable_qos:
+    api: DisableNetworkInterfaceQoS
+    request:
+      RegionId: $context.region
+      NetworkInterfaceId: $.id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  delete_to_absent:
+    api: DeleteNetworkInterface
+    request:
+      RegionId: $context.region
+      NetworkInterfaceId: $.id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+
+operations:
+  create:
+    examples:
+      - ecctl ecs eni create --vswitch <vsw-id> --security-group-ids <security-group-ids>
+      - ecctl ecs eni create --vswitch <vsw-id> --security-group-ids <security-group-ids> --name my-name --tag env=prod
+    description:
+      en: Create ENI
+      zh-CN: 创建弹性网卡
+    input:
+      fields:
+        - vswitch:
+            required: true
+        - security_group_ids:
+            required: true
+            flag_name: sg
+        - type
+        - name
+        - description
+        - primary_ip
+        - private_ip_count
+        - private_ips
+        - ipv4_prefixes
+        - ipv4_prefix_count
+        - ipv6_addresses
+        - ipv6_address_count
+        - ipv6_prefixes
+        - ipv6_prefix_count
+        - queue_number
+        - queue_pair_number
+        - traffic_mode
+        - visible
+        - resource_group
+        - delete_on_release
+        - rx_queue_size
+        - tx_queue_size
+        - source_dest_check
+        - traffic_config
+        - connection_tracking
+        - enhanced_network
+        - tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_to_available
+        wait_unless: input.no_wait
+      - probe: attribute
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            vswitch: $input.vswitch
+            status: Available
+  update:
+    examples:
+      - ecctl ecs eni update <eni-id>
+      - ecctl ecs eni update <eni-id> --name my-name
+    description:
+      en: Update ENI
+      zh-CN: 更新弹性网卡
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - description
+        - security_group_ids:
+            flag_name: sg
+        - queue_number
+        - delete_on_release
+        - rx_queue_size
+        - tx_queue_size
+        - source_dest_check
+        - traffic_config
+        - connection_tracking
+        - enhanced_network
+        - private_ip_updates:
+            flag_name: private-ip
+        - private_ip_count
+        - ipv4_prefix_updates:
+            flag_name: ipv4-prefix
+        - ipv4_prefix_count
+        - ipv6_address_updates:
+            flag_name: ipv6-address
+        - ipv6_address_count
+        - ipv6_prefix_updates:
+            flag_name: ipv6-prefix
+        - ipv6_prefix_count
+        - qos
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: update_attributes
+        when_any:
+          - has(input.name)
+          - has(input.description)
+          - has(input.security_group_ids)
+          - has(input.queue_number)
+          - has(input.delete_on_release)
+          - has(input.rx_queue_size)
+          - has(input.tx_queue_size)
+          - has(input.source_dest_check)
+          - has(input.traffic_config)
+          - has(input.connection_tracking)
+          - has(input.enhanced_network)
+      - binding: assign_private_ips
+        when_any:
+          - has($prefixed_values($.private_ip_updates,+))
+          - has(input.private_ip_count)
+          - has($prefixed_values($.ipv4_prefix_updates,+))
+          - has(input.ipv4_prefix_count)
+      - binding: unassign_private_ips
+        when_any:
+          - has($prefixed_values($.private_ip_updates,-))
+          - has($prefixed_values($.ipv4_prefix_updates,-))
+      - binding: assign_ipv6_addresses
+        when_any:
+          - has($prefixed_values($.ipv6_address_updates,+))
+          - has(input.ipv6_address_count)
+          - has($prefixed_values($.ipv6_prefix_updates,+))
+          - has(input.ipv6_prefix_count)
+      - binding: unassign_ipv6_addresses
+        when_any:
+          - has($prefixed_values($.ipv6_address_updates,-))
+          - has($prefixed_values($.ipv6_prefix_updates,-))
+      - binding: enable_qos
+        when: input.qos.status == enable
+      - binding: disable_qos
+        when: input.qos.status == disable
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            name: $input.name
+            description: $input.description
+  delete:
+    examples:
+      - ecctl ecs eni delete <eni-id>
+    description:
+      en: Delete ENI
+      zh-CN: 删除弹性网卡
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get ENI
+      zh-CN: 获取弹性网卡
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - attribute
+        - with_monitor
+        - instance
+        - start_time
+        - end_time
+        - period
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        not_found: error
+      - probe: monitor
+        ids:
+          - $input.id
+        many: true
+        as: monitor
+        when: input.with_monitor
+    output:
+      fields:
+        eni: $result.item
+        monitor_data: $captures.monitor.items
+  list:
+    examples:
+      - ecctl ecs eni list
+      - ecctl ecs eni list --filter name=<value>
+      - ecctl ecs eni list --filter tag.env=prod
+    description:
+      en: List ENIs
+      zh-CN: 列出弹性网卡
+    input:
+      fields:
+        - ids:
+            positional_many: true
+      controls:
+        - filter
+        - limit
+        - next_token
+    filters:
+      id:
+        target: ids
+      ids:
+        target: ids
+      eni:
+        target: ids
+      eni.id:
+        target: ids
+      name:
+        target: name
+      status:
+        target: status
+      type:
+        target: type
+      vpc:
+        target: vpc
+      vpc.id:
+        target: vpc
+      vswitch:
+        target: vswitch
+      vswitch.id:
+        target: vswitch
+      sg:
+        target: sg
+      sg.id:
+        target: sg
+      security-group:
+        target: sg
+      security-group.id:
+        target: sg
+      instance:
+        target: instance
+      instance.id:
+        target: instance
+      primary-ip:
+        target: primary_ip
+      private-ip:
+        target: private_ip
+      ipv6-address:
+        target: ipv6_addresses
+      ipv6:
+        target: ipv6_addresses
+      service-managed:
+        target: service_managed
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true
+  attach:
+    examples:
+      - ecctl ecs eni attach <eni-id> --instance <instance-id>
+    description:
+      en: Attach ENI
+      zh-CN: 附加弹性网卡
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - instance:
+            required: true
+        - network_card_index
+        - trunk_network_instance_id
+        - wait_for_network_configuration_ready
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: attach_to_instance
+        wait_unless: input.no_wait
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            instance: $input.instance
+  detach:
+    examples:
+      - ecctl ecs eni detach <eni-id> --instance <instance-id>
+    description:
+      en: Detach ENI
+      zh-CN: 分离弹性网卡
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - instance:
+            required: true
+        - trunk_network_instance_id
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: detach_from_instance
+        wait_unless: input.no_wait
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            instance: $input.instance

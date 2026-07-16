@@ -1,0 +1,233 @@
+schema_version: 2
+product: rg
+api_product: ResourceManager
+resource: resource
+kind: regional
+display_name:
+  en: resource
+  zh-CN: 资源
+description:
+  en: Manage resources across resource groups
+  zh-CN: 管理资源组中的资源
+examples:
+  - ecctl rg resource list <group-id>
+  - ecctl rg resource list --filter service=ecs --filter resource-type=instance
+  - ecctl rg resource update <target-group-id> --resource resource-id=i-xxx,resource-type=instance,service=ecs,region-id=cn-hangzhou
+
+identity:
+  field: id
+  prefix: rg-
+  output_root:
+    one: resource
+    many: resources
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    service:
+      type: string
+      description:
+        en: cloud service code
+        zh-CN: 云服务代码
+    resource_region:
+      type: string
+      description:
+        en: filter by the region the resource resides in
+        zh-CN: 按资源所属地域过滤
+    resource_type:
+      type: string
+      description:
+        en: resource type
+        zh-CN: 资源类型
+    resource_id:
+      type: string
+      description:
+        en: resource ID
+        zh-CN: 资源 ID
+    resources:
+      type: array
+      description:
+        en: resources to move
+        zh-CN: 要移动的资源列表
+      items:
+        type: object
+        fields:
+          resource_id:
+            type: string
+            required: true
+            description:
+              en: resource ID
+              zh-CN: 资源 ID
+          resource_type:
+            type: string
+            required: true
+            description:
+              en: resource type
+              zh-CN: 资源类型
+          service:
+            type: string
+            required: true
+            description:
+              en: cloud service code
+              zh-CN: 云服务代码
+          region_id:
+            type: string
+            description:
+              en: resource region ID
+              zh-CN: 资源所属地域 ID
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  no_wait:
+    type: boolean
+    description:
+      en: return before moved resources are visible
+      zh-CN: 资源转组可见前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: ListResources
+    request:
+      ResourceGroupId: $.id
+      Service: $.service
+      Region: $.resource_region
+      ResourceType: $.resource_type
+      ResourceId: $.resource_id
+      PageNumber: $.page
+      PageSize: $.limit
+      ApiParam:
+        raw: $.api_param
+    response:
+      items: $.Resources.Resource
+      total: $.TotalCount
+      request_id: $.RequestId
+      fields:
+        resource_id: $.ResourceId
+        resource_type: $.ResourceType
+        service: $.Service
+        region_id: $.RegionId
+        resource_group_id: $.ResourceGroupId
+        create_date: $.CreateDate
+
+waiters:
+  resources_visible_after_move:
+    probe: list
+    target: matched
+    interval: 2s
+    timeout: 300s
+    match:
+      capture: moved_resources
+      by: [resource_id, resource_type, service]
+
+bindings:
+  move_resources:
+    api: MoveResources
+    request:
+      ResourceGroupId: $.id
+      Resources:
+        capture:
+          name: moved_resources
+          fields:
+            resource_id: $.resource_id
+            resource_type: $.resource_type
+            service: $.service
+        each: $.resources
+        fields:
+          ResourceId: $.resource_id
+          ResourceType: $.resource_type
+          Service: $.service
+          RegionId: $.region_id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: resources_visible_after_move
+
+operations:
+  update:
+    examples:
+      - ecctl rg resource update <resource-id> --resources <resources>
+    description:
+      en: Move resources to a target resource group
+      zh-CN: 将资源移动到目标资源组
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - resources:
+            required: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: move_resources
+        wait_unless: input.no_wait
+    output:
+      fields:
+        actions: $result.actions
+        resources: $result.items
+        total: $result.total
+
+  list:
+    examples:
+      - ecctl rg resource list
+      - ecctl rg resource list --filter service=<value>
+    description:
+      en: List resources in a resource group
+      zh-CN: 列出资源组中的资源
+    input:
+      fields:
+        - id:
+            positional: true
+      controls:
+        - filter
+        - limit
+        - page
+        - api_param
+    filters:
+      service:
+        target: service
+      resource-region:
+        target: resource_region
+      resource-type:
+        target: resource_type
+      resource-id:
+        target: resource_id
+    workflow:
+      - probe: list
+        many: true

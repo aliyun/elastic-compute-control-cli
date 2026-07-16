@@ -1,0 +1,801 @@
+schema_version: 2
+product: ecs
+resource: launch-template
+kind: regional
+aliases: [lt]
+display_name:
+  en: launch template
+  zh-CN: 启动模板
+description:
+  en: Manage ECS launch templates
+  zh-CN: 管理 ECS 启动模板
+examples:
+  - ecctl ecs launch-template list
+  - ecctl ecs launch-template create --name web-lt --image aliyun_3_x64_20G_alibase_20240528.vhd --type ecs.g6.large --sg sg-xxx --vswitch vsw-xxx
+  - ecctl ecs launch-template update <launch-template-id> --create-version --image aliyun_3_x64_20G_alibase_20240528.vhd
+  - ecctl ecs launch-template delete <launch-template-id> --version 2
+
+identity:
+  field: id
+  prefix: lt-
+  output_root:
+    one: launch_template
+    many: launch_templates
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: launch template ID
+        zh-CN: 启动模板 ID
+    ids:
+      type: array
+      description:
+        en: launch template IDs
+        zh-CN: 启动模板 ID 列表
+      items:
+        type: string
+    target:
+      type: string
+      description:
+        en: launch template ID or name
+        zh-CN: 启动模板 ID 或名称
+    targets:
+      type: array
+      description:
+        en: launch template IDs or names
+        zh-CN: 启动模板 ID 或名称列表
+      items:
+        type: string
+    name:
+      type: string
+      description:
+        en: launch template name
+        zh-CN: 启动模板名称
+    names:
+      type: array
+      description:
+        en: launch template names
+        zh-CN: 启动模板名称列表
+      items:
+        type: string
+    version:
+      type: integer
+      description:
+        en: launch template version number
+        zh-CN: 启动模板版本号
+    default_version:
+      type: integer
+      description:
+        en: launch template default version number
+        zh-CN: 启动模板默认版本号
+    description:
+      type: string
+      description:
+        en: instance description stored in the launch template
+        zh-CN: 启动模板中的实例描述
+    version_description:
+      type: string
+      description:
+        en: launch template version description
+        zh-CN: 启动模板版本描述
+    image:
+      type: string
+      description:
+        en: ECS image ID
+        zh-CN: ECS 镜像 ID
+    type:
+      type: string
+      description:
+        en: ECS instance type
+        zh-CN: ECS 实例规格
+    sg:
+      type: string
+      description:
+        en: security group ID
+        zh-CN: 安全组 ID
+    security_groups:
+      type: array
+      description:
+        en: security group IDs
+        zh-CN: 安全组 ID 列表
+      items:
+        type: string
+    vswitch:
+      type: string
+      description:
+        en: vSwitch ID
+        zh-CN: 交换机 ID
+    keypair:
+      type: string
+      description:
+        en: key pair name
+        zh-CN: 密钥对名称
+    resource_group:
+      type: string
+      description:
+        en: resource group ID for resources created from the template
+        zh-CN: 从模板创建出的资源所属资源组 ID
+    template_resource_group:
+      type: string
+      description:
+        en: resource group ID for the launch template
+        zh-CN: 启动模板所属资源组 ID
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value for resources created from the template
+        zh-CN: 从模板创建出的资源标签 key=value
+    template_tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: launch template tag assignment key=value
+        zh-CN: 启动模板标签 key=value
+    create_version:
+      type: boolean
+      description:
+        en: create a new launch template version
+        zh-CN: 创建新的启动模板版本
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  no_wait:
+    type: boolean
+    description:
+      en: return before read-back completion
+      zh-CN: 回读完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  with_versions:
+    type: boolean
+    description:
+      en: include launch template versions
+      zh-CN: 附带启动模板版本信息
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: DescribeLaunchTemplates
+    request:
+      RegionId: $context.region
+      LaunchTemplateId:
+        each: $.ids
+      LaunchTemplateName:
+        each: $.names
+      TemplateResourceGroupId: $.template_resource_group
+      TemplateTag: $.template_tag
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.LaunchTemplateSets.LaunchTemplateSet
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.LaunchTemplateId
+      fields:
+        id: $.LaunchTemplateId
+        name: $.LaunchTemplateName
+        default_version:
+          int: $.DefaultVersionNumber
+        latest_version:
+          int: $.LatestVersionNumber
+        created_by: $.CreatedBy
+        create_time: $.CreateTime
+        modified_time: $.ModifiedTime
+        resource_group: $.ResourceGroupId
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+  list_by_name:
+    api: DescribeLaunchTemplates
+    request:
+      RegionId: $context.region
+      LaunchTemplateName:
+        each: $list($.name)
+      TemplateResourceGroupId: $.template_resource_group
+      TemplateTag: $.template_tag
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.LaunchTemplateSets.LaunchTemplateSet
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.LaunchTemplateId
+      fields:
+        id: $.LaunchTemplateId
+        name: $.LaunchTemplateName
+        default_version:
+          int: $.DefaultVersionNumber
+        latest_version:
+          int: $.LatestVersionNumber
+        created_by: $.CreatedBy
+        create_time: $.CreateTime
+        modified_time: $.ModifiedTime
+        resource_group: $.ResourceGroupId
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+  list_by_target_name:
+    api: DescribeLaunchTemplates
+    request:
+      RegionId: $context.region
+      LaunchTemplateName:
+        each: $.ids
+      TemplateResourceGroupId: $.template_resource_group
+      TemplateTag: $.template_tag
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.LaunchTemplateSets.LaunchTemplateSet
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.LaunchTemplateId
+      fields:
+        id: $.LaunchTemplateId
+        name: $.LaunchTemplateName
+        default_version:
+          int: $.DefaultVersionNumber
+        latest_version:
+          int: $.LatestVersionNumber
+        created_by: $.CreatedBy
+        create_time: $.CreateTime
+        modified_time: $.ModifiedTime
+        resource_group: $.ResourceGroupId
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+  created_template:
+    api: DescribeLaunchTemplates
+    request:
+      RegionId: $context.region
+      LaunchTemplateId:
+        each: $list($context.id)
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.LaunchTemplateSets.LaunchTemplateSet
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.LaunchTemplateId
+      fields:
+        id: $.LaunchTemplateId
+        name: $.LaunchTemplateName
+        default_version:
+          int: $.DefaultVersionNumber
+        latest_version:
+          int: $.LatestVersionNumber
+        created_by: $.CreatedBy
+        create_time: $.CreateTime
+        modified_time: $.ModifiedTime
+        resource_group: $.ResourceGroupId
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+  versions:
+    api: DescribeLaunchTemplateVersions
+    request:
+      RegionId: $context.region
+      LaunchTemplateId: $.id
+      LaunchTemplateName: $.name
+      LaunchTemplateVersion:
+        each: $.version
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      item: $
+      total: $.TotalCount
+      request_id: $.RequestId
+      fields:
+        versions:
+          from: $.LaunchTemplateVersionSets.LaunchTemplateVersionSet
+          each:
+            version: $.VersionNumber
+            id: $.LaunchTemplateId
+            name: $.LaunchTemplateName
+            default: $.DefaultVersion
+            description: $.VersionDescription
+            create_time: $.CreateTime
+            modified_time: $.ModifiedTime
+            created_by: $.CreatedBy
+            image: $.LaunchTemplateData.ImageId
+            type: $.LaunchTemplateData.InstanceType
+            sg: $.LaunchTemplateData.SecurityGroupId
+            security_groups: $.LaunchTemplateData.SecurityGroupIds.SecurityGroupId
+            vswitch: $.LaunchTemplateData.VSwitchId
+            keypair: $.LaunchTemplateData.KeyPairName
+            resource_group: $.LaunchTemplateData.ResourceGroupId
+            tags: $.LaunchTemplateData.Tags.InstanceTag
+  versions_selected:
+    api: DescribeLaunchTemplateVersions
+    request:
+      RegionId: $context.region
+      LaunchTemplateId: $context.target_template.id
+      LaunchTemplateName: $context.target_template.name
+      LaunchTemplateVersion:
+        each: $.version
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      item: $
+      total: $.TotalCount
+      request_id: $.RequestId
+      fields:
+        versions:
+          from: $.LaunchTemplateVersionSets.LaunchTemplateVersionSet
+          each:
+            version: $.VersionNumber
+            id: $.LaunchTemplateId
+            name: $.LaunchTemplateName
+            default: $.DefaultVersion
+            description: $.VersionDescription
+            create_time: $.CreateTime
+            modified_time: $.ModifiedTime
+            created_by: $.CreatedBy
+            image: $.LaunchTemplateData.ImageId
+            type: $.LaunchTemplateData.InstanceType
+            sg: $.LaunchTemplateData.SecurityGroupId
+            security_groups: $.LaunchTemplateData.SecurityGroupIds.SecurityGroupId
+            vswitch: $.LaunchTemplateData.VSwitchId
+            keypair: $.LaunchTemplateData.KeyPairName
+            resource_group: $.LaunchTemplateData.ResourceGroupId
+            tags: $.LaunchTemplateData.Tags.InstanceTag
+  default_version:
+    api: DescribeLaunchTemplateVersions
+    request:
+      RegionId: $context.region
+      LaunchTemplateId: $.id
+      LaunchTemplateName: $.name
+      DefaultVersion: true
+      LaunchTemplateVersion:
+        each: $.default_version
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      item: $
+      total: $.TotalCount
+      request_id: $.RequestId
+      fields:
+        versions:
+          from: $.LaunchTemplateVersionSets.LaunchTemplateVersionSet
+          each:
+            version: $.VersionNumber
+            id: $.LaunchTemplateId
+            name: $.LaunchTemplateName
+            default: $.DefaultVersion
+            description: $.VersionDescription
+            create_time: $.CreateTime
+            modified_time: $.ModifiedTime
+            created_by: $.CreatedBy
+            image: $.LaunchTemplateData.ImageId
+            type: $.LaunchTemplateData.InstanceType
+            sg: $.LaunchTemplateData.SecurityGroupId
+            security_groups: $.LaunchTemplateData.SecurityGroupIds.SecurityGroupId
+            vswitch: $.LaunchTemplateData.VSwitchId
+            keypair: $.LaunchTemplateData.KeyPairName
+            resource_group: $.LaunchTemplateData.ResourceGroupId
+            tags: $.LaunchTemplateData.Tags.InstanceTag
+  created_version:
+    api: DescribeLaunchTemplateVersions
+    request:
+      RegionId: $context.region
+      LaunchTemplateId: $.id
+      LaunchTemplateName: $.name
+      LaunchTemplateVersion:
+        each: $context.created_version
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      item: $
+      total: $.TotalCount
+      request_id: $.RequestId
+      fields:
+        versions:
+          from: $.LaunchTemplateVersionSets.LaunchTemplateVersionSet
+          each:
+            version: $.VersionNumber
+            id: $.LaunchTemplateId
+            name: $.LaunchTemplateName
+            default: $.DefaultVersion
+            description: $.VersionDescription
+            create_time: $.CreateTime
+            modified_time: $.ModifiedTime
+            created_by: $.CreatedBy
+            image: $.LaunchTemplateData.ImageId
+            type: $.LaunchTemplateData.InstanceType
+            sg: $.LaunchTemplateData.SecurityGroupId
+            security_groups: $.LaunchTemplateData.SecurityGroupIds.SecurityGroupId
+            vswitch: $.LaunchTemplateData.VSwitchId
+            keypair: $.LaunchTemplateData.KeyPairName
+            resource_group: $.LaunchTemplateData.ResourceGroupId
+            tags: $.LaunchTemplateData.Tags.InstanceTag
+
+waiters:
+  created_version_visible:
+    probe: created_version
+    target: present
+    interval: 2s
+    timeout: 300s
+  default_version_visible:
+    probe: default_version
+    target: present
+    interval: 2s
+    timeout: 300s
+  template_visible:
+    probe: created_template
+    target: present
+    interval: 2s
+    timeout: 300s
+
+bindings:
+  create_to_available:
+    api: CreateLaunchTemplate
+    request:
+      RegionId: $context.region
+      LaunchTemplateName: $.name
+      VersionDescription: $.version_description
+      ImageId: $.image
+      InstanceType: $.type
+      Description: $.description
+      SecurityGroupId: $.sg
+      SecurityGroupIds:
+        each: $.security_groups
+      VSwitchId: $.vswitch
+      KeyPairName: $.keypair
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      TemplateResourceGroupId: $.template_resource_group
+      TemplateTag: $.template_tag
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: LaunchTemplateName
+    id_from: $.LaunchTemplateId
+    request_id_from: $.RequestId
+  create_version:
+    api: CreateLaunchTemplateVersion
+    request:
+      RegionId: $context.region
+      LaunchTemplateId: $.id
+      LaunchTemplateName: $.name
+      VersionDescription: $.version_description
+      ImageId: $.image
+      InstanceType: $.type
+      Description: $.description
+      SecurityGroupId: $.sg
+      SecurityGroupIds:
+        each: $.security_groups
+      VSwitchId: $.vswitch
+      KeyPairName: $.keypair
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - raw: $.id
+      - raw: $.name
+    id_from: $.LaunchTemplateId
+    context_from:
+      created_version: $.LaunchTemplateVersionNumber
+    request_id_from: $.RequestId
+  set_default_version:
+    api: ModifyLaunchTemplateDefaultVersion
+    request:
+      RegionId: $context.region
+      LaunchTemplateId: $.id
+      LaunchTemplateName: $.name
+      DefaultVersionNumber: $.default_version
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: DefaultVersionNumber
+    require_any:
+      - raw: $.id
+      - raw: $.name
+    request_id_from: $.RequestId
+  delete_template:
+    api: DeleteLaunchTemplate
+    request:
+      RegionId: $context.region
+      LaunchTemplateId: $context.target_template.id
+      LaunchTemplateName: $context.target_template.name
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - raw: $context.target_template.id
+      - raw: $context.target_template.name
+    request_id_from: $.RequestId
+  delete_version:
+    api: DeleteLaunchTemplateVersion
+    request:
+      RegionId: $context.region
+      LaunchTemplateId: $context.target_template.id
+      LaunchTemplateName: $context.target_template.name
+      DeleteVersion:
+        each: $.version
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: DeleteVersion.1
+    require_any:
+      - raw: $context.target_template.id
+      - raw: $context.target_template.name
+    request_id_from: $.RequestId
+
+operations:
+  create:
+    examples:
+      - ecctl ecs launch-template create --name my-name
+      - ecctl ecs launch-template create --name my-name --tag env=prod
+    description:
+      en: Create launch template
+      zh-CN: 创建启动模板
+    input:
+      fields:
+        - name:
+            required: true
+        - version_description
+        - image
+        - type
+        - description
+        - sg
+        - security_groups
+        - vswitch
+        - keypair
+        - resource_group:
+            flag_name: resource-resource-group
+        - template_resource_group:
+            flag_name: resource-group
+        - tag:
+            flag_name: resource-tag
+        - template_tag:
+            flag_name: tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_to_available
+      - wait: template_visible
+        unless: input.no_wait
+      - probe: list
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - probe: versions
+        ids:
+          - $context.id
+        merge: true
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            region: $context.region
+  update:
+    examples:
+      - ecctl ecs launch-template update <launch-template-id>
+      - ecctl ecs launch-template update <launch-template-id> --name my-name
+    description:
+      en: Create a launch template version or switch the default version
+      zh-CN: 创建启动模板版本或切换默认版本
+    input:
+      fields:
+        - id:
+            positional: true
+        - name
+        - create_version
+        - default_version
+        - version_description
+        - image
+        - type
+        - description
+        - sg
+        - security_groups
+        - vswitch
+        - keypair
+        - resource_group:
+            flag_name: resource-resource-group
+        - tag:
+            flag_name: resource-tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    require_any:
+      - raw: $.create_version
+      - raw: $.default_version
+    workflow:
+      - binding: create_version
+        when: input.create_version
+      - wait: created_version_visible
+        when: input.create_version
+        unless: input.no_wait
+      - binding: set_default_version
+        when: input.default_version
+      - wait: default_version_visible
+        when: input.default_version
+        unless: input.no_wait
+      - probe: list
+        when: input.id
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - probe: list_by_name
+        when: input.name
+        as: final
+        unless: input.no_wait || input.id
+      - probe: default_version
+        ids:
+          - $input.id
+        when: input.default_version
+        not_found: error
+        merge: true
+        unless: input.no_wait
+      - probe: created_version
+        ids:
+          - $input.id
+        when: input.create_version
+        not_found: error
+        merge: true
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            name: $input.name
+            default_version: $input.default_version
+  delete:
+    examples:
+      - ecctl ecs launch-template delete <target>
+    description:
+      en: Delete launch template or version
+      zh-CN: 删除启动模板或版本
+    input:
+      fields:
+        - target:
+            positional: true
+        - version
+      controls:
+        - api_param
+    require_any:
+      - raw: $.target
+    workflow:
+      - probe: list
+        ids:
+          - $input.target
+        when: starts_with(input.target,"lt-")
+        as: target_template
+      - probe: list_by_target_name
+        ids:
+          - $input.target
+        unless: context.target_template
+        as: target_template
+        not_found: error
+      - binding: delete_version
+        when: input.version
+      - binding: delete_template
+        unless: input.version
+      - emit:
+          fields:
+            id: $context.target_template.id
+            name: $context.target_template.name
+            version: $input.version
+          deleted: true
+
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get launch template
+      zh-CN: 获取启动模板
+    input:
+      fields:
+        - target:
+            positional: true
+        - version
+      controls:
+        - with_versions
+    require_any:
+      - raw: $.target
+    workflow:
+      - probe: list
+        ids:
+          - $input.target
+        when: starts_with(input.target,"lt-")
+        as: target_template
+      - probe: list_by_target_name
+        ids:
+          - $input.target
+        unless: context.target_template
+        as: target_template
+        not_found: error
+      - probe: versions_selected
+        when: input.with_versions
+        not_found: error
+        merge: true
+      - probe: versions_selected
+        when: has(input.version)
+        unless: input.with_versions
+        not_found: error
+        merge: true
+  list:
+    examples:
+      - ecctl ecs launch-template list
+      - ecctl ecs launch-template list --filter name=<value>
+      - ecctl ecs launch-template list --filter tag.env=prod
+    description:
+      en: List launch templates
+      zh-CN: 列出启动模板
+    input:
+      fields:
+        - targets:
+            positional_many: true
+      controls:
+        - filter
+        - limit
+        - page
+    filters:
+      id:
+        target: ids
+      ids:
+        target: ids
+      name:
+        target: names
+      names:
+        target: names
+      resource-group:
+        target: template_resource_group
+      tag.:
+        target: template_tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true
+        unless: input.targets
+      - probe: list
+        ids:
+          - $matching_prefix($.targets,"lt-")
+        when: has($matching_prefix($.targets,"lt-"))
+        as: id_targets
+        many: true
+      - probe: list_by_target_name
+        ids:
+          - $not_matching_prefix($.targets,"lt-")
+        when: has($not_matching_prefix($.targets,"lt-"))
+        append: true
+        many: true
+      - probe: list_by_target_name
+        ids:
+          - $except($matching_prefix($.targets,"lt-"),$captured_field(id_targets,id))
+        when: has($except($matching_prefix($.targets,"lt-"),$captured_field(id_targets,id)))
+        append: true
+        many: true
