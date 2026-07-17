@@ -1,0 +1,74 @@
+# Nodepool upgrade is isolated from the CRUD/attach/repair lifecycle. The
+# shared control plane is upgraded only after the regular nodepool case has
+# completed, and a dedicated desired-size=1 pool owns its worker node.
+resource: ack/nodepool
+requires_params: [ack.version, ack.upgrade_version, ack.instance_type, ack.system_disk_category, ack.runtime, ack.runtime_version]
+parameter_constraints:
+  ecs:
+    min_eni_quantity: 2
+    min_eni_private_ip_address_quantity: 6
+needs: [ack_shared_cluster]
+timeout: 2h
+serial: true
+
+steps:
+  - name: get upgrade source cluster version
+    run: ecctl ack get {{.stack.ack_shared_cluster}}
+    at: $.cluster
+    expect:
+      id: { eq: "{{.stack.ack_shared_cluster}}" }
+      version: { eq: "{{.params.ack.version}}" }
+
+  - name: create upgrade source nodepool
+    run: >
+      ecctl ack nodepool create
+      --cluster {{.stack.ack_shared_cluster}}
+      --name {{.resource_prefix}}-nodepool-upgrade
+      --desired-size 1
+      --instance-type {{.params.ack.instance_type}}
+      --vswitch {{.stack.vswitch}}
+      --runtime {{.params.ack.runtime}}
+      --runtime-version {{.params.ack.runtime_version}}
+      --system-disk-category {{.params.ack.system_disk_category}}
+      --system-disk-size 40
+      --timeout 30m
+    at: $.nodepool
+    expect:
+      id: { type: string, min_len: 1 }
+    capture:
+      nodepool_id: id
+    teardown: ecctl ack nodepool delete {{.nodepool_id}} --cluster {{.stack.ack_shared_cluster}} --force --timeout 30m
+
+  - name: upgrade source cluster control plane
+    run: ecctl ack upgrade {{.stack.ack_shared_cluster}} --version {{.params.ack.upgrade_version}} --master-only --timeout 60m
+    at: $.cluster
+    expect:
+      id: { eq: "{{.stack.ack_shared_cluster}}" }
+
+  - name: upgrade
+    run: >
+      ecctl ack nodepool upgrade {{.nodepool_id}}
+      --cluster {{.stack.ack_shared_cluster}}
+      --config '{"kubernetes_version":"{{.params.ack.upgrade_version}}","runtime":{"name":"{{.params.ack.runtime}}","version":"{{.params.ack.runtime_version}}"},"rolling_policy":{"max_parallelism":1,"pause_policy":"NotPause","batch_interval":0}}'
+      --timeout 60m
+    at: $.nodepool
+    expect:
+      id: { eq: "{{.nodepool_id}}" }
+
+  - name: get upgraded worker
+    run: ecctl ack node list --cluster {{.stack.ack_shared_cluster}} --nodepool {{.nodepool_id}} --limit 100
+    at: $.nodes[0]
+    expect:
+      id: { type: string, prefix: i- }
+    capture:
+      upgraded_node_id: id
+
+  - name: release upgraded worker
+    run: ecctl ack node delete {{.upgraded_node_id}} --cluster {{.stack.ack_shared_cluster}} --release --timeout 30m
+    expect:
+      $.deleted: { eq: true }
+
+  - name: delete upgrade source nodepool
+    run: ecctl ack nodepool delete {{.nodepool_id}} --cluster {{.stack.ack_shared_cluster}} --force --timeout 30m
+    expect:
+      $.deleted: { eq: true }

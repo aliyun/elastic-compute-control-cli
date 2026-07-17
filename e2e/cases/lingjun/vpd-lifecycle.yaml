@@ -1,0 +1,46 @@
+# Lingjun VPD lifecycle using case-local CIDRs.
+resource: lingjun/vpd
+timeout: 45m
+serial: true
+
+steps:
+  - name: create
+    run: >
+      ecctl lingjun vpd create
+      --name {{.run_name}}-vpd
+      --cidr 10.100.0.0/16
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.vpd
+    expect:
+      id: { type: string, min_len: 1 }
+      name: { eq: "{{.run_name}}-vpd" }
+      cidr: { eq: "10.100.0.0/16" }
+    capture:
+      vpd_id: id
+    teardown: ecctl lingjun vpd delete {{.vpd_id}}
+
+  - name: get
+    run: ecctl lingjun vpd get {{.vpd_id}}
+    at: $.vpd
+    expect:
+      id: { eq: "{{.vpd_id}}" }
+
+  - name: list
+    run: ecctl lingjun vpd list --filter name={{.run_name}}-vpd --limit 10
+    assert:
+      - len($.vpds) >= 1
+
+  - name: update
+    run: >
+      ecctl lingjun vpd update {{.vpd_id}}
+      --name {{.run_name}}-vpd-updated
+      --cidr +10.101.0.0/16
+    at: $.vpd
+    expect:
+      id: { eq: "{{.vpd_id}}" }
+      name: { eq: "{{.run_name}}-vpd-updated" }
+
+  - name: delete
+    run: ecctl lingjun vpd delete {{.vpd_id}}
+    expect:
+      $.deleted: { eq: true }

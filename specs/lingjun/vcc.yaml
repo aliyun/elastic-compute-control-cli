@@ -1,0 +1,783 @@
+schema_version: 2
+product: lingjun
+api_product: eflo
+resource: vcc
+kind: regional
+display_name:
+  en: VCC
+  zh-CN: 灵骏连接
+description:
+  en: Manage Lingjun VCC resources
+  zh-CN: 管理灵骏连接
+examples:
+  - ecctl lingjun vcc list
+  - ecctl lingjun vcc create --vpd vpd-xxx --name train-vcc --bandwidth 1000
+  - ecctl lingjun vcc get <vcc-id> --with-routes --with-grants
+  - ecctl lingjun vcc update <vcc-id> --route +destination-cidr=10.0.0.0/24
+
+identity:
+  field: id
+  prefix: vcc-
+  output_root:
+    one: vcc
+    many: vccs
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: VCC ID
+        zh-CN: 灵骏连接 ID
+    name:
+      type: string
+      description:
+        en: VCC name
+        zh-CN: 灵骏连接名称
+    description:
+      type: string
+      description:
+        en: VCC description
+        zh-CN: 灵骏连接描述
+    status:
+      type: string
+      description:
+        en: VCC status
+        zh-CN: 灵骏连接状态
+    vpd:
+      type: string
+      description:
+        en: VPD ID
+        zh-CN: 灵骏网段实例 ID
+    bandwidth:
+      type: integer
+      description:
+        en: Bandwidth in Mbit/s
+        zh-CN: 带宽，单位 Mbit/s
+    connection_type:
+      type: string
+      description:
+        en: Connection type
+        zh-CN: 连接类型
+      enum: [VPC, CENTR]
+    cen:
+      type: string
+      description:
+        en: CEN instance ID
+        zh-CN: CEN 实例 ID
+    cen_owner:
+      type: string
+      description:
+        en: CEN owner account ID
+        zh-CN: CEN 所属账号 ID
+    vpc:
+      type: string
+      description:
+        en: VPC ID
+        zh-CN: VPC ID
+    vswitch:
+      type: string
+      description:
+        en: vSwitch ID
+        zh-CN: 交换机 ID
+    zone:
+      type: string
+      description:
+        en: Zone ID
+        zh-CN: 可用区 ID
+    bgp_asn:
+      type: integer
+      description:
+        en: BGP AS number
+        zh-CN: BGP AS 号
+    bgp_cidr:
+      type: cidr
+      description:
+        en: BGP CIDR block
+        zh-CN: BGP 网段
+    access_cloud_service:
+      type: boolean
+      description:
+        en: Enable access to cloud services
+        zh-CN: 启用云服务访问
+    resource_group:
+      type: string
+      description:
+        en: Resource group ID
+        zh-CN: 资源组 ID
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: Tag assignment key=value
+        zh-CN: 标签赋值 key=value
+    order:
+      type: string
+      description:
+        en: Order ID for bandwidth changes
+        zh-CN: 带宽变更订单 ID
+    route_changes:
+      type: string
+      repeatable: true
+      description:
+        en: route entry change; prefix with + to add or - to remove
+        zh-CN: 路由条目变更，使用 + 前缀新增或 - 前缀删除
+    grant_changes:
+      type: string
+      repeatable: true
+      description:
+        en: grant rule change; prefix with + to add or - to remove
+        zh-CN: 授权规则变更，使用 + 前缀新增或 - 前缀删除
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: Filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: Maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: Results page to return
+      zh-CN: 返回结果页码
+  no_wait:
+    type: boolean
+    description:
+      en: Return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: Wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: Additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+  with_routes:
+    type: boolean
+    description:
+      en: Include VCC route entries
+      zh-CN: 附带 VCC 路由条目
+  with_grants:
+    type: boolean
+    description:
+      en: Include VCC grant rules
+      zh-CN: 附带 VCC 授权规则
+  with_flows:
+    type: boolean
+    description:
+      en: Include VCC flow metrics
+      zh-CN: 附带 VCC 流量信息
+probes:
+  get:
+    api: GetVcc
+    request:
+      RegionId: $context.region
+      VccId: $.id
+    response:
+      item: $.Content
+      request_id: $.RequestId
+      id: $.VccId
+      state: $.Status
+      fields:
+        id: $.VccId
+        name: $.VccName
+        status: $.Status
+        message: $.Message
+        vpd: $.VpdId
+        bandwidth: $.Bandwidth
+        bandwidth_text: $.BandwidthStr
+        connection_type: $.ConnectionType
+        cen: $.CenId
+        cen_owner: $.CenOwnerId
+        vpc: $.VpcId
+        vswitch: $.VSwitchId
+        zone: $.ZoneId
+        bgp_asn: $.BgpAsn
+        bgp_cidr: $.BgpCidr
+        resource_group: $.ResourceGroupId
+        region: $.RegionId
+        tenant: $.TenantId
+        create_time: $.CreateTime
+        modified_time: $.GmtModified
+        expiration_date: $.ExpirationDate
+        tags: $.Tags
+        er_infos:
+          from: $.ErInfos
+          each:
+            id: $.ErId
+            name: $.ErName
+            status: $.Status
+            region: $.RegionId
+  list:
+    api: ListVccs
+    request:
+      RegionId: $context.region
+      EnablePage: true
+      PageNumber: $.page
+      PageSize: $.limit
+      VccId: $.id
+      VpdId: $.vpd
+      Status: $.status
+      ResourceGroupId: $.resource_group
+      Tag:
+        each:
+          sources:
+            - source: $.tag
+        fields:
+          Key: $kv_key($.value)
+          Value: $kv_value($.value)
+    response:
+      items: $.Content.Data
+      total: $.Content.Total
+      request_id: $.RequestId
+      id: $.VccId
+      state: $.Status
+      fields:
+        id: $.VccId
+        name: $.VccName
+        status: $.Status
+        message: $.Message
+        vpd: $.VpdId
+        bandwidth_text: $.BandwidthStr
+        connection_type: $.ConnectionType
+        cen: $.CenId
+        cen_owner: $.CenOwnerId
+        vpc: $.VpcId
+        zone: $.ZoneId
+        bgp_asn: $.BgpAsn
+        bgp_cidr: $.BgpCidr
+        resource_group: $.ResourceGroupId
+        region: $.RegionId
+        tenant: $.TenantId
+        create_time: $.CreateTime
+        modified_time: $.GmtModified
+        expiration_date: $.ExpirationDate
+        tags: $.Tags
+        er_infos:
+          from: $.ErInfos
+          each:
+            id: $.ErId
+            name: $.ErName
+            status: $.Status
+            region: $.RegionId
+      absent:
+        when_empty_for_requested_ids: true
+  routes:
+    api: ListVccRouteEntries
+    request:
+      RegionId: $context.region
+      VccId: $.id
+      EnablePage: true
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        routes:
+          from: $.Content.Data
+          each:
+            id: $.VccRouteEntryId
+            vcc: $.VccId
+            destination_cidr: $.DestinationCidrBlock
+            next_hop_id: $.NextHopId
+            next_hop_type: $.NextHopType
+            route_type: $.RouteType
+            status: $.Status
+            message: $.Message
+            resource_group: $.ResourceGroupId
+            region: $.RegionId
+            tenant: $.TenantId
+            modified_time: $.GmtModified
+  route_entries:
+    api: ListVccRouteEntries
+    request:
+      RegionId: $context.region
+      VccId: $.id
+      EnablePage: true
+      PageNumber: 1
+      PageSize: 100
+    response:
+      items: $.Content.Data
+      request_id: $.RequestId
+      id: $.VccRouteEntryId
+      state: $.Status
+      fields:
+        id: $.VccRouteEntryId
+        vcc: $.VccId
+        destination_cidr: $.DestinationCidrBlock
+        next_hop_id: $.NextHopId
+        next_hop_type: $.NextHopType
+        route_type: $.RouteType
+        status: $.Status
+        message: $.Message
+        resource_group: $.ResourceGroupId
+        region: $.RegionId
+        tenant: $.TenantId
+        modified_time: $.GmtModified
+  grants:
+    api: ListVccGrantRules
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      EnablePage: true
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        grants:
+          from: $.Content.Data
+          each:
+            id: $.GrantRuleId
+            er: $.ErId
+            tenant: $.GrantTenantId
+            instance: $.InstanceId
+            instance_name: $.InstanceName
+            product: $.Product
+            used: $.Used
+            resource_group: $.ResourceGroupId
+            region: $.RegionId
+            create_time: $.CreateTime
+  grant_rules:
+    api: ListVccGrantRules
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      EnablePage: true
+      PageNumber: 1
+      PageSize: 100
+    response:
+      items: $.Content.Data
+      request_id: $.RequestId
+      id: $.GrantRuleId
+      fields:
+        id: $.GrantRuleId
+        er: $.ErId
+        tenant: $.GrantTenantId
+        instance: $.InstanceId
+        instance_name: $.InstanceName
+        product: $.Product
+        used: $.Used
+        resource_group: $.ResourceGroupId
+        region: $.RegionId
+        create_time: $.CreateTime
+  flows:
+    api: ListVccFlowInfos
+    request:
+      RegionId: $context.region
+      VccId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        flows:
+          from: $.Content.Data
+          each:
+            vcc: $.VccId
+            metric: $.MetricName
+            direction: $.Direction
+            timestamp: $.Timestamp
+            value: $.Value
+            region: $.RegionId
+
+waiters:
+  available_after_change:
+    probe: get
+    target: Available
+    interval: 2s
+    timeout: 300s
+    pending:
+      - field: status
+        values: [Executing]
+    failure:
+      states: ["Not Available"]
+  deleted_after_delete:
+    probe: list
+    target: absent
+    interval: 5s
+    timeout: 300s
+  routes_visible:
+    probe: route_entries
+    target: matched
+    interval: 2s
+    timeout: 300s
+    match:
+      capture: added_routes
+      by: [id, destination_cidr]
+  routes_removed:
+    probe: route_entries
+    target: absent
+    interval: 2s
+    timeout: 300s
+    match:
+      capture: removed_routes
+      by: [id, destination_cidr]
+  grants_visible:
+    probe: grant_rules
+    target: matched
+    interval: 2s
+    timeout: 300s
+    match:
+      capture: added_grants
+      by: [id, er, tenant, instance]
+  grants_removed:
+    probe: grant_rules
+    target: absent
+    interval: 2s
+    timeout: 300s
+    match:
+      capture: removed_grants
+      by: [id, er, tenant, instance]
+
+bindings:
+  create_to_available:
+    api: CreateVcc
+    request:
+      RegionId: $context.region
+      VpdId: $.vpd
+      VccName: $.name
+      Description: $.description
+      Bandwidth: $.bandwidth
+      ConnectionType: $.connection_type
+      CenId: $.cen
+      CenOwnerId: $.cen_owner
+      VpcId: $.vpc
+      VSwitchId: $.vswitch
+      ZoneId: $.zone
+      BgpAsn: $.bgp_asn
+      BgpCidr: $.bgp_cidr
+      AccessCouldService: $.access_cloud_service
+      ResourceGroupId: $.resource_group
+      Tag:
+        each:
+          sources:
+            - source: $.tag
+        fields:
+          Key: $kv_key($.value)
+          Value: $kv_value($.value)
+    require_all:
+      - request: VpdId
+      - request: VccName
+      - request: Bandwidth
+    id_from: $.Content.VccId
+    request_id_from: $.RequestId
+  update_attributes:
+    api: UpdateVcc
+    request:
+      RegionId: $context.region
+      VccId: $.id
+      VccName: $.name
+      Bandwidth: $.bandwidth
+      OrderId: $.order
+    require_all:
+      - raw: $.id
+    require_any:
+      - request: VccName
+      - request: Bandwidth
+      - request: OrderId
+    id_from: $.Content.VccId
+    request_id_from: $.RequestId
+  add_route:
+    api: CreateVccRouteEntry
+    each: $prefixed_kv_objects($.route_changes,"+")
+    capture:
+      name: added_routes
+      fields:
+        destination_cidr: $.destination_cidr
+    request:
+      RegionId: $context.region
+      VccId: $input.id
+      DestinationCidrBlock: $.destination_cidr
+    require_all:
+      - raw: $input.id
+      - request: DestinationCidrBlock
+    id_from: $.Content.VccRouteEntryId
+    request_id_from: $.RequestId
+  remove_route:
+    api: DeleteVccRouteEntry
+    each: $prefixed_kv_objects($.route_changes,"-")
+    capture:
+      name: removed_routes
+      fields:
+        id: $.id
+        destination_cidr: $.destination_cidr
+    request:
+      RegionId: $context.region
+      VccId: $input.id
+      VccRouteEntryId: $.id
+      DestinationCidrBlock: $.destination_cidr
+    require_all:
+      - raw: $input.id
+    require_any:
+      - request: VccRouteEntryId
+      - request: DestinationCidrBlock
+    request_id_from: $.RequestId
+  add_grant:
+    api: CreateVccGrantRule
+    each: $prefixed_kv_objects($.grant_changes,"+")
+    capture:
+      name: added_grants
+      fields:
+        er: $.er
+        tenant: $.tenant
+        instance: $.instance
+    request:
+      RegionId: $context.region
+      ErId: $.er
+      GrantTenantId: $.tenant
+      InstanceId: $.instance
+    require_all:
+      - request: ErId
+      - request: GrantTenantId
+      - request: InstanceId
+    id_from: $.Content.GrantRuleId
+    request_id_from: $.RequestId
+  remove_grant:
+    api: DeleteVccGrantRule
+    each: $prefixed_kv_objects($.grant_changes,"-")
+    capture:
+      name: removed_grants
+      fields:
+        id: $.id
+        er: $.er
+        instance: $.instance
+    request:
+      RegionId: $context.region
+      GrantRuleId: $.id
+      ErId: $.er
+      InstanceId: $.instance
+    require_all:
+      - request: GrantRuleId
+    request_id_from: $.RequestId
+  delete_to_absent:
+    api: RefundVcc
+    request:
+      RegionId: $context.region
+      VccId: $.id
+    require_all:
+      - raw: $.id
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+
+operations:
+  create:
+    examples:
+      - ecctl lingjun vcc create --vpd <vpd-id> --name my-name --bandwidth <bandwidth>
+      - ecctl lingjun vcc create --vpd <vpd-id> --name my-name --bandwidth <bandwidth> --tag env=prod
+    description:
+      en: Create VCC
+      zh-CN: 创建灵骏连接
+    input:
+      fields:
+        - vpd:
+            required: true
+        - name:
+            required: true
+        - bandwidth:
+            required: true
+        - description
+        - connection_type
+        - cen
+        - cen_owner
+        - vpc
+        - vswitch
+        - zone
+        - bgp_asn
+        - bgp_cidr
+        - access_cloud_service
+        - resource_group
+        - tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_to_available
+      - wait: available_after_change
+        ids:
+          - $context.id
+        unless: input.no_wait
+      - probe: get
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            vpd: $input.vpd
+            bandwidth: $input.bandwidth
+  update:
+    examples:
+      - ecctl lingjun vcc update <vcc-id>
+      - ecctl lingjun vcc update <vcc-id> --name my-name
+    description:
+      en: Update VCC
+      zh-CN: 更新灵骏连接
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - bandwidth
+        - order
+        - route_changes:
+            flag_name: route
+        - grant_changes:
+            flag_name: grant
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    require_any:
+      - raw: $.name
+      - raw: $.bandwidth
+      - raw: $.order
+      - raw: $.route_changes
+      - raw: $.grant_changes
+    workflow:
+      - binding: update_attributes
+        when_any: [input.name, input.bandwidth, input.order]
+      - binding: add_route
+        when: has($prefixed_kv_objects($.route_changes,"+"))
+      - binding: remove_route
+        when: has($prefixed_kv_objects($.route_changes,"-"))
+      - binding: add_grant
+        when: has($prefixed_kv_objects($.grant_changes,"+"))
+      - binding: remove_grant
+        when: has($prefixed_kv_objects($.grant_changes,"-"))
+      - wait: routes_visible
+        ids:
+          - $input.id
+        unless: input.no_wait || !has($prefixed_kv_objects($.route_changes,"+"))
+      - wait: routes_removed
+        ids:
+          - $input.id
+        unless: input.no_wait || !has($prefixed_kv_objects($.route_changes,"-"))
+      - wait: grants_visible
+        ids:
+          - $input.id
+        unless: input.no_wait || !has($prefixed_kv_objects($.grant_changes,"+"))
+      - wait: grants_removed
+        ids:
+          - $input.id
+        unless: input.no_wait || !has($prefixed_kv_objects($.grant_changes,"-"))
+      - wait: available_after_change
+        ids:
+          - $input.id
+        unless: input.no_wait
+      - probe: get
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            name: $input.name
+            bandwidth: $input.bandwidth
+  delete:
+    examples:
+      - ecctl lingjun vcc delete <vcc-id>
+    description:
+      en: Delete VCC
+      zh-CN: 删除灵骏连接
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get VCC
+      zh-CN: 获取灵骏连接
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - with_routes
+        - with_grants
+        - with_flows
+        - limit
+        - page
+    workflow:
+      - probe: get
+        ids:
+          - $input.id
+        as: final
+        not_found: error
+      - probe: routes
+        ids:
+          - $input.id
+        when: input.with_routes
+        merge: true
+      - probe: grants
+        ids:
+          - $input.id
+        when: input.with_grants
+        merge: true
+      - probe: flows
+        ids:
+          - $input.id
+        when: input.with_flows
+        merge: true
+  list:
+    examples:
+      - ecctl lingjun vcc list
+      - ecctl lingjun vcc list --filter status=<value>
+      - ecctl lingjun vcc list --filter tag.env=prod
+    description:
+      en: List VCCs
+      zh-CN: 查询灵骏连接列表
+    input:
+      controls:
+        - filter
+        - limit
+        - page
+    filters:
+      id:
+        target: id
+      vpd:
+        target: vpd
+      status:
+        target: status
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true

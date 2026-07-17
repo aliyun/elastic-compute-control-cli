@@ -1,0 +1,1099 @@
+schema_version: 2
+product: ecs
+resource: disk
+kind: regional
+display_name:
+  en: disk
+  zh-CN: 云盘
+description:
+  en: Manage disk resources
+  zh-CN: 管理云盘资源
+examples:
+  - ecctl ecs disk list --filter status=Available
+  - ecctl ecs disk create --zone cn-beijing-a --size 40 --category cloud_essd --name data-01
+  - ecctl ecs disk attach <disk-id> --instance <instance-id>
+  - ecctl ecs disk get <disk-id>
+
+identity:
+  field: id
+  prefix: d-
+  output_root:
+    one: disk
+    many: disks
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: disk ID
+        zh-CN: 云盘 ID
+    ids:
+      type: array
+      description:
+        en: disk IDs
+        zh-CN: 云盘 ID 列表
+      items:
+        type: string
+    name:
+      type: string
+      description:
+        en: disk name
+        zh-CN: 云盘名称
+    description:
+      type: string
+      description:
+        en: disk description
+        zh-CN: 云盘描述
+    status:
+      type: string
+      description:
+        en: disk status
+        zh-CN: 云盘状态
+      enum: [Creating, Available, In_use, Detaching, ReIniting]
+    zone:
+      type: string
+      description:
+        en: zone ID
+        zh-CN: 可用区 ID
+    type:
+      type: string
+      description:
+        en: disk type
+        zh-CN: 云盘用途类型
+    size:
+      type: integer
+      description:
+        en: disk size in GiB
+        zh-CN: 云盘容量，单位 GiB
+    category:
+      type: string
+      description:
+        en: disk category
+        zh-CN: 云盘类型
+    performance_level:
+      type: string
+      description:
+        en: ESSD performance level
+        zh-CN: ESSD 性能等级
+    provisioned_iops:
+      type: integer
+      description:
+        en: provisioned IOPS
+        zh-CN: 预配置 IOPS
+    bursting_enabled:
+      type: boolean
+      description:
+        en: enable performance burst
+        zh-CN: 启用性能突发
+    snapshot:
+      type: string
+      description:
+        en: snapshot ID
+        zh-CN: 快照 ID
+    instance:
+      type: string
+      description:
+        en: instance ID
+        zh-CN: 实例 ID
+    device:
+      type: string
+      description:
+        en: device name in the instance
+        zh-CN: 实例中的设备名
+    delete_with_instance:
+      type: boolean
+      description:
+        en: release the disk with the instance
+        zh-CN: 随实例释放云盘
+    delete_auto_snapshot:
+      type: boolean
+      description:
+        en: delete automatic snapshots with the disk
+        zh-CN: 随云盘删除自动快照
+    encrypted:
+      type: boolean
+      description:
+        en: encrypt the disk
+        zh-CN: 加密云盘
+    kms_key_id:
+      type: string
+      description:
+        en: KMS key ID for disk encryption
+        zh-CN: 云盘加密使用的 KMS 密钥 ID
+    multi_attach:
+      type: string
+      description:
+        en: multi-attach mode
+        zh-CN: 多重挂载模式
+    encryption_default:
+      type: boolean
+      description:
+        en: query account-level default disk encryption status
+        zh-CN: 查询账号级云盘默认加密状态
+    encryption_default_action:
+      type: string
+      enum: [enable, disable]
+      description:
+        en: enable or disable account-level default disk encryption
+        zh-CN: 开启或关闭账号级云盘默认加密
+    default_kms_key:
+      type: boolean
+      description:
+        en: query account-level default disk encryption KMS key
+        zh-CN: 查询账号级云盘默认加密 KMS 密钥
+    default_kms_key_id:
+      type: string
+      description:
+        en: account-level default disk encryption KMS key ID
+        zh-CN: 账号级云盘默认加密 KMS 密钥 ID
+    reset_default_kms_key:
+      type: boolean
+      description:
+        en: reset account-level default disk encryption KMS key
+        zh-CN: 重置账号级云盘默认加密 KMS 密钥
+    resize_type:
+      type: string
+      description:
+        en: resize mode
+        zh-CN: 扩容模式
+    charge_type:
+      type: string
+      description:
+        en: disk charge type
+        zh-CN: 云盘计费方式
+    auto_pay:
+      type: boolean
+      description:
+        en: automatically pay for prepaid disks
+        zh-CN: 自动支付预付费云盘
+    storage_cluster:
+      type: string
+      description:
+        en: storage cluster ID for disk deployment migration
+        zh-CN: 云盘迁移目标存储集群 ID
+    start_time:
+      type: string
+      description:
+        en: monitoring start time
+        zh-CN: 监控开始时间
+    end_time:
+      type: string
+      description:
+        en: monitoring end time
+        zh-CN: 监控结束时间
+    period_seconds:
+      type: integer
+      description:
+        en: monitoring period in seconds
+        zh-CN: 监控周期，单位秒
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 500
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  next_token:
+    type: string
+    description:
+      en: token for the next result page
+      zh-CN: 下一页查询 token
+  force:
+    type: boolean
+    default: false
+    description:
+      en: force the disk operation when supported by the API
+      zh-CN: 在 API 支持时强制执行云盘操作
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: DescribeDisks
+    request:
+      RegionId: $context.region
+      DiskIds: $.ids
+      DiskName: $.name
+      Status: $.status
+      ZoneId: $.zone
+      InstanceId: $.instance
+      SnapshotId: $.snapshot
+      DiskType: $.type
+      Category: $.category
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      MaxResults: $.limit
+      NextToken: $.next_token
+    response:
+      items: $.Disks.Disk
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.DiskId
+      state: $.Status
+      fields:
+        id: $.DiskId
+        name: $.DiskName
+        description: $.Description
+        status: $.Status
+        region: $.RegionId
+        zone: $.ZoneId
+        size: $.Size
+        category: $.Category
+        type: $.DiskType
+        performance_level: $.PerformanceLevel
+        provisioned_iops: $.ProvisionedIops
+        bursting_enabled: $.BurstingEnabled
+        instance: $.InstanceId
+        device: $.Device
+        portable: $.Portable
+        encrypted: $.Encrypted
+        kms_key_id: $.KMSKeyId
+        snapshot: $.SourceSnapshotId
+        charge_type: $.DiskChargeType
+        creation_time: $.CreationTime
+        expired_time: $.ExpiredTime
+        attached_time: $.AttachedTime
+        detached_time: $.DetachedTime
+        delete_with_instance: $.DeleteWithInstance
+        delete_auto_snapshot: $.DeleteAutoSnapshot
+        image: $.ImageId
+        operation_locks: $.OperationLocks.OperationLock
+        resource_group: $.ResourceGroupId
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+  encryption_default_status:
+    api: DescribeDiskEncryptionByDefaultStatus
+    request:
+      RegionId: $context.region
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        enabled: $.Encrypted
+        status: $.Status
+  default_kms_key:
+    api: DescribeDiskDefaultKMSKeyId
+    request:
+      RegionId: $context.region
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        kms_key_id: $.KMSKeyId
+  monitor:
+    api: DescribeDiskMonitorData
+    request:
+      RegionId: $context.region
+      DiskId: $.id
+      StartTime: $.start_time
+      EndTime: $.end_time
+      Period: $.period_seconds
+    response:
+      items: $.MonitorData.DiskMonitorData
+      request_id: $.RequestId
+      fields:
+        disk_id: $.DiskId
+        timestamp: $.TimeStamp
+        bps_read: $.BPSRead
+        bps_write: $.BPSWrite
+        iops_read: $.IOPSRead
+        iops_write: $.IOPSWrite
+  list_by_id:
+    api: DescribeDisks
+    request:
+      RegionId: $context.region
+      DiskIds: $.ids
+      MaxResults: $.limit
+      NextToken: $.next_token
+    response:
+      items: $.Disks.Disk
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.DiskId
+      state: $.Status
+      fields:
+        id: $.DiskId
+        name: $.DiskName
+        description: $.Description
+        status: $.Status
+        region: $.RegionId
+        zone: $.ZoneId
+        size: $.Size
+        category: $.Category
+        type: $.DiskType
+        performance_level: $.PerformanceLevel
+        provisioned_iops: $.ProvisionedIops
+        bursting_enabled: $.BurstingEnabled
+        instance: $.InstanceId
+        device: $.Device
+        portable: $.Portable
+        encrypted: $.Encrypted
+        kms_key_id: $.KMSKeyId
+        snapshot: $.SourceSnapshotId
+        charge_type: $.DiskChargeType
+        creation_time: $.CreationTime
+        expired_time: $.ExpiredTime
+        attached_time: $.AttachedTime
+        detached_time: $.DetachedTime
+        delete_with_instance: $.DeleteWithInstance
+        delete_auto_snapshot: $.DeleteAutoSnapshot
+        image: $.ImageId
+        operation_locks: $.OperationLocks.OperationLock
+        resource_group: $.ResourceGroupId
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+  clone_task:
+    api: DescribeTasks
+    request:
+      RegionId: $context.region
+      TaskGroupId: $.id
+    response:
+      items: $.TaskSet.Task
+      request_id: $.RequestId
+      state: $.TaskStatus
+      fields:
+        task_id: $.TaskId
+        task_group_id: $.TaskGroupId
+        status: $.TaskStatus
+        action: $.TaskAction
+        resource_id: $.ResourceId
+        start_time: $.StartTime
+        finished_time: $.FinishedTime
+
+waiters:
+  available_after_create:
+    probe: list
+    target: Available
+    interval: 2s
+    timeout: 300s
+  available_after_detach:
+    probe: list_by_id
+    target: Available
+    interval: 2s
+    timeout: 300s
+  in_use_after_attach:
+    probe: list
+    target: In_use
+    interval: 2s
+    timeout: 300s
+  deleted_after_delete:
+    probe: list
+    target: absent
+    interval: 2s
+    timeout: 300s
+  clone_finished:
+    probe: clone_task
+    target: Finished
+    interval: 15s
+    timeout: 3600s
+    failure:
+      states: [Failed]
+
+bindings:
+  create_to_available:
+    api: CreateDisk
+    idempotency:
+      field: ClientToken
+      prefix: disk-create
+    request:
+      RegionId: $context.region
+      ZoneId: $.zone
+      DiskName: $.name
+      Description: $.description
+      Size: $.size
+      DiskCategory: $.category
+      SnapshotId: $.snapshot
+      Encrypted: $.encrypted
+      KMSKeyId: $.kms_key_id
+      PerformanceLevel: $.performance_level
+      ProvisionedIops: $.provisioned_iops
+      BurstingEnabled: $.bursting_enabled
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - request: Size
+      - request: SnapshotId
+      - raw: $.api_param
+    id_from: $.DiskId
+    request_id_from: $.RequestId
+    wait: available_after_create
+  update_attributes:
+    api: ModifyDiskAttribute
+    request:
+      RegionId: $context.region
+      DiskId: $.id
+      DiskName: $.name
+      Description: $.description
+      DeleteWithInstance: $.delete_with_instance
+      DeleteAutoSnapshot: $.delete_auto_snapshot
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    require_any:
+      - request: DiskName
+      - request: Description
+      - request: DeleteWithInstance
+      - request: DeleteAutoSnapshot
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  resize:
+    api: ResizeDisk
+    idempotency:
+      field: ClientToken
+      prefix: disk-resize
+    request:
+      RegionId: $context.region
+      DiskId: $.id
+      NewSize: $.size
+      Type: $.resize_type
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+      - request: NewSize
+    request_id_from: $.RequestId
+  modify_spec:
+    api: ModifyDiskSpec
+    request:
+      RegionId: $context.region
+      DiskId: $.id
+      DiskCategory: $.category
+      PerformanceLevel: $.performance_level
+      ProvisionedIops: $.provisioned_iops
+      BurstingEnabled: $.bursting_enabled
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    require_any:
+      - request: DiskCategory
+      - request: PerformanceLevel
+      - request: ProvisionedIops
+      - request: BurstingEnabled
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  modify_charge_type:
+    api: ModifyDiskChargeType
+    request:
+      RegionId: $context.region
+      InstanceId: $.instance
+      DiskIds: $list(input.id)
+      DiskChargeType: $.charge_type
+      AutoPay: $.auto_pay
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+      - request: InstanceId
+      - request: DiskChargeType
+    request_id_from: $.RequestId
+  modify_deployment:
+    api: ModifyDiskDeployment
+    request:
+      RegionId: $context.region
+      DiskId: $.id
+      StorageClusterId: $.storage_cluster
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+      - request: StorageClusterId
+    request_id_from: $.RequestId
+  enable_encryption_default:
+    api: EnableDiskEncryptionByDefault
+    request:
+      RegionId: $context.region
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  disable_encryption_default:
+    api: DisableDiskEncryptionByDefault
+    request:
+      RegionId: $context.region
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  modify_default_kms_key:
+    api: ModifyDiskDefaultKMSKeyId
+    request:
+      RegionId: $context.region
+      KMSKeyId: $.default_kms_key_id
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: KMSKeyId
+    request_id_from: $.RequestId
+  reset_default_kms_key:
+    api: ResetDiskDefaultKMSKeyId
+    request:
+      RegionId: $context.region
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  delete_to_absent:
+    api: DeleteDisk
+    retry:
+      policy: initializing_grace
+      errors:
+        - IncorrectDiskStatus.Initializing
+      initial_interval: 1s
+      max_interval: 30s
+      timeout: 180s
+    request:
+      RegionId: $context.region
+      DiskId: $.id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+  attach_to_instance:
+    api: AttachDisk
+    request:
+      RegionId: $context.region
+      DiskId: $.id
+      InstanceId: $.instance
+      Device: $.device
+      DeleteWithInstance: $.delete_with_instance
+      Force: $.force
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+      - request: InstanceId
+    request_id_from: $.RequestId
+    wait: in_use_after_attach
+  detach_from_instance:
+    api: DetachDisk
+    request:
+      RegionId: $context.region
+      DiskId: $.id
+      InstanceId: $.instance
+      DeleteWithInstance: $.delete_with_instance
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+      - request: InstanceId
+    request_id_from: $.RequestId
+    wait: available_after_detach
+  clone_to_available:
+    api: CloneDisks
+    idempotency:
+      field: ClientToken
+      prefix: disk-clone
+    request:
+      RegionId: $context.region
+      SourceDiskId: $.id
+      DiskName: $.name
+      Size: $.size
+      DiskCategory: $.category
+      MultiAttach: $.multi_attach
+      Encrypted: $.encrypted
+      KmsKeyId: $.kms_key_id
+      PerformanceLevel: $.performance_level
+      ProvisionedIops: $.provisioned_iops
+      BurstingEnabled: $.bursting_enabled
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+      - request: Size
+      - request: DiskCategory
+      - request: MultiAttach
+    id_from: $.TaskGroupId
+    request_id_from: $.RequestId
+    wait: clone_finished
+  reinit_to_target:
+    api: ReInitDisk
+    request:
+      RegionId: $context.region
+      DiskId: $.id
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    request_id_from: $.RequestId
+  reset_to_target:
+    api: ResetDisk
+    request:
+      RegionId: $context.region
+      DiskId: $.id
+      SnapshotId: $.snapshot
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+      - request: SnapshotId
+    request_id_from: $.RequestId
+
+operations:
+  create:
+    examples:
+      - ecctl ecs disk create --zone cn-beijing-a --size 40 --category cloud_essd --name data-01
+      - ecctl ecs disk create --zone cn-beijing-a --size 100 --category cloud_essd --name data-01 --tag env=prod
+      - ecctl ecs disk create --zone cn-beijing-a --snapshot <snapshot-id> --category cloud_essd --name restored-01
+    description:
+      en: Create disk
+      zh-CN: 创建云盘
+    input:
+      fields:
+        - zone
+        - size
+        - category
+        - snapshot
+        - name
+        - description
+        - encrypted
+        - kms_key_id
+        - performance_level
+        - provisioned_iops
+        - bursting_enabled
+        - resource_group
+        - tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_to_available
+        wait_unless: input.no_wait
+      - probe: list
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            zone: $input.zone
+            size: $input.size
+            category: $input.category
+            region: $context.region
+  update:
+    examples:
+      - ecctl ecs disk update <disk-id> --name data-renamed
+      - ecctl ecs disk update <disk-id> --size 200 --resize-type online
+    description:
+      en: Update disk
+      zh-CN: 更新云盘
+    input:
+      fields:
+        - id:
+            positional: true
+        - name
+        - description
+        - delete_with_instance
+        - delete_auto_snapshot
+        - size
+        - resize_type
+        - category
+        - performance_level
+        - provisioned_iops
+        - bursting_enabled
+        - charge_type
+        - auto_pay
+        - instance
+        - storage_cluster
+        - encryption_default_action:
+            flag_name: encryption-default
+        - default_kms_key_id
+        - reset_default_kms_key
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    conflicts:
+      - any:
+          - id
+          - name
+          - description
+          - delete_with_instance
+          - delete_auto_snapshot
+          - size
+          - resize_type
+          - category
+          - performance_level
+          - provisioned_iops
+          - bursting_enabled
+          - charge_type
+          - auto_pay
+          - instance
+          - storage_cluster
+        with_any:
+          - encryption_default_action
+          - default_kms_key_id
+          - reset_default_kms_key
+    workflow:
+      - binding: update_attributes
+        when_any: [input.name, input.description, input.delete_with_instance, input.delete_auto_snapshot]
+      - binding: resize
+        when: input.size
+      - binding: modify_spec
+        when_any: [input.category, input.performance_level, input.provisioned_iops, input.bursting_enabled]
+      - binding: modify_charge_type
+        when: input.charge_type
+      - binding: modify_deployment
+        when: input.storage_cluster
+      - binding: enable_encryption_default
+        when: input.encryption_default_action == enable
+      - binding: disable_encryption_default
+        when: input.encryption_default_action == disable
+      - binding: modify_default_kms_key
+        when: input.default_kms_key_id
+      - binding: reset_default_kms_key
+        when: input.reset_default_kms_key
+      - probe: list
+        ids:
+          - $input.id
+        as: final
+        when: input.id
+        unless: input.no_wait
+    output:
+      fields:
+        actions: $result.actions
+        disk:
+          id: $input.id
+          name: $input.name
+          description: $input.description
+          status: $result.item.status
+          size: $input.size
+          category: $input.category
+          performance_level: $input.performance_level
+          provisioned_iops: $input.provisioned_iops
+          bursting_enabled: $input.bursting_enabled
+        disk_encryption_default:
+          action: $input.encryption_default_action
+          kms_key_id: $input.default_kms_key_id
+          reset_kms_key: $input.reset_default_kms_key
+  delete:
+    examples:
+      - ecctl ecs disk delete <disk-id>
+    description:
+      en: Delete disk
+      zh-CN: 删除云盘
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - force
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get disk
+      zh-CN: 获取云盘
+    input:
+      fields:
+        - id:
+            positional: true
+        - encryption_default
+        - default_kms_key
+    require_any:
+      - raw: $.id
+      - raw: $.encryption_default
+      - raw: $.default_kms_key
+    workflow:
+      - probe: encryption_default_status
+        when: input.encryption_default
+      - probe: default_kms_key
+        when: input.default_kms_key
+      - probe: list
+        ids:
+          - $input.id
+        not_found: error
+        when: input.id
+    output:
+      fields:
+        disk:
+          id: $result.item.id
+          name: $result.item.name
+          description: $result.item.description
+          status: $result.item.status
+          region: $result.item.region
+          zone: $result.item.zone
+          size: $result.item.size
+          category: $result.item.category
+          instance: $result.item.instance
+        disk_encryption_default:
+          enabled: $result.item.enabled
+          kms_key_id: $result.item.kms_key_id
+  list:
+    examples:
+      - ecctl ecs disk list
+      - ecctl ecs disk list --filter name=<value>
+      - ecctl ecs disk list --filter tag.env=prod
+    description:
+      en: List disks
+      zh-CN: 列出云盘
+    input:
+      fields:
+        - ids:
+            positional_many: true
+      controls:
+        - filter
+        - limit
+        - next_token
+    filters:
+      id:
+        target: ids
+      ids:
+        target: ids
+      disk:
+        target: ids
+      disk.id:
+        target: ids
+      name:
+        target: name
+      status:
+        target: status
+      zone:
+        target: zone
+      instance:
+        target: instance
+      instance.id:
+        target: instance
+      snapshot:
+        target: snapshot
+      snapshot.id:
+        target: snapshot
+      category:
+        target: category
+      type:
+        target: type
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true
+  attach:
+    examples:
+      - ecctl ecs disk attach <disk-id> --instance <instance-id>
+    description:
+      en: Attach disk
+      zh-CN: 挂载云盘
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - instance:
+            required: true
+        - device
+        - delete_with_instance
+      controls:
+        - force
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: attach_to_instance
+        wait_unless: input.no_wait
+      - probe: list
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            instance: $input.instance
+  detach:
+    examples:
+      - ecctl ecs disk detach <disk-id> --instance <instance-id>
+    description:
+      en: Detach disk
+      zh-CN: 卸载云盘
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - instance:
+            required: true
+        - delete_with_instance
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: detach_from_instance
+        wait_unless: input.no_wait
+      - probe: list_by_id
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            instance: $input.instance
+  clone:
+    examples:
+      - ecctl ecs disk clone <disk-id> --size 40 --category cloud_essd --multi-attach <multi-attach>
+    description:
+      en: Clone disk
+      zh-CN: 克隆云盘
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - size:
+            required: true
+        - category:
+            required: true
+        - multi_attach:
+            required: true
+        - encrypted
+        - kms_key_id
+        - performance_level
+        - provisioned_iops
+        - bursting_enabled
+        - resource_group
+        - tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: clone_to_available
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            task_group_id: $context.id
+            source_disk: $input.id
+  monitor:
+    examples:
+      - ecctl ecs disk monitor <disk-id> --start-time <start-time> --end-time <end-time>
+    description:
+      en: Query disk monitor data
+      zh-CN: 查询云盘监控数据
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - start_time:
+            required: true
+        - end_time:
+            required: true
+        - period_seconds
+    workflow:
+      - probe: monitor
+        many: true
+    output:
+      fields:
+        disk:
+          id: $input.id
+        monitor_data: $result.items
+  reinit:
+    examples:
+      - ecctl ecs disk reinit <disk-id>
+    description:
+      en: Reinitialize disk
+      zh-CN: 重新初始化云盘
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: reinit_to_target
+      - probe: list
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+  reset:
+    examples:
+      - ecctl ecs disk reset <disk-id> --snapshot <snapshot-id>
+    description:
+      en: Reset disk from snapshot
+      zh-CN: 使用快照回滚云盘
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - snapshot:
+            required: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: reset_to_target
+      - probe: list
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            snapshot: $input.snapshot

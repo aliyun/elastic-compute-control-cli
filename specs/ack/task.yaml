@@ -1,0 +1,236 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: task
+kind: regional
+display_name:
+  en: task
+  zh-CN: 异步任务
+description:
+  en: Query and control ACK asynchronous tasks
+  zh-CN: 查询和控制 ACK 异步任务
+examples:
+  - ecctl ack task get <task-id> --cluster <cluster-id>
+  - ecctl ack task list --cluster <cluster-id> --filter status=running
+  - ecctl ack task pause <task-id>
+  - ecctl ack task cancel <task-id>
+
+identity:
+  field: task_id
+  output_root:
+    one: task
+    many: tasks
+
+schema:
+  fields:
+    task_id:
+      type: string
+      description:
+        en: ACK task ID
+        zh-CN: ACK 任务 ID
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    status:
+      type: string
+      description:
+        en: task status filter
+        zh-CN: 任务状态过滤条件
+    type:
+      type: string
+      description:
+        en: task type filter
+        zh-CN: 任务类型过滤条件
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum tasks to return
+      zh-CN: 最多返回任务数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  detail:
+    api: DescribeTaskInfo
+    request:
+      task_id: $.task_id
+      cluster_id: $.cluster
+      ApiParam:
+        raw: $.api_param
+    response:
+      item: $
+      request_id: $.requestId
+      id: $.task_id
+      state: $.state
+      fields:
+        id: $.task_id
+        task_id: $.task_id
+        cluster_id: $.cluster_id
+        type: $.task_type
+        status: $.state
+        state: $.state
+        created: $.created
+        updated: $.updated
+  list:
+    api: DescribeClusterTasks
+    request:
+      cluster_id: $.cluster
+      state: $.status
+      task_type: $.type
+      page_size: $.limit
+      page_number: $.page
+      ApiParam:
+        raw: $.api_param
+    response:
+      items: $.tasks
+      total: $.page_info.total_count
+      request_id: $.requestId
+      id: $.task_id
+      state: $.state
+      fields:
+        id: $.task_id
+        task_id: $.task_id
+        cluster_id: $.cluster_id
+        type: $.task_type
+        status: $.state
+        state: $.state
+        created: $.created
+        updated: $.updated
+
+bindings:
+  pause:
+    api: PauseTask
+    request:
+      task_id: $.task_id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.requestId
+  resume:
+    api: ResumeTask
+    request:
+      task_id: $.task_id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.requestId
+  cancel:
+    api: CancelTask
+    request:
+      task_id: $.task_id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.requestId
+
+operations:
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get task details
+      zh-CN: 查询任务详情
+    input:
+      fields:
+        - task_id:
+            required: true
+            positional: true
+        - cluster
+      controls:
+        - api_param
+    workflow:
+      - probe: detail
+        not_found: error
+  list:
+    examples:
+      - ecctl ack task list
+      - ecctl ack task list --filter status=<value>
+    description:
+      en: List cluster tasks
+      zh-CN: 列出集群任务
+    input:
+      fields:
+        - cluster:
+            required: true
+      controls:
+        - filter
+        - limit
+        - page
+        - api_param
+    filters:
+      status:
+        target: status
+      type:
+        target: type
+    workflow:
+      - probe: list
+        many: true
+  pause:
+    examples:
+      - ecctl ack task pause <task-id>
+    description:
+      en: Pause a task
+      zh-CN: 暂停任务
+    input:
+      fields:
+        - task_id:
+            required: true
+            positional: true
+      controls:
+        - api_param
+    workflow:
+      - binding: pause
+      - probe: detail
+        not_found: error
+  resume:
+    examples:
+      - ecctl ack task resume <task-id>
+    description:
+      en: Resume a task
+      zh-CN: 恢复任务
+    input:
+      fields:
+        - task_id:
+            required: true
+            positional: true
+      controls:
+        - api_param
+    workflow:
+      - binding: resume
+      - probe: detail
+        not_found: error
+  cancel:
+    examples:
+      - ecctl ack task cancel <task-id>
+    description:
+      en: Cancel a task
+      zh-CN: 取消任务
+    input:
+      fields:
+        - task_id:
+            required: true
+            positional: true
+      controls:
+        - api_param
+    workflow:
+      - binding: cancel
+      - probe: detail
+        not_found: error

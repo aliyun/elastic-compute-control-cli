@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ecctl-e2e · {{.RunID}}</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --panel:#ffffff; --fg:#1c2024; --muted:#6b7280; --border:#e5e7eb;
+    --code-bg:#0d1117; --code-fg:#e6edf3;
+    --pass:#16a34a; --pass-bg:#dcfce7; --fail:#dc2626; --fail-bg:#fee2e2; --skip:#b45309; --skip-bg:#fef3c7;
+    --accent:#2563eb; --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 16px rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0b0d10; --panel:#15181d; --fg:#e6e9ee; --muted:#9aa3af; --border:#272b32;
+      --code-bg:#0a0c10; --code-fg:#e6edf3;
+      --pass:#4ade80; --pass-bg:#0f2c1b; --fail:#f87171; --fail-bg:#2c1414; --skip:#fbbf24; --skip-bg:#2c2410;
+      --accent:#60a5fa; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 28px rgba(0,0,0,.45);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; font-size:14px; line-height:1.5; }
+  .wrap { max-width:1080px; margin:0 auto; padding:32px 24px 80px; }
+  header { display:flex; align-items:center; gap:14px; margin-bottom:4px; }
+  h1 { font-size:20px; font-weight:650; margin:0; letter-spacing:-.01em; }
+  .badge { font-size:12px; font-weight:700; padding:4px 10px; border-radius:999px; }
+  .badge.pass { color:var(--pass); background:var(--pass-bg); }
+  .badge.fail { color:var(--fail); background:var(--fail-bg); }
+  .meta { color:var(--muted); font-size:12.5px; margin-bottom:24px; }
+  .meta code { background:var(--panel); border:1px solid var(--border); padding:1px 6px; border-radius:5px; }
+
+  .stats { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:24px; }
+  .stat { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:14px 16px; box-shadow:var(--shadow); }
+  .stat .n { font-size:24px; font-weight:700; letter-spacing:-.02em; }
+  .stat .l { font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-top:2px; }
+  .stat.pass .n { color:var(--pass); } .stat.fail .n { color:var(--fail); } .stat.skip .n { color:var(--skip); }
+
+  .toolbar { display:flex; gap:10px; align-items:center; margin-bottom:18px; flex-wrap:wrap; }
+  .search { flex:1; min-width:220px; display:flex; align-items:center; gap:8px; background:var(--panel);
+    border:1px solid var(--border); border-radius:10px; padding:9px 12px; box-shadow:var(--shadow); }
+  .search input { border:0; outline:0; background:transparent; color:var(--fg); font-size:14px; width:100%; }
+  .search svg { flex:none; opacity:.5; }
+  .pills { display:flex; gap:6px; }
+  .pill { cursor:pointer; user-select:none; font-size:13px; font-weight:550; padding:8px 14px; border-radius:10px;
+    border:1px solid var(--border); background:var(--panel); color:var(--muted); }
+  .pill.active { color:#fff; background:var(--accent); border-color:var(--accent); }
+
+  .count { color:var(--muted); font-size:12.5px; margin:0 0 12px 2px; }
+
+  .case { background:var(--panel); border:1px solid var(--border); border-radius:12px; margin-bottom:10px;
+    box-shadow:var(--shadow); overflow:hidden; }
+  .case > summary { cursor:pointer; list-style:none; display:flex; align-items:center; gap:12px; padding:14px 16px; }
+  .case > summary::-webkit-details-marker { display:none; }
+  .case > summary::before { content:"▸"; color:var(--muted); transition:transform .15s; font-size:11px; }
+  .case[open] > summary::before { transform:rotate(90deg); }
+  .dot { width:9px; height:9px; border-radius:50%; flex:none; }
+  .dot.pass { background:var(--pass); } .dot.fail { background:var(--fail); } .dot.skip { background:var(--skip); }
+  .case .nm { font-weight:600; }
+  .case .res { color:var(--muted); font-size:12.5px; font-family:ui-monospace,monospace; }
+  .case .spacer { flex:1; }
+  .case .small { color:var(--muted); font-size:12px; }
+
+  .steps { border-top:1px solid var(--border); padding:6px 16px 14px; }
+  .step { padding:12px 0; border-bottom:1px dashed var(--border); }
+  .step:last-child { border-bottom:0; }
+  .step .head { display:flex; align-items:center; gap:10px; }
+  .tag { font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; }
+  .tag.pass { color:var(--pass); background:var(--pass-bg); } .tag.fail { color:var(--fail); background:var(--fail-bg); }
+  .tag.skip { color:var(--skip); background:var(--skip-bg); }
+  .step .sname { font-weight:550; } .step .sm { color:var(--muted); font-size:12px; }
+  pre.code { background:var(--code-bg); color:var(--code-fg); border-radius:8px; padding:10px 12px; margin:8px 0 0;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; overflow:auto; max-height:360px; white-space:pre; }
+  .check { font-family:ui-monospace,monospace; font-size:12px; margin-top:5px; }
+  .check .y { color:var(--pass); } .check .x { color:var(--fail); }
+  .out { margin-top:8px; }
+  .out > summary { cursor:pointer; font-size:12px; color:var(--accent); list-style:none; }
+  .out > summary::-webkit-details-marker { display:none; }
+  .errline { color:var(--fail); font-family:ui-monospace,monospace; font-size:12px; white-space:pre-wrap; margin-top:6px; }
+  .empty { text-align:center; color:var(--muted); padding:40px; display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ecctl-e2e</h1>
+    {{if .Failed}}<span class="badge fail">FAIL</span>{{else}}<span class="badge pass">PASS</span>{{end}}
+  </header>
+  <div class="meta">{{if .Region}}region <code>{{.Region}}</code>{{else}}{{len .Executions}} execution units{{end}} · run <code>{{.RunID}}</code> · {{.StartedAt.Format "2006-01-02 15:04:05 MST"}}</div>
+  {{if gt (len .RegionAttempts) 1}}
+  <div class="meta">region attempts: {{range $i, $attempt := .RegionAttempts}}{{if $i}} → {{end}}<code>{{$attempt.Region}}</code> ({{$attempt.Status}}){{end}}</div>
+  {{end}}
+  {{if gt (len .Executions) 1}}
+  <div class="meta">execution units:
+    {{range .Executions}}<br><code>{{.ID}}</code> · {{.Signature}} · {{regions .Regions}}
+      {{range .Attempts}}<br>&nbsp;&nbsp;attempt: {{regions .Regions}} ({{.Status}}){{if .Reason}} — {{.Reason}}{{end}}{{end}}
+    {{end}}
+  </div>
+  {{end}}
+
+  <div class="stats">
+    <div class="stat pass"><div class="n">{{.Summary.Passed}}</div><div class="l">Passed</div></div>
+    <div class="stat fail"><div class="n">{{.Summary.Failed}}</div><div class="l">Failed</div></div>
+    <div class="stat skip"><div class="n">{{.Summary.Skipped}}</div><div class="l">Skipped</div></div>
+    <div class="stat"><div class="n">{{.Summary.Cases}}</div><div class="l">Cases</div></div>
+    <div class="stat"><div class="n">{{secs .WallMs}}</div><div class="l">Total time</div></div>
+  </div>
+
+  <div class="toolbar">
+    <label class="search">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="search" type="search" placeholder="Search cases by name or resource…" autocomplete="off">
+    </label>
+    <div class="pills">
+      <span class="pill active" data-filter="all">All</span>
+      <span class="pill" data-filter="pass">Passed</span>
+      <span class="pill" data-filter="fail">Failed</span>
+      <span class="pill" data-filter="skip">Skipped</span>
+    </div>
+  </div>
+  <div class="count"><span id="count">{{.Summary.Cases}}</span> shown</div>
+
+  {{range .Cases}}
+  <details class="case" data-status="{{bucket .Status}}" data-name="{{.Name}} {{.Resource}}" {{if ne (bucket .Status) "pass"}}open{{end}}>
+    <summary>
+      <span class="dot {{bucket .Status}}"></span>
+      <span class="nm">{{.Name}}</span>
+      <span class="res">{{.Resource}}</span>
+      {{if .ExecutionID}}<span class="res">{{.ExecutionID}} · {{regions .Regions}}</span>{{end}}
+      <span class="spacer"></span>
+      <span class="small">{{len .Steps}} steps · {{secs .DurationMs}}</span>
+    </summary>
+    <div class="steps">
+      {{if .Error}}<div class="errline">{{.Error}}</div>{{end}}
+      {{range .Steps}}
+      <div class="step">
+        <div class="head">
+          <span class="tag {{bucket .Status}}">{{icon .Status}}</span>
+          <span class="sname">{{.Name}}</span>
+          <span class="sm">exit {{.Exit}} (want {{.WantExit}}) · {{secs .DurationMs}}</span>
+        </div>
+        <pre class="code">{{.Command}}</pre>
+        {{range .Checks}}<div class="check">{{if .OK}}<span class="y">✓</span>{{else}}<span class="x">✗</span>{{end}} {{.Path}}{{if .Detail}} — {{.Detail}}{{end}}</div>{{end}}
+        {{if .Error}}<div class="errline">{{.Error}}</div>{{end}}
+        {{if .Stdout}}<details class="out"><summary>ecctl output (stdout)</summary><pre class="code">{{.Stdout}}</pre></details>{{end}}
+        {{if .Stderr}}<details class="out"><summary>stderr</summary><pre class="code">{{.Stderr}}</pre></details>{{end}}
+      </div>
+      {{end}}
+    </div>
+  </details>
+  {{end}}
+  <div class="empty" id="empty">No cases match.</div>
+</div>
+
+<script>
+  (function () {
+    var search = document.getElementById('search');
+    var cards = Array.prototype.slice.call(document.querySelectorAll('.case'));
+    var pills = Array.prototype.slice.call(document.querySelectorAll('.pill'));
+    var countEl = document.getElementById('count');
+    var emptyEl = document.getElementById('empty');
+    var status = 'all';
+
+    function apply() {
+      var q = search.value.trim().toLowerCase();
+      var shown = 0;
+      cards.forEach(function (c) {
+        var okS = status === 'all' || c.getAttribute('data-status') === status;
+        var okN = !q || c.getAttribute('data-name').toLowerCase().indexOf(q) !== -1;
+        var vis = okS && okN;
+        c.style.display = vis ? '' : 'none';
+        if (vis) shown++;
+      });
+      countEl.textContent = shown;
+      emptyEl.style.display = shown ? 'none' : 'block';
+    }
+    search.addEventListener('input', apply);
+    pills.forEach(function (p) {
+      p.addEventListener('click', function () {
+        pills.forEach(function (x) { x.classList.remove('active'); });
+        p.classList.add('active');
+        status = p.getAttribute('data-filter');
+        apply();
+      });
+    });
+  })();
+</script>
+</body>
+</html>

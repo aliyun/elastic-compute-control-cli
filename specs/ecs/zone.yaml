@@ -1,0 +1,133 @@
+schema_version: 2
+product: ecs
+resource: zone
+kind: regional
+display_name:
+  en: zone
+  zh-CN: 可用区
+description:
+  en: Query ECS zones in a region
+  zh-CN: 查询地域内的 ECS 可用区
+examples:
+  - ecctl ecs zone list --region cn-hangzhou
+  - ecctl ecs zone list --region cn-hangzhou --instance-charge-type PrePaid
+
+identity:
+  field: id
+  output_root:
+    one: zone
+    many: zones
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: zone ID
+        zh-CN: 可用区 ID
+    instance_charge_type:
+      type: string
+      description:
+        en: only return zones that support the given instance charge type
+        zh-CN: 仅返回支持该实例计费方式的可用区
+      enum: [PrePaid, PostPaid]
+    spot_strategy:
+      type: string
+      description:
+        en: only return zones that support the given preemptible strategy
+        zh-CN: 仅返回支持该抢占式策略的可用区
+      enum: [NoSpot, SpotWithPriceLimit, SpotAsPriceGo]
+    resource_type:
+      type: string
+      description:
+        en: only return zones that support the given resource type
+        zh-CN: 仅返回支持该资源类型的可用区
+    accept_language:
+      type: string
+      description:
+        en: language used for localized zone names
+        zh-CN: 可用区名称的展示语言
+      enum: [zh-CN, en-US, ja]
+    verbose:
+      type: boolean
+      description:
+        en: return the full available-resource detail for each zone
+        zh-CN: 返回每个可用区的完整可用资源详情
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: DescribeZones
+    request:
+      RegionId: $context.region
+      InstanceChargeType: $.instance_charge_type
+      SpotStrategy: $.spot_strategy
+      ResourceType: $.resource_type
+      AcceptLanguage: $.accept_language
+      Verbose: $.verbose
+      ApiParam:
+        raw: $.api_param
+    response:
+      items: $.Zones.Zone
+      request_id: $.RequestId
+      id: $.ZoneId
+      fields:
+        id: $.ZoneId
+        local_name: $.LocalName
+        available_resource_creation:
+          path: $.AvailableResourceCreation.ResourceTypes
+          default_empty_array: true
+        available_instance_types:
+          path: $.AvailableInstanceTypes.InstanceTypes
+          default_empty_array: true
+        available_disk_categories:
+          path: $.AvailableDiskCategories.DiskCategories
+          default_empty_array: true
+        available_resources:
+          path: $.AvailableResources.ResourcesInfo
+          default_empty_array: true
+        available_volume_categories:
+          path: $.AvailableVolumeCategories.VolumeCategories
+          default_empty_array: true
+        dedicated_host_generations:
+          path: $.DedicatedHostGenerations.DedicatedHostGeneration
+          default_empty_array: true
+
+operations:
+  list:
+    examples:
+      - ecctl ecs zone list
+      - ecctl ecs zone list --filter charge-type=<value>
+    description:
+      en: List zones
+      zh-CN: 列出可用区
+    input:
+      fields:
+        - accept_language
+        - verbose
+      controls:
+        - filter
+        - api_param
+    filters:
+      charge-type:
+        target: instance_charge_type
+      spot-strategy:
+        target: spot_strategy
+      resource-type:
+        target: resource_type
+    workflow:
+      - probe: list
+        many: true

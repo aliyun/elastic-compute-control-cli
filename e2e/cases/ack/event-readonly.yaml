@@ -1,0 +1,8 @@
+surface: full
+resource: ack/event
+
+steps:
+  - name: list regional events
+    run: ecctl ack event list --by-region --limit 10
+    assert:
+      - len($.events) >= 0

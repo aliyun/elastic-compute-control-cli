@@ -1,0 +1,384 @@
+schema_version: 2
+product: lingjun
+api_product: eflo
+resource: lni
+kind: regional
+display_name:
+  en: Lingjun LNI (Physical NIC)
+  zh-CN: 灵骏物理网卡
+description:
+  en: Manage Lingjun physical network interface (LNI) auxiliary IPs and queries
+  zh-CN: 管理灵骏物理网卡（LNI）辅助 IP 和查询
+examples:
+  - ecctl lingjun lni list --filter node=node-xxx
+  - ecctl lingjun lni get lni-xxx --with-ips
+  - ecctl lingjun lni update lni-xxx --ip +10.0.0.10 --ip +10.0.0.11
+  - ecctl lingjun lni update lni-xxx --ip -ip-xxxxxxxx
+
+identity:
+  field: id
+  prefix: lni-
+  output_root:
+    one: lni
+    many: lnis
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: LNI ID
+        zh-CN: 物理网卡 ID
+    name:
+      type: string
+      description:
+        en: LNI name
+        zh-CN: 物理网卡名称
+    status:
+      type: string
+      description:
+        en: LNI status
+        zh-CN: 物理网卡状态
+    node:
+      type: string
+      description:
+        en: parent node ID (list filter)
+        zh-CN: 所属节点 ID（list 过滤）
+    subnet:
+      type: string
+      description:
+        en: subnet ID (list filter; required for assign/unassign — auto-derived from the LNI when omitted, pass to override)
+        zh-CN: 子网 ID（list 过滤；assign/unassign 必填，缺省时从 LNI 自动派生，显式传入可覆盖）
+    vpd:
+      type: string
+      description:
+        en: parent VPD ID (list filter)
+        zh-CN: 所属 VPD ID（list 过滤）
+    private_ip:
+      type: string
+      description:
+        en: filter LNIs by primary IP
+        zh-CN: 按主 IP 过滤
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+    ip_changes:
+      type: string
+      repeatable: true
+      description:
+        en: |-
+          auxiliary private IP change; +<ip> calls AssignPrivateIpAddress (the value is the IP literal); -<ip-name> calls UnAssignPrivateIpAddress (the value is the IpName returned by Assign or list_private_ips, NOT the IP literal). SubnetId is derived from the LNI when --subnet is omitted.
+        zh-CN: |-
+          辅助私网 IP 变更；+<ip> 调用 AssignPrivateIpAddress（值为 IP 字面量）；-<ip-name> 调用 UnAssignPrivateIpAddress（值为 Assign 或 list_private_ips 返回的 IpName，不是 IP 字面量）。未传 --subnet 时从 LNI 自动派生。
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  with_ips:
+    type: boolean
+    description:
+      en: include LNI auxiliary private IP allocations under private_ips in get output
+      zh-CN: get 输出附带 LNI 辅助私网 IP 分配（private_ips）
+  no_wait:
+    type: boolean
+    description:
+      en: return before final readback completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  attribute:
+    api: GetNetworkInterface
+    request:
+      RegionId: $context.region
+      NetworkInterfaceId: $.id
+      SubnetId: $.subnet
+    response:
+      item: $.Content
+      request_id: $.RequestId
+      id: $.NetworkInterfaceId
+      state: $.Status
+      fields:
+        id: $.NetworkInterfaceId
+        name: $.NetworkInterfaceName
+        status: $.Status
+        nc_type: $.NcType
+        node: $.NodeId
+        zone: $.ZoneId
+        vpc: $.VpcId
+        vpd: $.VpdId
+        subnet: $.SubnetId
+        vswitch: $.VSwitchId
+        gateway: $.Gateway
+        mac: $.Mac
+        ip: $.Ip
+        port_type: $.PortType
+        service_mac: $.ServiceMac
+        ethernet: $.Ethernet
+        private_ip_count: $.PrivateIpCount
+        private_ip_address_mac_group: $.PrivateIpAddressMacGroup
+        resource_group: $.ResourceGroupId
+        tenant: $.TenantId
+        create_time: $.CreateTime
+        modified_time: $.GmtModified
+        tags: $.Tags
+  list:
+    api: ListNetworkInterfaces
+    request:
+      RegionId: $context.region
+      EnablePage: true
+      PageNumber: $.page
+      PageSize: $.limit
+      NetworkInterfaceId: $.id
+      NodeId: $.node
+      SubnetId: $.subnet
+      VpdId: $.vpd
+      Ip: $.private_ip
+      ResourceGroupId: $.resource_group
+      Tag:
+        each:
+          sources:
+            - source: $.tag
+        fields:
+          Key: $kv_key($.value)
+          Value: $kv_value($.value)
+    response:
+      items: $.Content.Data
+      total: $.Content.Total
+      request_id: $.RequestId
+      id: $.NetworkInterfaceId
+      state: $.Status
+      fields:
+        id: $.NetworkInterfaceId
+        name: $.NetworkInterfaceName
+        status: $.Status
+        nc_type: $.NcType
+        node: $.NodeId
+        zone: $.ZoneId
+        vpc: $.VpcId
+        vpd: $.VpdId
+        subnet: $.SubnetId
+        vswitch: $.VSwitchId
+        gateway: $.Gateway
+        mac: $.Mac
+        ip: $.Ip
+        port_type: $.PortType
+        service_mac: $.ServiceMac
+        ethernet: $.Ethernet
+        resource_group: $.ResourceGroupId
+        tenant: $.TenantId
+        create_time: $.CreateTime
+        modified_time: $.GmtModified
+        tags: $.Tags
+      absent:
+        when_empty_for_requested_ids: true
+  private_ips:
+    api: ListLniPrivateIpAddress
+    request:
+      RegionId: $context.region
+      NetworkInterfaceId: $.id
+      ResourceGroupId: $.resource_group
+      EnablePage: true
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.Content.Data
+      total: $.Content.Total
+      request_id: $.RequestId
+      id: $.IpName
+      fields:
+        ip_name: $.IpName
+        private_ip: $.PrivateIpAddress
+        description: $.Description
+        status: $.Status
+        network_interface: $.NetworkInterfaceId
+        subnet: $.SubnetId
+        resource_group: $.ResourceGroupId
+        create_time: $.GmtCreate
+        modified_time: $.GmtModified
+
+waiters:
+  available_after_change:
+    probe: attribute
+    target: Available
+    interval: 2s
+    timeout: 300s
+    pending:
+      - field: status
+        values: [Executing, Pending]
+
+bindings:
+  assign_private_ip:
+    api: AssignPrivateIpAddress
+    each: $prefixed_kv_objects($.ip_changes,"+","ip")
+    idempotency:
+      field: ClientToken
+      prefix: lingjun-lni-assign-ip
+    request:
+      RegionId: $context.region
+      NetworkInterfaceId: $input.id
+      SubnetId: $context.lni.subnet
+      PrivateIpAddress: $.ip
+    require_all:
+      - raw: $input.id
+      - request: SubnetId
+      - request: PrivateIpAddress
+    request_id_from: $.RequestId
+  unassign_private_ip:
+    api: UnAssignPrivateIpAddress
+    each: $prefixed_kv_objects($.ip_changes,"-","ip")
+    idempotency:
+      field: ClientToken
+      prefix: lingjun-lni-unassign-ip
+    request:
+      RegionId: $context.region
+      NetworkInterfaceId: $input.id
+      SubnetId: $context.lni.subnet
+      IpName: $.ip
+    require_all:
+      - raw: $input.id
+      - request: SubnetId
+      - request: IpName
+    request_id_from: $.RequestId
+
+operations:
+  update:
+    examples:
+      - ecctl lingjun lni update <lni-id>
+    description:
+      en: Update Lingjun LNI auxiliary IPs (assign and/or unassign)
+      zh-CN: 更新灵骏物理网卡辅助 IP（分配和/或回收）
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - subnet
+        - ip_changes:
+            flag_name: ip
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    require_any:
+      - raw: $.ip_changes
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        as: lni
+        not_found: error
+      - binding: assign_private_ip
+        when: has($prefixed_kv_objects($.ip_changes,"+","ip"))
+      - binding: unassign_private_ip
+        when: has($prefixed_kv_objects($.ip_changes,"-","ip"))
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get Lingjun LNI
+      zh-CN: 获取灵骏物理网卡
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - subnet
+      controls:
+        - with_ips
+        - limit
+        - page
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+        not_found: error
+      - probe: private_ips
+        ids:
+          - $input.id
+        when: input.with_ips
+        merge: true
+  list:
+    examples:
+      - ecctl lingjun lni list
+      - ecctl lingjun lni list --filter private-ip=<value>
+      - ecctl lingjun lni list --filter tag.env=prod
+    description:
+      en: List Lingjun LNIs
+      zh-CN: 列出灵骏物理网卡
+    input:
+      fields:
+        - node
+      controls:
+        - filter
+        - limit
+        - page
+    filters:
+      id:
+        target: id
+      node:
+        target: node
+      node.id:
+        target: node
+      vpd:
+        target: vpd
+      vpd.id:
+        target: vpd
+      subnet:
+        target: subnet
+      subnet.id:
+        target: subnet
+      private-ip:
+        target: private_ip
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true

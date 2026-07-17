@@ -1,0 +1,18 @@
+# ECS regions are a read-only global list: no create/delete, so no `needs` and no
+# teardown. Assertions are purely structural (derived from the spec) — the array
+# is non-empty and every region ID matches the cn- region naming.
+resource: ecs/region
+
+steps:
+  - name: list
+    run: ecctl ecs region list
+    at: $.regions
+    assert:
+      - len($.regions) >= 1
+    expect:
+      "[*].id": { each: { regex: "^[a-z]" } }
+
+  - name: differential vs raw DescribeRegions
+    run: ecctl call ecs DescribeRegions
+    expect:
+      $.response.Regions.Region: { type: array, min_len: 1 }

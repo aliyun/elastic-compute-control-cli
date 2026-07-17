@@ -1,0 +1,103 @@
+# Resource Group Policy 生命周期。ServiceRole、ResourceGroup 和自定义策略
+# 都在本 case 内创建，PrincipalName 使用 API 返回的角色主体名，不依赖账号级配置。
+resource: rg/policy
+serial: true
+
+steps:
+  - name: create resource group prerequisite
+    run: >
+      ecctl rg group create
+      --name {{.run_name}}-policy-rg
+      --display-name {{.run_id}}-policy-rg
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.group
+    expect:
+      id: { type: string, prefix: rg- }
+    capture:
+      group_id: id
+    teardown: ecctl rg group delete {{.group_id}}
+
+  - name: read account identity
+    run: ecctl rg group get {{.group_id}}
+    at: $.group
+    expect:
+      id: { eq: "{{.group_id}}" }
+      account_id: { type: string }
+    capture:
+      account_id: account_id
+
+  - name: create ServiceRole prerequisite
+    run: >
+      ecctl rg role create
+      --name {{.run_name}}-policy-role
+      --assume-role-policy-document
+      '{"Version":"1","Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"RAM":["acs:ram::{{.account_id}}:root"]}}]}'
+    at: $.role
+    expect:
+      name: { eq: "{{.run_name}}-policy-role" }
+      role_principal_name: { type: string }
+    capture:
+      role_name: name
+      role_principal_name: role_principal_name
+    teardown: ecctl rg role delete {{.role_name}}
+
+  - name: create custom policy
+    run: >
+      ecctl rg policy create
+      --name {{.run_name}}-policy
+      --policy-document
+      '{"Version":"1","Statement":[{"Action":["ecs:DescribeInstances"],"Effect":"Allow","Resource":"*"}]}'
+    at: $.policy
+    expect:
+      name: { eq: "{{.run_name}}-policy" }
+      policy_type: { eq: Custom }
+    capture:
+      policy_name: name
+    teardown: ecctl rg policy delete {{.policy_name}}
+
+  - name: attach policy to ServiceRole
+    run: >
+      ecctl rg policy attach {{.policy_name}}
+      --policy-type Custom
+      --principal-type ServiceRole
+      --principal-name {{.role_principal_name}}
+      --resource-group {{.group_id}}
+    teardown: >
+      ecctl rg policy detach {{.policy_name}}
+      --policy-type Custom
+      --principal-type ServiceRole
+      --principal-name {{.role_principal_name}}
+      --resource-group {{.group_id}}
+
+  - name: list policy attachments
+    run: >
+      ecctl rg policy list
+      --policy-type Custom
+      --principal-type ServiceRole
+      --principal-name {{.role_principal_name}}
+      --resource-group {{.group_id}}
+    assert:
+      - len($.attachments) >= 1
+
+  - name: detach policy from ServiceRole
+    run: >
+      ecctl rg policy detach {{.policy_name}}
+      --policy-type Custom
+      --principal-type ServiceRole
+      --principal-name {{.role_principal_name}}
+      --resource-group {{.group_id}}
+
+  - name: delete custom policy
+    run: ecctl rg policy delete {{.policy_name}}
+    expect:
+      deleted: true
+
+  - name: delete ServiceRole
+    run: ecctl rg role delete {{.role_name}}
+    expect:
+      deleted: true
+
+  - name: delete resource group
+    run: ecctl rg group delete {{.group_id}}
+    expect:
+      deleted: true

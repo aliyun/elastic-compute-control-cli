@@ -1,0 +1,742 @@
+schema_version: 2
+product: ecs
+resource: snapshot
+kind: regional
+display_name:
+  en: snapshot
+  zh-CN: 快照
+description:
+  en: Manage disk snapshots
+  zh-CN: 管理云盘快照
+examples:
+  - ecctl ecs snapshot list --filter status=accomplished
+  - ecctl ecs snapshot create --disk d-xxx --name backup-01
+  - ecctl ecs snapshot copy <snapshot-id> --destination-region cn-hangzhou --name backup-copy
+  - ecctl ecs snapshot delete <snapshot-id>
+
+identity:
+  field: id
+  prefix: s-
+  output_root:
+    one: snapshot
+    many: snapshots
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: snapshot ID
+        zh-CN: 快照 ID
+    ids:
+      type: array
+      description:
+        en: snapshot IDs
+        zh-CN: 快照 ID 列表
+      items:
+        type: string
+    name:
+      type: string
+      description:
+        en: snapshot name
+        zh-CN: 快照名称
+    description:
+      type: string
+      description:
+        en: snapshot description
+        zh-CN: 快照描述
+    status:
+      type: string
+      description:
+        en: snapshot status
+        zh-CN: 快照状态
+      enum: [progressing, accomplished, failed]
+    disk:
+      type: string
+      description:
+        en: source disk ID
+        zh-CN: 源云盘 ID
+    instance:
+      type: string
+      description:
+        en: source instance ID
+        zh-CN: 源实例 ID
+    snapshot_type:
+      type: string
+      description:
+        en: snapshot type
+        zh-CN: 快照类型
+      enum: [auto, user, all]
+    category:
+      type: string
+      description:
+        en: snapshot category
+        zh-CN: 快照类型（普通/极速可用）
+      enum: [standard, flash]
+    source_disk_type:
+      type: string
+      description:
+        en: source disk type
+        zh-CN: 源云盘用途类型
+      enum: [System, Data]
+    usage:
+      type: string
+      description:
+        en: snapshot usage
+        zh-CN: 快照使用状态
+      enum: [image, disk, image_disk, none]
+    retention_days:
+      type: integer
+      description:
+        en: snapshot retention days
+        zh-CN: 快照保留天数
+    instant_access:
+      type: boolean
+      description:
+        en: enable instant access
+        zh-CN: 启用极速可用
+    instant_access_retention_days:
+      type: integer
+      description:
+        en: instant access retention days
+        zh-CN: 极速可用保留天数
+    disable_instant_access:
+      type: boolean
+      description:
+        en: disable instant access on update
+        zh-CN: 更新时关闭极速可用
+    lock:
+      type: boolean
+      description:
+        en: lock the snapshot against deletion
+        zh-CN: 锁定快照以防删除
+    unlock:
+      type: boolean
+      description:
+        en: unlock the snapshot
+        zh-CN: 解锁快照
+    open_service:
+      type: boolean
+      description:
+        en: activate the snapshot service
+        zh-CN: 开通快照服务
+    encrypted:
+      type: boolean
+      description:
+        en: encrypt the destination snapshot when copying
+        zh-CN: 复制快照时加密目标快照
+    kms_key_id:
+      type: string
+      description:
+        en: KMS key ID used to encrypt the destination snapshot
+        zh-CN: 加密目标快照使用的 KMS 密钥 ID
+    destination_region:
+      type: string
+      description:
+        en: destination region for copy
+        zh-CN: 复制快照的目标地域
+    destination_name:
+      type: string
+      description:
+        en: destination snapshot name for copy
+        zh-CN: 复制快照的目标名称
+    destination_description:
+      type: string
+      description:
+        en: destination snapshot description for copy
+        zh-CN: 复制快照的目标描述
+    start_time:
+      type: string
+      description:
+        en: monitor query start time
+        zh-CN: 监控查询开始时间
+    end_time:
+      type: string
+      description:
+        en: monitor query end time
+        zh-CN: 监控查询结束时间
+    period:
+      type: integer
+      description:
+        en: monitor data period in seconds
+        zh-CN: 监控数据周期，单位秒
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  next_token:
+    type: string
+    description:
+      en: token for the next result page
+      zh-CN: 下一页查询 token
+  force:
+    type: boolean
+    default: false
+    description:
+      en: force delete the snapshot even if it is used by a disk (must be set explicitly)
+      zh-CN: 即使快照被云盘使用也强制删除（必须显式指定）
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 600s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  with_lock:
+    type: boolean
+    description:
+      en: include snapshot lock information
+      zh-CN: 附带快照锁定信息
+  with_links:
+    type: boolean
+    description:
+      en: include snapshot chain information
+      zh-CN: 附带快照链信息
+  with_monitor:
+    type: boolean
+    description:
+      en: include snapshot capacity monitor data
+      zh-CN: 附带快照容量监控数据
+  with_package:
+    type: boolean
+    description:
+      en: include OSS snapshot storage package information
+      zh-CN: 附带 OSS 快照存储包信息
+  with_usage:
+    type: boolean
+    description:
+      en: include snapshot count and capacity usage
+      zh-CN: 附带快照数量和容量
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: DescribeSnapshots
+    request:
+      RegionId: $context.region
+      SnapshotIds: $.ids
+      DiskId: $.disk
+      InstanceId: $.instance
+      SnapshotName: $.name
+      Status: $.status
+      SnapshotType: $.snapshot_type
+      Category: $.category
+      SourceDiskType: $.source_disk_type
+      Usage: $.usage
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      MaxResults: $.limit
+      NextToken: $.next_token
+    response:
+      items: $.Snapshots.Snapshot
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.SnapshotId
+      state: $.Status
+      fields: &snapshot_fields
+        id: $.SnapshotId
+        name: $.SnapshotName
+        description: $.Description
+        status: $.Status
+        progress: $.Progress
+        region: $.RegionId
+        disk: $.SourceDiskId
+        source_disk_size: $.SourceDiskSize
+        source_disk_type: $.SourceDiskType
+        snapshot_type: $.SnapshotType
+        category: $.Category
+        usage: $.Usage
+        retention_days: $.RetentionDays
+        instant_access: $.InstantAccess
+        encrypted: $.Encrypted
+        kms_key_id: $.KMSKeyId
+        creation_time: $.CreationTime
+        last_modified_time: $.LastModifiedTime
+        resource_group: $.ResourceGroupId
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+  destination_list:
+    api: DescribeSnapshots
+    request:
+      RegionId: $.destination_region
+      SnapshotIds: $.ids
+      MaxResults: $.limit
+      NextToken: $.next_token
+    response:
+      items: $.Snapshots.Snapshot
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.SnapshotId
+      state: $.Status
+      fields: *snapshot_fields
+      absent:
+        when_empty_for_requested_ids: true
+  locked:
+    api: DescribeLockedSnapshots
+    request:
+      RegionId: $context.region
+      SnapshotIds: $.ids
+      DiskId: $.disk
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        locked_snapshots: $.LockedSnapshots.LockedSnapshot
+  links:
+    api: DescribeSnapshotLinks
+    request:
+      RegionId: $context.region
+      DiskId: $.disk
+      InstanceId: $.instance
+      MaxResults: $.limit
+      NextToken: $.next_token
+    response:
+      item: $
+      next_token: $.NextToken
+      request_id: $.RequestId
+      fields:
+        snapshot_links: $.SnapshotLinks.SnapshotLink
+  monitor:
+    api: DescribeSnapshotMonitorData
+    request:
+      RegionId: $context.region
+      StartTime: $.start_time
+      EndTime: $.end_time
+      Period: $.period
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        monitor_data: $.MonitorData.DataPoint
+  package:
+    api: DescribeSnapshotPackage
+    request:
+      RegionId: $context.region
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        snapshot_packages: $.SnapshotPackages.SnapshotPackage
+  usage:
+    api: DescribeSnapshotsUsage
+    request:
+      RegionId: $context.region
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        snapshot_count: $.SnapshotCount
+        snapshot_size: $.SnapshotSize
+
+waiters:
+  accomplished_after_create:
+    probe: list
+    target: accomplished
+    interval: 5s
+    timeout: 600s
+    failure:
+      states: [failed]
+  accomplished_after_copy:
+    probe: destination_list
+    target: accomplished
+    interval: 5s
+    timeout: 600s
+    failure:
+      states: [failed]
+  deleted_after_delete:
+    probe: list
+    target: absent
+    interval: 5s
+    timeout: 300s
+
+bindings:
+  create_to_accomplished:
+    api: CreateSnapshot
+    idempotency:
+      field: ClientToken
+      prefix: snapshot-create
+    request:
+      RegionId: $context.region
+      DiskId: $.disk
+      SnapshotName: $.name
+      Description: $.description
+      RetentionDays: $.retention_days
+      Category: $.category
+      InstantAccess: $.instant_access
+      InstantAccessRetentionDays: $.instant_access_retention_days
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: DiskId
+    id_from: $.SnapshotId
+    request_id_from: $.RequestId
+    wait: accomplished_after_create
+  update_attributes:
+    api: ModifySnapshotAttribute
+    request:
+      RegionId: $context.region
+      SnapshotId: $.id
+      SnapshotName: $.name
+      Description: $.description
+      DisableInstantAccess: $.disable_instant_access
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    require_any:
+      - request: SnapshotName
+      - request: Description
+      - request: DisableInstantAccess
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  modify_category:
+    api: ModifySnapshotCategory
+    request:
+      RegionId: $context.region
+      SnapshotId: $.id
+      Category: $.category
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+      - request: Category
+    request_id_from: $.RequestId
+  lock_snapshot:
+    api: LockSnapshot
+    request:
+      RegionId: $context.region
+      SnapshotId: $.id
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    request_id_from: $.RequestId
+  unlock_snapshot:
+    api: UnlockSnapshot
+    request:
+      RegionId: $context.region
+      SnapshotId: $.id
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    request_id_from: $.RequestId
+  open_snapshot_service:
+    api: OpenSnapshotService
+    request:
+      RegionId: $context.region
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  delete_to_absent:
+    api: DeleteSnapshot
+    request:
+      RegionId: $context.region
+      SnapshotId: $.id
+      Force: $.force
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+  copy_to_destination:
+    api: CopySnapshot
+    idempotency:
+      field: ClientToken
+      prefix: snapshot-copy
+    request:
+      RegionId: $context.region
+      SnapshotId: $.id
+      DestinationRegionId: $.destination_region
+      DestinationSnapshotName: $.destination_name
+      DestinationSnapshotDescription: $.destination_description
+      RetentionDays: $.retention_days
+      Encrypted: $.encrypted
+      KMSKeyId: $.kms_key_id
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+      - request: DestinationRegionId
+    id_from: $.SnapshotId
+    request_id_from: $.RequestId
+
+operations:
+  create:
+    examples:
+      - ecctl ecs snapshot create --disk <disk>
+      - ecctl ecs snapshot create --disk <disk> --name my-name --tag env=prod
+    description:
+      en: Create snapshot
+      zh-CN: 创建快照
+    input:
+      fields:
+        - disk:
+            required: true
+        - name
+        - description
+        - retention_days
+        - category
+        - instant_access
+        - instant_access_retention_days
+        - resource_group
+        - tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_to_accomplished
+        wait_unless: input.no_wait
+      - probe: list
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            disk: $input.disk
+            region: $context.region
+  update:
+    examples:
+      - ecctl ecs snapshot update <snapshot-id>
+      - ecctl ecs snapshot update <snapshot-id> --name my-name
+    description:
+      en: Update snapshot attributes, category, or lock state
+      zh-CN: 更新快照属性、类型或锁定状态
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - description
+        - disable_instant_access
+        - category
+        - lock
+        - unlock
+        - open_service
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    conflicts:
+      - any:
+          - lock
+        with_any:
+          - unlock
+    workflow:
+      - binding: update_attributes
+        when_any: [input.name, input.description, input.disable_instant_access]
+      - binding: modify_category
+        when: input.category
+      - binding: lock_snapshot
+        when: input.lock
+      - binding: unlock_snapshot
+        when: input.unlock
+      - binding: open_snapshot_service
+        when: input.open_service
+      - probe: list
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            name: $input.name
+            description: $input.description
+  delete:
+    examples:
+      - ecctl ecs snapshot delete <snapshot-id>
+    description:
+      en: Delete snapshot
+      zh-CN: 删除快照
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - force
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get snapshot
+      zh-CN: 获取快照
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - disk
+        - instance
+        - start_time
+        - end_time
+        - period
+      controls:
+        - with_lock
+        - with_links
+        - with_monitor
+        - with_package
+        - with_usage
+    workflow:
+      - probe: list
+        ids:
+          - $input.id
+        not_found: error
+      - probe: locked
+        ids:
+          - $input.id
+        when: input.with_lock
+        merge: true
+      - probe: links
+        when: input.with_links
+        merge: true
+      - probe: monitor
+        when: input.with_monitor
+        merge: true
+      - probe: package
+        when: input.with_package
+        merge: true
+      - probe: usage
+        when: input.with_usage
+        merge: true
+  list:
+    examples:
+      - ecctl ecs snapshot list
+      - ecctl ecs snapshot list --filter name=<value>
+      - ecctl ecs snapshot list --filter tag.env=prod
+    description:
+      en: List snapshots
+      zh-CN: 列出快照
+    input:
+      fields:
+        - ids:
+            positional_many: true
+      controls:
+        - filter
+        - limit
+        - next_token
+    filters:
+      id:
+        target: ids
+      ids:
+        target: ids
+      snapshot:
+        target: ids
+      snapshot.id:
+        target: ids
+      name:
+        target: name
+      status:
+        target: status
+      disk:
+        target: disk
+      disk.id:
+        target: disk
+      instance:
+        target: instance
+      instance.id:
+        target: instance
+      type:
+        target: snapshot_type
+      category:
+        target: category
+      usage:
+        target: usage
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+      source-disk-type:
+        target: source_disk_type
+    workflow:
+      - probe: list
+        many: true
+  copy:
+    examples:
+      - ecctl ecs snapshot copy <snapshot-id> --destination-region cn-shanghai
+    description:
+      en: Copy snapshot across regions
+      zh-CN: 跨地域复制快照
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - destination_region:
+            required: true
+        - destination_name
+        - destination_description
+        - retention_days
+        - encrypted
+        - kms_key_id
+        - resource_group
+        - tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: copy_to_destination
+      - wait: accomplished_after_copy
+        ids:
+          - $context.id
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            source_snapshot: $input.id
+            destination_region: $input.destination_region
+            destination_name: $input.destination_name

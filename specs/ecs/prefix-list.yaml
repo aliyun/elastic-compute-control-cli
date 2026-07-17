@@ -1,0 +1,483 @@
+schema_version: 2
+product: ecs
+resource: prefix-list
+kind: regional
+aliases: [pl]
+display_name:
+  en: prefix list
+  zh-CN: 前缀列表
+description:
+  en: Manage prefix lists
+  zh-CN: 管理前缀列表
+examples:
+  - ecctl ecs prefix-list list
+  - ecctl ecs prefix-list create --name web-pl --address-family IPv4 --max-entries 10 --entry cidr=10.0.0.0/24,description=web
+  - ecctl ecs prefix-list get <prefix-list-id> --with-associations
+
+identity:
+  field: id
+  prefix: pl-
+  output_root:
+    one: prefix_list
+    many: prefix_lists
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: prefix list ID
+        zh-CN: 前缀列表 ID
+    ids:
+      type: array
+      description:
+        en: prefix list IDs
+        zh-CN: 前缀列表 ID 列表
+      items:
+        type: string
+    name:
+      type: string
+      description:
+        en: prefix list name
+        zh-CN: 前缀列表名称
+    description:
+      type: string
+      description:
+        en: prefix list description
+        zh-CN: 前缀列表描述
+    address_family:
+      type: string
+      description:
+        en: IP address family
+        zh-CN: IP 地址族
+      enum: [IPv4, IPv6]
+    max_entries:
+      type: integer
+      description:
+        en: maximum number of entries
+        zh-CN: 最大条目数量
+    entries:
+      type: array
+      description:
+        en: prefix list entries to create
+        zh-CN: 创建时的前缀列表条目
+      items:
+        type: object
+        fields:
+          cidr:
+            type: cidr
+            description:
+              en: entry CIDR block
+              zh-CN: 条目 CIDR 网段
+          description:
+            type: string
+            description:
+              en: entry description
+              zh-CN: 条目描述
+    entry_changes:
+      type: string
+      repeatable: true
+      description:
+        en: entry change; prefix with + to add or - to remove
+        zh-CN: 条目变更，使用 + 前缀新增或 - 前缀删除
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  next_token:
+    type: string
+    description:
+      en: token for the next result page
+      zh-CN: 下一页查询 token
+  no_wait:
+    type: boolean
+    description:
+      en: skip prefix list readback
+      zh-CN: 跳过前缀列表回读
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: readback timeout
+      zh-CN: 回读超时时间
+  with_associations:
+    type: boolean
+    description:
+      en: include associated resources
+      zh-CN: 附带关联资源
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: DescribePrefixLists
+    request:
+      RegionId: $context.region
+      PrefixListId:
+        each: $.ids
+      PrefixListName: $.name
+      AddressFamily: $.address_family
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      MaxResults: $.limit
+      NextToken: $.next_token
+    response:
+      items: $.PrefixLists.PrefixList
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.PrefixListId
+      fields:
+        id: $.PrefixListId
+        name: $.PrefixListName
+        description: $.Description
+        address_family: $.AddressFamily
+        max_entries: $.MaxEntries
+        association_count: $.AssociationCount
+        resource_group: $.ResourceGroupId
+        creation_time: $.CreationTime
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+  attribute:
+    api: DescribePrefixListAttributes
+    request:
+      RegionId: $context.region
+      PrefixListId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      id: $.PrefixListId
+      fields:
+        id: $.PrefixListId
+        name: $.PrefixListName
+        description: $.Description
+        address_family: $.AddressFamily
+        max_entries: $.MaxEntries
+        creation_time: $.CreationTime
+        entries:
+          from: $.Entries.Entry
+          each:
+            cidr: $.Cidr
+            description: $.Description
+  entry_list:
+    api: DescribePrefixListAttributes
+    request:
+      RegionId: $context.region
+      PrefixListId: $.id
+    response:
+      items: $.Entries.Entry
+      request_id: $.RequestId
+      fields:
+        cidr: $.Cidr
+        description: $.Description
+  associations:
+    api: DescribePrefixListAssociations
+    request:
+      RegionId: $context.region
+      PrefixListId: $.id
+      MaxResults: $.limit
+      NextToken: $.next_token
+    response:
+      item: $
+      next_token: $.NextToken
+      request_id: $.RequestId
+      fields:
+        associations:
+          from: $.PrefixListAssociations.PrefixListAssociation
+          each:
+            resource_id: $.ResourceId
+            resource_type: $.ResourceType
+
+waiters:
+  entries_visible:
+    probe: entry_list
+    target: matched
+    interval: 2s
+    timeout: 300s
+    match:
+      capture: entries
+      by: [cidr, description]
+  entries_removed:
+    probe: entry_list
+    target: absent
+    interval: 2s
+    timeout: 300s
+    match:
+      capture: removed_entries
+      by: [cidr]
+
+bindings:
+  create_to_available:
+    api: CreatePrefixList
+    idempotency:
+      field: ClientToken
+      prefix: prefix-list-create
+    request:
+      RegionId: $context.region
+      PrefixListName: $.name
+      Description: $.description
+      AddressFamily: $.address_family
+      MaxEntries: $.max_entries
+      Entry:
+        capture:
+          name: entries
+          fields:
+            cidr: $.cidr
+            description: $.description
+        each: $.entries
+        fields:
+          Cidr: $.cidr
+          Description: $.description
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: PrefixListName
+      - request: AddressFamily
+      - request: MaxEntries
+    id_from: $.PrefixListId
+    request_id_from: $.RequestId
+  update_attributes:
+    api: ModifyPrefixList
+    request:
+      RegionId: $context.region
+      PrefixListId: $.id
+      PrefixListName: $.name
+      Description: $.description
+      AddEntry:
+        capture:
+          name: entries
+          fields:
+            cidr: $.cidr
+            description: $.description
+        each: $prefixed_kv_objects($.entry_changes,"+")
+        fields:
+          Cidr: $.cidr
+          Description: $.description
+      RemoveEntry:
+        capture:
+          name: removed_entries
+          fields:
+            cidr: $.cidr
+        each: $prefixed_kv_objects($.entry_changes,"-")
+        fields:
+          Cidr: $.cidr
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    require_any:
+      - request: PrefixListName
+      - request: Description
+      - request: AddEntry
+      - request: RemoveEntry
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  delete_to_absent:
+    api: DeletePrefixList
+    request:
+      RegionId: $context.region
+      PrefixListId: $.id
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    request_id_from: $.RequestId
+
+operations:
+  create:
+    examples:
+      - ecctl ecs prefix-list create --name my-name --address-family <address-family> --max-entries <max-entries>
+      - ecctl ecs prefix-list create --name my-name --address-family <address-family> --max-entries <max-entries> --tag env=prod
+    description:
+      en: Create prefix list
+      zh-CN: 创建前缀列表
+    input:
+      fields:
+        - name:
+            required: true
+        - description
+        - address_family:
+            required: true
+        - max_entries:
+            required: true
+        - entries
+        - resource_group
+        - tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_to_available
+      - wait: entries_visible
+        ids:
+          - $context.id
+        unless: input.no_wait || !has(input.entries)
+      - probe: attribute
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            description: $input.description
+            address_family: $input.address_family
+            max_entries: $input.max_entries
+            resource_group: $input.resource_group
+  update:
+    examples:
+      - ecctl ecs prefix-list update <prefix-list-id>
+      - ecctl ecs prefix-list update <prefix-list-id> --name my-name
+    description:
+      en: Update prefix list
+      zh-CN: 更新前缀列表
+    require_any:
+      - raw: $.name
+      - raw: $.description
+      - raw: $.entry_changes
+      - raw: $.api_param
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - description
+        - entry_changes:
+            flag_name: entry
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: update_attributes
+      - wait: entries_visible
+        ids:
+          - $input.id
+        unless: input.no_wait || !has($prefixed_kv_objects($.entry_changes,"+"))
+      - wait: entries_removed
+        ids:
+          - $input.id
+        unless: input.no_wait || !has($prefixed_kv_objects($.entry_changes,"-"))
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            name: $input.name
+            description: $input.description
+  delete:
+    examples:
+      - ecctl ecs prefix-list delete <prefix-list-id>
+    description:
+      en: Delete prefix list
+      zh-CN: 删除前缀列表
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get prefix list
+      zh-CN: 获取前缀列表
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - with_associations
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        as: attribute
+        not_found: error
+      - probe: associations
+        ids:
+          - $input.id
+        when: input.with_associations
+        merge: true
+  list:
+    examples:
+      - ecctl ecs prefix-list list
+      - ecctl ecs prefix-list list --filter name=<value>
+      - ecctl ecs prefix-list list --filter tag.env=prod
+    description:
+      en: List prefix lists
+      zh-CN: 列出前缀列表
+    input:
+      fields:
+        - ids:
+            positional_many: true
+      controls:
+        - filter
+        - limit
+        - next_token
+    filters:
+      id:
+        target: ids
+      prefix-list:
+        target: ids
+      prefix-list.id:
+        target: ids
+      pl:
+        target: ids
+      pl.id:
+        target: ids
+      name:
+        target: name
+      address-family:
+        target: address_family
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true

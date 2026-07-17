@@ -1,0 +1,8 @@
+/bin/
+/.idea/
+/.worktrees/
+/worktrees/
+/reports/
+.envrc
+.claude/
+eval/

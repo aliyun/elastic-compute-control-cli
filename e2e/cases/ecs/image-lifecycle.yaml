@@ -1,0 +1,64 @@
+# ECS custom image lifecycle. It creates a host instance and waits for ECS image
+# creation/deletion.
+resource: ecs/image
+requires_params: [ecs.instance_type]
+needs: [vpc, vswitch, security_group, image]
+timeout: 45m
+serial: true
+
+steps:
+  - name: prereq create host instance
+    run: >
+      ecctl ecs instance create
+      --type {{.params.ecs.instance_type}}
+      --image {{.stack.image}}
+      --sg {{.stack.security_group}}
+      --vswitch {{.stack.vswitch}}
+      --name {{.run_name}}-img-host
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.instance
+    expect:
+      id: { type: string, prefix: i- }
+      status: Running
+    capture:
+      instance_id: id
+    teardown: ecctl ecs instance delete {{.instance_id}} --force
+
+  - name: create
+    run: >
+      ecctl ecs image create
+      --instance {{.instance_id}}
+      --name {{.run_name}}-image
+      --description ecctl-e2e-image-{{.run_id}}
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.image
+    expect:
+      id: { type: string, prefix: m- }
+      name: { eq: "{{.run_name}}-image" }
+    capture:
+      image_id: id
+    teardown: ecctl ecs image delete {{.image_id}} --force
+
+  - name: get
+    run: ecctl ecs image get {{.image_id}}
+    at: $.image
+    expect:
+      id: { eq: "{{.image_id}}" }
+
+  - name: list
+    run: ecctl ecs image list --filter name={{.run_name}}-image
+    assert:
+      - len($.images) >= 1
+
+  - name: update
+    run: ecctl ecs image update {{.image_id}} --description ecctl-e2e-image-updated-{{.run_id}}
+    at: $.image
+    expect:
+      id: { eq: "{{.image_id}}" }
+
+  - name: delete
+    run: ecctl ecs image delete {{.image_id}} --force
+    at: $.image
+    expect:
+      id: { eq: "{{.image_id}}" }
+      $.deleted: { eq: true }

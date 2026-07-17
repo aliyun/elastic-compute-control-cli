@@ -1,0 +1,116 @@
+# Shared fixture stack: reusable resources requested by selected cases.
+# Provisioned once per run (topologically by `needs`), torn down after all
+# cases join. Each node declares only the dynamic parameters it consumes.
+tags:
+  ecctl-e2e: "1"
+  run-id: "{{.run_id}}"
+
+provision:
+  - id: vpc
+    run: ecctl vpc create --name {{.resource_prefix}}-vpc --cidr 10.0.0.0/16 --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.vpc
+    capture:
+      vpc: id
+    teardown: ecctl vpc delete {{.vpc}}
+
+  - id: vswitch
+    needs: [vpc]
+    requires_params: [ecs.zone]
+    run: ecctl vpc vswitch create --vpc {{.vpc}} --zone {{.params.ecs.zone}} --cidr 10.0.1.0/24 --name {{.resource_prefix}}-vsw --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.vswitch
+    capture:
+      vswitch: id
+    teardown: ecctl vpc vswitch delete {{.vswitch}}
+
+  - id: security_group
+    needs: [vpc]
+    run: ecctl ecs sg create --vpc {{.vpc}} --name {{.resource_prefix}}-sg --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.security_group
+    capture:
+      security_group: id
+    teardown: ecctl ecs sg delete {{.security_group}}
+
+  - id: image
+    requires_params: [ecs.image_id]
+    # Resolve the image once before provisioning, then use that
+    # concrete ID for every dependent create. This keeps image selection and
+    # instance architecture compatible without duplicating a second selector.
+    run: ecctl call ecs DescribeImages --ImageId {{.params.ecs.image_id}}
+    at: $.response.Images.Image[0]   # `ecctl call` wraps the raw API response under .response
+    capture:
+      image: ImageId
+    # image is read-only; no teardown
+
+  - id: ack_shared_cluster
+    needs: [vpc, vswitch]
+    requires_params: [ack.cluster_type, ack.version, ack.edition, ack.profile, ack.zone]
+    run: >
+      ecctl ack create
+      --name {{.resource_prefix}}-ack-shared
+      --type {{.params.ack.cluster_type}}
+      --version {{.params.ack.version}}
+      --edition {{.params.ack.edition}}
+      --profile {{.params.ack.profile}}
+      --vpc {{.vpc}}
+      --vswitch {{.vswitch}}
+      --zone {{.params.ack.zone}}
+      --pod-cidr 172.22.0.0/16
+      --service-cidr 172.23.0.0/20
+      --snat-entry
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 30m
+    at: $.cluster
+    capture:
+      ack_shared_cluster: id
+    teardown: ecctl ack delete {{.ack_shared_cluster}} --force --timeout 30m
+
+  - id: ack_shared_nodepool
+    needs: [ack_shared_cluster, vswitch]
+    requires_params: [ack.instance_type, ack.system_disk_category, ack.runtime, ack.runtime_version]
+    run: >
+      ecctl ack nodepool create
+      --cluster {{.ack_shared_cluster}}
+      --name {{.resource_prefix}}-ack-shared-pool
+      --desired-size 0
+      --instance-type {{.params.ack.instance_type}}
+      --vswitch {{.vswitch}}
+      --runtime {{.params.ack.runtime}}
+      --runtime-version {{.params.ack.runtime_version}}
+      --system-disk-category {{.params.ack.system_disk_category}}
+      --system-disk-size 40
+      --timeout 30m
+    at: $.nodepool
+    capture:
+      ack_shared_nodepool: id
+      ack_worker_role: scaling_group.ram_role_name
+      ack_node_security_group: scaling_group.security_group_id
+    teardown: ecctl ack nodepool delete {{.ack_shared_nodepool}} --cluster {{.ack_shared_cluster}} --force --timeout 30m
+
+  - id: ack_test_instance
+    needs: [vswitch, image, ack_shared_nodepool]
+    requires_params: [ack.instance_type, ack.system_disk_category]
+    run: >
+      ecctl ecs instance create
+      --type {{.params.ack.instance_type}}
+      --image {{.image}}
+      --sg {{.ack_node_security_group}}
+      --ram-role {{.ack_worker_role}}
+      --vswitch {{.vswitch}}
+      --system-disk '{"category":"{{.params.ack.system_disk_category}}","size":40}'
+      --name {{.resource_prefix}}-ack-node
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 30m
+    at: $.instance
+    capture:
+      ack_test_instance: id
+    teardown: ecctl ecs instance delete {{.ack_test_instance}} --force
+
+  - id: ack_test_user
+    run: >
+      ecctl --region cn-hangzhou call ram CreateUser
+      --request '{"UserName":"{{.resource_prefix}}-ack-user","DisplayName":"ecctl E2E ACK access user"}'
+    at: $.response.User
+    capture:
+      ack_test_user_id: UserId
+      ack_test_user_name: UserName
+    teardown: ecctl --region cn-hangzhou call ram DeleteUser --request '{"UserName":"{{.ack_test_user_name}}"}'

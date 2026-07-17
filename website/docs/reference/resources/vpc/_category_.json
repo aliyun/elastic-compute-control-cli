@@ -1,0 +1,9 @@
+{
+  "label": "VPC",
+  "position": 4,
+  "link": {
+    "type": "generated-index",
+    "title": "VPC resources",
+    "description": "Manage Virtual Private Cloud (VPC) networking, including isolated VPCs and the vSwitches that carve them into zone-level subnets for IP address planning."
+  }
+}

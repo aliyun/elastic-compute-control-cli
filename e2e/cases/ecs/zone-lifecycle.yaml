@@ -1,0 +1,19 @@
+# ECS zones are a read-only list scoped to the run's region: no create/delete, so
+# no `needs` and no teardown. Assertions are purely structural (derived from the
+# spec) — the array is non-empty and every zone ID is prefixed with the region
+# name (cn- for the default run region).
+resource: ecs/zone
+
+steps:
+  - name: list
+    run: ecctl ecs zone list
+    at: $.zones
+    assert:
+      - len($.zones) >= 1
+    expect:
+      "[*].id": { each: { regex: "^cn-" } }
+
+  - name: differential vs raw DescribeZones
+    run: ecctl call ecs DescribeZones
+    expect:
+      $.response.Zones.Zone: { type: array, min_len: 1 }

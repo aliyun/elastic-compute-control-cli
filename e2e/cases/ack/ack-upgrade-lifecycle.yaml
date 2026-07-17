@@ -1,0 +1,85 @@
+# ACK upgrade is isolated from CRUD so a region without an upgrade path can
+# skip this case without blocking cluster create/get/list/update/delete.
+resource: ack/ack
+requires_params: [ack.cluster_type, ack.version, ack.upgrade_version, ack.edition, ack.profile, ack.zone, ack.instance_type, ack.system_disk_category, ack.runtime, ack.runtime_version]
+parameter_constraints:
+  ecs:
+    min_eni_quantity: 2
+    min_eni_private_ip_address_quantity: 6
+needs: [vpc, vswitch]
+timeout: 2h
+serial: true
+
+steps:
+  - name: create upgrade source cluster
+    run: >
+      ecctl ack create
+      --name {{.resource_prefix}}-ack-upgrade
+      --type {{.params.ack.cluster_type}}
+      --version {{.params.ack.version}}
+      --edition {{.params.ack.edition}}
+      --profile {{.params.ack.profile}}
+      --vpc {{.stack.vpc}}
+      --vswitch {{.stack.vswitch}}
+      --zone {{.params.ack.zone}}
+      --pod-cidr 172.24.0.0/16
+      --service-cidr 172.25.0.0/20
+      --snat-entry
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 30m
+    at: $.cluster
+    expect:
+      id: { type: string, prefix: c }
+      version: { eq: "{{.params.ack.version}}" }
+    capture:
+      cluster_id: id
+    teardown: ecctl ack delete {{.cluster_id}} --force --timeout 30m
+
+  - name: create upgrade source nodepool
+    run: >
+      ecctl ack nodepool create
+      --cluster {{.cluster_id}}
+      --name {{.resource_prefix}}-ack-upgrade-pool
+      --desired-size 1
+      --instance-type {{.params.ack.instance_type}}
+      --vswitch {{.stack.vswitch}}
+      --runtime {{.params.ack.runtime}}
+      --runtime-version {{.params.ack.runtime_version}}
+      --system-disk-category {{.params.ack.system_disk_category}}
+      --system-disk-size 40
+      --timeout 30m
+    at: $.nodepool
+    expect:
+      id: { type: string, min_len: 1 }
+    capture:
+      upgrade_nodepool_id: id
+    teardown: ecctl ack nodepool delete {{.upgrade_nodepool_id}} --cluster {{.cluster_id}} --force --timeout 30m
+
+  - name: upgrade
+    run: ecctl ack upgrade {{.cluster_id}} --version {{.params.ack.upgrade_version}} --master-only --timeout 60m
+    at: $.cluster
+    expect:
+      id: { eq: "{{.cluster_id}}" }
+
+  - name: get upgrade source worker
+    run: ecctl ack node list --cluster {{.cluster_id}} --nodepool {{.upgrade_nodepool_id}} --limit 100
+    at: $.nodes[0]
+    expect:
+      id: { type: string, prefix: i- }
+    capture:
+      upgrade_node_id: id
+
+  - name: release upgrade source worker
+    run: ecctl ack node delete {{.upgrade_node_id}} --cluster {{.cluster_id}} --release --timeout 30m
+    expect:
+      $.deleted: { eq: true }
+
+  - name: delete upgrade source nodepool
+    run: ecctl ack nodepool delete {{.upgrade_nodepool_id}} --cluster {{.cluster_id}} --force --timeout 30m
+    expect:
+      $.deleted: { eq: true }
+
+  - name: delete upgrade source cluster
+    run: ecctl ack delete {{.cluster_id}} --force --timeout 30m
+    expect:
+      $.deleted: { eq: true }

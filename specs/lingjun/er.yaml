@@ -1,0 +1,615 @@
+schema_version: 2
+product: lingjun
+api_product: eflo
+resource: er
+kind: regional
+display_name:
+  en: Lingjun Enterprise Router
+  zh-CN: 灵骏 HUB（Enterprise Router）
+description:
+  en: Manage Lingjun Enterprise Router (HUB) resources
+  zh-CN: 管理灵骏 HUB（Enterprise Router）资源
+examples:
+  - ecctl lingjun er list --filter master-zone=cn-wulanchabu-b
+  - ecctl lingjun er get er-xxx --with-attachments --with-route-maps --with-routes
+  - ecctl lingjun er create --name er-main --master-zone cn-wulanchabu-b
+  - ecctl lingjun er update er-xxx --attachment +instance=vpd-xxx,instance_type=VPD,name=vpd-attach,auto_receive_all_route=true
+
+identity:
+  field: id
+  prefix: er-
+  output_root:
+    one: er
+    many: ers
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: ER ID
+        zh-CN: HUB ID
+    name:
+      type: string
+      description:
+        en: ER name
+        zh-CN: HUB 名称
+    description:
+      type: string
+      description:
+        en: ER description
+        zh-CN: HUB 描述
+    master_zone:
+      type: string
+      description:
+        en: master zone ID
+        zh-CN: 主可用区 ID
+    status:
+      type: string
+      description:
+        en: ER status
+        zh-CN: HUB 状态
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    instance:
+      type: string
+      description:
+        en: attached instance ID (list filter only)
+        zh-CN: 关联实例 ID（仅 list 过滤使用）
+    instance_type:
+      type: string
+      description:
+        en: attached instance type (list filter, VPD or VCC)
+        zh-CN: 关联实例类型（list 过滤，VPD 或 VCC）
+      enum: [VPD, VCC]
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+    attachment_changes:
+      type: string
+      repeatable: true
+      description:
+        en: |-
+          attachment change; prefix with + to add (inline kv: instance=...,instance_type=VPD|VCC,name=...,auto_receive_all_route=true|false[,resource_tenant=...]) or - to remove (value is the attachment ID, e.g. -era-xxx)
+        zh-CN: |-
+          连接关系变更；+ 前缀新增（内联 kv：instance=...,instance_type=VPD|VCC,name=...,auto_receive_all_route=true|false[,resource_tenant=...]），- 前缀按 attachment ID 删除（如 -era-xxx）
+    route_map_changes:
+      type: string
+      repeatable: true
+      description:
+        en: |-
+          route map change; prefix with + to add (inline kv: route_map_num=...,action=permit|deny,reception_instance=...,reception_instance_type=VPD|VCC,transmission_instance=...,transmission_instance_type=VPD|VCC[,destination_cidr=...,description=...,reception_instance_owner=...,transmission_instance_owner=...]) or - to remove (value is the route-map ID, e.g. -ermap-xxx)
+        zh-CN: |-
+          路由策略变更；+ 前缀新增（内联 kv：route_map_num=...,action=permit|deny,reception_instance=...,reception_instance_type=VPD|VCC,transmission_instance=...,transmission_instance_type=VPD|VCC[,destination_cidr=...,description=...,reception_instance_owner=...,transmission_instance_owner=...]），- 前缀按 route-map ID 删除（如 -ermap-xxx）
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  with_attachments:
+    type: boolean
+    description:
+      en: include ER attachments list in get output
+      zh-CN: get 输出附带 HUB 连接关系列表
+  with_route_maps:
+    type: boolean
+    description:
+      en: include ER route maps list in get output
+      zh-CN: get 输出附带 HUB 路由策略列表
+  with_routes:
+    type: boolean
+    description:
+      en: include ER route entries list in get output
+      zh-CN: get 输出附带 HUB 路由条目列表
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 600s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  attribute:
+    api: GetEr
+    request:
+      RegionId: $context.region
+      ErId: $.id
+    response:
+      item: $.Content
+      request_id: $.RequestId
+      id: $.ErId
+      state: $.Status
+      fields:
+        id: $.ErId
+        name: $.ErName
+        description: $.Description
+        status: $.Status
+        master_zone: $.MasterZoneId
+        region: $.RegionId
+        resource_group: $.ResourceGroupId
+        tenant: $.TenantId
+        message: $.Message
+        create_time: $.CreateTime
+        modified_time: $.GmtModified
+        tags: $.Tags
+  list:
+    api: ListErs
+    request:
+      RegionId: $context.region
+      EnablePage: true
+      PageNumber: $.page
+      PageSize: $.limit
+      ErId: $.id
+      ErName: $.name
+      InstanceId: $.instance
+      InstanceType: $.instance_type
+      MasterZoneId: $.master_zone
+      ResourceGroupId: $.resource_group
+      Tag:
+        each:
+          sources:
+            - source: $.tag
+        fields:
+          Key: $kv_key($.value)
+          Value: $kv_value($.value)
+    response:
+      items: $.Content.Data
+      total: $.Content.Total
+      request_id: $.RequestId
+      id: $.ErId
+      state: $.Status
+      fields:
+        id: $.ErId
+        name: $.ErName
+        description: $.Description
+        status: $.Status
+        master_zone: $.MasterZoneId
+        region: $.RegionId
+        resource_group: $.ResourceGroupId
+        tenant: $.TenantId
+        message: $.Message
+        create_time: $.CreateTime
+        modified_time: $.GmtModified
+        tags: $.Tags
+        connections: $.Connections
+        route_maps: $.RouteMaps
+      absent:
+        when_empty_for_requested_ids: true
+  attachments:
+    api: ListErAttachments
+    request:
+      RegionId: $context.region
+      ErId: $.id
+      EnablePage: true
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        attachments:
+          from: $.Content.Data
+          each:
+            id: $.ErAttachmentId
+            name: $.ErAttachmentName
+            er: $.ErId
+            instance: $.InstanceId
+            instance_name: $.InstanceName
+            instance_type: $.InstanceType
+            status: $.Status
+            message: $.Message
+            auto_receive_all_route: $.AutoReceiveAllRoute
+            across: $.Across
+            resource_tenant: $.ResourceTenantId
+            resource_group: $.ResourceGroupId
+            region: $.RegionId
+            tenant: $.TenantId
+            create_time: $.CreateTime
+            modified_time: $.GmtModified
+  route_maps:
+    api: ListErRouteMaps
+    request:
+      RegionId: $context.region
+      ErId: $.id
+      EnablePage: true
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        route_maps:
+          from: $.Content.Data
+          each:
+            id: $.ErRouteMapId
+            er: $.ErId
+            route_map_num: $.RouteMapNum
+            action: $.RouteMapAction
+            description: $.Description
+            destination_cidr: $.DestinationCidrBlock
+            transmission_instance: $.TransmissionInstanceId
+            transmission_instance_name: $.TransmissionInstanceName
+            transmission_instance_type: $.TransmissionInstanceType
+            transmission_instance_owner: $.TransmissionInstanceOwner
+            reception_instance: $.ReceptionInstanceId
+            reception_instance_name: $.ReceptionInstanceName
+            reception_instance_type: $.ReceptionInstanceType
+            reception_instance_owner: $.ReceptionInstanceOwner
+            status: $.Status
+            message: $.Message
+            resource_group: $.ResourceGroupId
+            region: $.RegionId
+            tenant: $.TenantId
+            create_time: $.CreateTime
+            modified_time: $.GmtModified
+  routes:
+    api: ListErRouteEntries
+    request:
+      RegionId: $context.region
+      ErId: $.id
+      EnablePage: true
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        routes:
+          from: $.Content.Data
+          each:
+            id: $.ErRouteEntryId
+            er: $.ErId
+            destination_cidr: $.DestinationCidrBlock
+            next_hop: $.NextHopId
+            next_hop_type: $.NextHopType
+            route_type: $.RouteType
+            status: $.Status
+            resource_group: $.ResourceGroupId
+            region: $.RegionId
+            tenant: $.TenantId
+            modified_time: $.GmtModified
+
+waiters:
+  available_after_change:
+    probe: attribute
+    target: Available
+    interval: 5s
+    timeout: 600s
+    pending:
+      - field: status
+        values: [Executing, Creating, Updating, Pending]
+    failure:
+      states: ["Not Available", Failed]
+  deleted_after_delete:
+    probe: attribute
+    target: absent
+    interval: 5s
+    timeout: 600s
+
+bindings:
+  create_to_available:
+    api: CreateEr
+    request:
+      RegionId: $context.region
+      ErName: $.name
+      Description: $.description
+      MasterZoneId: $.master_zone
+      ResourceGroupId: $.resource_group
+      Tag:
+        each:
+          sources:
+            - source: $.tag
+        fields:
+          Key: $kv_key($.value)
+          Value: $kv_value($.value)
+    require_all:
+      - request: ErName
+      - request: MasterZoneId
+    id_from: $.Content.ErId
+    request_id_from: $.RequestId
+  update_er:
+    api: UpdateEr
+    request:
+      RegionId: $context.region
+      ErId: $.id
+      ErName: $.name
+      Description: $.description
+    require_all:
+      - raw: $.id
+    require_any:
+      - request: ErName
+      - request: Description
+    request_id_from: $.RequestId
+  add_attachment:
+    api: CreateErAttachment
+    each: $prefixed_kv_objects($.attachment_changes,"+","instance")
+    request:
+      RegionId: $context.region
+      ErId: $input.id
+      InstanceId: $.instance
+      InstanceType: $.instance_type
+      ErAttachmentName: $.name
+      AutoReceiveAllRoute: $.auto_receive_all_route
+      ResourceTenantId: $.resource_tenant
+    require_all:
+      - raw: $input.id
+      - request: InstanceId
+      - request: InstanceType
+      - request: ErAttachmentName
+      - request: AutoReceiveAllRoute
+    id_from: $.Content.ErAttachmentId
+    request_id_from: $.RequestId
+  remove_attachment:
+    api: DeleteErAttachment
+    each: $prefixed_kv_objects($.attachment_changes,"-","id")
+    request:
+      RegionId: $context.region
+      ErId: $input.id
+      ErAttachmentId: $.id
+    require_all:
+      - raw: $input.id
+      - request: ErAttachmentId
+    request_id_from: $.RequestId
+  add_route_map:
+    api: CreateErRouteMap
+    each: $prefixed_kv_objects($.route_map_changes,"+","route_map_num")
+    request:
+      RegionId: $context.region
+      ErId: $input.id
+      RouteMapNum: $.route_map_num
+      RouteMapAction: $.action
+      Description: $.description
+      DestinationCidrBlock: $.destination_cidr
+      ReceptionInstanceId: $.reception_instance
+      ReceptionInstanceType: $.reception_instance_type
+      ReceptionInstanceOwner: $.reception_instance_owner
+      TransmissionInstanceId: $.transmission_instance
+      TransmissionInstanceType: $.transmission_instance_type
+      TransmissionInstanceOwner: $.transmission_instance_owner
+    require_all:
+      - raw: $input.id
+      - request: RouteMapNum
+      - request: RouteMapAction
+      - request: ReceptionInstanceId
+      - request: ReceptionInstanceType
+      - request: TransmissionInstanceId
+      - request: TransmissionInstanceType
+    id_from: $.Content.ErRouteMapId
+    request_id_from: $.RequestId
+  remove_route_map:
+    api: DeleteErRouteMap
+    each: $prefixed_kv_objects($.route_map_changes,"-","id")
+    request:
+      RegionId: $context.region
+      ErId: $input.id
+      ErRouteMapId: $.id
+    require_all:
+      - raw: $input.id
+      - request: ErRouteMapId
+    request_id_from: $.RequestId
+  delete_to_absent:
+    api: DeleteEr
+    request:
+      RegionId: $context.region
+      ErId: $.id
+    require_all:
+      - raw: $.id
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+
+operations:
+  create:
+    examples:
+      - ecctl lingjun er create --name my-name --master-zone <master-zone>
+      - ecctl lingjun er create --name my-name --master-zone <master-zone> --tag env=prod
+    description:
+      en: Create Lingjun ER
+      zh-CN: 创建灵骏 HUB
+    input:
+      fields:
+        - name:
+            required: true
+        - master_zone:
+            required: true
+        - description
+        - resource_group
+        - tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_to_available
+      - wait: available_after_change
+        ids:
+          - $context.id
+        unless: input.no_wait
+      - probe: attribute
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            master_zone: $input.master_zone
+  update:
+    examples:
+      - ecctl lingjun er update <er-id>
+      - ecctl lingjun er update <er-id> --name my-name
+    description:
+      en: Update Lingjun ER (attributes, attachments or route maps)
+      zh-CN: 更新灵骏 HUB（基础属性、连接关系或路由策略）
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - description
+        - attachment_changes:
+            flag_name: attachment
+        - route_map_changes:
+            flag_name: route-map
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    require_any:
+      - raw: $.name
+      - raw: $.description
+      - raw: $.attachment_changes
+      - raw: $.route_map_changes
+    workflow:
+      - binding: update_er
+        when_any: [input.name, input.description]
+      - binding: add_attachment
+        when: has($prefixed_kv_objects($.attachment_changes,"+","instance"))
+      - binding: remove_attachment
+        when: has($prefixed_kv_objects($.attachment_changes,"-","id"))
+      - binding: add_route_map
+        when: has($prefixed_kv_objects($.route_map_changes,"+","route_map_num"))
+      - binding: remove_route_map
+        when: has($prefixed_kv_objects($.route_map_changes,"-","id"))
+      - wait: available_after_change
+        ids:
+          - $input.id
+        unless: input.no_wait
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            name: $input.name
+  delete:
+    examples:
+      - ecctl lingjun er delete <er-id>
+    description:
+      en: Delete Lingjun ER
+      zh-CN: 删除灵骏 HUB
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get Lingjun ER
+      zh-CN: 获取灵骏 HUB
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - with_attachments
+        - with_route_maps
+        - with_routes
+        - limit
+        - page
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+        not_found: error
+      - probe: attachments
+        ids:
+          - $input.id
+        when: input.with_attachments
+        merge: true
+      - probe: route_maps
+        ids:
+          - $input.id
+        when: input.with_route_maps
+        merge: true
+      - probe: routes
+        ids:
+          - $input.id
+        when: input.with_routes
+        merge: true
+  list:
+    examples:
+      - ecctl lingjun er list
+      - ecctl lingjun er list --filter name=<value>
+      - ecctl lingjun er list --filter tag.env=prod
+    description:
+      en: List Lingjun ERs
+      zh-CN: 列出灵骏 HUB
+    input:
+      controls:
+        - filter
+        - limit
+        - page
+    filters:
+      id:
+        target: id
+      name:
+        target: name
+      er-name:
+        target: name
+      master-zone:
+        target: master_zone
+      instance:
+        target: instance
+      instance.id:
+        target: instance
+      instance-type:
+        target: instance_type
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true

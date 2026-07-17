@@ -1,0 +1,45 @@
+# Tag resource lifecycle through a temporary VPC ARN.
+resource: tag/resource
+
+steps:
+  - name: create vpc prerequisite
+    run: ecctl vpc create --name {{.run_name}}-tag-vpc --cidr 10.22.0.0/16 --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.vpc
+    expect:
+      id: { type: string, prefix: vpc- }
+      cidr: "10.22.0.0/16"
+    capture:
+      vpc_id: id
+    teardown: ecctl vpc delete {{.vpc_id}}
+
+  - name: get vpc owner
+    run: ecctl vpc get {{.vpc_id}}
+    at: $.vpc
+    expect:
+      id: { eq: "{{.vpc_id}}" }
+    capture:
+      owner_id: owner_id
+
+  - name: apply
+    run: >
+      ecctl tag resource apply
+      --arn arn:acs:vpc:{{.region}}:{{.owner_id}}:vpc/{{.vpc_id}}
+      --tag validation-run={{.run_id}}
+
+  - name: list by arn
+    run: ecctl tag resource list --filter arn=arn:acs:vpc:{{.region}}:{{.owner_id}}:vpc/{{.vpc_id}}
+    assert:
+      - len($.resources) >= 0
+
+  - name: remove
+    run: >
+      ecctl tag resource remove
+      --arn arn:acs:vpc:{{.region}}:{{.owner_id}}:vpc/{{.vpc_id}}
+      --tag-key validation-run
+
+  - name: delete vpc prerequisite
+    run: ecctl vpc delete {{.vpc_id}}
+    at: $.vpc
+    expect:
+      id: { eq: "{{.vpc_id}}" }
+      $.deleted: { eq: true }

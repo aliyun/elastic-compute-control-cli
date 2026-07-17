@@ -1,0 +1,9 @@
+{
+  "label": "ECS",
+  "position": 2,
+  "link": {
+    "type": "generated-index",
+    "title": "ECS resources",
+    "description": "Manage Elastic Compute Service (ECS) resources, including instances, block storage disks and snapshots, images, security groups, elastic network interfaces, key pairs, launch templates, and Cloud Assistant commands."
+  }
+}

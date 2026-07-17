@@ -1,0 +1,395 @@
+schema_version: 2
+product: lingjun
+api_product: eflo
+resource: subnet
+kind: regional
+display_name:
+  en: Lingjun subnet
+  zh-CN: 灵骏子网
+description:
+  en: Manage Lingjun subnet resources
+  zh-CN: 管理灵骏子网资源
+examples:
+  - ecctl lingjun subnet list --filter vpd=<vpd-id>
+  - ecctl lingjun subnet get <subnet-id>
+  - ecctl lingjun subnet create --vpd <vpd-id> --zone cn-wulanchabu-b --cidr 10.0.1.0/24 --name train-subnet
+  - ecctl lingjun subnet update <subnet-id> --vpd <vpd-id> --zone cn-wulanchabu-b --name train-subnet
+
+identity:
+  field: id
+  prefix: subnet-
+  output_root:
+    one: subnet
+    many: subnets
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: Lingjun subnet ID
+        zh-CN: 灵骏子网 ID
+    name:
+      type: string
+      description:
+        en: Lingjun subnet name
+        zh-CN: 灵骏子网名称
+    vpd:
+      type: string
+      description:
+        en: Lingjun VPD ID
+        zh-CN: 灵骏 VPD ID
+    zone:
+      type: string
+      description:
+        en: zone ID
+        zh-CN: 可用区 ID
+    cidr:
+      type: cidr
+      description:
+        en: subnet CIDR block
+        zh-CN: 子网 CIDR 网段
+    status:
+      type: string
+      description:
+        en: subnet status
+        zh-CN: 子网状态
+      enum: [Available, "Not Available", Executing, Deleting]
+    type:
+      type: string
+      description:
+        en: subnet usage type
+        zh-CN: 子网用途类型
+      enum: [OOB, LB]
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  attribute:
+    api: GetSubnet
+    request:
+      RegionId: $context.region
+      SubnetId: $.id
+      VpdId: $.vpd
+    response:
+      item: $.Content
+      request_id: $.RequestId
+      id: $.SubnetId
+      state: $.Status
+      fields:
+        id: $.SubnetId
+        name: $.SubnetName
+        vpd: $.VpdId
+        zone: $.ZoneId
+        cidr: $.Cidr
+        status: $.Status
+        type: $.Type
+        available_ips: $.AvailableIps
+        network_interface_count: $.NetworkInterfaceCount
+        private_ip_count: $.PrivateIpCount
+        nc_count: $.NcCount
+        lb_count: $.LbCount
+        resource_group: $.ResourceGroupId
+        region: $.RegionId
+        tenant_id: $.TenantId
+        create_time: $.CreateTime
+        gmt_modified: $.GmtModified
+        message: $.Message
+        tags: $.Tags
+        vpd_base_info: $.VpdBaseInfo
+  list:
+    api: ListSubnets
+    request:
+      RegionId: $context.region
+      EnablePage: true
+      PageNumber: $.page
+      PageSize: $.limit
+      VpdId: $.vpd
+      SubnetId: $.id
+      SubnetName: $.name
+      Status: $.status
+      ZoneId: $.zone
+      Type: $.type
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+    response:
+      items: $.Content.Data
+      total: $.Content.Total
+      request_id: $.RequestId
+      id: $.SubnetId
+      state: $.Status
+      fields:
+        id: $.SubnetId
+        name: $.SubnetName
+        vpd: $.VpdId
+        zone: $.ZoneId
+        cidr: $.Cidr
+        status: $.Status
+        type: $.Type
+        network_interface_count: $.NetworkInterfaceCount
+        nc_count: $.NcCount
+        resource_group: $.ResourceGroupId
+        region: $.RegionId
+        tenant_id: $.TenantId
+        create_time: $.CreateTime
+        gmt_modified: $.GmtModified
+        message: $.Message
+        tags: $.Tags
+        vpd_base_info: $.VpdBaseInfo
+      absent:
+        when_empty_for_requested_ids: true
+
+waiters:
+  available_after_change:
+    probe: attribute
+    target: Available
+    interval: 2s
+    timeout: 300s
+    pending:
+      - field: status
+        values: [Executing]
+    failure:
+      states: ["Not Available"]
+  deleted_after_delete:
+    probe: list
+    target: absent
+    interval: 2s
+    timeout: 300s
+
+bindings:
+  create_subnet:
+    api: CreateSubnet
+    request:
+      RegionId: $context.region
+      VpdId: $.vpd
+      Cidr: $.cidr
+      SubnetName: $.name
+      ZoneId: $.zone
+      Type: $.type
+      Tag: $.tag
+    id_from: $.Content.SubnetId
+    request_id_from: $.RequestId
+    wait: available_after_change
+  update_subnet:
+    api: UpdateSubnet
+    request:
+      RegionId: $context.region
+      SubnetId: $.id
+      VpdId: $.vpd
+      ZoneId: $.zone
+      SubnetName: $.name
+    id_from: $.Content.SubnetId
+    request_id_from: $.RequestId
+    wait: available_after_change
+  delete_subnet:
+    api: DeleteSubnet
+    request:
+      RegionId: $context.region
+      SubnetId: $.id
+      VpdId: $.vpd
+      ZoneId: $.zone
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+
+operations:
+  create:
+    examples:
+      - ecctl lingjun subnet create --vpd <vpd-id> --cidr 10.0.0.0/16 --name my-name --zone <zone-id>
+      - ecctl lingjun subnet create --vpd <vpd-id> --cidr 10.0.0.0/16 --name my-name --zone <zone-id> --tag env=prod
+    description:
+      en: Create Lingjun subnet
+      zh-CN: 创建灵骏子网
+    input:
+      fields:
+        - vpd:
+            required: true
+        - cidr:
+            required: true
+        - name:
+            required: true
+        - zone:
+            required: true
+        - type
+        - tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_subnet
+        wait_unless: input.no_wait
+      - probe: attribute
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            vpd: $input.vpd
+            zone: $input.zone
+            cidr: $input.cidr
+            type: $input.type
+  update:
+    examples:
+      - ecctl lingjun subnet update <subnet-id> --vpd <vpd-id> --zone <zone-id>
+      - ecctl lingjun subnet update <subnet-id> --vpd <vpd-id> --zone <zone-id> --name my-name
+    description:
+      en: Update Lingjun subnet
+      zh-CN: 更新灵骏子网
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - vpd:
+            required: true
+        - zone:
+            required: true
+        - name
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: update_subnet
+        wait_unless: input.no_wait
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            name: $input.name
+  delete:
+    examples:
+      - ecctl lingjun subnet delete <subnet-id> --vpd <vpd-id> --zone <zone-id>
+    description:
+      en: Delete Lingjun subnet
+      zh-CN: 删除灵骏子网
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - vpd:
+            required: true
+        - zone:
+            required: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_subnet
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get Lingjun subnet
+      zh-CN: 获取灵骏子网
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - vpd
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        not_found: error
+  list:
+    examples:
+      - ecctl lingjun subnet list
+      - ecctl lingjun subnet list --filter name=<value>
+      - ecctl lingjun subnet list --filter tag.env=prod
+    description:
+      en: List Lingjun subnets
+      zh-CN: 列出灵骏子网
+    input:
+      controls:
+        - filter
+        - limit
+        - page
+    filters:
+      vpd:
+        target: vpd
+      vpd.id:
+        target: vpd
+      id:
+        target: id
+      subnet:
+        target: id
+      subnet.id:
+        target: id
+      name:
+        target: name
+      status:
+        target: status
+      zone:
+        target: zone
+      type:
+        target: type
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true

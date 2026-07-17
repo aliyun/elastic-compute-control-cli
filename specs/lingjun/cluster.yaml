@@ -1,0 +1,513 @@
+schema_version: 2
+product: lingjun
+api_product: eflo-controller
+resource: cluster
+kind: regional
+display_name:
+  en: Lingjun cluster
+  zh-CN: 灵骏集群
+description:
+  en: Manage Lingjun cluster resources
+  zh-CN: 管理灵骏集群资源
+examples:
+  - ecctl lingjun cluster list
+  - ecctl lingjun cluster create --name train-cluster --cluster-type Lite --node-groups @node-groups.json
+  - ecctl lingjun cluster get <cluster-id> --with-nodes
+  - ecctl lingjun cluster update <cluster-id> --extend @extend-node-groups.json
+
+identity:
+  field: id
+  output_root:
+    one: cluster
+    many: clusters
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: Lingjun cluster ID
+        zh-CN: 灵骏集群 ID
+    name:
+      type: string
+      description:
+        en: Lingjun cluster name
+        zh-CN: 灵骏集群名称
+    description:
+      type: string
+      description:
+        en: Lingjun cluster description
+        zh-CN: 灵骏集群描述
+    cluster_type:
+      type: string
+      description:
+        en: Lingjun cluster type
+        zh-CN: 灵骏集群类型
+    hpn_zone:
+      type: string
+      description:
+        en: Cluster HPN zone
+        zh-CN: 集群 HPN 分区
+    components:
+      type: string
+      input_style: JSON array or @file
+      description:
+        en: Components JSON array matching the Lingjun API shape
+        zh-CN: 符合灵骏 API 结构的组件 JSON 数组
+    networks:
+      type: string
+      input_style: JSON object or @file
+      description:
+        en: Network JSON object matching the Lingjun API shape
+        zh-CN: 符合灵骏 API 结构的网络 JSON 对象
+    node_groups:
+      type: string
+      input_style: JSON array or @file
+      description:
+        en: Node groups JSON array matching the Lingjun API shape
+        zh-CN: 符合灵骏 API 结构的节点组 JSON 数组
+    nimiz_vswitches:
+      type: string
+      input_style: JSON array or @file
+      description:
+        en: NIMIZ VSwitches JSON array
+        zh-CN: NIMIZ 交换机 JSON 数组
+    resource_group:
+      type: string
+      description:
+        en: Resource group ID
+        zh-CN: 资源组 ID
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: Tag assignment key=value
+        zh-CN: 标签赋值 key=value
+    open_eni_jumbo_frame:
+      type: boolean
+      description:
+        en: Enable ENI jumbo frames
+        zh-CN: 启用 ENI Jumbo Frame
+    ignore_failed_node_tasks:
+      type: boolean
+      description:
+        en: Skip failed node tasks when the API supports it
+        zh-CN: 在 API 支持时跳过失败节点任务
+    extend:
+      type: string
+      input_style: JSON array or @file
+      description:
+        en: Node groups JSON array for cluster scale-out
+        zh-CN: 集群扩容节点组 JSON 数组
+    shrink:
+      type: string
+      input_style: JSON array or @file
+      description:
+        en: Node groups JSON array for cluster scale-in
+        zh-CN: 集群缩容节点组 JSON 数组
+    ip_allocation_policy:
+      type: string
+      input_style: JSON array or @file
+      description:
+        en: IP allocation policy JSON array for scale-out
+        zh-CN: 扩容 IP 分配策略 JSON 数组
+    vswitch_zone:
+      type: string
+      description:
+        en: VSwitch zone ID for scale-out
+        zh-CN: 扩容交换机可用区 ID
+    vpd_subnets:
+      type: string
+      input_style: JSON array or @file
+      description:
+        en: VPD subnet IDs JSON array for scale-out
+        zh-CN: 扩容 VPD 子网 ID JSON 数组
+    status:
+      type: string
+      description:
+        en: Cluster operating state
+        zh-CN: 集群运行状态
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: Filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: Maximum resources to return
+      zh-CN: 最多返回资源数量
+  next_token:
+    type: string
+    description:
+      en: Next page token
+      zh-CN: 下一页查询 Token
+  no_wait:
+    type: boolean
+    description:
+      en: Return before waiter completion
+      zh-CN: 等待完成前返回
+  with_nodes:
+    type: boolean
+    description:
+      en: Include cluster nodes in get output
+      zh-CN: 在 get 输出中包含集群节点
+  with_hyper_nodes:
+    type: boolean
+    description:
+      en: Include cluster hyper nodes in get output
+      zh-CN: 在 get 输出中包含集群超节点
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: Wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: Additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  attribute:
+    api: DescribeCluster
+    request:
+      ClusterId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      id: $.ClusterId
+      state: $.OperatingState
+      fields:
+        id: $.ClusterId
+        name: $.ClusterName
+        description: $.ClusterDescription
+        cluster_type: $.ClusterType
+        status: $.OperatingState
+        hpn_zone: $.HpnZone
+        node_count: $.NodeCount
+        node_group_count: $.NodeGroupCount
+        computing_ip_version: $.ComputingIpVersion
+        open_eni_jumbo_frame: $.OpenEniJumboFrame
+        resource_group: $.ResourceGroupId
+        security_group: $.SecurityGroupId
+        task_id: $.TaskId
+        vpc: $.VpcId
+        vswitch: $.VSwitchId
+        create_time: $.CreateTime
+        update_time: $.UpdateTime
+        components: $.Components
+        networks: $.Networks
+  list:
+    api: ListClusters
+    request:
+      MaxResults: $.limit
+      NextToken: $.next_token
+      ResourceGroupId: $.resource_group
+      Tags:
+        each:
+          sources:
+            - source: $.tag
+        fields:
+          Key: $kv_key($.value)
+          Value: $kv_value($.value)
+    response:
+      items: $.Clusters
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.ClusterId
+      state: $.OperatingState
+      fields:
+        id: $.ClusterId
+        name: $.ClusterName
+        description: $.ClusterDescription
+        cluster_type: $.ClusterType
+        status: $.OperatingState
+        hpn_zone: $.HpnZone
+        node_count: $.NodeCount
+        node_group_count: $.NodeGroupCount
+        computing_ip_version: $.ComputingIpVersion
+        resource_group: $.ResourceGroupId
+        task_id: $.TaskId
+        vpc: $.VpcId
+        create_time: $.CreateTime
+        update_time: $.UpdateTime
+        components: $.Components
+        tags: $.Tags
+  nodes:
+    api: ListClusterNodes
+    request:
+      ClusterId: $.id
+      MaxResults: $.limit
+      NextToken: $.next_token
+      ResourceGroupId: $.resource_group
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        nodes:
+          from: $.Nodes
+          each:
+            id: $.NodeId
+            hostname: $.Hostname
+            status: $.Status
+            node_group: $.NodeGroupId
+            node_group_name: $.NodeGroupName
+            hyper_node: $.HyperNodeId
+            machine_type: $.MachineType
+            image: $.ImageId
+            image_name: $.ImageName
+            hpn_zone: $.HpnZone
+            create_time: $.CreateTime
+  hyper_nodes:
+    api: ListClusterHyperNodes
+    request:
+      ClusterId: $.id
+      MaxResults: $.limit
+      NextToken: $.next_token
+      ResourceGroupId: $.resource_group
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        hyper_nodes:
+          from: $.HyperNodes
+          each:
+            id: $.HyperNodeId
+            hostname: $.Hostname
+            status: $.Status
+            node_group: $.NodeGroupId
+            node_group_name: $.NodeGroupName
+            machine_type: $.MachineType
+            hpn_zone: $.HpnZone
+            vpc: $.VpcId
+            vswitch: $.VSwitchId
+            zone: $.ZoneId
+            create_time: $.CreateTime
+
+waiters:
+  ready_after_change:
+    probe: attribute
+    target: running
+    interval: 10s
+    timeout: 1800s
+    pending:
+      - field: status
+        values: [initializing, expanding, shrinking]
+    failure:
+      states: [failed]
+  deleted_after_delete:
+    probe: attribute
+    target: absent
+    interval: 10s
+    timeout: 1800s
+bindings:
+  create_cluster:
+    api: CreateCluster
+    request:
+      ClusterName: $.name
+      ClusterDescription: $.description
+      ClusterType: $.cluster_type
+      HpnZone: $.hpn_zone
+      Components: $.components
+      Networks: $.networks
+      NodeGroups: $.node_groups
+      NimizVSwitches: $.nimiz_vswitches
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      OpenEniJumboFrame: $.open_eni_jumbo_frame
+      IgnoreFailedNodeTasks: $.ignore_failed_node_tasks
+      ApiParam:
+        raw: $.api_param
+    id_from: $.ClusterId
+    request_id_from: $.RequestId
+    wait: ready_after_change
+  extend_cluster:
+    api: ExtendCluster
+    request:
+      ClusterId: $.id
+      NodeGroups: $.extend
+      IpAllocationPolicy: $.ip_allocation_policy
+      VSwitchZoneId: $.vswitch_zone
+      VpdSubnets: $.vpd_subnets
+      IgnoreFailedNodeTasks: $.ignore_failed_node_tasks
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: ready_after_change
+  shrink_cluster:
+    api: ShrinkCluster
+    request:
+      ClusterId: $.id
+      NodeGroups: $.shrink
+      IgnoreFailedNodeTasks: $.ignore_failed_node_tasks
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: ready_after_change
+  delete_cluster:
+    api: DeleteCluster
+    request:
+      ClusterId: $.id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+
+operations:
+  create:
+    examples:
+      - ecctl lingjun cluster create --name my-name
+      - ecctl lingjun cluster create --name my-name --tag env=prod
+    description:
+      en: Create a Lingjun cluster
+      zh-CN: 创建灵骏集群
+    input:
+      fields:
+        - name:
+            required: true
+        - description
+        - cluster_type
+        - hpn_zone
+        - components
+        - networks
+        - node_groups
+        - nimiz_vswitches
+        - resource_group
+        - tag
+        - open_eni_jumbo_frame
+        - ignore_failed_node_tasks
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_cluster
+        wait_unless: input.no_wait
+      - probe: attribute
+        ids:
+          - $context.id
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            cluster_type: $input.cluster_type
+        when: input.no_wait
+  update:
+    examples:
+      - ecctl lingjun cluster update <cluster-id>
+    description:
+      en: Extend or shrink a Lingjun cluster
+      zh-CN: 扩容或缩容灵骏集群
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - extend
+        - shrink
+        - ip_allocation_policy
+        - vswitch_zone
+        - vpd_subnets
+        - ignore_failed_node_tasks
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    require_any:
+      - raw: $.extend
+      - raw: $.shrink
+    conflicts:
+      - any:
+          - extend
+        with_any:
+          - shrink
+    workflow:
+      - binding: extend_cluster
+        when: input.extend
+        wait_unless: input.no_wait
+      - binding: shrink_cluster
+        when: input.shrink
+        wait_unless: input.no_wait
+      - probe: attribute
+        ids:
+          - $input.id
+        unless: input.no_wait
+  delete:
+    examples:
+      - ecctl lingjun cluster delete <cluster-id>
+    description:
+      en: Delete a Lingjun cluster
+      zh-CN: 删除灵骏集群
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_cluster
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get a Lingjun cluster
+      zh-CN: 查询灵骏集群
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - resource_group
+      controls:
+        - limit
+        - next_token
+        - with_nodes
+        - with_hyper_nodes
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        not_found: error
+      - probe: nodes
+        when: input.with_nodes
+        merge: true
+      - probe: hyper_nodes
+        when: input.with_hyper_nodes
+        merge: true
+  list:
+    examples:
+      - ecctl lingjun cluster list
+      - ecctl lingjun cluster list --filter tag.env=prod
+    description:
+      en: List Lingjun clusters
+      zh-CN: 查询灵骏集群列表
+    input:
+      controls:
+        - filter
+        - limit
+        - next_token
+    filters:
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true

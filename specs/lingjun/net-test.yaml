@@ -1,0 +1,376 @@
+schema_version: 2
+product: lingjun
+api_product: eflo-controller
+resource: net-test
+kind: regional
+aliases: [nt]
+display_name:
+  en: Lingjun Net Test
+  zh-CN: 灵骏网络压测任务
+description:
+  en: Manage Lingjun network test tasks (delay, traffic, communication library)
+  zh-CN: 管理灵骏网络压测任务（延时、带宽、通信库）
+examples:
+  - ecctl lingjun net-test list
+  - ecctl lingjun net-test get dr-xxx
+  - ecctl lingjun net-test create --cluster c-xxx --type DelayTest --nodes node-1 --nodes node-2
+  - ecctl lingjun net-test create --cluster c-xxx --type CommTest --nodes node-1 --nodes node-2 --comm-type NCCL --comm-model AllToAll --comm-gpu-num 8
+
+identity:
+  field: id
+  prefix: dr-
+  output_root:
+    one: net_test
+    many: net_tests
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: net test task ID
+        zh-CN: 网络压测任务 ID
+    cluster:
+      type: string
+      description:
+        en: target cluster ID
+        zh-CN: 目标集群 ID
+    cluster_name:
+      type: string
+      description:
+        en: target cluster name (alternative to --cluster; provide one of --cluster / --cluster-name)
+        zh-CN: 目标集群名称（与 --cluster 二选一，至少提供其一）
+    type:
+      type: string
+      enum: [DelayTest, TrafficTest, CommTest]
+      description:
+        en: net test type (DelayTest, TrafficTest, CommTest)
+        zh-CN: 网络压测类型（DelayTest、TrafficTest、CommTest）
+    network_mode:
+      type: string
+      description:
+        en: network mode
+        zh-CN: 网络模式
+    port:
+      type: string
+      description:
+        en: test port number
+        zh-CN: 压测端口号
+    nodes:
+      type: string
+      repeatable: true
+      description:
+        en: target node IDs (mapped to Hosts/Servers per --type; repeatable)
+        zh-CN: 待测节点 ID 列表（按 --type 自动映射到 Hosts 或 Servers，可重复传入）
+    traffic_protocol:
+      type: string
+      enum: [RDMA, TCP]
+      description:
+        en: TrafficTest protocol (RDMA or TCP)
+        zh-CN: TrafficTest 协议（RDMA 或 TCP）
+    traffic_model:
+      type: string
+      enum: [MTON, Fullmesh]
+      description:
+        en: TrafficTest traffic model (MTON or Fullmesh)
+        zh-CN: TrafficTest 流量模型（MTON 或 Fullmesh）
+    traffic_duration:
+      type: integer
+      description:
+        en: TrafficTest duration in seconds
+        zh-CN: TrafficTest 持续时间，单位秒
+    traffic_qp:
+      type: integer
+      description:
+        en: TrafficTest QP value (RDMA) or concurrent connection count (TCP)
+        zh-CN: TrafficTest QP 数（RDMA）或并发连接数（TCP）
+    traffic_gdr:
+      type: boolean
+      description:
+        en: enable GPU Direct RDMA for TrafficTest (RDMA protocol only)
+        zh-CN: TrafficTest 是否启用 GPU Direct RDMA（仅 RDMA 协议）
+    traffic_clients:
+      type: string
+      repeatable: true
+      description:
+        en: TrafficTest client node IDs (only used for MTON model; spec does not fall back to --nodes)
+        zh-CN: TrafficTest 客户端节点 ID 列表（仅 MTON 模型使用；spec 不会自动回落到 --nodes）
+    comm_type:
+      type: string
+      enum: [ACCL, NCCL]
+      description:
+        en: CommTest communication library type (ACCL or NCCL)
+        zh-CN: CommTest 通信库类型（ACCL 或 NCCL）
+    comm_model:
+      type: string
+      description:
+        en: CommTest communication library model
+        zh-CN: CommTest 通信库模型
+    comm_gpu_num:
+      type: integer
+      description:
+        en: CommTest GPU count
+        zh-CN: CommTest GPU 数量
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  next_token:
+    type: string
+    description:
+      en: token for the next result page
+      zh-CN: 下一页查询 token
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 1800s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  attribute:
+    api: DescribeNetTestResult
+    request:
+      TestId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      id: $.TestId
+      state: $.Status
+      fields:
+        id: $.TestId
+        cluster: $.ClusterId
+        cluster_name: $.ClusterName
+        type: $.NetTestType
+        network_mode: $.NetworkMode
+        port: $.Port
+        status: $.Status
+        create_time: $.CreationTime
+        finished_time: $.FinishedTime
+        result_detail: $.ResultDetial
+        traffic_test: $.TrafficTest
+        delay_test: $.DelayTest
+        comm_test: $.CommTest
+      absent:
+        when_empty_for_requested_ids: true
+  list:
+    api: ListNetTestResults
+    request:
+      MaxResults: $.limit
+      NextToken: $.next_token
+      NetTestType: $.type
+      ResourceGroupId: $.resource_group
+    response:
+      items: $.NetTestResults
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.TestId
+      state: $.Status
+      fields:
+        id: $.TestId
+        cluster: $.ClusterId
+        cluster_name: $.ClusterName
+        type: $.NetTestType
+        network_mode: $.NetworkMode
+        port: $.Port
+        status: $.Status
+        create_time: $.CreationTime
+        finished_time: $.FinishedTime
+
+waiters:
+  finished_after_create:
+    probe: attribute
+    target: Finished
+    interval: 10s
+    timeout: 1800s
+    pending:
+      - field: status
+        values: [InProgress, Pending, Queued, Initializing, Running]
+    failure:
+      states: [Failed]
+
+bindings:
+  create_delay_test:
+    api: CreateNetTestTask
+    request:
+      ClusterId: $.cluster
+      ClusterName: $.cluster_name
+      NetTestType: $.type
+      NetworkMode: $.network_mode
+      Port: $.port
+      DelayTest:
+        from: $
+        fields:
+          Hosts:
+            each: $.nodes
+            fields:
+              NodeId: $
+    id_from: $.TestId
+    request_id_from: $.RequestId
+  create_traffic_test:
+    api: CreateNetTestTask
+    request:
+      ClusterId: $.cluster
+      ClusterName: $.cluster_name
+      NetTestType: $.type
+      NetworkMode: $.network_mode
+      Port: $.port
+      TrafficTest:
+        from: $
+        fields:
+          Protocol: $.traffic_protocol
+          TrafficModel: $.traffic_model
+          Duration: $.traffic_duration
+          QP: $.traffic_qp
+          GDR: $.traffic_gdr
+          Servers:
+            each: $.nodes
+            fields:
+              NodeId: $
+          Clients:
+            each: $.traffic_clients
+            fields:
+              NodeId: $
+    id_from: $.TestId
+    request_id_from: $.RequestId
+  create_comm_test:
+    api: CreateNetTestTask
+    request:
+      ClusterId: $.cluster
+      ClusterName: $.cluster_name
+      NetTestType: $.type
+      NetworkMode: $.network_mode
+      Port: $.port
+      CommTest:
+        from: $
+        fields:
+          Type: $.comm_type
+          Model: $.comm_model
+          GPUNum: $.comm_gpu_num
+          Hosts:
+            each: $.nodes
+            fields:
+              NodeId: $
+    id_from: $.TestId
+    request_id_from: $.RequestId
+
+operations:
+  create:
+    examples:
+      - ecctl lingjun net-test create --type <type> --nodes <node-ids>
+    description:
+      en: Create Lingjun net test task
+      zh-CN: 创建灵骏网络压测任务
+    input:
+      fields:
+        - type:
+            required: true
+        - nodes:
+            required: true
+        - cluster
+        - cluster_name
+        - network_mode
+        - port
+        - traffic_protocol
+        - traffic_model
+        - traffic_duration
+        - traffic_qp
+        - traffic_gdr
+        - traffic_clients
+        - comm_type
+        - comm_model
+        - comm_gpu_num
+        - resource_group
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    require_any:
+      - raw: $.cluster
+      - raw: $.cluster_name
+    workflow:
+      - binding: create_delay_test
+        when: input.type == DelayTest
+      - binding: create_traffic_test
+        when: input.type == TrafficTest
+      - binding: create_comm_test
+        when: input.type == CommTest
+      - wait: finished_after_create
+        ids:
+          - $context.id
+        unless: input.no_wait
+      - probe: attribute
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            cluster: $input.cluster
+            type: $input.type
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get Lingjun net test result
+      zh-CN: 获取灵骏网络压测结果
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+        not_found: error
+  list:
+    examples:
+      - ecctl lingjun net-test list
+      - ecctl lingjun net-test list --filter type=<value>
+    description:
+      en: List Lingjun net test results
+      zh-CN: 列出灵骏网络压测结果
+    input:
+      controls:
+        - filter
+        - limit
+        - next_token
+    filters:
+      type:
+        target: type
+      net-test-type:
+        target: type
+      resource-group:
+        target: resource_group
+    workflow:
+      - probe: list
+        many: true

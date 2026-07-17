@@ -1,0 +1,173 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: event
+kind: regional
+display_name:
+  en: event
+  zh-CN: 事件
+description:
+  en: Query ACK control-plane events
+  zh-CN: 查询 ACK 控制面事件
+examples:
+  - ecctl ack event list --cluster <cluster-id>
+  - ecctl ack event list --by-region
+  - ecctl ack event list --cluster <cluster-id> --type nodepool_upgrade
+
+identity:
+  field: id
+  output_root:
+    one: event
+    many: events
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: event ID
+        zh-CN: 事件 ID
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    type:
+      type: string
+      description:
+        en: event type
+        zh-CN: 事件类型
+    source:
+      type: string
+      description:
+        en: event source
+        zh-CN: 事件来源
+
+controls:
+  by_region:
+    type: boolean
+    description:
+      en: list events across clusters in the current region
+      zh-CN: 按当前地域跨集群列出事件
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum events to return
+      zh-CN: 最多返回事件数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  cluster_events:
+    api: DescribeClusterEvents
+    request:
+      ClusterId: $.cluster
+      page_size: $.limit
+      page_number: $.page
+      ApiParam:
+        raw: $.api_param
+    response:
+      items: $.events
+      total: $.page_info.total_count
+      request_id: $.RequestId
+      id: $.event_id
+      fields:
+        id: $.event_id
+        type: $.type
+        source: $.source
+        subject: $.subject
+        time: $.time
+        cluster_id: $.cluster_id
+        data: $.data
+  region_events:
+    api: DescribeEventsForRegion
+    request:
+      region_id: $context.region
+      page_size: $.limit
+      page_number: $.page
+      ApiParam:
+        raw: $.api_param
+    response:
+      items: $.events
+      total: $.page_info.total_count
+      request_id: $.RequestId
+      id: $.event_id
+      fields:
+        id: $.event_id
+        type: $.type
+        source: $.source
+        subject: $.subject
+        time: $.time
+        cluster_id: $.cluster_id
+        data: $.data
+  typed_events:
+    api: DescribeEvents
+    request:
+      cluster_id: $.cluster
+      type: $.type
+      source: $.source
+      page_size: $.limit
+      page_number: $.page
+      ApiParam:
+        raw: $.api_param
+    response:
+      items: $.events
+      total: $.page_info.total_count
+      request_id: $.RequestId
+      id: $.event_id
+      fields:
+        id: $.event_id
+        type: $.type
+        source: $.source
+        subject: $.subject
+        time: $.time
+        cluster_id: $.cluster_id
+        data: $.data
+
+operations:
+  list:
+    examples:
+      - ecctl ack event list
+    description:
+      en: List ACK events
+      zh-CN: 列出 ACK 事件
+    input:
+      fields:
+        - cluster
+        - type
+        - source
+      controls:
+        - by_region
+        - limit
+        - page
+        - api_param
+    conflicts:
+      - any: [by_region]
+        with_any: [cluster, type, source]
+    require_any:
+      - raw: $.cluster
+      - raw: $.by_region
+      - raw: $.type
+      - raw: $.source
+    workflow:
+      - probe: region_events
+        many: true
+        when: input.by_region
+      - probe: typed_events
+        many: true
+        when: has(input.type) || has(input.source)
+      - probe: cluster_events
+        many: true
+        unless: input.by_region || has(input.type) || has(input.source)

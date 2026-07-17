@@ -1,0 +1,203 @@
+schema_version: 2
+product: ack
+api_product: CS
+resource: report
+parent: inspect
+kind: regional
+display_name:
+  en: inspect report
+  zh-CN: 巡检报告
+description:
+  en: Trigger and query inspection reports
+  zh-CN: 触发和查询巡检报告
+examples:
+  - ecctl ack inspect report create --cluster <cluster-id>
+  - ecctl ack inspect report get <report-id> --cluster <cluster-id>
+  - ecctl ack inspect report list --cluster <cluster-id>
+
+identity:
+  field: report_id
+  output_root:
+    one: report
+    many: reports
+
+schema:
+  fields:
+    report_id:
+      type: string
+      description:
+        en: inspection report ID
+        zh-CN: 巡检报告 ID
+    cluster:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    status:
+      type: string
+      description:
+        en: report status
+        zh-CN: 报告状态
+
+controls:
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum reports to return
+      zh-CN: 最多返回报告数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  no_wait:
+    type: boolean
+    description:
+      en: return before report readback completes
+      zh-CN: 不等待报告回读完成
+  timeout:
+    type: duration
+    default: 600s
+    description:
+      en: inspection wait timeout
+      zh-CN: 巡检等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: ListClusterInspectReports
+    request:
+      cluster_id: $.cluster
+      page_size: $.limit
+      page_number: $.page
+      ApiParam:
+        raw: $.api_param
+    response:
+      items: $.reports
+      total: $.page_info.total_count
+      request_id: $.requestId
+      id: $.report_id
+      state: $.status
+      fields:
+        id: $.report_id
+        report_id: $.report_id
+        status: $.status
+        created: $.created
+        finished: $.finished
+        summary: $.summary
+  detail:
+    api: GetClusterInspectReportDetail
+    request:
+      cluster_id: $.cluster
+      report_id: $.report_id
+      ApiParam:
+        raw: $.api_param
+    response:
+      item: $
+      request_id: $.requestId
+      id: $.report_id
+      state: $.status
+      fields:
+        id: $.report_id
+        report_id: $.report_id
+        status: $.status
+        created: $.created
+        finished: $.finished
+        summary: $.summary
+        details: $.details
+  latest_detail:
+    api: GetClusterInspectReportDetail
+    request:
+      cluster_id: $.cluster
+      report_id: $context.latest.report_id
+      ApiParam:
+        raw: $.api_param
+    response:
+      item: $
+      request_id: $.requestId
+      id: $.report_id
+      state: $.status
+      fields:
+        id: $.report_id
+        report_id: $.report_id
+        status: $.status
+        created: $.created
+        finished: $.finished
+        summary: $.summary
+        details: $.details
+
+bindings:
+  run:
+    api: RunClusterInspect
+    request:
+      cluster_id: $.cluster
+      ApiParam:
+        raw: $.api_param
+    id_from: $.task_id
+    request_id_from: $.requestId
+
+operations:
+  create:
+    examples:
+      - ecctl ack inspect report create --cluster <cluster-id>
+    description:
+      en: Trigger an inspection report
+      zh-CN: 触发巡检报告
+    input:
+      fields:
+        - cluster:
+            required: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: run
+      - probe: list
+        many: true
+        as: latest
+        unless: input.no_wait
+      - probe: latest_detail
+        unless: input.no_wait
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get inspection report
+      zh-CN: 查询巡检报告
+    input:
+      fields:
+        - report_id:
+            required: true
+            positional: true
+        - cluster:
+            required: true
+      controls:
+        - api_param
+    workflow:
+      - probe: detail
+        not_found: error
+  list:
+    examples:
+      - ecctl ack inspect report list
+    description:
+      en: List inspection reports
+      zh-CN: 列出巡检报告
+    input:
+      fields:
+        - cluster:
+            required: true
+      controls:
+        - limit
+        - page
+        - api_param
+    workflow:
+      - probe: list
+        many: true

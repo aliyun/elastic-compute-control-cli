@@ -1,0 +1,22 @@
+# Import an ECS image from a region-local OSS object and delete the imported image.
+resource: ecs/image
+requires_prerequisites: [ecs.image]
+timeout: 60m
+serial: true
+
+steps:
+  - name: import
+    run: >
+      ecctl ecs image import
+      --name {{.run_name}}-import-image
+      --description ecctl-e2e-import-image-{{.run_id}}
+      --disk-device-mapping 'oss_bucket={{.prerequisites.ecs.image.oss_bucket}},oss_object=ecctl-e2e/import-source.qcow2,disk_type=system'
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 60m
+    at: $.image
+    expect:
+      id: { type: string, prefix: m- }
+      name: { eq: "{{.run_name}}-import-image" }
+    capture:
+      imported_image_id: id
+    teardown: ecctl ecs image delete {{.imported_image_id}} --force

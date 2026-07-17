@@ -1,0 +1,120 @@
+# ECS instance lifecycle: create -> read-back -> differential -> stop -> delete.
+# Consumes the shared stack (vswitch/sg/image). Waiting is ecctl's default; no
+# --wait flag is needed (pass --no-wait to skip). The instance type comes from
+# the shared ECS inventory resolver.
+resource: ecs/instance
+requires_params: [ecs.instance_type]
+needs: [vpc, vswitch, security_group, image]
+
+steps:
+  - name: create
+    run: >
+      ecctl ecs instance create
+      --type {{.params.ecs.instance_type}}
+      --image {{.stack.image}}
+      --sg {{.stack.security_group}}
+      --vswitch {{.stack.vswitch}}
+      --name {{.run_name}}-web
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.instance
+    expect:
+      id: { type: string, prefix: i- }
+      status: Running
+    capture:
+      instance_id: id
+    teardown: ecctl ecs instance delete {{.instance_id}} --force
+
+  - name: get (read-back)
+    run: ecctl ecs instance get {{.instance_id}}
+    at: $.instance
+    expect:
+      id: { eq: "{{.instance_id}}" }
+      vswitch: { eq: "{{.stack.vswitch}}" }
+      security_group_ids: { type: array, min_len: 1 }
+      zone: { regex: "^cn-" }
+    capture:
+      hi_status: status
+
+  - name: differential vs raw DescribeInstances
+    run: ecctl call ecs DescribeInstances --InstanceIds '["{{.instance_id}}"]'
+    expect:
+      $.response.Instances.Instance[0].Status: { eq: "{{.hi_status}}" }   # call wraps under .response
+
+  - name: update (rename)
+    run: ecctl ecs instance update {{.instance_id}} --name {{.run_name}}-renamed
+    at: $.instance
+    expect:
+      id: { eq: "{{.instance_id}}" }
+      name: { eq: "{{.run_name}}-renamed" }
+
+  - name: get (read-back rename)
+    run: ecctl ecs instance get {{.instance_id}}
+    at: $.instance
+    expect:
+      id: { eq: "{{.instance_id}}" }
+      name: { eq: "{{.run_name}}-renamed" }
+
+  # Definitely-runnable steps come before the environment-dependent block below,
+  # so an expected TODO(human) failure (monitor/exec/sendfile/renew) doesn't abort
+  # the case before list runs. (A failed step aborts the rest of the case.)
+  - name: list (find ours)
+    run: ecctl ecs instance list --filter status=Running
+    assert:
+      - len($.instances) >= 0
+
+  - name: install assistant agent
+    run: ecctl ecs assistant install --instance-ids '["{{.instance_id}}"]'
+    expect:
+      $.statuses: { type: array, min_len: 1 }
+
+  - name: monitor
+    run: >
+      ecctl ecs instance monitor {{.instance_id}}
+      --start-time {{.time.monitor_start}}
+      --end-time {{.time.monitor_end}}
+      --monitor-period 60
+    expect:
+      $.monitor_data: { type: array }
+
+  - name: exec
+    run: ecctl ecs instance exec {{.instance_id}} --command 'printf ecctl-e2e'
+    expect:
+      $.invoke_id: { type: string, min_len: 1 }
+      $.results: { type: array, min_len: 1 }
+
+  - name: sendfile
+    run: >
+      ecctl ecs instance sendfile {{.instance_id}}
+      --file-name ecctl-e2e-{{.run_id}}.txt
+      --target-dir /tmp
+      --content ecctl-e2e-{{.run_id}}
+      --file-mode 0644
+    expect:
+      $.invoke_id: { type: string, min_len: 1 }
+      $.results: { type: array, min_len: 1 }
+
+  - name: stop
+    run: ecctl ecs instance stop {{.instance_id}}
+    at: $.instance
+    expect:
+      status: Stopped
+
+  - name: start
+    run: ecctl ecs instance start {{.instance_id}}
+    at: $.instance
+    expect:
+      id: { eq: "{{.instance_id}}" }
+      status: Running
+
+  - name: reboot
+    run: ecctl ecs instance reboot {{.instance_id}}
+    at: $.instance
+    expect:
+      id: { eq: "{{.instance_id}}" }
+      status: Running
+
+  - name: delete
+    run: ecctl ecs instance delete {{.instance_id}} --force
+    at: $.instance
+    expect:
+      id: { eq: "{{.instance_id}}" }

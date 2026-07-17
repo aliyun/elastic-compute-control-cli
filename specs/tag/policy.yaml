@@ -1,0 +1,534 @@
+schema_version: 2
+product: tag
+resource: policy
+kind: regional
+display_name:
+  en: Tag policy
+  zh-CN: 标签策略
+description:
+  en: Manage tag policies
+  zh-CN: 管理标签策略
+examples:
+  - ecctl tag policy list
+  - ecctl tag policy get <policy-id> --with-status
+  - ecctl tag policy create --name cost --content @policy.json --user-type RD
+  - ecctl tag policy attach <policy-id> --target <account-id> --target-type ACCOUNT
+
+identity:
+  field: id
+  prefix: p-
+  output_root:
+    one: policy
+    many: policies
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: tag policy ID
+        zh-CN: 标签策略 ID
+    ids:
+      type: array
+      description:
+        en: tag policy IDs
+        zh-CN: 标签策略 ID 列表
+      items:
+        type: string
+    name:
+      type: string
+      description:
+        en: tag policy name
+        zh-CN: 标签策略名称
+    names:
+      type: array
+      description:
+        en: tag policy names
+        zh-CN: 标签策略名称列表
+      items:
+        type: string
+    description:
+      type: string
+      description:
+        en: tag policy description
+        zh-CN: 标签策略描述
+    content:
+      type: string
+      input_style: json|@file
+      description:
+        en: tag policy document JSON or @file
+        zh-CN: 标签策略内容 JSON 或 @file
+    user_type:
+      type: string
+      description:
+        en: tag policy mode
+        zh-CN: 标签策略模式
+      enum: [USER, RD]
+    target:
+      type: string
+      description:
+        en: target node ID
+        zh-CN: 目标节点 ID
+    target_type:
+      type: string
+      description:
+        en: target node type
+        zh-CN: 目标节点类型
+      enum: [USER, ROOT, FOLDER, ACCOUNT]
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 1000
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  next_token:
+    type: string
+    description:
+      en: token for the next result page
+      zh-CN: 下一页查询 token
+  with_status:
+    type: boolean
+    description:
+      en: include tag policy enable status
+      zh-CN: 附带标签策略启用状态
+  with_effective:
+    type: boolean
+    description:
+      en: include effective policy for the target
+      zh-CN: 附带目标节点的有效策略
+  open_type:
+    type: string
+    description:
+      en: enablement type for policy status
+      zh-CN: 策略状态开通类型
+    enum: [TAG_POLICY, VERIFY_NO_TAG, TAG_POLICY_NOTIFY]
+  tag_keys:
+    type: array
+    description:
+      en: tag keys for effective policy query
+      zh-CN: 有效策略查询的标签键
+    items:
+      type: string
+  targets_for_policy:
+    type: string
+    description:
+      en: policy ID whose attached targets should be listed
+      zh-CN: 查询绑定目标节点的标签策略 ID
+  dry_run:
+    type: boolean
+    description:
+      en: validate without applying changes
+      zh-CN: 只校验不执行
+  no_wait:
+    type: boolean
+    description:
+      en: return before read-back completion
+      zh-CN: 回读完成前返回
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  detail:
+    api: GetPolicy
+    request:
+      RegionId: $context.region
+      PolicyId: $.id
+    response:
+      item: $.Policy
+      request_id: $.RequestId
+      fields:
+        name: $.PolicyName
+        description: $.PolicyDesc
+        content: $.PolicyContent
+        user_type: $.UserType
+  list:
+    api: ListPolicies
+    request:
+      RegionId: $context.region
+      MaxResult: $.limit
+      NextToken: $.next_token
+      PolicyIds:
+        each: $.ids
+      PolicyNames:
+        each: $.names
+      UserType: $.user_type
+    response:
+      items: $.PolicyList
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.PolicyId
+      fields:
+        id: $.PolicyId
+        name: $.PolicyName
+        description: $.PolicyDesc
+        content: $.PolicyContent
+        user_type: $.UserType
+  target_policies:
+    api: ListPoliciesForTarget
+    request:
+      RegionId: $context.region
+      MaxResult: $.limit
+      NextToken: $.next_token
+      TargetId: $.target
+      TargetType: $.target_type
+    response:
+      items: $.Data
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.PolicyId
+      fields:
+        id: $.PolicyId
+        name: $.PolicyName
+        description: $.PolicyDesc
+        content: $.PolicyContent
+        user_type: $.UserType
+  policy_targets:
+    api: ListTargetsForPolicy
+    request:
+      RegionId: $context.region
+      MaxResult: $.limit
+      NextToken: $.next_token
+      PolicyId: $.targets_for_policy
+    response:
+      items: $.Targets
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.TargetId
+      fields:
+        id: $.TargetId
+        target_type: $.TargetType
+  status:
+    api: GetPolicyEnableStatus
+    request:
+      RegionId: $context.region
+      UserType: $.user_type
+      OpenType: $.open_type
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        status_models: $.StatusModels
+  effective:
+    api: GetEffectivePolicy
+    request:
+      RegionId: $context.region
+      TargetId: $.target
+      TargetType: $.target_type
+      TagKeys:
+        each: $.tag_keys
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        effective_policy: $.EffectivePolicy
+        policy_attachments: $.PolicyAttachments
+
+waiters:
+  attached_after_attach:
+    probe: target_policies
+    target: present
+    interval: 2s
+    timeout: 300s
+  detached_after_detach:
+    probe: target_policies
+    target: absent
+    interval: 2s
+    timeout: 300s
+
+bindings:
+  create_policy:
+    api: CreatePolicy
+    request:
+      RegionId: $context.region
+      PolicyName: $.name
+      PolicyDesc: $.description
+      PolicyContent: $.content
+      UserType: $.user_type
+      DryRun: $.dry_run
+      ApiParam:
+        raw: $.api_param
+    id_from: $.PolicyId
+    request_id_from: $.RequestId
+  update_policy:
+    api: ModifyPolicy
+    request:
+      RegionId: $context.region
+      PolicyId: $.id
+      PolicyName: $.name
+      PolicyDesc: $.description
+      PolicyContent: $.content
+      DryRun: $.dry_run
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  delete_policy:
+    api: DeletePolicy
+    request:
+      RegionId: $context.region
+      PolicyId: $.id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  attach_policy:
+    api: AttachPolicy
+    request:
+      RegionId: $context.region
+      PolicyId: $.id
+      TargetId: $.target
+      TargetType: $.target_type
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: attached_after_attach
+  detach_policy:
+    api: DetachPolicy
+    request:
+      RegionId: $context.region
+      PolicyId: $.id
+      TargetId: $.target
+      TargetType: $.target_type
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: detached_after_detach
+
+operations:
+  create:
+    examples:
+      - ecctl tag policy create --name my-name --content <content>
+    description:
+      en: Create tag policy
+      zh-CN: 创建标签策略
+    input:
+      fields:
+        - name:
+            required: true
+        - content:
+            required: true
+        - description
+        - user_type
+      controls:
+        - dry_run
+        - api_param
+    workflow:
+      - binding: create_policy
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            description: $input.description
+            content: $input.content
+            user_type: $input.user_type
+  update:
+    examples:
+      - ecctl tag policy update <policy-id>
+      - ecctl tag policy update <policy-id> --name my-name
+    description:
+      en: Update tag policy
+      zh-CN: 更新标签策略
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - description:
+            allow_empty: true
+        - content
+      controls:
+        - dry_run
+        - no_wait
+        - api_param
+    workflow:
+      - binding: update_policy
+      - probe: detail
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+        unless: input.no_wait
+  delete:
+    examples:
+      - ecctl tag policy delete <policy-id>
+    description:
+      en: Delete tag policy
+      zh-CN: 删除标签策略
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - api_param
+    workflow:
+      - binding: delete_policy
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get tag policy
+      zh-CN: 获取标签策略
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - target
+        - target_type
+        - user_type
+      controls:
+        - with_status
+        - with_effective
+        - open_type
+        - tag_keys
+    workflow:
+      - probe: detail
+        ids:
+          - $input.id
+        not_found: error
+      - probe: status
+        when: input.with_status
+        merge: true
+      - probe: effective
+        when: input.with_effective
+        merge: true
+  list:
+    examples:
+      - ecctl tag policy list
+      - ecctl tag policy list --filter name=<value>
+    description:
+      en: List tag policies
+      zh-CN: 列出标签策略
+    input:
+      fields:
+        - ids:
+            positional_many: true
+        - target
+        - target_type
+      controls:
+        - filter
+        - limit
+        - next_token
+        - targets_for_policy
+    filters:
+      id:
+        target: ids
+      ids:
+        target: ids
+      policy:
+        target: ids
+      policy.id:
+        target: ids
+      name:
+        target: names
+      names:
+        target: names
+      user-type:
+        target: user_type
+    conflicts:
+      - any: [target, target_type]
+        with_any: [targets_for_policy]
+      - any: [ids, names, user_type]
+        with_any: [target, target_type, targets_for_policy]
+    require_when:
+      - when_any: [target]
+        require_any: [target_type]
+      - when_any: [target_type]
+        require_any: [target]
+    workflow:
+      - probe: list
+        many: true
+        unless: has(input.target) || has(input.target_type) || has(input.targets_for_policy)
+      - probe: target_policies
+        many: true
+        when: has(input.target) || has(input.target_type)
+      - probe: policy_targets
+        many: true
+        when: has(input.targets_for_policy)
+    output:
+      fields:
+        pagination: $result.pagination
+        total: $result.total
+        policies:
+          value: $result.items
+          unless: $input.targets_for_policy
+        targets:
+          value: $result.items
+          when: $input.targets_for_policy
+  attach:
+    examples:
+      - ecctl tag policy attach <policy-id>
+    description:
+      en: Attach tag policy to a target
+      zh-CN: 将标签策略绑定到目标节点
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - target
+        - target_type
+      controls:
+        - no_wait
+        - api_param
+    require_when:
+      - when_any: [target]
+        require_any: [target_type]
+      - when_any: [target_type]
+        require_any: [target]
+    workflow:
+      - binding: attach_policy
+        wait_unless: input.no_wait
+      - probe: target_policies
+        ids:
+          - $input.id
+        many: true
+        unless: input.no_wait
+  detach:
+    examples:
+      - ecctl tag policy detach <policy-id>
+    description:
+      en: Detach tag policy from a target
+      zh-CN: 解绑标签策略
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - target
+        - target_type
+      controls:
+        - no_wait
+        - api_param
+    require_when:
+      - when_any: [target]
+        require_any: [target_type]
+      - when_any: [target_type]
+        require_any: [target]
+    workflow:
+      - binding: detach_policy
+        wait_unless: input.no_wait
+      - probe: target_policies
+        ids:
+          - $input.id
+        many: true
+        unless: input.no_wait

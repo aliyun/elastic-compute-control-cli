@@ -1,0 +1,449 @@
+schema_version: 2
+product: vpc
+resource: vswitch
+kind: regional
+aliases: [vsw]
+display_name:
+  en: VSwitch
+  zh-CN: 交换机
+description:
+  en: Manage VSwitch resources
+  zh-CN: 管理交换机资源
+examples:
+  - ecctl vpc vswitch list --filter vpc=<vpc-id>
+  - ecctl vpc vswitch create --vpc <vpc-id> --zone cn-beijing-a --cidr 10.0.1.0/24 --name app-a
+  - ecctl vpc vswitch update <vswitch-id> --name app-a-renamed
+  - ecctl vpc vswitch delete <vswitch-id>
+
+identity:
+  field: id
+  prefix: vsw-
+  output_root:
+    one: vswitch
+    many: vswitches
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: VSwitch ID
+        zh-CN: 交换机 ID
+    ids:
+      type: array
+      description:
+        en: VSwitch IDs
+        zh-CN: 交换机 ID 列表
+      items:
+        type: string
+    name:
+      type: string
+      description:
+        en: VSwitch name
+        zh-CN: 交换机名称
+    description:
+      type: string
+      description:
+        en: VSwitch description
+        zh-CN: 交换机描述
+    vpc:
+      type: string
+      description:
+        en: VPC ID
+        zh-CN: VPC ID
+    zone:
+      type: string
+      description:
+        en: zone ID
+        zh-CN: 可用区 ID
+    cidr:
+      type: cidr
+      description:
+        en: CIDR block
+        zh-CN: CIDR 网段
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    route_table:
+      type: string
+      description:
+        en: route table ID
+        zh-CN: 路由表 ID
+    network_acl:
+      type: string
+      description:
+        en: network ACL ID
+        zh-CN: 网络 ACL ID
+    owner_id:
+      type: integer
+      description:
+        en: VPC owner ID
+        zh-CN: VPC 所有者 ID
+    enable_ipv6:
+      type: boolean
+      description:
+        en: enable IPv6
+        zh-CN: 启用 IPv6
+    ipv6_cidr_block:
+      type: integer
+      description:
+        en: IPv6 CIDR block index
+        zh-CN: IPv6 CIDR 网段序号
+    vpc_ipv6_cidr:
+      type: string
+      description:
+        en: VPC IPv6 CIDR block
+        zh-CN: VPC IPv6 CIDR 网段
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 50
+    max: 50
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  dry_run:
+    type: boolean
+    description:
+      en: validate without applying changes
+      zh-CN: 只校验不执行
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: DescribeVSwitches
+    request:
+      RegionId: $context.region
+      VSwitchId: $.id
+      VSwitchIds: $.ids
+      VpcId: $.vpc
+      ZoneId: $.zone
+      VSwitchName: $.name
+      ResourceGroupId: $.resource_group
+      RouteTableId: $.route_table
+      NetworkAclId: $.network_acl
+      VSwitchOwnerId: $.owner_id
+      Tag: $.tag
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.VSwitches.VSwitch
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.VSwitchId
+      state: $.Status
+      fields:
+        id: $.VSwitchId
+        name: $.VSwitchName
+        vpc: $.VpcId
+        zone: $.ZoneId
+        cidr: $.CidrBlock
+        status: $.Status
+        available_ip_count: $.AvailableIpAddressCount
+        creation_time: $.CreationTime
+        description: $.Description
+        owner_id: $.OwnerId
+        resource_group: $.ResourceGroupId
+        network_acl: $.NetworkAclId
+        route_table: $.RouteTable.RouteTableId
+        route_table_type: $.RouteTable.RouteTableType
+        ipv6_cidr: $.Ipv6CidrBlock
+        enable_ipv6: $.EnabledIpv6
+        default: $.IsDefault
+        share_type: $.ShareType
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+  attribute:
+    api: DescribeVSwitchAttributes
+    request:
+      RegionId: $context.region
+      VSwitchId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      id: $.VSwitchId
+      state: $.Status
+      fields:
+        id: $.VSwitchId
+        name: $.VSwitchName
+        vpc: $.VpcId
+        zone: $.ZoneId
+        cidr: $.CidrBlock
+        status: $.Status
+        available_ip_count: $.AvailableIpAddressCount
+        creation_time: $.CreationTime
+        description: $.Description
+        owner_id: $.OwnerId
+        resource_group: $.ResourceGroupId
+        network_acl: $.NetworkAclId
+        route_table: $.RouteTable.RouteTableId
+        route_table_type: $.RouteTable.RouteTableType
+        ipv6_cidr: $.Ipv6CidrBlock
+        enable_ipv6: $.EnabledIpv6
+        default: $.IsDefault
+        share_type: $.ShareType
+        tags: $.Tags.Tag
+
+waiters:
+  available_after_create:
+    probe: attribute
+    target: Available
+    interval: 1s
+    timeout: 300s
+  available_after_update:
+    probe: attribute
+    target: Available
+    interval: 1s
+    timeout: 300s
+  deleted_after_delete:
+    probe: list
+    target: absent
+    interval: 1s
+    timeout: 300s
+
+bindings:
+  create_to_available:
+    api: CreateVSwitch
+    idempotency:
+      field: ClientToken
+      prefix: vswitch-create
+    request:
+      RegionId: $context.region
+      VpcId: $.vpc
+      ZoneId: $.zone
+      CidrBlock: $.cidr
+      VSwitchName: $.name
+      Description: $.description
+      ResourceGroupId: $.resource_group
+      Ipv6CidrBlock: $.ipv6_cidr_block
+      VpcIpv6CidrBlock: $.vpc_ipv6_cidr
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    id_from: $.VSwitchId
+    request_id_from: $.RequestId
+    wait: available_after_create
+  update_attributes:
+    api: ModifyVSwitchAttribute
+    request:
+      RegionId: $context.region
+      VSwitchId: $.id
+      VSwitchName: $.name
+      Description: $.description
+      EnableIPv6: $.enable_ipv6
+      Ipv6CidrBlock: $.ipv6_cidr_block
+      VpcIpv6CidrBlock: $.vpc_ipv6_cidr
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: available_after_update
+  delete_to_absent:
+    api: DeleteVSwitch
+    request:
+      RegionId: $context.region
+      VSwitchId: $.id
+      DryRun: $.dry_run
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+
+operations:
+  create:
+    examples:
+      - ecctl vpc vswitch create --vpc <vpc-id> --zone cn-beijing-a --cidr 10.0.1.0/24
+      - ecctl vpc vswitch create --vpc <vpc-id> --zone cn-beijing-a --cidr 10.0.1.0/24 --name prod-vsw-a --tag env=prod
+    description:
+      en: Create VSwitch
+      zh-CN: 创建交换机
+    input:
+      fields:
+        - vpc:
+            required: true
+        - zone:
+            required: true
+        - cidr:
+            required: true
+        - name
+        - description
+        - resource_group
+        - ipv6_cidr_block
+        - vpc_ipv6_cidr
+        - tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_to_available
+        wait_unless: input.no_wait
+      - probe: attribute
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            vpc: $input.vpc
+            zone: $input.zone
+            cidr: $input.cidr
+  update:
+    examples:
+      - ecctl vpc vswitch update <vsw-id> --name renamed-vsw
+      - ecctl vpc vswitch update <vsw-id> --enable-ipv6
+    description:
+      en: Update VSwitch attributes
+      zh-CN: 更新交换机属性
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - description
+        - enable_ipv6
+        - ipv6_cidr_block
+        - vpc_ipv6_cidr
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: update_attributes
+        wait_unless: input.no_wait
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            name: $input.name
+            description: $input.description
+  delete:
+    examples:
+      - ecctl vpc vswitch delete <vsw-id>
+    description:
+      en: Delete VSwitch
+      zh-CN: 删除交换机
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - dry_run
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get VSwitch
+      zh-CN: 获取交换机
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        not_found: error
+  list:
+    examples:
+      - ecctl vpc vswitch list
+      - ecctl vpc vswitch list --filter zone=<value>
+      - ecctl vpc vswitch list --filter tag.env=prod
+    description:
+      en: List VSwitch resources
+      zh-CN: 列出交换机资源
+    input:
+      fields:
+        - ids:
+            positional_many: true
+      controls:
+        - filter
+        - limit
+        - page
+    filters:
+      id:
+        target: ids
+      ids:
+        target: ids
+      vswitch:
+        target: ids
+      vswitch.id:
+        target: ids
+      vpc:
+        target: vpc
+      vpc.id:
+        target: vpc
+      zone:
+        target: zone
+      name:
+        target: name
+      resource-group:
+        target: resource_group
+      route-table:
+        target: route_table
+      network-acl:
+        target: network_acl
+      owner-id:
+        target: owner_id
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true

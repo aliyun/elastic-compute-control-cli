@@ -1,0 +1,11 @@
+// This file is not used by "docusaurus start/build" commands.
+// It is here to improve IDE type-checking and autocompletion.
+{
+  "extends": "@docusaurus/tsconfig",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "strict": true
+  },
+  "exclude": [".docusaurus", "build"]
+}

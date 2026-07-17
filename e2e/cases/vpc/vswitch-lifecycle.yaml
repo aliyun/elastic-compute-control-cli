@@ -1,0 +1,73 @@
+# VSwitch full lifecycle with a private VPC prerequisite.
+resource: vpc/vswitch
+requires_params: [ecs.zone]
+
+steps:
+  - name: create vpc prerequisite
+    run: ecctl vpc create --name {{.run_name}}-vsw-vpc --cidr 10.21.0.0/16 --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.vpc
+    expect:
+      id: { type: string, prefix: vpc- }
+      cidr: "10.21.0.0/16"
+    capture:
+      vpc_id: id
+    teardown: ecctl vpc delete {{.vpc_id}}
+
+  - name: create
+    run: >
+      ecctl vpc vswitch create
+      --vpc {{.vpc_id}}
+      --zone {{.params.ecs.zone}}
+      --cidr 10.21.1.0/24
+      --name {{.run_name}}-vsw
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.vswitch
+    expect:
+      id: { type: string, prefix: vsw- }
+      vpc: { eq: "{{.vpc_id}}" }
+      cidr: "10.21.1.0/24"
+    capture:
+      vswitch_id: id
+    teardown: ecctl vpc vswitch delete {{.vswitch_id}}
+
+  - name: get (read-back)
+    run: ecctl vpc vswitch get {{.vswitch_id}}
+    at: $.vswitch
+    expect:
+      id: { eq: "{{.vswitch_id}}" }
+      vpc: { eq: "{{.vpc_id}}" }
+      cidr: "10.21.1.0/24"
+      status: { oneof: [Available, Pending] }
+    capture:
+      hi_zone: zone
+
+  - name: differential vs raw DescribeVSwitches
+    run: ecctl call vpc DescribeVSwitches --VSwitchId {{.vswitch_id}}
+    expect:
+      $.response.VSwitches.VSwitch[0].VSwitchId: { eq: "{{.vswitch_id}}" }
+      $.response.VSwitches.VSwitch[0].ZoneId: { eq: "{{.hi_zone}}" }
+
+  - name: list (find ours)
+    run: ecctl vpc vswitch list --filter vpc={{.vpc_id}}
+    assert:
+      - len($.vswitches) >= 1
+
+  - name: update
+    run: ecctl vpc vswitch update {{.vswitch_id}} --name {{.run_name}}-vsw-renamed
+    at: $.vswitch
+    expect:
+      id: { eq: "{{.vswitch_id}}" }
+
+  - name: get (read-back after update)
+    run: ecctl vpc vswitch get {{.vswitch_id}}
+    at: $.vswitch
+    expect:
+      id: { eq: "{{.vswitch_id}}" }
+      name: { eq: "{{.run_name}}-vsw-renamed" }
+
+  - name: delete
+    run: ecctl vpc vswitch delete {{.vswitch_id}}
+    at: $.vswitch
+    expect:
+      id: { eq: "{{.vswitch_id}}" }
+      $.deleted: { eq: true }

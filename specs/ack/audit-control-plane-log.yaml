@@ -1,0 +1,174 @@
+schema_version: 2
+product: ack
+api_product: cs
+resource: control-plane-log
+parent: audit
+kind: regional
+aliases: [cpl]
+display_name:
+  en: control-plane-log
+  zh-CN: 控制面日志
+description:
+  en: Manage ACK managed cluster control plane component logs
+  zh-CN: 管理 ACK 托管集群控制面组件日志
+examples:
+  - ecctl ack audit control-plane-log get --cluster <cluster-id>
+  - ecctl ack audit control-plane-log update --cluster <cluster-id> --components apiserver,kcm --project k8s-log-<cluster-id>
+
+identity:
+  field: id
+  output_root:
+    one: control_plane_log
+    many: control_plane_logs
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    enabled:
+      type: boolean
+      description:
+        en: enable or disable control plane component log collection
+        zh-CN: 开启或关闭控制面组件日志采集
+    components:
+      type: string_array
+      description:
+        en: control plane components to collect, such as apiserver,kcm,scheduler,ccm
+        zh-CN: 要采集的控制面组件，例如 apiserver,kcm,scheduler,ccm
+    project:
+      type: string
+      description:
+        en: SLS Project for control plane component logs
+        zh-CN: 控制面组件日志所在的 SLS Project
+    log_ttl:
+      type: integer
+      description:
+        en: log retention in days
+        zh-CN: 日志保存天数
+    aliuid:
+      type: string
+      description:
+        en: Alibaba Cloud account ID
+        zh-CN: 阿里云账号 ID
+
+controls:
+  no_wait:
+    type: boolean
+    description:
+      en: return before reading the updated control plane log configuration
+      zh-CN: 不等待回读控制面日志配置
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  state:
+    api: CheckControlPlaneLogEnable
+    request:
+      ClusterId: $.id
+    response:
+      item: $
+      request_id: $.request_id
+      fields:
+        project: $.log_project
+        log_ttl:
+          int: $.log_ttl
+        aliuid: $.aliuid
+        components: $.components
+
+bindings:
+  disable_control_plane_log:
+    api: UpdateControlPlaneLog
+    request:
+      ClusterId: $.id
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    hooks:
+      before:
+        - disable_control_plane_log_components
+    request_id_from: $.request_id
+  update_control_plane_log:
+    api: UpdateControlPlaneLog
+    request:
+      ClusterId: $.id
+      log_project: $.project
+      log_ttl: $.log_ttl
+      aliuid: $.aliuid
+      components: $.components
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    require_any:
+      - request: log_project
+      - request: log_ttl
+      - request: aliuid
+      - request: components
+      - raw: $.api_param
+    request_id_from: $.request_id
+
+operations:
+  update:
+    examples:
+      - ecctl ack audit control-plane-log update --id <control-plane-log-id>
+    description:
+      en: Update ACK managed cluster control plane component log
+      zh-CN: 更新 ACK 托管集群控制面组件日志
+    input:
+      fields:
+        - id:
+            required: true
+            flag_name: cluster
+        - enabled
+        - components
+        - project
+        - log_ttl
+        - aliuid
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: disable_control_plane_log
+        when: input.enabled == false
+      - binding: update_control_plane_log
+        unless: input.enabled == false
+      - probe: state
+        ids:
+          - $input.id
+        unless: input.no_wait
+      - emit:
+          fields:
+            cluster: $input.id
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get ACK managed cluster control plane component log configuration
+      zh-CN: 获取 ACK 托管集群控制面组件日志配置
+    input:
+      fields:
+        - id:
+            required: true
+            flag_name: cluster
+    workflow:
+      - probe: state
+        ids:
+          - $input.id
+        not_found: error
+      - emit:
+          fields:
+            cluster: $input.id

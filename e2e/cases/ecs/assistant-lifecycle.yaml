@@ -1,0 +1,49 @@
+# ECS Cloud Assistant settings and agent installation lifecycle.
+resource: ecs/assistant
+requires_params: [ecs.instance_type]
+needs: [vpc, vswitch, security_group, image]
+serial: true
+
+steps:
+  - name: get service settings
+    run: ecctl ecs assistant get --setting-types '["AgentUpgradeConfig"]'
+    expect:
+      $.assistant: { exists: true }
+      $.assistant.agent_upgrade_enabled: { type: bool }
+    capture:
+      agent_upgrade_enabled: $.assistant.agent_upgrade_enabled
+
+  - name: update service settings idempotently
+    run: >
+      ecctl ecs assistant update
+      --api-param AgentUpgradeConfig.Enabled={{.agent_upgrade_enabled}}
+      --setting-type AgentUpgradeConfig
+    expect:
+      $.assistant.agent_upgrade_enabled: { type: bool }
+
+  - name: provision assistant host
+    run: >
+      ecctl ecs instance create
+      --type {{.params.ecs.instance_type}}
+      --image {{.stack.image}}
+      --sg {{.stack.security_group}}
+      --vswitch {{.stack.vswitch}}
+      --name {{.run_name}}-assistant-host
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.instance
+    expect:
+      id: { type: string, prefix: i- }
+      status: Running
+    capture:
+      instance_id: id
+    teardown: ecctl ecs instance delete {{.instance_id}} --force
+
+  - name: install agent
+    run: ecctl ecs assistant install --instance-ids '["{{.instance_id}}"]'
+    expect:
+      $.statuses: { type: array, min_len: 1 }
+
+  - name: differential vs raw DescribeCloudAssistantSettings
+    run: ecctl call ecs DescribeCloudAssistantSettings --request '{"SettingType.1":"AgentUpgradeConfig"}'
+    expect:
+      $.response.RequestId: { type: string, min_len: 1 }

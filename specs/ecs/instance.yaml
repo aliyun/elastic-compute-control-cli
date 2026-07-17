@@ -1,0 +1,2446 @@
+schema_version: 2
+product: ecs
+resource: instance
+kind: regional
+display_name:
+  en: instance
+  zh-CN: 实例
+description:
+  en: Manage instance resources
+  zh-CN: 管理实例资源
+help:
+  en: |
+    Before creating instances, call DescribeAvailableResource to check stock. DestinationResource selects the stock dimension; omit ZoneId to check all zones in the region. Example:
+    ecctl call ecs DescribeAvailableResource --region cn-hangzhou --DestinationResource InstanceType --IoOptimized optimized --InstanceType ecs.g5.large
+  zh-CN: |
+    创建实例前，调用 DescribeAvailableResource 查询库存。DestinationResource 用于选择库存维度；不传 ZoneId 时查询该地域下所有可用区。示例：
+    ecctl call ecs DescribeAvailableResource --region cn-hangzhou --DestinationResource InstanceType --IoOptimized optimized --InstanceType ecs.g5.large
+examples:
+  - ecctl ecs instance list --filter status=Running
+  - ecctl ecs instance create --type <instance-type> --image <image-id> --sg <sg-id> --vswitch <vswitch-id> --name web-01
+  - ecctl ecs instance delete <instance-id>
+messages:
+  ImageNotFound:
+    en: image not found
+    zh-CN: 镜像不存在
+
+identity:
+  field: id
+  prefix: i-
+  output_root:
+    one: instance
+    many: instances
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: instance ID
+        zh-CN: 实例 ID
+    ids:
+      type: array
+      description:
+        en: instance IDs
+        zh-CN: 实例 ID 列表
+      items:
+        type: string
+    name:
+      type: string
+      description:
+        en: instance name
+        zh-CN: 实例名称
+    description:
+      type: string
+      description:
+        en: instance description
+        zh-CN: 实例描述
+    status:
+      type: string
+      description:
+        en: instance status
+        zh-CN: 实例状态
+      enum: [Pending, Starting, Running, Stopping, Stopped]
+    image:
+      type: string
+      description:
+        en: ECS image ID or name
+        zh-CN: ECS 镜像 ID 或名称
+    image_family:
+      type: string
+      description:
+        en: image family
+        zh-CN: 镜像族系
+    type:
+      type: string
+      description:
+        en: instance type
+        zh-CN: 实例规格
+    sg:
+      type: string
+      description:
+        en: security group ID
+        zh-CN: 安全组 ID
+    security_group_ids:
+      type: array
+      description:
+        en: security group IDs
+        zh-CN: 安全组 ID 列表
+      items:
+        type: string
+    vswitch:
+      type: string
+      description:
+        en: VSwitch ID
+        zh-CN: 交换机 ID
+    vpc:
+      type: string
+      description:
+        en: VPC ID
+        zh-CN: VPC ID
+    zone:
+      type: string
+      description:
+        en: zone ID
+        zh-CN: 可用区 ID
+    affinity:
+      type: string
+      description:
+        en: instance affinity
+        zh-CN: 实例关联策略
+    amount:
+      type: integer
+      description:
+        en: number of instances to create
+        zh-CN: 创建实例数量
+    auto_pay:
+      type: boolean
+      description:
+        en: automatically pay for prepaid instances
+        zh-CN: 自动支付预付费实例
+    auto_release_time:
+      type: string
+      description:
+        en: automatic release time
+        zh-CN: 自动释放时间
+    allocate_public_ip:
+      type: boolean
+      description:
+        en: allocate a public IPv4 address
+        zh-CN: 分配公网 IPv4 地址
+    auto_renew:
+      type: boolean
+      description:
+        en: automatically renew prepaid instances
+        zh-CN: 自动续费预付费实例
+    auto_renew_period:
+      type: integer
+      description:
+        en: automatic renewal period
+        zh-CN: 自动续费周期
+    instance_charge_type:
+      type: string
+      default: PostPaid
+      description:
+        en: instance charge type
+        zh-CN: 实例付费类型
+      enum: [PostPaid, PrePaid]
+    credit_specification:
+      type: string
+      description:
+        en: burstable instance credit specification
+        zh-CN: 突发性能实例积分模式
+    dedicated_host:
+      type: string
+      description:
+        en: dedicated host ID
+        zh-CN: 专有宿主机 ID
+    deletion_protection:
+      type: boolean
+      description:
+        en: enable deletion protection
+        zh-CN: 启用删除保护
+    deployment_set_group_no:
+      type: integer
+      description:
+        en: deployment set group number
+        zh-CN: 部署集分组编号
+    deployment_set:
+      type: string
+      description:
+        en: deployment set ID
+        zh-CN: 部署集 ID
+    host_name:
+      type: string
+      description:
+        en: host name
+        zh-CN: 主机名
+    host_names:
+      type: array
+      description:
+        en: host names
+        zh-CN: 主机名列表
+      items:
+        type: string
+    hpc_cluster:
+      type: string
+      description:
+        en: HPC cluster ID
+        zh-CN: HPC 集群 ID
+    http_endpoint:
+      type: string
+      description:
+        en: metadata service endpoint setting
+        zh-CN: 元数据服务访问配置
+    http_put_response_hop_limit:
+      type: integer
+      description:
+        en: metadata service PUT response hop limit
+        zh-CN: 元数据服务 PUT 响应跳数限制
+    http_tokens:
+      type: string
+      description:
+        en: metadata service token requirement
+        zh-CN: 元数据服务 Token 要求
+    internet_charge_type:
+      type: string
+      description:
+        en: internet charge type
+        zh-CN: 公网计费类型
+    internet_bandwidth_in:
+      type: integer
+      description:
+        en: public inbound bandwidth
+        zh-CN: 公网入带宽
+    internet_bandwidth_out:
+      type: integer
+      description:
+        en: public outbound bandwidth
+        zh-CN: 公网出带宽
+    io_optimized:
+      type: string
+      description:
+        en: I/O optimized setting
+        zh-CN: I/O 优化配置
+    ipv6_address_count:
+      type: integer
+      description:
+        en: number of IPv6 addresses
+        zh-CN: IPv6 地址数量
+    ipv6_addresses:
+      type: array
+      description:
+        en: IPv6 addresses
+        zh-CN: IPv6 地址列表
+      items:
+        type: string
+    isp:
+      type: string
+      description:
+        en: line operator
+        zh-CN: 线路运营商
+    key_pair:
+      type: string
+      description:
+        en: key pair name
+        zh-CN: 密钥对名称
+    launch_template:
+      type: string
+      description:
+        en: launch template ID
+        zh-CN: 启动模板 ID
+    launch_template_name:
+      type: string
+      description:
+        en: launch template name
+        zh-CN: 启动模板名称
+    launch_template_version:
+      type: integer
+      description:
+        en: launch template version
+        zh-CN: 启动模板版本
+    min_amount:
+      type: integer
+      description:
+        en: minimum number of instances to create
+        zh-CN: 最小创建实例数量
+    network_interface_queue_number:
+      type: integer
+      description:
+        en: network interface queue number
+        zh-CN: 弹性网卡队列数
+    password:
+      type: string
+      description:
+        en: instance password
+        zh-CN: 实例密码
+    password_inherit:
+      type: boolean
+      description:
+        en: inherit image password
+        zh-CN: 继承镜像密码
+    vnc_password:
+      type: string
+      description:
+        en: VNC password
+        zh-CN: VNC 密码
+    period:
+      type: integer
+      description:
+        en: prepaid period
+        zh-CN: 预付费周期
+    period_unit:
+      type: string
+      description:
+        en: prepaid period unit
+        zh-CN: 预付费周期单位
+    command:
+      type: string
+      input_style: text|@file
+      description:
+        en: command content to run on the instance
+        zh-CN: 在实例上执行的命令内容
+    command_type:
+      type: string
+      default: RunShellScript
+      description:
+        en: cloud assistant command type
+        zh-CN: 云助手命令类型
+      enum: [RunShellScript, RunBatScript, RunPowerShellScript]
+    command_timeout:
+      type: integer
+      description:
+        en: command timeout in seconds
+        zh-CN: 命令超时时间，单位秒
+    working_dir:
+      type: string
+      description:
+        en: command working directory
+        zh-CN: 命令工作目录
+    content:
+      type: string
+      description:
+        en: file content to send
+        zh-CN: 要下发的文件内容
+    file_name:
+      type: string
+      description:
+        en: file name to create
+        zh-CN: 要创建的文件名
+    target_dir:
+      type: string
+      description:
+        en: target directory for the file
+        zh-CN: 文件目标目录
+    file_mode:
+      type: string
+      description:
+        en: file permission mode
+        zh-CN: 文件权限模式
+    owner:
+      type: string
+      description:
+        en: file owner
+        zh-CN: 文件属主
+    group:
+      type: string
+      description:
+        en: file group
+        zh-CN: 文件属组
+    start_time:
+      type: string
+      description:
+        en: monitor query start time
+        zh-CN: 监控查询开始时间
+    end_time:
+      type: string
+      description:
+        en: monitor query end time
+        zh-CN: 监控查询结束时间
+    monitor_period:
+      type: integer
+      description:
+        en: monitor data sampling period in seconds
+        zh-CN: 监控数据采样周期，单位秒
+    private_ip:
+      type: string
+      description:
+        en: private IPv4 address
+        zh-CN: 私网 IPv4 地址
+    ram_role:
+      type: string
+      description:
+        en: RAM role name
+        zh-CN: RAM 角色名称
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    security_enhancement_strategy:
+      type: string
+      description:
+        en: security enhancement strategy
+        zh-CN: 安全增强策略
+    spot_duration:
+      type: integer
+      description:
+        en: preemptible instance duration
+        zh-CN: 抢占式实例持续时间
+    spot_interruption_behavior:
+      type: string
+      description:
+        en: preemptible interruption behavior
+        zh-CN: 抢占中断行为
+    spot_price_limit:
+      type: number
+      description:
+        en: preemptible instance price limit
+        zh-CN: 抢占式实例价格上限
+    spot_strategy:
+      type: string
+      description:
+        en: preemptible instance strategy
+        zh-CN: 抢占式实例策略
+    storage_set:
+      type: string
+      description:
+        en: storage set ID
+        zh-CN: 存储集 ID
+    storage_set_partition_number:
+      type: integer
+      description:
+        en: storage set partition number
+        zh-CN: 存储集分区编号
+    tenancy:
+      type: string
+      description:
+        en: tenancy
+        zh-CN: 租户属性
+    unique_suffix:
+      type: boolean
+      description:
+        en: add a unique suffix to generated names
+        zh-CN: 为生成名称添加唯一后缀
+    user_data:
+      type: string
+      description:
+        en: user data
+        zh-CN: 用户数据
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+    remove_tag:
+      type: string_array
+      description:
+        en: tag keys to remove
+        zh-CN: 要移除的标签键
+    arns:
+      type: array
+      description:
+        en: RAM role ARNs for the instance.
+        zh-CN: 实例使用的 RAM 角色 ARN 列表。
+      items:
+        type: object
+        fields:
+          assume_role_for:
+            type: integer
+            description:
+              en: RAM role principal ID to assume.
+              zh-CN: 要扮演的 RAM 角色主体 ID。
+          role_type:
+            type: string
+            description:
+              en: RAM role type.
+              zh-CN: RAM 角色类型。
+          role_arn:
+            type: string
+            description:
+              en: RAM role ARN.
+              zh-CN: RAM 角色 ARN。
+    clock_options:
+      type: object
+      description:
+        en: clock options
+        zh-CN: 时钟选项
+    cpu_options:
+      type: object
+      description:
+        en: CPU options
+        zh-CN: CPU 选项
+      fields:
+        core:
+          type: integer
+          description:
+            en: CPU core count.
+            zh-CN: CPU 核数。
+        numa:
+          type: string
+          description:
+            en: NUMA setting.
+            zh-CN: NUMA 配置。
+        threads_per_core:
+          type: integer
+          description:
+            en: threads per CPU core.
+            zh-CN: 每核线程数。
+        topology_type:
+          type: string
+          description:
+            en: CPU topology type.
+            zh-CN: CPU 拓扑类型。
+    data_disks:
+      type: array
+      description:
+        en: Data disks to attach when creating the instance.
+        zh-CN: 创建实例时挂载的数据盘列表。
+      items:
+        type: object
+        fields:
+          auto_snapshot_policy:
+            type: string
+            description:
+              en: Automatic snapshot policy ID for the data disk.
+              zh-CN: 数据盘使用的自动快照策略 ID。
+          bursting_enabled:
+            type: boolean
+            description:
+              en: Whether to enable performance burst for the data disk.
+              zh-CN: 是否为数据盘开启性能突发。
+          category:
+            type: string
+            description:
+              en: Data disk category.
+              zh-CN: 数据盘类型。
+          delete_with_instance:
+            type: boolean
+            description:
+              en: Whether to release the data disk with the instance.
+              zh-CN: 是否随实例释放数据盘。
+          description:
+            type: string
+            description:
+              en: Data disk description.
+              zh-CN: 数据盘描述。
+          device:
+            type: string
+            description:
+              en: Data disk device name.
+              zh-CN: 数据盘设备名。
+          disk_name:
+            type: string
+            description:
+              en: Data disk name.
+              zh-CN: 数据盘名称。
+          encrypt_algorithm:
+            type: string
+            description:
+              en: Data disk encryption algorithm.
+              zh-CN: 数据盘加密算法。
+          encrypted:
+            type: string
+            description:
+              en: Whether the data disk is encrypted.
+              zh-CN: 数据盘是否加密。
+          kms_key_id:
+            type: string
+            description:
+              en: KMS key ID used to encrypt the data disk.
+              zh-CN: 用于加密数据盘的 KMS 密钥 ID。
+          performance_level:
+            type: string
+            description:
+              en: ESSD performance level for the data disk.
+              zh-CN: 数据盘 ESSD 性能等级。
+          provisioned_iops:
+            type: integer
+            description:
+              en: Provisioned IOPS for the data disk.
+              zh-CN: 数据盘预配置 IOPS。
+          size:
+            type: integer
+            description:
+              en: Data disk size in GiB.
+              zh-CN: 数据盘容量，单位 GiB。
+          snapshot_id:
+            type: string
+            description:
+              en: Snapshot ID used to create the data disk.
+              zh-CN: 创建数据盘使用的快照 ID。
+          storage_cluster_id:
+            type: string
+            description:
+              en: Storage cluster ID for the data disk.
+              zh-CN: 数据盘所属存储集群 ID。
+    hibernation_options:
+      type: object
+      description:
+        en: hibernation options
+        zh-CN: 休眠选项
+      fields:
+        configured:
+          type: boolean
+          description:
+            en: Whether hibernation is configured.
+            zh-CN: 是否配置休眠。
+    image_options:
+      type: object
+      description:
+        en: image options
+        zh-CN: 镜像选项
+    network_interfaces:
+      type: array
+      description:
+        en: Elastic network interfaces.
+        zh-CN: 弹性网卡列表。
+      items:
+        type: object
+        fields:
+          delete_on_release:
+            type: boolean
+            description:
+              en: Whether to delete the ENI when the instance is released.
+              zh-CN: 释放实例时是否删除弹性网卡。
+          description:
+            type: string
+            description:
+              en: ENI description.
+              zh-CN: 弹性网卡描述。
+          instance_type:
+            type: string
+            description:
+              en: Instance type used by the ENI.
+              zh-CN: 弹性网卡关联的实例规格。
+          ipv6_address:
+            type: array
+            description:
+              en: IPv6 addresses assigned to the ENI.
+              zh-CN: 分配给弹性网卡的 IPv6 地址列表。
+            items:
+              type: string
+          ipv6_address_count:
+            type: integer
+            description:
+              en: Number of IPv6 addresses assigned to the ENI.
+              zh-CN: 分配给弹性网卡的 IPv6 地址数量。
+          network_card_index:
+            type: integer
+            description:
+              en: Network card index.
+              zh-CN: 网卡索引。
+          network_interface_id:
+            type: string
+            description:
+              en: Existing ENI ID to attach.
+              zh-CN: 要挂载的已有弹性网卡 ID。
+          network_interface_name:
+            type: string
+            description:
+              en: ENI name.
+              zh-CN: 弹性网卡名称。
+          network_interface_traffic_mode:
+            type: string
+            description:
+              en: ENI traffic mode.
+              zh-CN: 弹性网卡流量模式。
+          primary_ip_address:
+            type: string
+            description:
+              en: Primary private IPv4 address of the ENI.
+              zh-CN: 弹性网卡主私网 IPv4 地址。
+          queue_number:
+            type: integer
+            description:
+              en: Number of queues for the ENI.
+              zh-CN: 弹性网卡队列数。
+          queue_pair_number:
+            type: integer
+            description:
+              en: Number of queue pairs for the ENI.
+              zh-CN: 弹性网卡队列对数量。
+          rx_queue_size:
+            type: integer
+            description:
+              en: Receive queue size.
+              zh-CN: 接收队列大小。
+          secondary_private_ip_address_count:
+            type: integer
+            description:
+              en: Number of secondary private IPv4 addresses.
+              zh-CN: 辅助私网 IPv4 地址数量。
+          security_group_id:
+            type: string
+            description:
+              en: Security group ID for the ENI.
+              zh-CN: 弹性网卡所属安全组 ID。
+          security_group_ids:
+            type: array
+            description:
+              en: Security group IDs for the ENI.
+              zh-CN: 弹性网卡所属安全组 ID 列表。
+            items:
+              type: string
+          source_dest_check:
+            type: boolean
+            description:
+              en: Whether to enable source/destination check.
+              zh-CN: 是否启用源/目标检查。
+          tx_queue_size:
+            type: integer
+            description:
+              en: Transmit queue size.
+              zh-CN: 发送队列大小。
+          vswitch_id:
+            type: string
+            description:
+              en: VSwitch ID for the ENI.
+              zh-CN: 弹性网卡所属交换机 ID。
+    network_options:
+      type: object
+      description:
+        en: network options
+        zh-CN: 网络选项
+    maintenance_options:
+      type: object
+      description:
+        en: maintenance attributes
+        zh-CN: 维护属性
+    private_dns_name_options:
+      type: object
+      description:
+        en: private DNS name options
+        zh-CN: 私有 DNS 名称选项
+    private_pool_options:
+      type: object
+      description:
+        en: private pool options
+        zh-CN: 私有池选项
+      fields:
+        id:
+          type: string
+          description:
+            en: private pool ID.
+            zh-CN: 私有池 ID。
+        match_criteria:
+          type: string
+          description:
+            en: private pool match criteria.
+            zh-CN: 私有池匹配条件。
+    scheduler_options:
+      type: object
+      description:
+        en: scheduler options
+        zh-CN: 调度选项
+      fields:
+        dedicated_host_cluster:
+          type: string
+          description:
+            en: dedicated host cluster ID.
+            zh-CN: 专有宿主机集群 ID。
+    security_options:
+      type: object
+      description:
+        en: security options
+        zh-CN: 安全选项
+      fields:
+        confidential_computing_mode:
+          type: string
+          description:
+            en: confidential computing mode.
+            zh-CN: 机密计算模式。
+        trusted_system_mode:
+          type: string
+          description:
+            en: trusted system mode.
+            zh-CN: 可信系统模式。
+    system_disk:
+      type: object
+      description:
+        en: System disk configuration.
+        zh-CN: 系统盘配置。
+      fields:
+        auto_snapshot_policy:
+          type: string
+          description:
+            en: Automatic snapshot policy ID for the system disk.
+            zh-CN: 系统盘使用的自动快照策略 ID。
+        category:
+          type: string
+          default: cloud_essd
+          description:
+            en: System disk category.
+            zh-CN: 系统盘类型。
+        description:
+          type: string
+          description:
+            en: System disk description.
+            zh-CN: 系统盘描述。
+        disk_name:
+          type: string
+          description:
+            en: System disk name.
+            zh-CN: 系统盘名称。
+        performance_level:
+          type: string
+          description:
+            en: ESSD performance level for the system disk.
+            zh-CN: 系统盘 ESSD 性能等级。
+        size:
+          type: string
+          description:
+            en: System disk size in GiB.
+            zh-CN: 系统盘容量，单位 GiB。
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  next_token:
+    type: string
+    description:
+      en: token for the next result page
+      zh-CN: 下一页查询 token
+  dry_run:
+    type: boolean
+    description:
+      en: validate without creating
+      zh-CN: 只校验不创建
+  force:
+    type: boolean
+    default: false
+    description:
+      en: force release running instance (must be set explicitly)
+      zh-CN: 强制释放运行中的实例（必须显式指定）
+  no_wait:
+    type: boolean
+    description:
+      en: return before waiter completion
+      zh-CN: 等待完成前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+  with_auto_renew:
+    type: boolean
+    description:
+      en: include automatic renewal settings
+      zh-CN: 附带自动续费设置
+  with_maintenance:
+    type: boolean
+    description:
+      en: include maintenance attributes
+      zh-CN: 附带维护属性
+  with_ram_role:
+    type: boolean
+    description:
+      en: include RAM role information
+      zh-CN: 附带 RAM 角色信息
+  with_user_data:
+    type: boolean
+    description:
+      en: include user data
+      zh-CN: 附带用户数据
+  with_vnc_url:
+    type: boolean
+    description:
+      en: include VNC login URL
+      zh-CN: 附带 VNC 登录地址
+  with_assistant:
+    type: boolean
+    description:
+      en: include cloud assistant status
+      zh-CN: 附带云助手状态
+  with_plugin_status:
+    type: boolean
+    description:
+      en: include cloud assistant plugin status
+      zh-CN: 附带云助手插件状态
+  with_tags:
+    type: boolean
+    description:
+      en: include resource tags
+      zh-CN: 附带资源标签
+
+probes:
+  state:
+    api: DescribeInstances
+    request:
+      RegionId: $context.region
+      InstanceIds: $.ids
+      InstanceName: $.name
+      Status: $.status
+      VpcId: $.vpc
+      VSwitchId: $.vswitch
+      SecurityGroupId: $.sg
+      InstanceType: $.type
+      ResourceGroupId: $.resource_group
+      Tag: $.tag
+      MaxResults: $.limit
+      NextToken: $.next_token
+    response:
+      items: $.Instances.Instance
+      next_token: $.NextToken
+      request_id: $.RequestId
+      id: $.InstanceId
+      state: $.Status
+      fields:
+        id: $.InstanceId
+        name: $.InstanceName
+        description: $.Description
+        status: $.Status
+        region: $.RegionId
+        zone: $.ZoneId
+        additional_info: $.AdditionalInfo
+        auto_release_time: $.AutoReleaseTime
+        clock_options: $.ClockOptions
+        cluster: $.ClusterId
+        cpu: $.Cpu
+        cpu_options: $.CpuOptions
+        vpc: $.VpcAttributes.VpcId
+        vswitch: $.VpcAttributes.VSwitchId
+        vpc_attributes: $.VpcAttributes
+        image: $.ImageId
+        image_options: $.ImageOptions
+        type: $.InstanceType
+        type_family: $.InstanceTypeFamily
+        charge_type: $.InstanceChargeType
+        network_type: $.InstanceNetworkType
+        internet_charge_type: $.InternetChargeType
+        internet_max_bandwidth_in: $.InternetMaxBandwidthIn
+        internet_max_bandwidth_out: $.InternetMaxBandwidthOut
+        io_optimized: $.IoOptimized
+        key_pair: $.KeyPairName
+        host_name: $.HostName
+        hpc_cluster: $.HpcClusterId
+        isp: $.ISP
+        os_name: $.OSName
+        os_name_en: $.OSNameEn
+        os_type: $.OSType
+        creation_time: $.CreationTime
+        expired_time: $.ExpiredTime
+        start_time: $.StartTime
+        resource_group: $.ResourceGroupId
+        credit_specification: $.CreditSpecification
+        dedicated_host_attribute: $.DedicatedHostAttribute
+        dedicated_instance_attribute: $.DedicatedInstanceAttribute
+        deletion_protection: $.DeletionProtection
+        deployment_set_group_no: $.DeploymentSetGroupNo
+        deployment_set: $.DeploymentSetId
+        device_available: $.DeviceAvailable
+        ecs_capacity_reservation_attr: $.EcsCapacityReservationAttr
+        eip_address: $.EipAddress
+        enable_nvs: $.EnableNVS
+        gpu_amount: $.GPUAmount
+        gpu_spec: $.GPUSpec
+        hibernation_options: $.HibernationOptions
+        inner_ip_addresses: $.InnerIpAddress.IpAddress
+        local_storage_amount: $.LocalStorageAmount
+        local_storage_capacity: $.LocalStorageCapacity
+        memory: $.Memory
+        metadata_options: $.MetadataOptions
+        network_interfaces: $.NetworkInterfaces.NetworkInterface
+        operation_locks: $.OperationLocks.LockReason
+        private_dns_name_options: $.PrivateDnsNameOptions
+        public_ip_addresses: $.PublicIpAddress.IpAddress
+        rdma_ip_addresses: $.RdmaIpAddress.IpAddress
+        recyclable: $.Recyclable
+        sale_cycle: $.SaleCycle
+        security_group_ids: $.SecurityGroupIds.SecurityGroupId
+        serial_number: $.SerialNumber
+        spot_duration: $.SpotDuration
+        spot_interruption_behavior: $.SpotInterruptionBehavior
+        spot_price_limit: $.SpotPriceLimit
+        spot_strategy: $.SpotStrategy
+        stopped_mode: $.StoppedMode
+        tags: $.Tags.Tag
+        vlan: $.VlanId
+      absent:
+        when_empty_for_requested_ids: true
+  attribute:
+    api: DescribeInstanceAttribute
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      id: $.InstanceId
+      state: $.Status
+      fields:
+        id: $.InstanceId
+        name: $.InstanceName
+        description: $.Description
+        status: $.Status
+        region: $.RegionId
+        zone: $.ZoneId
+        vpc: $.VpcAttributes.VpcId
+        vswitch: $.VpcAttributes.VSwitchId
+        image: $.ImageId
+        type: $.InstanceType
+        charge_type: $.InstanceChargeType
+        network_type: $.InstanceNetworkType
+        internet_charge_type: $.InternetChargeType
+        internet_max_bandwidth_in: $.InternetMaxBandwidthIn
+        internet_max_bandwidth_out: $.InternetMaxBandwidthOut
+        key_pair: $.KeyPairName
+        host_name: $.HostName
+        os_name: $.OSName
+        os_name_en: $.OSNameEn
+        os_type: $.OSType
+        creation_time: $.CreationTime
+        expired_time: $.ExpiredTime
+        start_time: $.StartTime
+        resource_group: $.ResourceGroupId
+        metadata_options: $.MetadataOptions
+        security_group_ids: $.SecurityGroupIds.SecurityGroupId
+        tags: $.Tags.Tag
+  auto_renew:
+    api: DescribeInstanceAutoRenewAttribute
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+    response:
+      items: $.InstanceRenewAttributes.InstanceRenewAttribute
+      request_id: $.RequestId
+      id: $.InstanceId
+      fields:
+        id: $.InstanceId
+        auto_renew: $.AutoRenewEnabled
+        auto_renew_period:
+          int: $.Duration
+        auto_renew_period_unit: $.PeriodUnit
+  maintenance:
+    api: DescribeInstanceMaintenanceAttributes
+    request:
+      RegionId: $context.region
+      InstanceId:
+        each: $.ids
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        maintenance: $
+  ram_role:
+    api: DescribeInstanceRamRole
+    request:
+      RegionId: $context.region
+      InstanceIds: $.ids
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        ram_role: $
+  user_data:
+    api: DescribeUserData
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        user_data: $.UserData
+  vnc_url:
+    api: DescribeInstanceVncUrl
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        vnc_url: $.VncUrl
+  assistant_status:
+    api: DescribeCloudAssistantStatus
+    request:
+      RegionId: $context.region
+      InstanceIds: $.ids
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        assistant_status: $
+  plugin_status:
+    api: ListPluginStatus
+    request:
+      RegionId: $context.region
+      InstanceId:
+        each: $.ids
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        plugin_statuses: $.PluginStatusList.PluginStatus
+  tags:
+    api: ListTagResources
+    request:
+      RegionId: $context.region
+      ResourceType: instance
+      ResourceId:
+        each: $.ids
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        tags: $.TagResources.TagResource
+  invocation_results:
+    api: DescribeInvocationResults
+    request:
+      RegionId: $context.region
+      InvokeId: $context.id
+    response:
+      items: $.Invocation.InvocationResults.InvocationResult
+      request_id: $.RequestId
+      id: $.InvokeId
+      state: $.InvocationStatus
+      fields:
+        invoke_id: $.InvokeId
+        instance: $.InstanceId
+        status: $.InvocationStatus
+        exit_code: $.ExitCode
+        output: $.Output
+        output_text: $.Output
+        error_info: $.ErrorInfo
+        start_time: $.StartTime
+        end_time: $.EndTime
+  command_invocation:
+    api: DescribeInvocations
+    request:
+      RegionId: $context.region
+      InvokeId: $context.id
+    response:
+      items: $.Invocations.Invocation
+      request_id: $.RequestId
+      id: $.InvokeId
+      state: $.InvocationStatus
+      fields:
+        invoke_id: $.InvokeId
+        command_id: $.CommandId
+        status: $.InvocationStatus
+        invoke_status: $.InvokeStatus
+        creation_time: $.CreationTime
+  sendfile_results:
+    api: DescribeSendFileResults
+    request:
+      RegionId: $context.region
+      InvokeId: $context.id
+    response:
+      items: $.Invocations.Invocation
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.InvokeId
+      state: $.InvocationStatus
+      fields:
+        invoke_id: $.InvokeId
+        name: $.Name
+        target_dir: $.TargetDir
+        status: $.InvocationStatus
+        content_type: $.ContentType
+        overwrite: $.Overwrite
+        start_time: $.StartTime
+        end_time: $.FinishTime
+  monitor_data:
+    api: DescribeInstanceMonitorData
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      StartTime: $.start_time
+      EndTime: $.end_time
+      Period: $.monitor_period
+    response:
+      items: $.MonitorData.InstanceMonitorData
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.InstanceId
+      fields:
+        id: $.InstanceId
+        timestamp: $.TimeStamp
+        cpu: $.CPU
+        intranet_rx: $.IntranetRX
+        intranet_tx: $.IntranetTX
+        internet_rx: $.InternetRX
+        internet_tx: $.InternetTX
+
+waiters:
+  running_after_create:
+    probe: state
+    target: Running
+    interval: 2s
+    timeout: 300s
+  running_after_update:
+    probe: state
+    target: Running
+    interval: 2s
+    timeout: 300s
+  running_after_start:
+    probe: state
+    target: Running
+    interval: 2s
+    timeout: 300s
+  stopped_after_stop:
+    probe: state
+    target: Stopped
+    interval: 2s
+    timeout: 300s
+  running_after_reboot:
+    probe: state
+    target: Running
+    interval: 2s
+    timeout: 300s
+  deleted_after_delete:
+    probe: state
+    target: absent
+    interval: 2s
+    timeout: 300s
+  command_invocation_success:
+    probe: command_invocation
+    target: Success
+    interval: 5s
+    timeout: 600s
+    failure:
+      states: [Failed, PartialFailed, Stopped]
+  sendfile_result_success:
+    probe: sendfile_results
+    target: Success
+    interval: 5s
+    timeout: 600s
+    failure:
+      states: [Failed, PartialFailed]
+
+bindings:
+  create_to_running:
+    api: RunInstances
+    hooks:
+      before: [validate_dry_run_amount, resolve_image_name]
+      after_error: [suggest_availability_query]
+      api_calls:
+        - hook: resolve_image_name
+          api: DescribeImages
+          phase: preflight
+          condition: trim(input.image) != "" && !ends_with(lower(trim(input.image)), ".vhd")
+          purpose:
+            en: Resolve the requested image name to an image ID before creating the instance.
+            zh-CN: 创建实例前，将指定的镜像名称解析为镜像 ID。
+    idempotency:
+      field: ClientToken
+      prefix: instance-create
+    request:
+      RegionId: $context.region
+      Affinity: $.affinity
+      Amount: $.amount
+      AutoPay: $.auto_pay
+      AutoReleaseTime: $.auto_release_time
+      AutoRenew: $.auto_renew
+      AutoRenewPeriod: $.auto_renew_period
+      ImageId: $.image
+      ImageFamily: $.image_family
+      InstanceType: $.type
+      SecurityGroupId: $.sg
+      VSwitchId: $.vswitch
+      ZoneId: $.zone
+      InstanceName: $.name
+      Description: $.description
+      InstanceChargeType: $.instance_charge_type
+      CreditSpecification: $.credit_specification
+      DedicatedHostId: $.dedicated_host
+      DeletionProtection: $.deletion_protection
+      DeploymentSetGroupNo: $.deployment_set_group_no
+      DeploymentSetId: $.deployment_set
+      HostName: $.host_name
+      HpcClusterId: $.hpc_cluster
+      HttpEndpoint: $.http_endpoint
+      HttpPutResponseHopLimit: $.http_put_response_hop_limit
+      HttpTokens: $.http_tokens
+      InternetChargeType: $.internet_charge_type
+      InternetMaxBandwidthIn: $.internet_bandwidth_in
+      InternetMaxBandwidthOut: $.internet_bandwidth_out
+      IoOptimized: $.io_optimized
+      Ipv6AddressCount: $.ipv6_address_count
+      Isp: $.isp
+      KeyPairName: $.key_pair
+      LaunchTemplateId: $.launch_template
+      LaunchTemplateName: $.launch_template_name
+      LaunchTemplateVersion: $.launch_template_version
+      MinAmount: $.min_amount
+      NetworkInterfaceQueueNumber: $.network_interface_queue_number
+      Password: $.password
+      PasswordInherit: $.password_inherit
+      Period: $.period
+      PeriodUnit: $.period_unit
+      PrivateIpAddress: $.private_ip
+      RamRoleName: $.ram_role
+      ResourceGroupId: $.resource_group
+      SecurityEnhancementStrategy: $.security_enhancement_strategy
+      SpotDuration: $.spot_duration
+      SpotInterruptionBehavior: $.spot_interruption_behavior
+      SpotPriceLimit: $.spot_price_limit
+      SpotStrategy: $.spot_strategy
+      StorageSetId: $.storage_set
+      StorageSetPartitionNumber: $.storage_set_partition_number
+      Tenancy: $.tenancy
+      UniqueSuffix: $.unique_suffix
+      UserData: $.user_data
+      DryRun: $.dry_run
+      Tag: $.tag
+      Arn:
+        each: $.arns
+        fields:
+          AssumeRoleFor: $.assume_role_for
+          RoleType: $.role_type
+          Rolearn: $.role_arn
+      ClockOptions:
+        from: $.clock_options
+      CpuOptions:
+        from: $.cpu_options
+        fields:
+          Core: $.core
+          Numa: $.numa
+          ThreadsPerCore: $.threads_per_core
+          TopologyType: $.topology_type
+      DataDisk:
+        each: $.data_disks
+        fields:
+          AutoSnapshotPolicyId: $.auto_snapshot_policy
+          BurstingEnabled: $.bursting_enabled
+          Category: $.category
+          DeleteWithInstance: $.delete_with_instance
+          Description: $.description
+          Device: $.device
+          DiskName: $.disk_name
+          EncryptAlgorithm: $.encrypt_algorithm
+          Encrypted: $.encrypted
+          KMSKeyId: $.kms_key_id
+          PerformanceLevel: $.performance_level
+          ProvisionedIops: $.provisioned_iops
+          Size: $.size
+          SnapshotId: $.snapshot_id
+          StorageClusterId: $.storage_cluster_id
+      HibernationOptions:
+        from: $.hibernation_options
+        fields:
+          Configured: $.configured
+      HostNames:
+        each: $.host_names
+      ImageOptions:
+        from: $.image_options
+      Ipv6Address:
+        each: $.ipv6_addresses
+      NetworkInterface:
+        each: $.network_interfaces
+        fields:
+          DeleteOnRelease: $.delete_on_release
+          Description: $.description
+          InstanceType: $.instance_type
+          Ipv6Address:
+            each: $.ipv6_address
+          Ipv6AddressCount: $.ipv6_address_count
+          NetworkCardIndex: $.network_card_index
+          NetworkInterfaceId: $.network_interface_id
+          NetworkInterfaceName: $.network_interface_name
+          NetworkInterfaceTrafficMode: $.network_interface_traffic_mode
+          PrimaryIpAddress: $.primary_ip_address
+          QueueNumber: $.queue_number
+          QueuePairNumber: $.queue_pair_number
+          RxQueueSize: $.rx_queue_size
+          SecondaryPrivateIpAddressCount: $.secondary_private_ip_address_count
+          SecurityGroupId: $.security_group_id
+          SecurityGroupIds:
+            each: $.security_group_ids
+          SourceDestCheck: $.source_dest_check
+          TxQueueSize: $.tx_queue_size
+          VSwitchId: $.vswitch_id
+      NetworkOptions:
+        from: $.network_options
+      PrivateDnsNameOptions:
+        from: $.private_dns_name_options
+      PrivatePoolOptions:
+        from: $.private_pool_options
+        fields:
+          Id: $.id
+          MatchCriteria: $.match_criteria
+      SchedulerOptions:
+        from: $.scheduler_options
+        fields:
+          DedicatedHostClusterId: $.dedicated_host_cluster
+      SecurityGroupIds:
+        each: $.security_group_ids
+      SecurityOptions:
+        from: $.security_options
+        fields:
+          ConfidentialComputingMode: $.confidential_computing_mode
+          TrustedSystemMode: $.trusted_system_mode
+      SystemDisk:
+        from: $.system_disk
+        fields:
+          AutoSnapshotPolicyId: $.auto_snapshot_policy
+          Category: $.category
+          Description: $.description
+          DiskName: $.disk_name
+          PerformanceLevel: $.performance_level
+          Size: $.size
+      ApiParam:
+        raw: $.api_param
+    id_from: $.InstanceIdSets.InstanceIdSet
+    request_id_from: $.RequestId
+    wait: running_after_create
+  update_attributes:
+    api: ModifyInstanceAttribute
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      InstanceName: $.name
+      Description: $.description
+      HostName: $.host_name
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  update_auto_release_time:
+    api: ModifyInstanceAutoReleaseTime
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      AutoReleaseTime: $.auto_release_time
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  update_auto_renew:
+    api: ModifyInstanceAutoRenewAttribute
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      AutoRenew: $.auto_renew
+      Duration: $.auto_renew_period
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  update_charge_type:
+    api: ModifyInstanceChargeType
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      InstanceChargeType: $.instance_charge_type
+      Period: $.period
+      PeriodUnit: $.period_unit
+      AutoPay: $.auto_pay
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  update_clock_options:
+    api: ModifyInstanceClockOptions
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      PtpStatus: $.clock_options.ptp_status
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  update_maintenance_attributes:
+    api: ModifyInstanceMaintenanceAttributes
+    request:
+      RegionId: $context.region
+      InstanceId:
+        each: $list(input.id)
+      ActionOnMaintenance: $.maintenance_options.action_on_maintenance
+      NotifyOnMaintenance: $.maintenance_options.notify_on_maintenance
+      MaintenanceWindow:
+        each: $.maintenance_options.maintenance_windows
+        fields:
+          StartTime: $.start_time
+          EndTime: $.end_time
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  update_metadata_options:
+    api: ModifyInstanceMetadataOptions
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      HttpEndpoint: $.http_endpoint
+      HttpTokens: $.http_tokens
+      HttpPutResponseHopLimit: $.http_put_response_hop_limit
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  update_network_options:
+    api: ModifyInstanceNetworkOptions
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      NetworkOptions:
+        from: $.network_options
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  update_network_spec:
+    api: ModifyInstanceNetworkSpec
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      InternetMaxBandwidthIn: $.internet_bandwidth_in
+      InternetMaxBandwidthOut: $.internet_bandwidth_out
+      InternetChargeType: $.internet_charge_type
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  update_postpaid_spec:
+    api: ModifyInstanceSpec
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      InstanceType: $.type
+      InternetMaxBandwidthIn: $.internet_bandwidth_in
+      InternetMaxBandwidthOut: $.internet_bandwidth_out
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  update_prepay_spec:
+    api: ModifyPrepayInstanceSpec
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      InstanceType: $.type
+      Period: $.period
+      AutoPay: $.auto_pay
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  update_vnc_password:
+    api: ModifyInstanceVncPasswd
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      VncPassword: $.vnc_password
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  update_vpc_attribute:
+    api: ModifyInstanceVpcAttribute
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      VSwitchId: $.vswitch
+      PrivateIpAddress: $.private_ip
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  allocate_public_ip:
+    api: AllocatePublicIpAddress
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  replace_system_disk:
+    api: ReplaceSystemDisk
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      ImageId: $.image
+      SystemDisk:
+        from: $.system_disk
+        fields:
+          Category: $.category
+          PerformanceLevel: $.performance_level
+          Size: $.size
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  attach_ram_role:
+    api: AttachInstanceRamRole
+    request:
+      RegionId: $context.region
+      RamRoleName: $.ram_role
+      InstanceIds: $list(input.id)
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  detach_ram_role:
+    api: DetachInstanceRamRole
+    request:
+      RegionId: $context.region
+      InstanceIds: $list(input.id)
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  attach_key_pair:
+    api: AttachKeyPair
+    request:
+      RegionId: $context.region
+      KeyPairName: $.key_pair
+      InstanceIds: $list(input.id)
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  detach_key_pair:
+    api: DetachKeyPair
+    request:
+      RegionId: $context.region
+      InstanceIds: $list(input.id)
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  join_security_group:
+    api: JoinSecurityGroup
+    each: $except(input.security_group_ids,context.current_security_groups.security_group_ids)
+    request:
+      RegionId: $context.region
+      InstanceId: $input.id
+      SecurityGroupId: $
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  leave_security_group:
+    api: LeaveSecurityGroup
+    each: $except(context.current_security_groups.security_group_ids,input.security_group_ids)
+    request:
+      RegionId: $context.region
+      InstanceId: $input.id
+      SecurityGroupId: $
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  join_resource_group:
+    api: JoinResourceGroup
+    request:
+      RegionId: $context.region
+      ResourceGroupId: $.resource_group
+      ResourceType: instance
+      ResourceId: $.id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  tag_resources:
+    api: TagResources
+    request:
+      RegionId: $context.region
+      ResourceType: instance
+      ResourceId:
+        each: $list(input.id)
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  untag_resources:
+    api: UntagResources
+    request:
+      RegionId: $context.region
+      ResourceType: instance
+      ResourceId:
+        each: $list(input.id)
+      TagKey:
+        each: $.remove_tag
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  delete_to_absent:
+    api: DeleteInstance
+    hooks:
+      after_error: [suggest_force_release]
+    retry:
+      policy: initializing_grace
+      errors:
+        - IncorrectInstanceStatus
+      # Only grace-retry status errors while forcing: a running instance can
+      # only be released with --force, so retrying without it never succeeds.
+      # Surface the error immediately instead and let suggest_force_release
+      # point the user at --force.
+      when: input.force
+      initial_interval: 5s
+      max_interval: 10s
+      timeout: 120s
+    request:
+      RegionId: $context.region
+      InstanceId: $first(input.ids)
+      Force: $.force
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+  delete_many_to_absent:
+    api: DeleteInstances
+    hooks:
+      after_error: [suggest_force_release]
+    request:
+      RegionId: $context.region
+      InstanceId:
+        each: $input.ids
+      Force: $.force
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: deleted_after_delete
+  start_one:
+    api: StartInstance
+    request:
+      RegionId: $context.region
+      InstanceId: $first(input.ids)
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: running_after_start
+  start_many:
+    api: StartInstances
+    request:
+      RegionId: $context.region
+      InstanceId:
+        each: $input.ids
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: running_after_start
+  stop_one:
+    api: StopInstance
+    request:
+      RegionId: $context.region
+      InstanceId: $first(input.ids)
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: stopped_after_stop
+  stop_many:
+    api: StopInstances
+    request:
+      RegionId: $context.region
+      InstanceId:
+        each: $input.ids
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: stopped_after_stop
+  reboot_one:
+    api: RebootInstance
+    request:
+      RegionId: $context.region
+      InstanceId: $first(input.ids)
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: running_after_reboot
+  reboot_many:
+    api: RebootInstances
+    request:
+      RegionId: $context.region
+      InstanceId:
+        each: $input.ids
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: running_after_reboot
+  renew_instance:
+    api: RenewInstance
+    request:
+      RegionId: $context.region
+      InstanceId: $.id
+      Period: $.period
+      PeriodUnit: $.period_unit
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  run_command:
+    api: RunCommand
+    request:
+      RegionId: $context.region
+      InstanceId:
+        each: $input.ids
+      Type: $.command_type
+      CommandContent: $.command
+      WorkingDir: $.working_dir
+      Timeout: $.command_timeout
+      ApiParam:
+        raw: $.api_param
+    id_from: $.InvokeId
+    request_id_from: $.RequestId
+    wait: command_invocation_success
+  send_file:
+    api: SendFile
+    request:
+      RegionId: $context.region
+      InstanceId:
+        each: $input.ids
+      Name: $.file_name
+      TargetDir: $.target_dir
+      Content: $.content
+      FileMode: $.file_mode
+      Owner: $.owner
+      Group: $.group
+      ApiParam:
+        raw: $.api_param
+    id_from: $.InvokeId
+    request_id_from: $.RequestId
+    wait: sendfile_result_success
+
+operations:
+  create:
+    examples:
+      - ecctl call ecs DescribeAvailableResource --region cn-hangzhou --DestinationResource InstanceType --IoOptimized optimized --InstanceType ecs.g5.large
+      - ecctl call ecs DescribeAvailableResource --region cn-hangzhou --ZoneId cn-hangzhou-b --ResourceType instance --DestinationResource SystemDisk --InstanceType ecs.g7.large --SystemDiskCategory cloud_essd
+      - ecctl ecs instance create --type <type> --image <image-id> --sg <sg-id> --vswitch <vsw-id>
+      - ecctl ecs instance create --type <type> --image <image-id> --sg <sg-id> --vswitch <vsw-id> --name my-name --tag env=prod
+    description:
+      en: Create instance
+      zh-CN: 创建实例
+    help:
+      en: Before creating instances, call DescribeAvailableResource to check stock. Use DestinationResource=SystemDisk with InstanceType when checking system disk stock.
+      zh-CN: 创建实例前，调用 DescribeAvailableResource 查询库存。查询系统盘库存时，DestinationResource=SystemDisk 需要配合 InstanceType 使用。
+    input:
+      fields:
+        - type:
+            required: true
+        - image:
+            required: true
+        - sg:
+            required: true
+        - vswitch:
+            required: true
+        - affinity:
+            brief: false
+        - amount:
+            brief: false
+        - arns:
+            brief: false
+        - auto_pay:
+            brief: false
+        - auto_release_time:
+            brief: false
+        - auto_renew:
+            brief: false
+        - auto_renew_period:
+            brief: false
+        - clock_options:
+            brief: false
+        - name
+        - description:
+            brief: false
+        - zone
+        - cpu_options:
+            brief: false
+        - credit_specification:
+            brief: false
+        - dedicated_host:
+            brief: false
+        - deletion_protection:
+            brief: false
+        - deployment_set_group_no:
+            brief: false
+        - deployment_set:
+            brief: false
+        - hibernation_options:
+            brief: false
+        - host_name:
+            brief: false
+        - host_names:
+            brief: false
+        - instance_charge_type:
+            brief: false
+        - hpc_cluster:
+            brief: false
+        - http_endpoint:
+            brief: false
+        - http_put_response_hop_limit:
+            brief: false
+        - http_tokens:
+            brief: false
+        - image_family:
+            brief: false
+        - image_options:
+            brief: false
+        - internet_charge_type:
+            brief: false
+        - internet_bandwidth_in:
+            brief: false
+        - internet_bandwidth_out:
+            brief: false
+        - io_optimized:
+            brief: false
+        - ipv6_address_count:
+            brief: false
+        - ipv6_addresses:
+            brief: false
+        - isp:
+            brief: false
+        - key_pair:
+            brief: false
+        - launch_template:
+            brief: false
+        - launch_template_name:
+            brief: false
+        - launch_template_version:
+            brief: false
+        - min_amount:
+            brief: false
+        - network_interfaces:
+            brief: false
+        - network_interface_queue_number:
+            brief: false
+        - network_options:
+            brief: false
+        - password:
+            brief: false
+        - password_inherit:
+            brief: false
+        - period:
+            brief: false
+        - period_unit:
+            brief: false
+        - private_dns_name_options:
+            brief: false
+        - private_ip:
+            brief: false
+        - private_pool_options:
+            brief: false
+        - ram_role:
+            brief: false
+        - resource_group:
+            brief: false
+        - scheduler_options:
+            brief: false
+        - security_enhancement_strategy:
+            brief: false
+        - security_options:
+            brief: false
+        - spot_duration:
+            brief: false
+        - spot_interruption_behavior:
+            brief: false
+        - spot_price_limit:
+            brief: false
+        - spot_strategy:
+            brief: false
+        - storage_set:
+            brief: false
+        - storage_set_partition_number:
+            brief: false
+        - system_disk:
+            brief: false
+        - tenancy:
+            brief: false
+        - unique_suffix:
+            brief: false
+        - user_data:
+            brief: false
+        - tag
+        - data_disks:
+            brief: false
+        - security_group_ids:
+            brief: false
+      controls:
+        - dry_run
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_to_running
+        wait_unless: input.no_wait
+      - probe: state
+        ids:
+          - $context.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            image: $input.image
+            type: $input.type
+            vswitch: $input.vswitch
+            region: $context.region
+  update:
+    examples:
+      - ecctl ecs instance update <instance-id> --name web-server-01
+      - ecctl ecs instance update <instance-id> --type ecs.g6.large
+      - ecctl ecs instance update <instance-id> --security-group-ids <sg-id>,<sg-id2>
+    description:
+      en: Update instance
+      zh-CN: 更新实例
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - name
+        - description
+        - host_name
+        - security_group_ids
+        - type
+        - image
+        - instance_charge_type:
+            default: ""
+        - period
+        - period_unit:
+            schema: false
+        - auto_pay:
+            schema: false
+        - auto_release_time:
+            schema: false
+        - auto_renew
+        - auto_renew_period:
+            schema: false
+        - clock_options
+        - maintenance_options
+        - http_endpoint
+        - http_tokens
+        - http_put_response_hop_limit:
+            schema: false
+        - network_options
+        - internet_bandwidth_in:
+            schema: false
+        - internet_bandwidth_out
+        - internet_charge_type:
+            schema: false
+        - vnc_password:
+            schema: false
+        - vswitch
+        - private_ip:
+            schema: false
+        - allocate_public_ip:
+            schema: false
+        - system_disk:
+            schema: false
+        - ram_role:
+            allow_empty: true
+        - key_pair:
+            allow_empty: true
+        - resource_group
+        - tag
+        - remove_tag
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: update_attributes
+        when: has(input.name) || has(input.description) || has(input.host_name)
+      - binding: update_auto_release_time
+        when: has(input.auto_release_time)
+      - binding: update_auto_renew
+        when: has(input.auto_renew) || has(input.auto_renew_period)
+      - binding: update_charge_type
+        when: has(input.instance_charge_type) && !has(input.type)
+      - binding: update_clock_options
+        when: has(input.clock_options)
+      - binding: update_maintenance_attributes
+        when: has(input.maintenance_options)
+      - binding: update_metadata_options
+        when: has(input.http_endpoint) || has(input.http_tokens) || has(input.http_put_response_hop_limit)
+      - binding: update_network_options
+        when: has(input.network_options)
+      - binding: update_network_spec
+        when: has(input.internet_bandwidth_in) || has(input.internet_bandwidth_out) || has(input.internet_charge_type)
+      - binding: update_postpaid_spec
+        when: has(input.type) && input.instance_charge_type != PrePaid
+      - binding: update_prepay_spec
+        when: has(input.type) && input.instance_charge_type == PrePaid
+      - binding: update_vnc_password
+        when: has(input.vnc_password)
+      - binding: update_vpc_attribute
+        when: has(input.vswitch) || has(input.private_ip)
+      - binding: allocate_public_ip
+        when: has(input.allocate_public_ip)
+      - binding: replace_system_disk
+        when: has(input.image) || has(input.system_disk)
+      - binding: attach_ram_role
+        when: specified(input.ram_role) && has(input.ram_role)
+      - binding: detach_ram_role
+        when: specified(input.ram_role) && !has(input.ram_role)
+      - binding: attach_key_pair
+        when: specified(input.key_pair) && has(input.key_pair)
+      - binding: detach_key_pair
+        when: specified(input.key_pair) && !has(input.key_pair)
+      - probe: attribute
+        ids:
+          - $input.id
+        as: current_security_groups
+        many: true
+        when: has(input.security_group_ids)
+      - binding: join_security_group
+        when: has(input.security_group_ids)
+      - binding: leave_security_group
+        when: has(input.security_group_ids)
+      - binding: join_resource_group
+        when: has(input.resource_group)
+      - binding: tag_resources
+        when: has(input.tag)
+      - binding: untag_resources
+        when: has(input.remove_tag)
+      - probe: state
+        ids:
+          - $input.id
+        as: final
+        unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+            name: $input.name
+            description: $input.description
+  delete:
+    examples:
+      - ecctl ecs instance delete <instance-id>
+      - ecctl ecs instance delete i-1 i-2 i-3 --force
+    description:
+      en: Delete instance
+      zh-CN: 删除实例
+    input:
+      fields:
+        - ids:
+            required: true
+            positional_many: true
+      controls:
+        - force
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_to_absent
+        when: single(input.ids)
+        wait_unless: input.no_wait
+      - binding: delete_many_to_absent
+        when: multiple(input.ids)
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $first(input.ids)
+          deleted: true
+        when: single(input.ids)
+      - emit:
+          fields:
+            ids: $input.ids
+          deleted: true
+        when: multiple(input.ids)
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get instance
+      zh-CN: 获取实例
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - with_auto_renew
+        - with_maintenance
+        - with_ram_role
+        - with_user_data
+        - with_vnc_url
+        - with_assistant
+        - with_plugin_status
+        - with_tags
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        not_found: error
+      - probe: auto_renew
+        ids:
+          - $input.id
+        when: input.with_auto_renew
+        merge: true
+      - probe: maintenance
+        ids:
+          - $input.id
+        when: input.with_maintenance
+        merge: true
+      - probe: ram_role
+        ids:
+          - $input.id
+        when: input.with_ram_role
+        merge: true
+      - probe: user_data
+        ids:
+          - $input.id
+        when: input.with_user_data
+        merge: true
+      - probe: vnc_url
+        ids:
+          - $input.id
+        when: input.with_vnc_url
+        merge: true
+      - probe: assistant_status
+        ids:
+          - $input.id
+        when: input.with_assistant
+        merge: true
+      - probe: plugin_status
+        ids:
+          - $input.id
+        when: input.with_plugin_status
+        merge: true
+      - probe: tags
+        ids:
+          - $input.id
+        when: input.with_tags
+        merge: true
+  list:
+    examples:
+      - ecctl ecs instance list
+      - ecctl ecs instance list --filter status=<value>
+      - ecctl ecs instance list --filter tag.env=prod
+    description:
+      en: List instance resources
+      zh-CN: 列出实例资源
+    input:
+      fields:
+        - ids:
+            positional_many: true
+      controls:
+        - filter
+        - limit
+        - next_token
+    filters:
+      id:
+        target: ids
+      ids:
+        target: ids
+      instance:
+        target: ids
+      instance.id:
+        target: ids
+      status:
+        target: status
+      vpc:
+        target: vpc
+      vpc.id:
+        target: vpc
+      vswitch:
+        target: vswitch
+      vswitch.id:
+        target: vswitch
+      sg:
+        target: sg
+      sg.id:
+        target: sg
+      security-group:
+        target: sg
+      security-group.id:
+        target: sg
+      name:
+        target: name
+      type:
+        target: type
+      resource-group:
+        target: resource_group
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: state
+        many: true
+  start:
+    examples:
+      - ecctl ecs instance start <instance-id>
+      - ecctl ecs instance start i-1 i-2 i-3
+    description:
+      en: Start instance
+      zh-CN: 启动实例
+    input:
+      fields:
+        - ids:
+            required: true
+            positional_many: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: start_one
+        when: single(input.ids)
+        wait_unless: input.no_wait
+      - binding: start_many
+        when: multiple(input.ids)
+        wait_unless: input.no_wait
+      - probe: state
+        ids:
+          - $input.ids
+        many: true
+        unless: input.no_wait
+  stop:
+    examples:
+      - ecctl ecs instance stop <instance-id>
+      - ecctl ecs instance stop i-1 i-2 --force
+    description:
+      en: Stop instance
+      zh-CN: 停止实例
+    input:
+      fields:
+        - ids:
+            required: true
+            positional_many: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: stop_one
+        when: single(input.ids)
+        wait_unless: input.no_wait
+      - binding: stop_many
+        when: multiple(input.ids)
+        wait_unless: input.no_wait
+      - probe: state
+        ids:
+          - $input.ids
+        many: true
+        unless: input.no_wait
+  reboot:
+    examples:
+      - ecctl ecs instance reboot <instance-id>
+      - ecctl ecs instance reboot i-1 i-2 --force
+    description:
+      en: Reboot instance
+      zh-CN: 重启实例
+    input:
+      fields:
+        - ids:
+            required: true
+            positional_many: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: reboot_one
+        when: single(input.ids)
+        wait_unless: input.no_wait
+      - binding: reboot_many
+        when: multiple(input.ids)
+        wait_unless: input.no_wait
+      - probe: state
+        ids:
+          - $input.ids
+        many: true
+        unless: input.no_wait
+  renew:
+    examples:
+      - ecctl ecs instance renew <instance-id> --period 1
+    description:
+      en: Renew instance
+      zh-CN: 续费实例
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - period:
+            required: true
+        - period_unit
+      controls:
+        - api_param
+    workflow:
+      - binding: renew_instance
+  exec:
+    examples:
+      - ecctl ecs instance exec <instance-id> --command <command-id>
+    description:
+      en: Run a temporary command on instances
+      zh-CN: 在实例上执行临时命令
+    input:
+      fields:
+        - ids:
+            required: true
+            positional_many: true
+        - command:
+            required: true
+        - command_type
+        - command_timeout
+        - working_dir
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: run_command
+        wait_unless: input.no_wait
+      - probe: invocation_results
+        ids:
+          - $input.ids
+        many: true
+        unless: input.no_wait
+    output:
+      fields:
+        actions: $result.actions
+        invoke_id: $result.id
+        results: $result.items
+  sendfile:
+    examples:
+      - ecctl ecs instance sendfile <instance-id> --file-name <file-name> --target-dir <target-dir> --content <content>
+    description:
+      en: Send a file to instances
+      zh-CN: 向实例下发文件
+    input:
+      fields:
+        - ids:
+            required: true
+            positional_many: true
+        - file_name:
+            required: true
+        - target_dir:
+            required: true
+        - content:
+            required: true
+        - file_mode
+        - owner
+        - group
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: send_file
+        wait_unless: input.no_wait
+      - probe: sendfile_results
+        ids:
+          - $input.ids
+        many: true
+        unless: input.no_wait
+    output:
+      fields:
+        actions: $result.actions
+        invoke_id: $result.id
+        results: $result.items
+  monitor:
+    examples:
+      - ecctl ecs instance monitor <instance-id> --start-time <start-time> --end-time <end-time>
+    description:
+      en: Query instance monitor data
+      zh-CN: 查询实例监控数据
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - start_time:
+            required: true
+        - end_time:
+            required: true
+        - monitor_period
+    workflow:
+      - probe: monitor_data
+        ids:
+          - $input.id
+        many: true
+    output:
+      fields:
+        monitor_data: $result.items
+        total: $result.total

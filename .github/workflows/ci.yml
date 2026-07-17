@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+    tags-ignore:
+      - "v*"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test
+
+      - name: E2E offline gates
+        run: |
+          make -C e2e test
+          make -C e2e lint
+          e2e/bin/ecctl-e2e coverage registry check \
+            --specs specs \
+            --cases e2e/cases \
+            --registry e2e/coverage.yaml \
+            --ecctl-bin e2e/bin/ecctl-public \
+            --surface public
+          e2e/bin/ecctl-e2e sweep check \
+            --cases e2e/cases \
+            --config e2e/sweep.yaml
+
+      - name: Snapshot release build
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish

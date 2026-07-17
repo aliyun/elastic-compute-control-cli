@@ -1,0 +1,106 @@
+name: e2e-nightly
+
+on:
+  schedule:
+    - cron: "0 18 * * *" # daily (UTC)
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: "-k keyword expression (e.g. \"vpc or eni\"); empty runs all"
+        default: ""
+      region:
+        description: "Optional single-region override; empty uses protected config candidates"
+        default: ""
+
+permissions:
+  id-token: write # required to mint the OIDC token
+  contents: read
+
+concurrency:
+  group: ecctl-e2e-live
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    environment: live-e2e # protection rules; fork PRs cannot reach secrets
+    timeout-minutes: 300 # < STS session duration (DESIGN §12.2)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: build ecctl + ecctl-e2e
+        run: |
+          mkdir -p e2e/bin
+          go build -o e2e/bin/ecctl-public ./cmd/ecctl
+          go -C e2e build -o "$GITHUB_WORKSPACE/e2e/bin/ecctl-e2e" ./cmd/ecctl-e2e
+          echo "$GITHUB_WORKSPACE/e2e/bin" >> "$GITHUB_PATH"
+
+      - name: materialize protected E2E config
+        working-directory: e2e
+        env:
+          ECCTL_E2E_CONFIG_YAML: ${{ secrets.ECCTL_E2E_CONFIG_YAML }}
+        run: |
+          if [ -z "$ECCTL_E2E_CONFIG_YAML" ]; then
+            echo "live-e2e environment secret ECCTL_E2E_CONFIG_YAML is required" >&2
+            exit 1
+          fi
+          printf '%s\n' "$ECCTL_E2E_CONFIG_YAML" > e2e.local.yaml
+          chmod 600 e2e.local.yaml
+          bin/ecctl-e2e lint cases --config e2e.local.yaml
+
+      - name: configure Alibaba Cloud credentials (OIDC)
+        uses: aliyun/configure-aliyun-credentials-action@v1
+        with:
+          role-to-assume: acs:ram::${{ vars.ALI_ACCOUNT_ID }}:role/ecctl-e2e-ci
+          oidc-provider-arn: acs:ram::${{ vars.ALI_ACCOUNT_ID }}:oidc-provider/github-actions
+          audience: sts.aliyuncs.com
+          role-session-duration: 21600 # 6h; role MaxSessionDuration must match
+
+      - name: run e2e
+        working-directory: e2e
+        env:
+          INPUT_REGION: ${{ github.event.inputs.region }}
+          INPUT_FILTER: ${{ github.event.inputs.filter }}
+        run: |
+          args=(--config e2e.local.yaml --surface public --ecctl-bin bin/ecctl-public --report-dir reports --exit-zero)
+          if [ -n "$INPUT_REGION" ]; then
+            args+=(--region "$INPUT_REGION")
+          fi
+          if [ -n "$INPUT_FILTER" ]; then
+            args+=(-k "$INPUT_FILTER")
+          fi
+          ecctl-e2e run "${args[@]}"
+
+      - name: remove protected E2E config
+        if: always()
+        working-directory: e2e
+        run: rm -f e2e.local.yaml
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && hashFiles('e2e/reports/e2e-report.*') != '' }}
+        with:
+          name: e2e-reports
+          path: e2e/reports/e2e-report.*
+
+      - name: check report gate
+        if: always()
+        working-directory: e2e
+        run: ecctl-e2e report check reports/e2e-report.json --failed 0
+
+      - name: alert on failure
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ecctl-e2e report check e2e/reports/e2e-report.json --failed 0; then
+            echo "no failures"
+          else
+            gh issue create \
+              --title "e2e-nightly failed: run ${{ github.run_id }}" \
+              --body "See run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+              --label e2e-failure || true
+          fi

@@ -1,0 +1,155 @@
+schema_version: 2
+product: ack
+api_product: cs
+resource: audit
+kind: regional
+display_name:
+  en: audit
+  zh-CN: 审计
+description:
+  en: Manage ACK cluster API Server audit log
+  zh-CN: 管理 ACK 集群 API Server 审计日志
+examples:
+  - ecctl ack audit get --cluster <cluster-id>
+  - ecctl ack audit update --cluster <cluster-id> --enabled --project k8s-log-<cluster-id>
+
+identity:
+  field: id
+  output_root:
+    one: audit
+    many: audits
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: ACK cluster ID
+        zh-CN: ACK 集群 ID
+    enabled:
+      type: boolean
+      description:
+        en: enable or disable API Server audit logging
+        zh-CN: 开启或关闭 API Server 审计日志
+    project:
+      type: string
+      description:
+        en: SLS Project for API Server audit logs
+        zh-CN: API Server 审计日志所在的 SLS Project
+
+controls:
+  no_wait:
+    type: boolean
+    description:
+      en: return before reading the updated audit configuration
+      zh-CN: 不等待回读审计配置
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  state:
+    api: GetClusterAuditProject
+    request:
+      clusterid: $.id
+    response:
+      item: $
+      request_id: $.request_id
+      fields:
+        enabled: $.audit_enabled
+        project: $.sls_project_name
+
+bindings:
+  enable_audit_log:
+    api: UpdateClusterAuditLogConfig
+    request:
+      clusterid: $.id
+      disable: false
+      sls_project_name: $.project
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    request_id_from: $.request_id
+  disable_audit_log:
+    api: UpdateClusterAuditLogConfig
+    request:
+      clusterid: $.id
+      disable: true
+      sls_project_name: $.project
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    request_id_from: $.request_id
+  update_audit_log_config:
+    api: UpdateClusterAuditLogConfig
+    request:
+      clusterid: $.id
+      sls_project_name: $.project
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - raw: $.id
+    request_id_from: $.request_id
+
+operations:
+  update:
+    examples:
+      - ecctl ack audit update --id <audit-id>
+    description:
+      en: Update ACK cluster API Server audit log
+      zh-CN: 更新 ACK 集群 API Server 审计日志
+    input:
+      fields:
+        - id:
+            required: true
+            flag_name: cluster
+        - enabled
+        - project
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: enable_audit_log
+        when: input.enabled == true
+      - binding: disable_audit_log
+        when: input.enabled == false
+      - binding: update_audit_log_config
+        when: input.project
+        unless: specified(input.enabled)
+      - probe: state
+        ids:
+          - $input.id
+        unless: input.no_wait
+      - emit:
+          fields:
+            cluster: $input.id
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get ACK cluster API Server audit log configuration
+      zh-CN: 获取 ACK 集群 API Server 审计日志配置
+    input:
+      fields:
+        - id:
+            required: true
+            flag_name: cluster
+    workflow:
+      - probe: state
+        ids:
+          - $input.id
+        not_found: error
+      - emit:
+          fields:
+            cluster: $input.id

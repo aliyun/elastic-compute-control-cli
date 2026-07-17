@@ -1,0 +1,11 @@
+# Verify that the region profile exposes the two free Lingjun nodes reserved for E2E.
+resource: lingjun/node
+requires_params: [lingjun.hpn_zone]
+requires_prerequisites: [lingjun.cluster]
+serial: true
+
+steps:
+  - name: list free nodes
+    run: ecctl lingjun node list --free --filter hpn-zone={{.params.lingjun.hpn_zone}}
+    assert:
+      - len($.nodes) >= 2

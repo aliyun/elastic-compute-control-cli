@@ -1,0 +1,360 @@
+schema_version: 2
+product: rg
+api_product: ResourceManager
+resource: group
+kind: regional
+display_name:
+  en: resource group
+  zh-CN: 资源组
+description:
+  en: Manage resource groups
+  zh-CN: 管理资源组
+examples:
+  - ecctl rg group list
+  - ecctl rg group get <group-id> --with-counts
+  - ecctl rg group create --name prod-rg --display-name Production
+  - ecctl rg group update <group-id> --display-name Production
+
+identity:
+  field: id
+  prefix: rg-
+  output_root:
+    one: group
+    many: groups
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    ids:
+      type: array
+      description:
+        en: resource group IDs
+        zh-CN: 资源组 ID 列表
+      items:
+        type: string
+    name:
+      type: string
+      description:
+        en: resource group identifier
+        zh-CN: 资源组唯一标识
+    display_name:
+      type: string
+      description:
+        en: resource group display name
+        zh-CN: 资源组显示名称
+    status:
+      type: string
+      description:
+        en: resource group status
+        zh-CN: 资源组状态
+      enum: [Creating, OK, PendingDelete]
+    tag:
+      type: key_value
+      repeatable: true
+      description:
+        en: tag assignment key=value
+        zh-CN: 标签赋值 key=value
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  with_counts:
+    type: boolean
+    description:
+      en: include resource counts
+      zh-CN: 附带资源数量
+  with_auth_details:
+    type: boolean
+    description:
+      en: include authorization details
+      zh-CN: 附带授权信息
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  list:
+    api: ListResourceGroups
+    request:
+      ResourceGroupIds: $.ids
+      Name: $.name
+      DisplayName: $.display_name
+      Status: $.status
+      Tag: $.tag
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.ResourceGroups.ResourceGroup
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.Id
+      state: $.Status
+      fields:
+        id: $.Id
+        name: $.Name
+        display_name: $.DisplayName
+        status: $.Status
+        account_id: $.AccountId
+        create_date: $.CreateDate
+        region_statuses: $.RegionStatuses.RegionStatus
+        tags: $.Tags.Tag
+      absent:
+        when_empty_for_requested_ids: true
+  list_with_auth_details:
+    api: ListResourceGroupsWithAuthDetails
+    request:
+      ResourceGroupIds: $.ids
+      Name: $.name
+      DisplayName: $.display_name
+      Status: $.status
+      Tag: $.tag
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.ResourceGroups
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.Id
+      state: $.Status
+      fields:
+        id: $.Id
+        name: $.Name
+        display_name: $.DisplayName
+        status: $.Status
+        account_id: $.AccountId
+        create_date: $.CreateDate
+        tags: $.Tags
+      extra_fields:
+        auth_details: $.AuthDetails
+      absent:
+        when_empty_for_requested_ids: true
+  attribute:
+    api: GetResourceGroup
+    request:
+      ResourceGroupId: $.id
+      IncludeTags: true
+    response:
+      item: $.ResourceGroup
+      request_id: $.RequestId
+      id: $.Id
+      state: $.Status
+      fields:
+        id: $.Id
+        name: $.Name
+        display_name: $.DisplayName
+        status: $.Status
+        account_id: $.AccountId
+        create_date: $.CreateDate
+        region_statuses: $.RegionStatuses.RegionStatus
+        tags: $.Tags.Tag
+  counts:
+    api: GetResourceGroupResourceCounts
+    request:
+      ResourceGroupId: $.id
+      GroupByKey: ResourceGroupId
+    response:
+      item: $
+      request_id: $.RequestId
+      fields:
+        resource_counts: $.ResourceCounts
+
+waiters:
+  ok_after_create:
+    probe: attribute
+    target: OK
+    interval: 1s
+    timeout: 10s
+    failure:
+      states: [PendingDelete]
+
+bindings:
+  create_group:
+    api: CreateResourceGroup
+    request:
+      Name: $.name
+      DisplayName: $.display_name
+      Tag: $.tag
+      ApiParam:
+        raw: $.api_param
+    id_from: $.ResourceGroup.Id
+    request_id_from: $.RequestId
+    wait: ok_after_create
+  update_group:
+    api: UpdateResourceGroup
+    request:
+      ResourceGroupId: $.id
+      NewDisplayName: $.display_name
+      ApiParam:
+        raw: $.api_param
+    require_any:
+      - request: NewDisplayName
+      - raw: $.api_param
+    request_id_from: $.RequestId
+  delete_group:
+    api: DeleteResourceGroup
+    request:
+      ResourceGroupId: $.id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+
+operations:
+  create:
+    examples:
+      - ecctl rg group create --name my-name --display-name <display-name>
+      - ecctl rg group create --name my-name --display-name <display-name> --tag env=prod
+    description:
+      en: Create resource group
+      zh-CN: 创建资源组
+    input:
+      fields:
+        - name:
+            required: true
+        - display_name:
+            required: true
+        - tag
+      controls:
+        - api_param
+    workflow:
+      - binding: create_group
+      - probe: attribute
+        ids:
+          - $context.id
+        as: final
+      - emit:
+          fields:
+            id: $context.id
+            name: $input.name
+            display_name: $input.display_name
+  update:
+    examples:
+      - ecctl rg group update <group-id>
+    description:
+      en: Update resource group
+      zh-CN: 更新资源组
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+        - display_name
+      controls:
+        - api_param
+    workflow:
+      - binding: update_group
+      - probe: attribute
+        ids:
+          - $input.id
+        as: final
+  delete:
+    examples:
+      - ecctl rg group delete <group-id>
+    description:
+      en: Delete resource group
+      zh-CN: 删除资源组
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - api_param
+    workflow:
+      - binding: delete_group
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get resource group
+      zh-CN: 获取资源组
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - with_counts
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        not_found: error
+      - probe: counts
+        ids:
+          - $input.id
+        when: input.with_counts
+        merge: true
+  list:
+    examples:
+      - ecctl rg group list
+      - ecctl rg group list --filter name=<value>
+      - ecctl rg group list --filter tag.env=prod
+    description:
+      en: List resource groups
+      zh-CN: 列出资源组
+    input:
+      fields:
+        - ids:
+            positional_many: true
+      controls:
+        - filter
+        - limit
+        - page
+        - with_auth_details
+    filters:
+      id:
+        target: ids
+      ids:
+        target: ids
+      group:
+        target: ids
+      group.id:
+        target: ids
+      resource-group:
+        target: ids
+      resource-group.id:
+        target: ids
+      name:
+        target: name
+      display-name:
+        target: display_name
+      status:
+        target: status
+      tag.:
+        target: tag
+        key_prefix: tag.
+    workflow:
+      - probe: list
+        many: true
+        unless: input.with_auth_details
+      - probe: list_with_auth_details
+        many: true
+        when: input.with_auth_details

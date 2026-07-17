@@ -1,0 +1,384 @@
+schema_version: 2
+product: rg
+api_product: ResourceManager
+resource: policy
+kind: regional
+display_name:
+  en: policy
+  zh-CN: 权限策略
+description:
+  en: Manage resource group policies
+  zh-CN: 管理权限策略
+examples:
+  - ecctl rg policy list
+  - ecctl rg policy get <policy-name> --policy-type Custom
+  - ecctl rg policy create --name my-policy --policy-document @policy.json
+  - ecctl rg policy attach <policy-name> --policy-type Custom --principal-type IMSUser --principal-name user1 --resource-group rg-123
+
+identity:
+  field: name
+  output_root:
+    one: policy
+    many: policies
+
+schema:
+  fields:
+    name:
+      type: string
+      description:
+        en: policy name
+        zh-CN: 权限策略名称
+    description:
+      type: string
+      description:
+        en: policy description
+        zh-CN: 权限策略描述
+    policy_type:
+      type: string
+      description:
+        en: policy type
+        zh-CN: 权限策略类型
+      enum: [Custom, System]
+    policy_document:
+      type: string
+      input_style: json|@file
+      description:
+        en: policy document JSON or @file
+        zh-CN: 权限策略内容 JSON 或 @file
+    language:
+      type: string
+      description:
+        en: language for policy description
+        zh-CN: 策略描述语言
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+    principal_type:
+      type: string
+      description:
+        en: principal type
+        zh-CN: 授权主体类型
+      enum: [IMSUser, IMSGroup, ServiceRole]
+    principal_name:
+      type: string
+      description:
+        en: principal name
+        zh-CN: 授权主体名称
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum resources to return
+      zh-CN: 最多返回资源数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  no_wait:
+    type: boolean
+    description:
+      en: return before relationship visibility is confirmed
+      zh-CN: 关系可见前返回
+  timeout:
+    type: duration
+    default: 300s
+    description:
+      en: wait timeout
+      zh-CN: 等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  detail:
+    api: GetPolicy
+    request:
+      PolicyName: $.name
+      PolicyType: $.policy_type
+      Language: $.language
+    response:
+      item: $.Policy
+      request_id: $.RequestId
+      fields:
+        name: $.PolicyName
+        policy_type: $.PolicyType
+        description: $.Description
+        default_version: $.DefaultVersion
+        attachment_count: $.AttachmentCount
+        create_date: $.CreateDate
+        update_date: $.UpdateDate
+        policy_document: $.PolicyDocument
+  list:
+    api: ListPolicies
+    request:
+      PolicyType: $.policy_type
+      Language: $.language
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.Policies.Policy
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.PolicyName
+      fields:
+        name: $.PolicyName
+        policy_type: $.PolicyType
+        description: $.Description
+        default_version: $.DefaultVersion
+        attachment_count: $.AttachmentCount
+        create_date: $.CreateDate
+        update_date: $.UpdateDate
+  list_attachments:
+    api: ListPolicyAttachments
+    request:
+      ResourceGroupId: $.resource_group
+      PolicyType: $.policy_type
+      PolicyName: $.name
+      PrincipalType: $.principal_type
+      PrincipalName: $.principal_name
+      PageNumber: $.page
+      PageSize: $.limit
+    response:
+      items: $.PolicyAttachments.PolicyAttachment
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.PolicyName
+      fields:
+        policy_name: $.PolicyName
+        policy_type: $.PolicyType
+        description: $.Description
+        principal_name: $.PrincipalName
+        principal_type: $.PrincipalType
+        resource_group: $.ResourceGroupId
+        attach_date: $.AttachDate
+
+waiters:
+  attached_after_attach:
+    probe: list_attachments
+    target: present
+    interval: 2s
+    timeout: 300s
+  detached_after_detach:
+    probe: list_attachments
+    target: absent
+    interval: 2s
+    timeout: 300s
+
+bindings:
+  create_policy:
+    api: CreatePolicy
+    request:
+      PolicyName: $.name
+      Description: $.description
+      PolicyDocument: $.policy_document
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  delete_policy:
+    api: DeletePolicy
+    request:
+      PolicyName: $.name
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+  attach_policy:
+    api: AttachPolicy
+    request:
+      ResourceGroupId: $.resource_group
+      PolicyType: $.policy_type
+      PolicyName: $.name
+      PrincipalType: $.principal_type
+      PrincipalName: $.principal_name
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: attached_after_attach
+  detach_policy:
+    api: DetachPolicy
+    request:
+      ResourceGroupId: $.resource_group
+      PolicyType: $.policy_type
+      PolicyName: $.name
+      PrincipalType: $.principal_type
+      PrincipalName: $.principal_name
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
+    wait: detached_after_detach
+
+operations:
+  create:
+    examples:
+      - ecctl rg policy create --name my-name --policy-document <policy-document>
+    description:
+      en: Create policy
+      zh-CN: 创建权限策略
+    input:
+      fields:
+        - name:
+            required: true
+        - policy_document:
+            required: true
+        - description
+      controls:
+        - api_param
+    workflow:
+      - binding: create_policy
+      - emit:
+          fields:
+            name: $input.name
+            description: $input.description
+  delete:
+    examples:
+      - ecctl rg policy delete my-name
+    description:
+      en: Delete policy
+      zh-CN: 删除权限策略
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+      controls:
+        - api_param
+    workflow:
+      - binding: delete_policy
+      - emit:
+          fields:
+            name: $input.name
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get policy
+      zh-CN: 获取权限策略
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+        - policy_type:
+            required: true
+        - language
+    workflow:
+      - probe: detail
+        ids:
+          - $input.name
+        not_found: error
+  list:
+    examples:
+      - ecctl rg policy list
+      - ecctl rg policy list --filter name=<value>
+    description:
+      en: List policies
+      zh-CN: 列出权限策略
+    input:
+      fields:
+        - language
+        - resource_group
+        - principal_type
+        - principal_name
+      controls:
+        - filter
+        - limit
+        - page
+    filters:
+      name:
+        target: name
+      policy-type:
+        target: policy_type
+    workflow:
+      - probe: list
+        many: true
+        unless: has(input.resource_group) || has(input.principal_type) || has(input.principal_name)
+      - probe: list_attachments
+        many: true
+        when: has(input.resource_group) || has(input.principal_type) || has(input.principal_name)
+    output:
+      fields:
+        pagination: $result.pagination
+        total: $result.total
+        policies:
+          value: $result.items
+          unless: $input.resource_group || $input.principal_type || $input.principal_name
+        attachments:
+          value: $result.items
+          when: $input.resource_group || $input.principal_type || $input.principal_name
+  attach:
+    examples:
+      - ecctl rg policy attach my-name --policy-type Custom --principal-type <principal-type> --principal-name <principal-name> --resource-group <rg-id>
+    description:
+      en: Attach policy to a principal
+      zh-CN: 将权限策略绑定到授权主体
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+        - policy_type:
+            required: true
+        - principal_type:
+            required: true
+        - principal_name:
+            required: true
+        - resource_group:
+            required: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: attach_policy
+        wait_unless: input.no_wait
+    output:
+      fields:
+        actions: $result.actions
+        attachments: $result.items
+        total: $result.total
+  detach:
+    examples:
+      - ecctl rg policy detach my-name --policy-type Custom --principal-type <principal-type> --principal-name <principal-name> --resource-group <rg-id>
+    description:
+      en: Detach policy from a principal
+      zh-CN: 解绑权限策略
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+        - policy_type:
+            required: true
+        - principal_type:
+            required: true
+        - principal_name:
+            required: true
+        - resource_group:
+            required: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: detach_policy
+        wait_unless: input.no_wait
+    output:
+      fields:
+        actions: $result.actions
+        attachments: $result.items
+        total: $result.total

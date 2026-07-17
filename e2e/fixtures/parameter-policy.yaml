@@ -1,0 +1,9 @@
+# ECS 动态参数选择策略。cores 按顺序尝试，优先选择核数较小的规格。
+# 实例规格、系统盘、数据盘和镜像都由 ECS API 根据库存动态发现。
+ecs:
+  cores: [1, 2, 4, 8]
+  image_family: acs:alibaba_cloud_linux_3_2104_lts_x64
+  image_owner_alias: system
+  io_optimized: optimized
+  # 仅用于静态检查或 image_family 未配置时的兼容回退。
+  static_image_id: alinux3
