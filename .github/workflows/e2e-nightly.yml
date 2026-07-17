@@ -1,8 +1,6 @@
 name: e2e-nightly
 
 on:
-  schedule:
-    - cron: "0 18 * * *" # daily (UTC)
   workflow_dispatch:
     inputs:
       filter:

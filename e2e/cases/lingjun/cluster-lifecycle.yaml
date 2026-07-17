@@ -1,7 +1,5 @@
-# Lingjun cluster lifecycle using two reserved node groups in the primary region.
+# Lingjun cluster lifecycle that does not require pre-existing nodes.
 resource: lingjun/cluster
-requires_params: [lingjun.cluster_type, lingjun.hpn_zone]
-requires_prerequisites: [lingjun.cluster]
 timeout: 2h
 serial: true
 
@@ -11,9 +9,7 @@ steps:
       ecctl lingjun cluster create
       --name {{.run_name}}-cluster
       --description "ecctl E2E cluster {{.run_id}}"
-      --cluster-type {{.params.lingjun.cluster_type}}
-      --hpn-zone {{.params.lingjun.hpn_zone}}
-      --node-groups '[{"NodeGroupId":"{{index .prerequisites.lingjun.cluster.node_group_ids 0}}","NodeCount":1},{"NodeGroupId":"{{index .prerequisites.lingjun.cluster.node_group_ids 1}}","NodeCount":1}]'
+      --cluster-type Lite
       --tag ecctl-e2e=1 --tag run-id={{.run_id}}
       --timeout 30m
     at: $.cluster
@@ -26,37 +22,15 @@ steps:
     teardown: ecctl lingjun cluster delete {{.cluster_id}} --timeout 30m
 
   - name: get
-    run: ecctl lingjun cluster get {{.cluster_id}} --with-nodes
+    run: ecctl lingjun cluster get {{.cluster_id}}
     at: $.cluster
     expect:
       id: { eq: "{{.cluster_id}}" }
-      nodes: { type: array, min_len: 2 }
-    capture:
-      shrink_node_id: nodes[0].id
-      shrink_node_group_id: nodes[0].node_group
 
   - name: list
     run: ecctl lingjun cluster list --filter name={{.run_name}}-cluster --limit 10
     assert:
       - len($.clusters) >= 1
-
-  - name: update shrink
-    run: >
-      ecctl lingjun cluster update {{.cluster_id}}
-      --shrink '[{"NodeGroupId":"{{.shrink_node_group_id}}","Nodes":[{"NodeId":"{{.shrink_node_id}}"}]}]'
-      --timeout 30m
-    at: $.cluster
-    expect:
-      id: { eq: "{{.cluster_id}}" }
-
-  - name: update extend
-    run: >
-      ecctl lingjun cluster update {{.cluster_id}}
-      --extend '[{"NodeGroupId":"{{.shrink_node_group_id}}","NodeCount":1}]'
-      --timeout 30m
-    at: $.cluster
-    expect:
-      id: { eq: "{{.cluster_id}}" }
 
   - name: delete
     run: ecctl lingjun cluster delete {{.cluster_id}} --timeout 30m

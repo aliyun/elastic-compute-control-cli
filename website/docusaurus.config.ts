@@ -94,6 +94,11 @@ const config: Config = {
           type: 'localeDropdown',
           position: 'right',
         },
+        {
+          href: 'https://github.com/aliyun/ecctl',
+          label: 'GitHub',
+          position: 'right',
+        },
       ],
     },
     footer: {
@@ -130,6 +135,15 @@ const config: Config = {
             {
               label: 'Resource Specs',
               to: '/docs/contributing/resource-specs',
+            },
+          ],
+        },
+        {
+          title: 'Project',
+          items: [
+            {
+              label: 'GitHub',
+              href: 'https://github.com/aliyun/ecctl',
             },
           ],
         },

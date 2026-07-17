@@ -70,6 +70,41 @@ func TestACKKubeconfigRootOnlyUpdateIsIsolated(t *testing.T) {
 	}
 }
 
+func TestLingjunClusterScalingPrerequisiteIsIsolated(t *testing.T) {
+	base, err := scenario.Load(filepath.Join("..", "..", "cases", "lingjun", "cluster-lifecycle.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(base.RequiresPrerequisites) != 0 {
+		t.Fatalf("base Lingjun cluster prerequisites = %#v, want none", base.RequiresPrerequisites)
+	}
+	if len(base.RequiresParams) != 0 {
+		t.Fatalf("base Lingjun cluster parameters = %#v, want none", base.RequiresParams)
+	}
+	for _, step := range base.Steps {
+		if strings.Contains(step.Run, "--node-groups") || strings.Contains(step.Run, "cluster update") {
+			t.Fatalf("base Lingjun cluster step %q still depends on scaling inventory: %q", step.Name, step.Run)
+		}
+	}
+
+	scaling, err := scenario.Load(filepath.Join("..", "..", "cases", "lingjun", "cluster-scaling-lifecycle.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(scaling.RequiresPrerequisites, []string{"lingjun.cluster"}) {
+		t.Fatalf("Lingjun scaling prerequisites = %#v, want lingjun.cluster", scaling.RequiresPrerequisites)
+	}
+	foundShrink := false
+	foundExtend := false
+	for _, step := range scaling.Steps {
+		foundShrink = foundShrink || strings.Contains(step.Run, "--shrink")
+		foundExtend = foundExtend || strings.Contains(step.Run, "--extend")
+	}
+	if !foundShrink || !foundExtend {
+		t.Fatalf("Lingjun scaling operations = shrink %t, extend %t", foundShrink, foundExtend)
+	}
+}
+
 func TestACKPermissionLifecycleUsesProvisionedRAMUser(t *testing.T) {
 	suite, err := scenario.Load(filepath.Join("..", "..", "cases", "ack", "permission-lifecycle.yaml"))
 	if err != nil {

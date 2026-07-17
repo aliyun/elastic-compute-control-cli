@@ -46,6 +46,22 @@ archives:
 checksum:
   name_template: checksums.txt
 
+brews:
+  - name: ecctl
+    ids:
+      - ecctl
+    repository:
+      owner: aliyun
+      name: ecctl
+    directory: Formula
+    url_template: https://github.com/aliyun/ecctl/releases/download/{{ .Tag }}/{{ .ArtifactName }}
+    homepage: https://github.com/aliyun/ecctl
+    description: Agent-first command-line controller for Alibaba Cloud elastic computing resources
+    license: Apache-2.0
+    skip_upload: auto
+    test: |
+      system "#{bin}/ecctl", "--version"
+
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 

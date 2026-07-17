@@ -1,8 +1,8 @@
 # ecctl-e2e
 
 End-to-end test suite for ecctl, run as a standalone CLI against **real**
-Alibaba Cloud (nightly in CI). Independent Go module; drives the `ecctl` binary
-as a subprocess.
+Alibaba Cloud. The live CI workflow is manually dispatched. This independent
+Go module drives the `ecctl` binary as a subprocess.
 
 ## Layout
 
@@ -135,8 +135,10 @@ The OSS bucket must contain `ecctl-e2e/import-source.qcow2` and have the
 account-level ECS image import/export roles and permissions already enabled.
 Image export uses a run-derived object prefix, so the bucket also needs a
 lifecycle rule that expires those objects. The prepaid instance is intentionally
-renewed for one month. The two Lingjun node group IDs must be different, and
-each group must expose at least one compatible free node in this region.
+renewed for one month. The two Lingjun node group IDs are used only by the node
+inventory and cluster scaling cases. They must be different, and each group
+must expose at least one compatible free node in this region. The base Lingjun
+cluster create/get/list/delete lifecycle does not require this prerequisite.
 
 Before building live execution units, the runner queries each configured OSS
 bucket with Resource Center `GetResourceConfiguration` using resource type
@@ -353,7 +355,7 @@ case/config lint, coverage-registry consistency check, sweep-coverage check,
 and release snapshot build. It does not require Alibaba Cloud credentials and
 does not require every registry operation to have live-pass evidence.
 
-Nightly live CI materializes the protected `live-e2e` environment secret
+Manually dispatched live CI materializes the protected `live-e2e` environment secret
 `ECCTL_E2E_CONFIG_YAML` as ignored `e2e.local.yaml`, validates that file, and
 runs the selected suite using its ordered region profiles. The secret contains
 the complete version 2 YAML document shown above; the runner itself never
@@ -372,11 +374,12 @@ upload credential is required. The coverage registry does not read those local
 report files; validate a report explicitly with
 `ecctl-e2e report check <path> --failed 0`.
 
-The sweeper workflow runs a dry-run audit followed by
-`sweep --mode finished-run` on a schedule for every candidate region declared
-in checked-in `e2e.yaml`. Manual dispatch can select audit-only mode or override
-one region. Run `ecctl-e2e sweep check --cases cases --config sweep.yaml`
-locally before changing sweep coverage.
+The manually dispatched sweeper workflow runs a dry-run audit for every
+candidate region declared in checked-in `e2e.yaml`, followed by
+`sweep --mode finished-run` when cleanup mode is selected. Dispatch inputs can
+select audit-only mode or override one region. Run
+`ecctl-e2e sweep check --cases cases --config sweep.yaml` locally before
+changing sweep coverage.
 
 Validate workflow syntax locally with:
 

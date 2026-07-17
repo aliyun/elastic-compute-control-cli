@@ -1,25 +1,28 @@
 ---
 title: Installation
-description: Install ecctl with go install or build it from source.
+description: Install ecctl with Homebrew or Go, or build it from source.
 ---
 
 # Installation
 
 ## Requirements
 
-- Go 1.25 or later.
+- Homebrew for the recommended installation method, or Go 1.25 or later.
 - Alibaba Cloud credentials for commands that call cloud APIs.
 - Optional: an existing compatible `aliyun` CLI configuration file.
 
-Check the local Go toolchain:
+## Install with Homebrew
+
+Install the latest public release:
 
 ```bash
-go version
+brew tap aliyun/ecctl https://github.com/aliyun/ecctl
+brew install ecctl
 ```
 
 ## Install with go install
 
-Install the latest release:
+If Go 1.25 or later is installed locally, install the latest release with:
 
 ```bash
 go install github.com/aliyun/ecctl/cmd/ecctl@latest
@@ -32,6 +35,9 @@ directory is on your `PATH`, then verify:
 ecctl --version
 ecctl --help
 ```
+
+You can also download a pre-built archive from
+[GitHub Releases](https://github.com/aliyun/ecctl/releases).
 
 ## Build from Source
 

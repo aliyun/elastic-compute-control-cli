@@ -1,8 +1,6 @@
 name: e2e-sweeper
 
 on:
-  schedule:
-    - cron: "0 */2 * * *" # every 2h
   workflow_dispatch:
     inputs:
       mode:
