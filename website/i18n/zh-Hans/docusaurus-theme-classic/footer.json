@@ -37,7 +37,7 @@
   },
   "link.item.label.GitHub": {
     "message": "GitHub",
-    "description": "The label of footer link with label=GitHub linking to https://github.com/aliyun/ecctl"
+    "description": "The label of footer link with label=GitHub linking to https://github.com/aliyun/elastic-compute-control-cli"
   },
   "copyright": {
     "message": "Copyright © 2026 阿里云",

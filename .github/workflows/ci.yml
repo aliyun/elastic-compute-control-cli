@@ -44,9 +44,12 @@ jobs:
             --cases e2e/cases \
             --config e2e/sweep.yaml
 
+      - name: Prepare snapshot release metadata
+        run: printf '%s\n' '0.0.0-snapshot' > version.txt
+
       - name: Snapshot release build
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: "~> v2"
+          version: v2.17.0
           args: release --snapshot --clean --skip=publish

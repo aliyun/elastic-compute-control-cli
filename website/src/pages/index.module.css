@@ -102,7 +102,7 @@
 }
 
 .installPanel {
-  width: min(100%, 560px);
+  width: min(100%, 860px);
   margin: 2rem auto 0;
 }
 
@@ -127,7 +127,7 @@
 }
 
 .commandBar code {
-  overflow: hidden;
+  overflow-x: auto;
   margin-left: 0.65rem;
   border: 0;
   background: transparent;

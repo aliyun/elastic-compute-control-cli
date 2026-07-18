@@ -22,18 +22,14 @@ behavior.
 Install the latest public release with Homebrew:
 
 ```bash
-brew tap aliyun/ecctl https://github.com/aliyun/ecctl
+brew tap aliyun/ecctl https://github.com/aliyun/elastic-compute-control-cli
 brew install ecctl
-ecctl --help
+ecctl --version
 ```
 
-Or install with Go 1.25 or later:
-
-```bash
-go install github.com/aliyun/ecctl/cmd/ecctl@latest
-```
-
-Pre-built binaries are also available from [GitHub Releases](https://github.com/aliyun/ecctl/releases).
+The first command uses this repository directly as the `aliyun/ecctl` Tap. Pre-built
+binaries for macOS, Linux, and Windows are also available from
+[GitHub Releases](https://github.com/aliyun/elastic-compute-control-cli/releases).
 
 Build from a source checkout:
 

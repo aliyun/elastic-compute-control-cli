@@ -73,6 +73,189 @@ func TestCheckReleaseReadyAllowsReleasePrepOnlyPlaceholders(t *testing.T) {
 	}
 }
 
+func TestCheckBinaryReleaseReady(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module ecctl\n\ngo 1.25.0\n")
+	writeFile(t, filepath.Join(root, "README.md"), "brew tap aliyun/ecctl https://github.com/aliyun/elastic-compute-control-cli\nbrew install ecctl\n")
+
+	if err := checkBinaryReleaseReady(root, binaryReleaseRepository); err != nil {
+		t.Fatalf("checkBinaryReleaseReady: %v", err)
+	}
+}
+
+func TestCheckBinaryReleaseReadyRejectsWrongRepository(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module ecctl\n\ngo 1.25.0\n")
+
+	err := checkBinaryReleaseReady(root, "aliyun/ecctl")
+	if err == nil || !strings.Contains(err.Error(), binaryReleaseRepository) {
+		t.Fatalf("checkBinaryReleaseReady error = %v, want repository identity failure", err)
+	}
+}
+
+func TestCheckBinaryReleaseReadyRejectsModuleMigration(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module github.com/aliyun/ecctl\n\ngo 1.25.0\n")
+
+	err := checkBinaryReleaseReady(root, binaryReleaseRepository)
+	if err == nil || !strings.Contains(err.Error(), "expects module") {
+		t.Fatalf("checkBinaryReleaseReady error = %v, want module failure", err)
+	}
+}
+
+func TestCheckBinaryReleaseReadyRejectsReplace(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module ecctl\n\ngo 1.25.0\n\nreplace example.com/a => example.com/b v1.0.0\n")
+
+	err := checkBinaryReleaseReady(root, binaryReleaseRepository)
+	if err == nil || !strings.Contains(err.Error(), "replace directives") {
+		t.Fatalf("checkBinaryReleaseReady error = %v, want replace failure", err)
+	}
+}
+
+func TestCheckBinaryReleaseReadyAllowsPinnedMetadataModuleReplace(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module ecctl\n\ngo 1.25.0\n\nreplace "+allowedBinaryReplace+"\n")
+
+	if err := checkBinaryReleaseReady(root, binaryReleaseRepository); err != nil {
+		t.Fatalf("checkBinaryReleaseReady: %v", err)
+	}
+}
+
+func TestCheckBinaryReleaseReadyRejectsGoInstallAndStaleRepository(t *testing.T) {
+	for _, content := range []string{
+		"go install github.com/aliyun/ecctl/cmd/ecctl@latest\n",
+		"Download from https://github.com/aliyun/ecctl/releases.\n",
+	} {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "go.mod"), "module ecctl\n\ngo 1.25.0\n")
+		writeFile(t, filepath.Join(root, "README.md"), content)
+
+		err := checkBinaryReleaseReady(root, binaryReleaseRepository)
+		if err == nil || !strings.Contains(err.Error(), "unfrozen Go module/repository") {
+			t.Fatalf("checkBinaryReleaseReady(%q) error = %v, want misrepresentation failure", content, err)
+		}
+	}
+}
+
+func TestCheckBinaryReleaseReadyRejectsStaleRepositoryInJSON(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module ecctl\n\ngo 1.25.0\n")
+	writeFile(t, filepath.Join(root, "website", "i18n", "footer.json"), `{"github":"https://github.com/aliyun/ecctl"}`)
+
+	err := checkBinaryReleaseReady(root, binaryReleaseRepository)
+	if err == nil || !strings.Contains(err.Error(), "unfrozen Go module/repository") {
+		t.Fatalf("checkBinaryReleaseReady error = %v, want JSON misrepresentation failure", err)
+	}
+}
+
+func TestCheckHomebrewCaskVersionAllowsAdvance(t *testing.T) {
+	cask := filepath.Join(t.TempDir(), "ecctl.rb")
+	writeFile(t, cask, "cask \"ecctl\" do\n  version \"1.2.3\"\nend\n")
+
+	if err := checkHomebrewCaskVersion("v1.3.0", cask, false); err != nil {
+		t.Fatalf("checkHomebrewCaskVersion: %v", err)
+	}
+}
+
+func TestCheckHomebrewCaskVersionAllowsFirstRelease(t *testing.T) {
+	if err := checkHomebrewCaskVersion("v0.0.0", "", true); err != nil {
+		t.Fatalf("checkHomebrewCaskVersion first release: %v", err)
+	}
+}
+
+func TestCheckHomebrewCaskVersionRequiresExplicitCaskState(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		cask         string
+		firstRelease bool
+	}{
+		{name: "missing state"},
+		{name: "ambiguous state", cask: "ecctl.rb", firstRelease: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := checkHomebrewCaskVersion("v1.0.0", test.cask, test.firstRelease); err == nil {
+				t.Fatal("checkHomebrewCaskVersion succeeded, want explicit state error")
+			}
+		})
+	}
+}
+
+func TestCheckHomebrewCaskVersionRejectsNonAdvance(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		tag  string
+		want string
+	}{
+		{name: "downgrade", tag: "v1.2.2", want: "refusing to downgrade"},
+		{name: "stable build metadata downgrade", tag: "v1.2.2+old-build", want: "refusing to downgrade"},
+		{name: "equal", tag: "v1.2.3", want: "equal-precedence"},
+		{name: "build metadata is equal precedence", tag: "v1.2.3+build.2", want: "equal-precedence"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cask := filepath.Join(t.TempDir(), "ecctl.rb")
+			writeFile(t, cask, "cask \"ecctl\" do\n  version \"1.2.3\"\nend\n")
+			err := checkHomebrewCaskVersion(test.tag, cask, false)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("checkHomebrewCaskVersion(%q) error = %v, want %q", test.tag, err, test.want)
+			}
+		})
+	}
+}
+
+func TestCheckHomebrewCaskVersionAllowsPrereleaseWithoutReadingCask(t *testing.T) {
+	if err := checkHomebrewCaskVersion("v1.3.0-rc.1", filepath.Join(t.TempDir(), "missing.rb"), false); err != nil {
+		t.Fatalf("checkHomebrewCaskVersion prerelease: %v", err)
+	}
+}
+
+func TestCheckHomebrewCaskVersionRejectsMalformedInput(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		tag     string
+		content string
+	}{
+		{name: "malformed tag", tag: "v1.02.3", content: "version \"1.2.3\"\n"},
+		{name: "missing version", tag: "v1.2.4", content: "cask \"ecctl\" do\nend\n"},
+		{name: "multiple versions", tag: "v1.2.4", content: "version \"1.2.2\"\nversion \"1.2.3\"\n"},
+		{name: "malformed current version", tag: "v1.2.4", content: "version \"1.02.3\"\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cask := filepath.Join(t.TempDir(), "ecctl.rb")
+			writeFile(t, cask, test.content)
+			if err := checkHomebrewCaskVersion(test.tag, cask, false); err == nil {
+				t.Fatalf("checkHomebrewCaskVersion(%q) succeeded, want error", test.tag)
+			}
+		})
+	}
+}
+
+func TestCompareSemVersionPrereleaseOrdering(t *testing.T) {
+	ordered := []string{
+		"1.0.0-alpha",
+		"1.0.0-alpha.1",
+		"1.0.0-alpha.beta",
+		"1.0.0-beta",
+		"1.0.0-beta.2",
+		"1.0.0-beta.11",
+		"1.0.0-rc.1",
+		"1.0.0",
+	}
+	for i := 0; i+1 < len(ordered); i++ {
+		left, err := parseSemVersion(ordered[i])
+		if err != nil {
+			t.Fatalf("parseSemVersion(%q): %v", ordered[i], err)
+		}
+		right, err := parseSemVersion(ordered[i+1])
+		if err != nil {
+			t.Fatalf("parseSemVersion(%q): %v", ordered[i+1], err)
+		}
+		if compareSemVersion(left, right) >= 0 {
+			t.Fatalf("compareSemVersion(%q, %q) >= 0", ordered[i], ordered[i+1])
+		}
+	}
+}
+
 func TestRewritePublicModule(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.mod"), "module ecctl\n\ngo 1.25.0\n")

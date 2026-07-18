@@ -1,13 +1,14 @@
 ---
 title: Installation
-description: Install ecctl with Homebrew or Go, or build it from source.
+description: Install ecctl with Homebrew, download a release, or build it from source.
 ---
 
 # Installation
 
 ## Requirements
 
-- Homebrew for the recommended installation method, or Go 1.25 or later.
+- Homebrew on macOS for the recommended installation method.
+- Go 1.25 or later only when building from source.
 - Alibaba Cloud credentials for commands that call cloud APIs.
 - Optional: an existing compatible `aliyun` CLI configuration file.
 
@@ -16,34 +17,39 @@ description: Install ecctl with Homebrew or Go, or build it from source.
 Install the latest public release:
 
 ```bash
-brew tap aliyun/ecctl https://github.com/aliyun/ecctl
+brew tap aliyun/ecctl https://github.com/aliyun/elastic-compute-control-cli
 brew install ecctl
+ecctl --version
 ```
 
-## Install with go install
-
-If Go 1.25 or later is installed locally, install the latest release with:
+The first command explicitly uses this repository as the `aliyun/ecctl` Tap. To
+upgrade an existing installation:
 
 ```bash
-go install github.com/aliyun/ecctl/cmd/ecctl@latest
+brew update
+brew upgrade ecctl
 ```
 
-This places the `ecctl` binary in `$(go env GOPATH)/bin`. Make sure that
-directory is on your `PATH`, then verify:
+## Download a Pre-built Binary
+
+Download the archive for your operating system and architecture from
+[GitHub Releases](https://github.com/aliyun/elastic-compute-control-cli/releases),
+then extract `ecctl` and place it on your `PATH`.
+
+Verify the installation:
 
 ```bash
 ecctl --version
 ecctl --help
 ```
 
-You can also download a pre-built archive from
-[GitHub Releases](https://github.com/aliyun/ecctl/releases).
-
 ## Build from Source
 
-To build from a checkout, run from the repository root:
+Clone the repository and build from its root:
 
 ```bash
+git clone https://github.com/aliyun/elastic-compute-control-cli.git
+cd elastic-compute-control-cli
 make build
 ```
 

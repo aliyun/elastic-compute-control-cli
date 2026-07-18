@@ -6,29 +6,35 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release
   cancel-in-progress: false
+  queue: max
 
 jobs:
-  release:
+  validate:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout tagged source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Check release repository identity
+      - name: Validate release source
         env:
-          EXPECTED_REPOSITORY: aliyun/ecctl
+          EXPECTED_REPOSITORY: aliyun/elastic-compute-control-cli
         shell: bash
         run: |
+          set -euo pipefail
           if [[ "${GITHUB_REPOSITORY}" != "${EXPECTED_REPOSITORY}" ]]; then
-            echo "Public releases must run from ${EXPECTED_REPOSITORY}; current repository is ${GITHUB_REPOSITORY}." >&2
-            echo "Complete the public repository transition before pushing a release tag." >&2
+            echo "Releases must run from ${EXPECTED_REPOSITORY}; current repository is ${GITHUB_REPOSITORY}." >&2
+            exit 1
+          fi
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" refs/remotes/origin/main; then
+            echo "Release commit ${GITHUB_SHA} is not reachable from origin/main." >&2
             exit 1
           fi
 
@@ -38,8 +44,28 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Check public release readiness
-        run: make check-public-release
+      - name: Check Homebrew Cask advancement
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_cask=$(mktemp)
+          trap 'rm -f "${current_cask}"' EXIT
+          cask_args=(--first-homebrew-release)
+          if git show refs/remotes/origin/main:Casks/ecctl.rb > "${current_cask}" 2>/dev/null; then
+            cask_args=(--cask "${current_cask}")
+          else
+            echo "No Homebrew Cask exists on main; allowing the release."
+          fi
+
+          go run ./cmd/releaseprep \
+            --check-homebrew-version \
+            --release-tag "${RELEASE_TAG}" \
+            "${cask_args[@]}"
+
+      - name: Check binary release readiness
+        run: make check-binary-release
 
       - name: Lint
         run: make lint
@@ -47,75 +73,135 @@ jobs:
       - name: Test
         run: make test
 
+      - name: Check GoReleaser configuration
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: v2.17.0
+          args: check
+
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Prepare release metadata
+        shell: bash
+        run: printf '%s\n' "${GITHUB_REF_NAME#v}" > version.txt
+
       - name: Publish GitHub release
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: "~> v2"
+          version: v2.17.0
           args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
 
+  notify:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
       - name: Trigger release webhook
         env:
-          RELEASE_WEBHOOK_URL: ${{ secrets.RELEASE_WEBHOOK_URL }}
+          GH_TOKEN: ${{ github.token }}
           RELEASE_WEBHOOK_TOKEN: ${{ secrets.RELEASE_WEBHOOK_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_WEBHOOK_URL: ${{ secrets.RELEASE_WEBHOOK_URL }}
         shell: bash
         run: |
-          if [[ -z "${RELEASE_WEBHOOK_URL}" ]]; then
-            echo "RELEASE_WEBHOOK_URL is not set; skipping explicit webhook call."
-            exit 0
-          fi
-          if [[ -z "${RELEASE_WEBHOOK_TOKEN}" ]]; then
-            echo "RELEASE_WEBHOOK_TOKEN is not set; cannot sign release webhook payload." >&2
-            exit 1
-          fi
+          set -euo pipefail
+          for name in RELEASE_WEBHOOK_URL RELEASE_WEBHOOK_TOKEN; do
+            if [[ -z "${!name}" ]]; then
+              echo "${name} is required." >&2
+              exit 1
+            fi
+          done
 
-          release_file=$(mktemp)
-          repository_file=$(mktemp)
-          payload_file=$(mktemp)
-          response_file=$(mktemp)
+          python3 - "${RELEASE_WEBHOOK_URL}" <<'PY'
+          import sys
+          from urllib.parse import urlsplit
+
+          parsed = urlsplit(sys.argv[1])
+          if parsed.scheme != "https" or not parsed.hostname:
+              raise SystemExit("RELEASE_WEBHOOK_URL must be an absolute HTTPS URL")
+          if parsed.username or parsed.password or parsed.fragment:
+              raise SystemExit("RELEASE_WEBHOOK_URL must not contain userinfo or a fragment")
+          if parsed.port not in (None, 443):
+              raise SystemExit("RELEASE_WEBHOOK_URL must use the default HTTPS port")
+          PY
+
+          work_dir=$(mktemp -d)
+          trap 'rm -rf "${work_dir}"' EXIT
+          release_file="${work_dir}/release.json"
+          repository_file="${work_dir}/repository.json"
+          payload_file="${work_dir}/payload.json"
+          response_file="${work_dir}/response.txt"
 
           gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" > "${release_file}"
           gh api "repos/${GITHUB_REPOSITORY}" > "${repository_file}"
+          jq -e --arg tag "${GITHUB_REF_NAME}" \
+            '.tag_name == $tag and .draft == false' "${release_file}" >/dev/null
+
+          delivery_id=$(cat /proc/sys/kernel/random/uuid)
+          sent_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
           jq -n \
+            --arg delivery_id "${delivery_id}" \
+            --arg sent_at "${sent_at}" \
             --slurpfile release "${release_file}" \
             --slurpfile repository "${repository_file}" \
-            '{action: "edited", release: $release[0], repository: $repository[0]}' \
-            > "${payload_file}"
+            '{
+              action: "published",
+              delivery_id: $delivery_id,
+              sent_at: $sent_at,
+              release: $release[0],
+              repository: $repository[0]
+            }' > "${payload_file}"
 
           signature=$(openssl dgst -sha256 -hmac "${RELEASE_WEBHOOK_TOKEN}" "${payload_file}" | awk '{print $2}')
-          delivery_id=$(uuidgen | tr '[:upper:]' '[:lower:]')
-          task_id="${delivery_id}"
-
-          http_code=$(curl --silent --show-error \
+          http_code=$(curl --proto '=https' --tlsv1.2 --silent --show-error \
             --output "${response_file}" \
-            --write-out "%{http_code}" \
-            --retry 3 --retry-delay 5 --connect-timeout 10 --max-time 20 \
+            --write-out '%{http_code}' \
+            --retry 3 --retry-all-errors --retry-delay 5 \
+            --connect-timeout 10 --max-time 20 \
             --request POST \
-            -H "Content-Type: application/json" \
+            -H 'Content-Type: application/json' \
             -H "User-Agent: GitHub-Hookshot/${GITHUB_RUN_ID}" \
-            -H "X-GitHub-Event: release" \
+            -H 'X-GitHub-Event: release' \
             -H "X-GitHub-Delivery: ${delivery_id}" \
-            -H "X-GitHub-Hook-Installation-Target-Type: repository" \
+            -H 'X-GitHub-Hook-Installation-Target-Type: repository' \
             -H "X-Hub-Signature-256: sha256=${signature}" \
-            -H "X-Fc-Invocation-Type: Async" \
-            -H "X-Fc-Async-Task-Id: ${task_id}" \
+            -H 'X-Fc-Invocation-Type: Async' \
+            -H "X-Fc-Async-Task-Id: ${delivery_id}" \
             --data-binary "@${payload_file}" \
             "${RELEASE_WEBHOOK_URL}")
 
           case "${http_code}" in
             2*)
-              echo "Submitted FC async release sync task ${task_id}."
+              echo "Submitted FC async release sync task ${delivery_id}."
               cat "${response_file}"
               ;;
             409)
-              echo "FC async release sync task ${task_id} was already submitted."
+              echo "FC async release sync task ${delivery_id} was already submitted."
               cat "${response_file}"
               ;;
             *)
-              echo "Failed to submit FC async release sync task ${task_id}; HTTP ${http_code}." >&2
+              echo "Failed to submit FC async release sync task ${delivery_id}; HTTP ${http_code}." >&2
               cat "${response_file}" >&2
               exit 1
               ;;
