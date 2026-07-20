@@ -7,6 +7,39 @@ import (
 	"testing"
 )
 
+func TestReleaseWorkflowUsesInfraGuardWebhookAction(t *testing.T) {
+	workflowPath := filepath.Join("..", "..", ".github", "workflows", "release.yml")
+	raw, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatalf("read release workflow: %v", err)
+	}
+
+	workflow := string(raw)
+	if !strings.Contains(workflow, `action: "edited"`) {
+		t.Fatal(`release webhook action is not "edited" as required by the InfraGuard-compatible FC handler`)
+	}
+	if strings.Contains(workflow, `action: "published"`) {
+		t.Fatal(`release webhook still contains unsupported action "published"`)
+	}
+	if !strings.Contains(workflow, `delivery_id=$(uuidgen | tr '[:upper:]' '[:lower:]')`) {
+		t.Fatal("release webhook does not generate a fresh delivery ID for each retry")
+	}
+	if strings.Contains(workflow, "uuid.uuid5") {
+		t.Fatal("release webhook still reuses a release-derived FC task ID")
+	}
+	for _, required := range []string{
+		`X-Hub-Signature-256: sha256=${signature}`,
+		`X-Fc-Invocation-Type: Async`,
+		`X-Fc-Async-Task-Id: ${delivery_id}`,
+		`case "${http_code}" in`,
+		`409)`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("release webhook is missing InfraGuard contract fragment %q", required)
+		}
+	}
+}
+
 func TestValidatePublicModule(t *testing.T) {
 	for _, module := range []string{
 		"github.com/example/ecctl",
