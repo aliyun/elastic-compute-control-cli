@@ -374,10 +374,11 @@ upload credential is required. The coverage registry does not read those local
 report files; validate a report explicitly with
 `ecctl-e2e report check <path> --failed 0`.
 
-The manually dispatched sweeper workflow runs a dry-run audit for every
-candidate region declared in checked-in `e2e.yaml`, followed by
-`sweep --mode finished-run` when cleanup mode is selected. Dispatch inputs can
-select audit-only mode or override one region. Run
+The sweeper workflow runs automatically after each same-repository
+`e2e-nightly` completion and can also be dispatched manually. Automatic runs
+use cleanup mode: first a dry-run audit for every candidate region declared in
+checked-in `e2e.yaml`, then `sweep --mode finished-run`. Manual dispatch inputs
+can select audit-only mode or override one region. Run
 `ecctl-e2e sweep check --cases cases --config sweep.yaml` locally before
 changing sweep coverage.
 
