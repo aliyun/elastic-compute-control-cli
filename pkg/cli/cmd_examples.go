@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	ecerrors "ecctl/pkg/errors"
-	"ecctl/pkg/i18n"
-	"ecctl/pkg/spec"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
 
 // newExamplesCommand wires the `ecctl examples [topic]` subcommand. Without

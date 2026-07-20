@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"strings"
 
-	"ecctl/e2e/internal/jsonq"
-	"ecctl/e2e/internal/scenario"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/jsonq"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
 // Result is the outcome of one path matcher or assert expression, for reports.

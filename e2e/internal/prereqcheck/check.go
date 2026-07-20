@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	execpkg "ecctl/e2e/internal/exec"
-	"ecctl/e2e/internal/fixtureconfig"
-	paramspkg "ecctl/e2e/internal/params"
+	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/fixtureconfig"
+	paramspkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/params"
 )
 
 const (

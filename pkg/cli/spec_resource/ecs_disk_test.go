@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"ecctl/pkg/engine"
-	ecerrors "ecctl/pkg/errors"
-	"ecctl/pkg/spec"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
 
 func TestECSDiskCreateUsesSpecDrivenCaller(t *testing.T) {

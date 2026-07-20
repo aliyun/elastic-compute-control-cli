@@ -13,7 +13,7 @@ import (
 	"github.com/google/shlex"
 	"gopkg.in/yaml.v3"
 
-	"ecctl/e2e/internal/scenario"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
 // Capability is one (resource, verb) pair.

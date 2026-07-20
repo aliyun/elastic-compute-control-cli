@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"ecctl/pkg/engine"
-	ecerrors "ecctl/pkg/errors"
-	"ecctl/pkg/spec"
-	_ "ecctl/specs/ecs"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
+	_ "github.com/aliyun/elastic-compute-control-cli/specs/ecs"
 )
 
 type regionStringer string

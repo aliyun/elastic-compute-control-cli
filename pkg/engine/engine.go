@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	ecerrors "ecctl/pkg/errors"
-	"ecctl/pkg/spec"
-	"ecctl/pkg/waiter"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/waiter"
 )
 
 type Caller interface {

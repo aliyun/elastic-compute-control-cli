@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	ecerrors "ecctl/pkg/errors"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 )
 
 func TestParseTagAssignmentsTrimsValuesAndRejectsInvalidTags(t *testing.T) {

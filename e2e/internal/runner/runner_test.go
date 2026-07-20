@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	paramspkg "ecctl/e2e/internal/params"
-	"ecctl/e2e/internal/report"
-	"ecctl/e2e/internal/scenario"
+	paramspkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/params"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
 // TestRunWithFakeEcctl exercises the full runner — provision skip, step exec,

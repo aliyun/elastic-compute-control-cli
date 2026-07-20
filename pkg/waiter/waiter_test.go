@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	ecerrors "ecctl/pkg/errors"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 )
 
 func TestWaitReturnsWhenTargetObserved(t *testing.T) {

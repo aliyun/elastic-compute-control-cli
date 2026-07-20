@@ -8,7 +8,11 @@ import (
 )
 
 func TestValidatePublicModule(t *testing.T) {
-	for _, module := range []string{"github.com/example/ecctl", "github.com/aliyun/ecctl"} {
+	for _, module := range []string{
+		"github.com/example/ecctl",
+		"github.com/aliyun/ecctl",
+		"github.com/aliyun/elastic-compute-control-cli",
+	} {
 		if err := validatePublicModule(module); err != nil {
 			t.Fatalf("validatePublicModule(%q) = %v", module, err)
 		}
@@ -18,11 +22,12 @@ func TestValidatePublicModule(t *testing.T) {
 		"",
 		"ecctl",
 		"gitlab.alibaba-inc.com/ai-storm/ecctl",
-		"github.com/example/not-ecctl",
 		"github.com/example/ecctl/v2",
 		"github.com/bad_owner/ecctl",
 		"github.com/-bad/ecctl",
 		"github.com/bad-/ecctl",
+		"github.com/example/bad/repo",
+		"github.com/example/<repo>",
 	} {
 		if err := validatePublicModule(module); err == nil {
 			t.Fatalf("validatePublicModule(%q) succeeded, want error", module)
@@ -34,7 +39,7 @@ func TestCheckReleaseReadyRejectsUnfrozenModule(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.mod"), "module ecctl\n\ngo 1.25.0\n")
 
-	err := checkReleaseReady(root)
+	err := checkReleaseReady(root, "example/ecctl")
 	if err == nil || !strings.Contains(err.Error(), "module path is not frozen") {
 		t.Fatalf("checkReleaseReady error = %v, want module path failure", err)
 	}
@@ -44,7 +49,7 @@ func TestCheckReleaseReadyRejectsReplace(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.mod"), "module github.com/example/ecctl\n\ngo 1.25.0\n\nreplace example.com/a => example.com/b v1.0.0\n")
 
-	err := checkReleaseReady(root)
+	err := checkReleaseReady(root, "example/ecctl")
 	if err == nil || !strings.Contains(err.Error(), "replace directives") {
 		t.Fatalf("checkReleaseReady error = %v, want replace failure", err)
 	}
@@ -55,7 +60,7 @@ func TestCheckReleaseReadyRejectsInstallPlaceholder(t *testing.T) {
 	writeFile(t, filepath.Join(root, "go.mod"), "module github.com/example/ecctl\n\ngo 1.25.0\n")
 	writeFile(t, filepath.Join(root, "README.md"), "go install github.com/<owner>/ecctl/cmd/ecctl@latest\n")
 
-	err := checkReleaseReady(root)
+	err := checkReleaseReady(root, "example/ecctl")
 	if err == nil || !strings.Contains(err.Error(), "public release placeholders") {
 		t.Fatalf("checkReleaseReady error = %v, want placeholder failure", err)
 	}
@@ -68,84 +73,29 @@ func TestCheckReleaseReadyAllowsReleasePrepOnlyPlaceholders(t *testing.T) {
 	writeFile(t, filepath.Join(root, "cmd", "releaseprep", "main.go"), "package main\n\nconst usage = \"github.com/<owner>/ecctl\"\n")
 	writeFile(t, filepath.Join(root, "docs", "superpowers", "plans", "plan.md"), "Before publish, set PUBLIC_MODULE to github.com/<owner>/ecctl.\n")
 
-	if err := checkReleaseReady(root); err != nil {
+	if err := checkReleaseReady(root, "example/ecctl"); err != nil {
 		t.Fatalf("checkReleaseReady: %v", err)
 	}
 }
 
-func TestCheckBinaryReleaseReady(t *testing.T) {
+func TestCheckReleaseReadyRejectsRepositoryMismatch(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "go.mod"), "module ecctl\n\ngo 1.25.0\n")
-	writeFile(t, filepath.Join(root, "README.md"), "brew tap aliyun/ecctl https://github.com/aliyun/elastic-compute-control-cli\nbrew install ecctl\n")
+	writeFile(t, filepath.Join(root, "go.mod"), "module github.com/attacker/ecctl\n\ngo 1.25.0\n")
 
-	if err := checkBinaryReleaseReady(root, binaryReleaseRepository); err != nil {
-		t.Fatalf("checkBinaryReleaseReady: %v", err)
+	err := checkReleaseReady(root, "aliyun/elastic-compute-control-cli")
+	if err == nil || !strings.Contains(err.Error(), "must match repository") {
+		t.Fatalf("checkReleaseReady error = %v, want repository mismatch", err)
 	}
 }
 
-func TestCheckBinaryReleaseReadyRejectsWrongRepository(t *testing.T) {
+func TestCheckReleaseReadyRejectsMismatchedGoInstallModule(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "go.mod"), "module ecctl\n\ngo 1.25.0\n")
+	writeFile(t, filepath.Join(root, "go.mod"), "module github.com/aliyun/elastic-compute-control-cli\n\ngo 1.25.0\n")
+	writeFile(t, filepath.Join(root, "README.md"), "go install github.com/attacker/ecctl/cmd/ecctl@latest\n")
 
-	err := checkBinaryReleaseReady(root, "aliyun/ecctl")
-	if err == nil || !strings.Contains(err.Error(), binaryReleaseRepository) {
-		t.Fatalf("checkBinaryReleaseReady error = %v, want repository identity failure", err)
-	}
-}
-
-func TestCheckBinaryReleaseReadyRejectsModuleMigration(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "go.mod"), "module github.com/aliyun/ecctl\n\ngo 1.25.0\n")
-
-	err := checkBinaryReleaseReady(root, binaryReleaseRepository)
-	if err == nil || !strings.Contains(err.Error(), "expects module") {
-		t.Fatalf("checkBinaryReleaseReady error = %v, want module failure", err)
-	}
-}
-
-func TestCheckBinaryReleaseReadyRejectsReplace(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "go.mod"), "module ecctl\n\ngo 1.25.0\n\nreplace example.com/a => example.com/b v1.0.0\n")
-
-	err := checkBinaryReleaseReady(root, binaryReleaseRepository)
-	if err == nil || !strings.Contains(err.Error(), "replace directives") {
-		t.Fatalf("checkBinaryReleaseReady error = %v, want replace failure", err)
-	}
-}
-
-func TestCheckBinaryReleaseReadyAllowsPinnedMetadataModuleReplace(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "go.mod"), "module ecctl\n\ngo 1.25.0\n\nreplace "+allowedBinaryReplace+"\n")
-
-	if err := checkBinaryReleaseReady(root, binaryReleaseRepository); err != nil {
-		t.Fatalf("checkBinaryReleaseReady: %v", err)
-	}
-}
-
-func TestCheckBinaryReleaseReadyRejectsGoInstallAndStaleRepository(t *testing.T) {
-	for _, content := range []string{
-		"go install github.com/aliyun/ecctl/cmd/ecctl@latest\n",
-		"Download from https://github.com/aliyun/ecctl/releases.\n",
-	} {
-		root := t.TempDir()
-		writeFile(t, filepath.Join(root, "go.mod"), "module ecctl\n\ngo 1.25.0\n")
-		writeFile(t, filepath.Join(root, "README.md"), content)
-
-		err := checkBinaryReleaseReady(root, binaryReleaseRepository)
-		if err == nil || !strings.Contains(err.Error(), "unfrozen Go module/repository") {
-			t.Fatalf("checkBinaryReleaseReady(%q) error = %v, want misrepresentation failure", content, err)
-		}
-	}
-}
-
-func TestCheckBinaryReleaseReadyRejectsStaleRepositoryInJSON(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "go.mod"), "module ecctl\n\ngo 1.25.0\n")
-	writeFile(t, filepath.Join(root, "website", "i18n", "footer.json"), `{"github":"https://github.com/aliyun/ecctl"}`)
-
-	err := checkBinaryReleaseReady(root, binaryReleaseRepository)
-	if err == nil || !strings.Contains(err.Error(), "unfrozen Go module/repository") {
-		t.Fatalf("checkBinaryReleaseReady error = %v, want JSON misrepresentation failure", err)
+	err := checkReleaseReady(root, "aliyun/elastic-compute-control-cli")
+	if err == nil || !strings.Contains(err.Error(), "go install commands must use public module") {
+		t.Fatalf("checkReleaseReady error = %v, want go install module mismatch", err)
 	}
 }
 
@@ -259,19 +209,27 @@ func TestCompareSemVersionPrereleaseOrdering(t *testing.T) {
 func TestRewritePublicModule(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.mod"), "module ecctl\n\ngo 1.25.0\n")
+	writeFile(t, filepath.Join(root, "e2e", "go.mod"), "module ecctl/e2e\n\ngo 1.25.0\n")
 	writeFile(t, filepath.Join(root, "cmd", "ecctl", "main.go"), "package main\n\nimport \"ecctl/pkg/cli\"\n")
 	writeFile(t, filepath.Join(root, "README.md"), "go install github.com/<owner>/ecctl/cmd/ecctl@latest\n")
 	writeFile(t, filepath.Join(root, ".goreleaser.yaml"), "ldflags:\n  - -X ecctl/pkg/cli.version={{ .Version }}\n")
 	writeFile(t, filepath.Join(root, "Makefile"), "PUBLIC_MODULE is required, for example github.com/<owner>/ecctl\n")
 	writeFile(t, filepath.Join(root, "cmd", "releaseprep", "main.go"), "package main\n\nconst usage = \"github.com/<owner>/ecctl\"\n")
 
-	if err := rewritePublicModule(root, "github.com/example/ecctl"); err != nil {
+	if err := rewritePublicModule(root, "github.com/example/elastic-compute-control-cli"); err != nil {
 		t.Fatalf("rewritePublicModule: %v", err)
 	}
-	assertFileContains(t, filepath.Join(root, "go.mod"), "module github.com/example/ecctl")
-	assertFileContains(t, filepath.Join(root, "cmd", "ecctl", "main.go"), "\"github.com/example/ecctl/pkg/cli\"")
-	assertFileContains(t, filepath.Join(root, "README.md"), "go install github.com/example/ecctl/cmd/ecctl@latest")
-	assertFileContains(t, filepath.Join(root, ".goreleaser.yaml"), "-X github.com/example/ecctl/pkg/cli.version={{ .Version }}")
+	if err := rewritePublicModule(root, "github.com/example/elastic-compute-control-cli"); err != nil {
+		t.Fatalf("rewritePublicModule second run: %v", err)
+	}
+	if err := rewritePublicModule(root, "github.com/another/ecctl-cli"); err != nil {
+		t.Fatalf("rewritePublicModule retarget: %v", err)
+	}
+	assertFileContains(t, filepath.Join(root, "go.mod"), "module github.com/another/ecctl-cli")
+	assertFileContains(t, filepath.Join(root, "e2e", "go.mod"), "module github.com/another/ecctl-cli/e2e")
+	assertFileContains(t, filepath.Join(root, "cmd", "ecctl", "main.go"), "\"github.com/another/ecctl-cli/pkg/cli\"")
+	assertFileContains(t, filepath.Join(root, "README.md"), "go install github.com/another/ecctl-cli/cmd/ecctl@latest")
+	assertFileContains(t, filepath.Join(root, ".goreleaser.yaml"), "-X github.com/another/ecctl-cli/pkg/cli.version={{ .Version }}")
 	assertFileContains(t, filepath.Join(root, "Makefile"), "github.com/<owner>/ecctl")
 	assertFileContains(t, filepath.Join(root, "cmd", "releaseprep", "main.go"), "github.com/<owner>/ecctl")
 }

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	ecerrors "ecctl/pkg/errors"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 )
 
 type tagAssignment struct {

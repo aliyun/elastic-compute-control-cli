@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"ecctl/pkg/spec"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
 
 var (

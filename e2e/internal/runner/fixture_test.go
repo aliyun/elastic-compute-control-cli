@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"ecctl/e2e/internal/scenario"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
 func TestPublicACKUserFixtureUsesGenericRAMCall(t *testing.T) {

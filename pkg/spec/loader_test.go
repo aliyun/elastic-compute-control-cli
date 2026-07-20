@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"ecctl/pkg/i18n"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
 )
 
 func TestLoadResourceSpecFromYAML(t *testing.T) {

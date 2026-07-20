@@ -22,9 +22,9 @@ builds:
     ldflags:
       - >-
         -s -w
-        -X ecctl/pkg/cli.version={{ .Version }}
-        -X ecctl/pkg/cli.commit={{ .Commit }}
-        -X ecctl/pkg/cli.date={{ .Date }}
+        -X github.com/aliyun/elastic-compute-control-cli/pkg/cli.version={{ .Version }}
+        -X github.com/aliyun/elastic-compute-control-cli/pkg/cli.commit={{ .Commit }}
+        -X github.com/aliyun/elastic-compute-control-cli/pkg/cli.date={{ .Date }}
 
   - id: ecctl-other
     main: ./cmd/ecctl
@@ -42,9 +42,9 @@ builds:
     ldflags:
       - >-
         -s -w
-        -X ecctl/pkg/cli.version={{ .Version }}
-        -X ecctl/pkg/cli.commit={{ .Commit }}
-        -X ecctl/pkg/cli.date={{ .Date }}
+        -X github.com/aliyun/elastic-compute-control-cli/pkg/cli.version={{ .Version }}
+        -X github.com/aliyun/elastic-compute-control-cli/pkg/cli.commit={{ .Commit }}
+        -X github.com/aliyun/elastic-compute-control-cli/pkg/cli.date={{ .Date }}
 
 archives:
   - id: ecctl-darwin

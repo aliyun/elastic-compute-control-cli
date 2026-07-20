@@ -5,11 +5,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	execpkg "ecctl/e2e/internal/exec"
-	"ecctl/e2e/internal/jsonq"
-	"ecctl/e2e/internal/report"
-	"ecctl/e2e/internal/scenario"
-	"ecctl/e2e/internal/vars"
+	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/jsonq"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/vars"
 )
 
 // renderExpectations substitutes {{.var}} templates inside matcher values and

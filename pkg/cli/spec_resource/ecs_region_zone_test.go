@@ -3,8 +3,8 @@ package spec_resource
 import (
 	"testing"
 
-	"ecctl/pkg/engine"
-	"ecctl/pkg/spec"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
 
 func catalogCaller(t *testing.T, product, resource string, fake *fakeSpecCaller) func(args ...string) (string, string, int) {

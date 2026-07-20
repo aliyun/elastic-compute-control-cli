@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	ecerrors "ecctl/pkg/errors"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 )
 
 func TestLocalizeFallsBackToEnglish(t *testing.T) {

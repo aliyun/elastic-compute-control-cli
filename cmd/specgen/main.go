@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"ecctl/pkg/spec"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
 
 type catalogData struct {

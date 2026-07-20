@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"ecctl/e2e/internal/fixtureconfig"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/fixtureconfig"
 )
 
 func TestCheckKeepsAvailableOSSAndLingjunPrerequisites(t *testing.T) {

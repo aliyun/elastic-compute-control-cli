@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	spechooks "ecctl/specs"
+	spechooks "github.com/aliyun/elastic-compute-control-cli/specs"
 )
 
 func init() {

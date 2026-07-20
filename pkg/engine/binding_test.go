@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"ecctl/pkg/spec"
-	_ "ecctl/specs/ecs"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
+	_ "github.com/aliyun/elastic-compute-control-cli/specs/ecs"
 )
 
 func TestResolveBindingRequestExpandsObjectArrayFields(t *testing.T) {

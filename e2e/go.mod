@@ -1,4 +1,4 @@
-module ecctl/e2e
+module github.com/aliyun/elastic-compute-control-cli/e2e
 
 go 1.25
 

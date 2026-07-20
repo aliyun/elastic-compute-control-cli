@@ -16,8 +16,8 @@ import (
 	"github.com/alibabacloud-go/tea/dara"
 	"github.com/alibabacloud-go/tea/tea"
 
-	ecconfig "ecctl/pkg/config"
-	ecerrors "ecctl/pkg/errors"
+	ecconfig "github.com/aliyun/elastic-compute-control-cli/pkg/config"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 )
 
 // Throttle-retry defaults: Alibaba Cloud throttles per-API per-account, so any

@@ -31,13 +31,10 @@ The first command uses this repository directly as the `aliyun/ecctl` Tap. Pre-b
 binaries for macOS, Linux, and Windows are also available from
 [GitHub Releases](https://github.com/aliyun/elastic-compute-control-cli/releases).
 
-Build from a source checkout:
+Or install with Go 1.25 or later:
 
 ```bash
-git clone https://github.com/aliyun/elastic-compute-control-cli.git
-cd elastic-compute-control-cli
-make build
-./bin/ecctl --help
+go install github.com/aliyun/elastic-compute-control-cli/cmd/ecctl@latest
 ```
 
 See the [installation guide](https://aliyun.github.io/elastic-compute-control-cli/docs/getting-started/installation) for requirements and other installation options.
@@ -47,25 +44,20 @@ See the [installation guide](https://aliyun.github.io/elastic-compute-control-cl
 Inspect the command surface before running cloud operations:
 
 ```bash
-./bin/ecctl schema --list
-./bin/ecctl schema --list ecs
-./bin/ecctl schema ecs.instance.create --brief
+ecctl schema --list
+ecctl schema --list ecs
+ecctl schema ecs.instance.create --brief
 ```
 
 Run resource commands with the regular product/resource/action shape:
 
 ```bash
-./bin/ecctl vpc list
-./bin/ecctl ecs instance list --filter status=Running
+ecctl vpc list
+ecctl ecs instance list --filter status=Running
 ```
 
 Learn more in the [Quick Start](https://aliyun.github.io/elastic-compute-control-cli/docs/getting-started/quick-start), [Concepts](https://aliyun.github.io/elastic-compute-control-cli/docs/user-guide/concepts), [Command Discovery](https://aliyun.github.io/elastic-compute-control-cli/docs/user-guide/discovery), and [Resource Coverage](https://aliyun.github.io/elastic-compute-control-cli/docs/reference/resource-coverage) guides.
 
 ## Contributing
 
-```bash
-make test
-make lint
-```
-
-Before changing resource behavior, read the online [resource spec guide](https://aliyun.github.io/elastic-compute-control-cli/docs/contributing/resource-specs).
+Start with the [resource spec guide](https://aliyun.github.io/elastic-compute-control-cli/docs/contributing/resource-specs).

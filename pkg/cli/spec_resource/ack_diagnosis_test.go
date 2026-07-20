@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"ecctl/pkg/engine"
-	"ecctl/pkg/spec"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
 
 func ackDiagnosisCaller(t *testing.T, fake *fakeSpecCaller, wantResource string, wantParent string) func(args ...string) (string, string, int) {

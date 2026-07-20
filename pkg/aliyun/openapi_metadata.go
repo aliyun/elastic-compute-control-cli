@@ -5,8 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	aliyunopenapimeta "github.com/aliyun/aliyun-cli/v3/aliyun-openapi-meta"
-	alinewmeta "github.com/aliyun/aliyun-cli/v3/newmeta"
+	aliyunopenapimeta "github.com/aliyun/aliyun-openapi-meta"
 )
 
 type OpenAPIProduct struct {
@@ -54,14 +53,14 @@ type OpenAPIParameter struct {
 func OpenAPIProducts(lang string) ([]OpenAPIProduct, error) {
 	metadataLang := openAPIMetadataLanguage(lang)
 	legacy := legacyOpenAPIProducts(lang)
-	content, err := alinewmeta.GetMetadata(metadataLang, "/products.json")
+	content, err := readOpenAPINewMetadata(metadataLang, "/products.json")
 	if err != nil {
 		if products := openAPIProductMapValues(legacy); len(products) > 0 {
 			return products, nil
 		}
 		return nil, err
 	}
-	var set alinewmeta.ProductSet
+	var set openAPINewProductSet
 	if err := json.Unmarshal(content, &set); err != nil {
 		return nil, err
 	}
@@ -101,7 +100,7 @@ func OpenAPIProductByCode(code string, lang string) (OpenAPIProduct, bool) {
 }
 
 func OpenAPIOperationSummaryFor(lang string, productCode string, operation string) (OpenAPIOperationSummary, bool) {
-	api, err := alinewmeta.GetAPI(openAPIMetadataLanguage(lang), productCode, operation)
+	api, err := readOpenAPINewAPI(openAPIMetadataLanguage(lang), productCode, operation)
 	if err != nil || api == nil {
 		return OpenAPIOperationSummary{}, false
 	}
@@ -113,7 +112,7 @@ func OpenAPIOperationSummaryFor(lang string, productCode string, operation strin
 }
 
 func OpenAPIOperationDetailFor(lang string, product OpenAPIProduct, operation string) (OpenAPIOperationDetail, bool) {
-	detail, err := alinewmeta.GetAPIDetail(openAPIMetadataLanguage(lang), product.Code, operation)
+	detail, err := readOpenAPINewAPIDetail(openAPIMetadataLanguage(lang), product.Code, operation)
 	if err != nil || detail == nil {
 		return legacyOpenAPIOperationDetail(lang, product, operation)
 	}
@@ -164,12 +163,12 @@ func findOpenAPIParameter(params []OpenAPIParameter, name string) *OpenAPIParame
 	return nil
 }
 
-func openAPIProductFromNewMeta(metadataLang string, product alinewmeta.Product) (OpenAPIProduct, error) {
-	content, err := alinewmeta.GetMetadata(metadataLang, "/"+strings.ToLower(product.Code)+"/version.json")
+func openAPIProductFromNewMeta(metadataLang string, product openAPINewProduct) (OpenAPIProduct, error) {
+	content, err := readOpenAPINewMetadata(metadataLang, "/"+strings.ToLower(product.Code)+"/version.json")
 	if err != nil {
 		return OpenAPIProduct{}, err
 	}
-	var version alinewmeta.Version
+	var version openAPINewVersion
 	if err := json.Unmarshal(content, &version); err != nil {
 		return OpenAPIProduct{}, err
 	}
@@ -181,7 +180,7 @@ func openAPIProductFromNewMeta(metadataLang string, product alinewmeta.Product) 
 	endpoints := make(map[string]OpenAPIEndpoint, len(product.Endpoints))
 	for region, endpoint := range product.Endpoints {
 		endpoints[region] = OpenAPIEndpoint{
-			RegionID: endpoint.RegionId,
+			RegionID: endpoint.RegionID,
 			Name:     endpoint.Name,
 			Public:   endpoint.Public,
 			VPC:      endpoint.VPC,
@@ -198,7 +197,7 @@ func openAPIProductFromNewMeta(metadataLang string, product alinewmeta.Product) 
 	}, nil
 }
 
-func openAPIOperationDetailFromNewMeta(product OpenAPIProduct, detail *alinewmeta.APIDetail) OpenAPIOperationDetail {
+func openAPIOperationDetailFromNewMeta(product OpenAPIProduct, detail *openAPINewDetail) OpenAPIOperationDetail {
 	params := make([]OpenAPIParameter, 0, len(detail.Parameters))
 	for _, param := range detail.Parameters {
 		params = append(params, OpenAPIParameter{

@@ -12,13 +12,13 @@ import (
 	"sync"
 	"time"
 
-	execpkg "ecctl/e2e/internal/exec"
-	"ecctl/e2e/internal/fixtureconfig"
-	"ecctl/e2e/internal/match"
-	paramspkg "ecctl/e2e/internal/params"
-	"ecctl/e2e/internal/report"
-	"ecctl/e2e/internal/scenario"
-	"ecctl/e2e/internal/vars"
+	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/fixtureconfig"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/match"
+	paramspkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/params"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/vars"
 )
 
 // Options configures a run.

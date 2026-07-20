@@ -26,19 +26,19 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"ecctl/e2e/internal/caselint"
-	"ecctl/e2e/internal/coverage"
-	execpkg "ecctl/e2e/internal/exec"
-	"ecctl/e2e/internal/fixtureconfig"
-	paramspkg "ecctl/e2e/internal/params"
-	"ecctl/e2e/internal/prereqcheck"
-	"ecctl/e2e/internal/regionselect"
-	"ecctl/e2e/internal/report"
-	"ecctl/e2e/internal/runner"
-	"ecctl/e2e/internal/runplan"
-	"ecctl/e2e/internal/scenario"
-	surfacepkg "ecctl/e2e/internal/surface"
-	"ecctl/e2e/internal/sweeper"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/caselint"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/coverage"
+	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/fixtureconfig"
+	paramspkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/params"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/prereqcheck"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/regionselect"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/runner"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/runplan"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
+	surfacepkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/surface"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/sweeper"
 )
 
 // Exit codes, modeled on pytest.

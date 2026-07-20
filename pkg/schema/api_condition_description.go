@@ -3,8 +3,8 @@ package schema
 import (
 	"strings"
 
-	"ecctl/pkg/i18n"
-	"ecctl/pkg/spec"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
 
 type apiConditionDescriber struct {

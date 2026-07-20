@@ -10,12 +10,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"ecctl/pkg/aliyun"
-	"ecctl/pkg/config"
-	"ecctl/pkg/engine"
-	ecerrors "ecctl/pkg/errors"
-	"ecctl/pkg/i18n"
-	"ecctl/pkg/output"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/aliyun"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/config"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/output"
 )
 
 type APICallerFactory func(profileName, configPath, product, region string, getenv func(string) string) (engine.Caller, error)

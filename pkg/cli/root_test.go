@@ -18,10 +18,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"ecctl/pkg/engine"
-	ecerrors "ecctl/pkg/errors"
-	"ecctl/pkg/schema"
-	"ecctl/pkg/spec"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/schema"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
 
 func TestMain(m *testing.M) {

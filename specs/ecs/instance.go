@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	ecerrors "ecctl/pkg/errors"
-	spechooks "ecctl/specs"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	spechooks "github.com/aliyun/elastic-compute-control-cli/specs"
 )
 
 func init() {

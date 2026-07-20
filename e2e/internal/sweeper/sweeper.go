@@ -16,10 +16,10 @@ import (
 	"github.com/google/shlex"
 	"gopkg.in/yaml.v3"
 
-	execpkg "ecctl/e2e/internal/exec"
-	"ecctl/e2e/internal/jsonq"
-	"ecctl/e2e/internal/report"
-	"ecctl/e2e/internal/vars"
+	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/jsonq"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/vars"
 )
 
 // defaultConcurrency bounds parallel deletes within a single kind when the

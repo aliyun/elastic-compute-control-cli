@@ -4,10 +4,10 @@ import (
 	"context"
 	"os"
 
-	"ecctl/pkg/cli"
-	_ "ecctl/specs/ack"
-	_ "ecctl/specs/ecs"
-	_ "ecctl/specs/tag"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/cli"
+	_ "github.com/aliyun/elastic-compute-control-cli/specs/ack"
+	_ "github.com/aliyun/elastic-compute-control-cli/specs/ecs"
+	_ "github.com/aliyun/elastic-compute-control-cli/specs/tag"
 )
 
 func main() {

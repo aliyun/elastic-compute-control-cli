@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"ecctl/e2e/internal/report"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
 )
 
 func TestClassifyRetriesOnlyRegionUnavailableFailures(t *testing.T) {

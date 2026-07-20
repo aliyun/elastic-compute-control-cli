@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"ecctl/e2e/internal/report"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
 )
 
 var unavailableMarkers = []string{

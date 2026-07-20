@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	execpkg "ecctl/e2e/internal/exec"
+	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
 )
 
 func TestCleanupFailurePreservesRedactedOutputAndCloudCode(t *testing.T) {

@@ -4,8 +4,8 @@ import (
 	"sort"
 	"strings"
 
-	ecconfig "ecctl/pkg/config"
-	ecerrors "ecctl/pkg/errors"
+	ecconfig "github.com/aliyun/elastic-compute-control-cli/pkg/config"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 )
 
 // Location service used to validate region IDs without depending on a static

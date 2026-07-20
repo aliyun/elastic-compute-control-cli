@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"ecctl/e2e/internal/scenario"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
 func TestLoadFromBinaryReadsSelectedCapabilities(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"ecctl/pkg/engine"
-	"ecctl/pkg/spec"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
 
 func ackTemplateCaller(t *testing.T, fake *fakeSpecCaller) func(args ...string) (string, string, int) {

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"ecctl/pkg/spec"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
 
 func TestProductSurfacesStayUnderAgentBudget(t *testing.T) {

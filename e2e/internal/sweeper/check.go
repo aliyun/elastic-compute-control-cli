@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/shlex"
 
-	"ecctl/e2e/internal/scenario"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
 var allowedNonSweepableReasons = map[string]bool{

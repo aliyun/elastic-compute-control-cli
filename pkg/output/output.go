@@ -8,7 +8,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 
-	ecerrors "ecctl/pkg/errors"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 )
 
 const (

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	ecerrors "ecctl/pkg/errors"
-	"ecctl/pkg/spec"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
 
 func TestRequireAnyBindingInputMatchesRequestPrefixAndExpressions(t *testing.T) {

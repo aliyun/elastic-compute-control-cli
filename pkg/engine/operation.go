@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	ecerrors "ecctl/pkg/errors"
-	"ecctl/pkg/spec"
-	spechooks "ecctl/specs"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
+	spechooks "github.com/aliyun/elastic-compute-control-cli/specs"
 )
 
 func (e *Executor) executeOperationCall(ctx context.Context, req Request, operation spec.Operation) (Result, error) {

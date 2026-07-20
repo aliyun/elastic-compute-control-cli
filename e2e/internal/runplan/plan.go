@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"ecctl/e2e/internal/fixtureconfig"
-	"ecctl/e2e/internal/scenario"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/fixtureconfig"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
 const PrimaryRole = "primary"

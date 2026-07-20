@@ -14,10 +14,10 @@ import (
 	"github.com/google/shlex"
 	"gopkg.in/yaml.v3"
 
-	"ecctl/e2e/internal/coverage"
-	"ecctl/e2e/internal/fixtureconfig"
-	paramspkg "ecctl/e2e/internal/params"
-	"ecctl/e2e/internal/scenario"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/coverage"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/fixtureconfig"
+	paramspkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/params"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
 type Options struct {

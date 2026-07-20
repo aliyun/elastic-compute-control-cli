@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	ecconfig "ecctl/pkg/config"
-	ecerrors "ecctl/pkg/errors"
+	ecconfig "github.com/aliyun/elastic-compute-control-cli/pkg/config"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 )
 
 type CLICommandRunner interface {

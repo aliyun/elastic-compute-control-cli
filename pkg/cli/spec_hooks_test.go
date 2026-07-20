@@ -1,3 +1,3 @@
 package cli
 
-import _ "ecctl/specs/ecs"
+import _ "github.com/aliyun/elastic-compute-control-cli/specs/ecs"

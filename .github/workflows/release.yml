@@ -64,8 +64,8 @@ jobs:
             --release-tag "${RELEASE_TAG}" \
             "${cask_args[@]}"
 
-      - name: Check binary release readiness
-        run: make check-binary-release
+      - name: Check public module release readiness
+        run: make check-public-release
 
       - name: Lint
         run: make lint

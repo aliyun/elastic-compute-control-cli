@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"ecctl/e2e/internal/scenario"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 
 	"gopkg.in/yaml.v3"
 )

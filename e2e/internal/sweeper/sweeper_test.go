@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	execpkg "ecctl/e2e/internal/exec"
-	"ecctl/e2e/internal/report"
+	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
 )
 
 func TestReplayJournalRunsTeardownsInReverseOrder(t *testing.T) {

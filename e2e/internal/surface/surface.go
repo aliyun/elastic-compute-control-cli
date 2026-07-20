@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/shlex"
 
-	execpkg "ecctl/e2e/internal/exec"
-	"ecctl/e2e/internal/scenario"
+	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
 type Capabilities struct {

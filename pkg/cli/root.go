@@ -15,12 +15,12 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"ecctl/pkg/aliyun"
-	"ecctl/pkg/config"
-	ecerrors "ecctl/pkg/errors"
-	"ecctl/pkg/i18n"
-	"ecctl/pkg/output"
-	"ecctl/pkg/schema"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/aliyun"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/config"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/output"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/schema"
 )
 
 // RegionVerifier is the surface exposed by aliyun.RegionVerifier and any test

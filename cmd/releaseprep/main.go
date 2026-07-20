@@ -13,41 +13,34 @@ import (
 )
 
 var (
-	githubModulePattern = regexp.MustCompile(`github\.com/[A-Za-z0-9_.-]+/ecctl`)
+	githubModulePattern = regexp.MustCompile(`github\.com/[A-Za-z0-9_.-]+/ecctl([^A-Za-z0-9_.-]|$)`)
 	githubOwnerPattern  = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$`)
-	goInstallPattern    = regexp.MustCompile(`(?m)\bgo\s+install\s+\S*ecctl\S*`)
+	githubRepoPattern   = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+	goInstallPattern    = regexp.MustCompile(`(?m)\bgo[\t ]+install[\t ]+\S+`)
 	semverIdentifier    = regexp.MustCompile(`^[0-9A-Za-z-]+$`)
 	semverNumeric       = regexp.MustCompile(`^[0-9]+$`)
 	caskVersionPattern  = regexp.MustCompile(`(?m)^[\t ]*version "([^"]+)"[\t ]*$`)
 )
 
-const (
-	binaryReleaseModule         = "ecctl"
-	binaryReleaseRepository     = "aliyun/elastic-compute-control-cli"
-	allowedBinaryReplace        = "github.com/aliyun/aliyun-cli/v3/aliyun-openapi-meta => github.com/aliyun/aliyun-openapi-meta v0.0.0-20260421122526-2563691c2222"
-	allowedBinaryReplaceWithKey = "replace " + allowedBinaryReplace
-)
-
 func main() {
-	module := flag.String("module", "", "public Go module path, for example github.com/<owner>/ecctl")
+	module := flag.String("module", "", "public Go module path, for example github.com/<owner>/<repo>")
 	write := flag.Bool("write", false, "rewrite repository files to the public module path")
 	check := flag.Bool("check", false, "check whether the repository is ready for a public release tag")
-	checkBinary := flag.Bool("check-binary-release", false, "check whether the repository is ready for a binary-only release tag")
 	checkHomebrew := flag.Bool("check-homebrew-version", false, "check whether a release tag advances the current Homebrew Cask")
-	repository := flag.String("repository", "", "GitHub repository identity for binary release checks")
+	repository := flag.String("repository", "", "GitHub repository identity for public release checks")
 	releaseTag := flag.String("release-tag", "", "candidate release tag for Homebrew version checks")
 	cask := flag.String("cask", "", "path to the current Homebrew Cask")
 	firstHomebrewRelease := flag.Bool("first-homebrew-release", false, "allow a release when the repository does not have a Homebrew Cask yet")
 	flag.Parse()
 
 	selected := 0
-	for _, enabled := range []bool{*write, *check, *checkBinary, *checkHomebrew} {
+	for _, enabled := range []bool{*write, *check, *checkHomebrew} {
 		if enabled {
 			selected++
 		}
 	}
 	if selected != 1 {
-		exitError(errors.New("exactly one of --write, --check, --check-binary-release, or --check-homebrew-version is required"))
+		exitError(errors.New("exactly one of --write, --check, or --check-homebrew-version is required"))
 	}
 	root, err := os.Getwd()
 	if err != nil {
@@ -59,19 +52,13 @@ func main() {
 		}
 		return
 	}
-	if *checkBinary {
-		if err := checkBinaryReleaseReady(root, *repository); err != nil {
-			exitError(err)
-		}
-		return
-	}
 	if *checkHomebrew {
 		if err := checkHomebrewCaskVersion(*releaseTag, *cask, *firstHomebrewRelease); err != nil {
 			exitError(err)
 		}
 		return
 	}
-	if err := checkReleaseReady(root); err != nil {
+	if err := checkReleaseReady(root, *repository); err != nil {
 		exitError(err)
 	}
 }
@@ -235,77 +222,6 @@ func compareNumericIdentifier(left string, right string) int {
 	return 0
 }
 
-func checkBinaryReleaseReady(root string, repository string) error {
-	if repository != binaryReleaseRepository {
-		return fmt.Errorf("binary releases must run from %s, got %q", binaryReleaseRepository, repository)
-	}
-	raw, err := os.ReadFile(filepath.Join(root, "go.mod"))
-	if err != nil {
-		return err
-	}
-	if module := modulePath(raw); module != binaryReleaseModule {
-		return fmt.Errorf("binary release expects module %q until the public module migration is planned separately, got %q", binaryReleaseModule, module)
-	}
-	if unsupported := unsupportedBinaryReplaceDirectives(raw); len(unsupported) > 0 {
-		return fmt.Errorf("go.mod contains unsupported replace directives: %s", strings.Join(unsupported, ", "))
-	}
-	return checkNoBinaryReleaseMisrepresentation(root)
-}
-
-func unsupportedBinaryReplaceDirectives(raw []byte) []string {
-	var unsupported []string
-	inBlock := false
-	scanner := bufio.NewScanner(bytes.NewReader(raw))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		switch {
-		case line == "replace" || line == "replace (" || line == "replace(":
-			inBlock = true
-		case inBlock && line == ")":
-			inBlock = false
-		case inBlock && line != "" && line != allowedBinaryReplace:
-			unsupported = append(unsupported, line)
-		case strings.HasPrefix(line, "replace ") && line != allowedBinaryReplaceWithKey:
-			unsupported = append(unsupported, line)
-		}
-	}
-	return unsupported
-}
-
-func checkNoBinaryReleaseMisrepresentation(root string) error {
-	var hits []string
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			if skipDir(entry.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !rewriteCandidate(path) {
-			return nil
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		text := string(raw)
-		if strings.Contains(text, "github.com/aliyun/ecctl") || goInstallPattern.MatchString(text) {
-			hits = append(hits, path)
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	if len(hits) > 0 {
-		return fmt.Errorf("binary release documentation or configuration still advertises the unfrozen Go module/repository in %s", strings.Join(hits, ", "))
-	}
-	return nil
-}
-
 func exitError(err error) {
 	fmt.Fprintln(os.Stderr, err)
 	os.Exit(1)
@@ -316,14 +232,17 @@ func validatePublicModule(module string) error {
 		return errors.New("PUBLIC_MODULE is required")
 	}
 	parts := strings.Split(module, "/")
-	if len(parts) != 3 || parts[0] != "github.com" || parts[1] == "" || parts[2] != "ecctl" {
-		return fmt.Errorf("PUBLIC_MODULE must look like github.com/<owner>/ecctl, got %q", module)
+	if len(parts) != 3 || parts[0] != "github.com" || parts[1] == "" || parts[2] == "" {
+		return fmt.Errorf("PUBLIC_MODULE must look like github.com/<owner>/<repo>, got %q", module)
 	}
-	if strings.Contains(parts[1], "<") || strings.Contains(parts[1], ">") {
-		return fmt.Errorf("PUBLIC_MODULE owner must be frozen, got %q", module)
+	if strings.Contains(module, "<") || strings.Contains(module, ">") {
+		return fmt.Errorf("PUBLIC_MODULE owner and repository must be frozen, got %q", module)
 	}
 	if !githubOwnerPattern.MatchString(parts[1]) {
 		return fmt.Errorf("PUBLIC_MODULE owner must be a valid GitHub namespace, got %q", module)
+	}
+	if !githubRepoPattern.MatchString(parts[2]) {
+		return fmt.Errorf("PUBLIC_MODULE repository must be a valid GitHub repository name, got %q", module)
 	}
 	return nil
 }
@@ -331,6 +250,14 @@ func validatePublicModule(module string) error {
 func rewritePublicModule(root string, module string) error {
 	if err := validatePublicModule(module); err != nil {
 		return err
+	}
+	rootGoMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return err
+	}
+	oldModule := modulePath(rootGoMod)
+	if oldModule == "" {
+		return errors.New("root go.mod does not declare a module path")
 	}
 	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
@@ -349,7 +276,7 @@ func rewritePublicModule(root string, module string) error {
 		if err != nil {
 			return err
 		}
-		updated := rewriteContent(path, raw, module)
+		updated := rewriteContent(path, raw, oldModule, module)
 		if bytes.Equal(raw, updated) {
 			return nil
 		}
@@ -361,7 +288,7 @@ func rewritePublicModule(root string, module string) error {
 	})
 }
 
-func checkReleaseReady(root string) error {
+func checkReleaseReady(root string, repository string) error {
 	raw, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
 		return err
@@ -370,11 +297,57 @@ func checkReleaseReady(root string) error {
 	if err := validatePublicModule(module); err != nil {
 		return fmt.Errorf("module path is not frozen: %w", err)
 	}
+	expectedModule := "github.com/" + repository
+	if repository == "" || module != expectedModule {
+		return fmt.Errorf("public release module must match repository %q, got %q", expectedModule, module)
+	}
 	if hasReplaceDirective(raw) {
 		return errors.New("go.mod contains replace directives; go install pkg@version requires the target module to be replace-free")
 	}
 	if err := checkNoPlaceholders(root); err != nil {
 		return err
+	}
+	if err := checkGoInstallModule(root, module); err != nil {
+		return err
+	}
+	return nil
+}
+
+func checkGoInstallModule(root string, module string) error {
+	expectedPrefix := "go install " + module + "/cmd/ecctl@"
+	var hits []string
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if skipDir(entry.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !rewriteCandidate(path) {
+			return nil
+		}
+		if filepath.Ext(path) != ".md" {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, command := range goInstallPattern.FindAllString(string(raw), -1) {
+			if !strings.HasPrefix(command, expectedPrefix) {
+				hits = append(hits, path+": "+command)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if len(hits) > 0 {
+		return fmt.Errorf("go install commands must use public module %q: %s", module, strings.Join(hits, ", "))
 	}
 	return nil
 }
@@ -435,27 +408,36 @@ func checkNoPlaceholders(root string) error {
 	return nil
 }
 
-func rewriteContent(path string, raw []byte, module string) []byte {
+func rewriteContent(path string, raw []byte, oldModule string, module string) []byte {
 	text := string(raw)
 	if filepath.Base(path) == "go.mod" {
 		lines := strings.SplitAfter(text, "\n")
 		for i, line := range lines {
-			if strings.HasPrefix(strings.TrimSpace(line), "module ") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "module ") {
+				currentModule := strings.TrimSpace(strings.TrimPrefix(trimmed, "module "))
+				publicModule := currentModule
+				switch {
+				case currentModule == oldModule:
+					publicModule = module
+				case strings.HasPrefix(currentModule, oldModule+"/"):
+					publicModule = module + strings.TrimPrefix(currentModule, oldModule)
+				}
 				ending := ""
 				if strings.HasSuffix(line, "\n") {
 					ending = "\n"
 				}
-				lines[i] = "module " + module + ending
+				lines[i] = "module " + publicModule + ending
 				break
 			}
 		}
 		text = strings.Join(lines, "")
 	}
-	text = strings.ReplaceAll(text, "ecctl/pkg/", module+"/pkg/")
-	text = strings.ReplaceAll(text, "ecctl/specs/", module+"/specs/")
-	text = strings.ReplaceAll(text, `"ecctl/`, `"`+module+`/`)
+	text = strings.ReplaceAll(text, `"`+oldModule+`/`, `"`+module+`/`)
+	text = strings.ReplaceAll(text, "-X "+oldModule+"/", "-X "+module+"/")
+	text = strings.ReplaceAll(text, "go install "+oldModule+"/", "go install "+module+"/")
 	text = strings.ReplaceAll(text, "github.com/<owner>/ecctl", module)
-	text = githubModulePattern.ReplaceAllString(text, module)
+	text = githubModulePattern.ReplaceAllString(text, module+"${1}")
 	return []byte(text)
 }
 

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"ecctl/pkg/i18n"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
 
 	"github.com/goccy/go-yaml"
 )

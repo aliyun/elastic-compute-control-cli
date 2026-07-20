@@ -6,8 +6,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"ecctl/e2e/internal/match"
-	"ecctl/e2e/internal/scenario"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/match"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
 func parseStep(t *testing.T, y string) scenario.Step {

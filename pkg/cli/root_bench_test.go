@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"ecctl/pkg/spec"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
 
 func BenchmarkRunRootHelp(b *testing.B) {
