@@ -17,12 +17,44 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Check release version
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CI_EVENT: ${{ github.event_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version_args=(--check-version-file --version-file version.txt)
+          previous_version=$(mktemp)
+          released_tags=$(mktemp)
+          trap 'rm -f "${previous_version}" "${released_tags}"' EXIT
+          git tag --merged HEAD --list 'v*' > "${released_tags}"
+          version_args+=(--released-tags-file "${released_tags}")
+          if [[ "${CI_EVENT}" == "pull_request" ]] && \
+            ! git diff --quiet "${BASE_SHA}" HEAD -- version.txt; then
+            if git show "${BASE_SHA}:version.txt" > "${previous_version}" 2>/dev/null; then
+              version_args+=(--previous-version-file "${previous_version}")
+            else
+              latest_tag=$(git describe --tags --abbrev=0 --match 'v*' "${BASE_SHA}" 2>/dev/null || true)
+              if [[ -n "${latest_tag}" ]]; then
+                printf '%s\n' "${latest_tag#v}" > "${previous_version}"
+                version_args+=(--previous-version-file "${previous_version}")
+                echo "No version.txt exists on the pull request base; comparing against ${latest_tag}."
+              else
+                echo "No prior release tag exists; treating this as the version baseline."
+              fi
+            fi
+          fi
+          go run ./cmd/releaseprep "${version_args[@]}"
 
       - name: Lint
         run: make lint
@@ -43,9 +75,6 @@ jobs:
           e2e/bin/ecctl-e2e sweep check \
             --cases e2e/cases \
             --config e2e/sweep.yaml
-
-      - name: Prepare snapshot release metadata
-        run: printf '%s\n' '0.0.0-snapshot' > version.txt
 
       - name: Snapshot release build
         uses: goreleaser/goreleaser-action@v6

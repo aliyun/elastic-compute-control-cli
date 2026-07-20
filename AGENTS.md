@@ -54,6 +54,16 @@ make lint
 Use `go test ./...` when validating the whole open-source tree. Avoid live cloud
 API calls in default tests.
 
+## Releases
+
+- `version.txt` is the canonical public release version and must contain one
+  unprefixed SemVer value followed by a newline.
+- A release tag must be `v` followed by the exact `version.txt` value.
+- Increasing `version.txt` on `main` starts the release workflow. Do not
+  generate or rewrite it in CI, and never move an existing public tag.
+- Keep GitHub release immutability and the `main`/`v*` repository rulesets
+  enabled; they are part of the release authorization and integrity boundary.
+
 ## E2E Surface and Cleanup Gates
 
 - Public E2E runs use `e2e/bin/ecctl-public` with `--surface public`; hidden

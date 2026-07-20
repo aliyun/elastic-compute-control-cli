@@ -27,20 +27,24 @@ func main() {
 	write := flag.Bool("write", false, "rewrite repository files to the public module path")
 	check := flag.Bool("check", false, "check whether the repository is ready for a public release tag")
 	checkHomebrew := flag.Bool("check-homebrew-version", false, "check whether a release tag advances the current Homebrew Cask")
+	checkVersion := flag.Bool("check-version-file", false, "check the canonical release version file")
 	repository := flag.String("repository", "", "GitHub repository identity for public release checks")
-	releaseTag := flag.String("release-tag", "", "candidate release tag for Homebrew version checks")
+	releaseTag := flag.String("release-tag", "", "candidate release tag for version and Homebrew checks")
+	versionFile := flag.String("version-file", "version.txt", "path to the canonical release version file")
+	previousVersionFile := flag.String("previous-version-file", "", "path to the previous canonical release version file")
+	releasedTagsFile := flag.String("released-tags-file", "", "path to newline-delimited existing release tags")
 	cask := flag.String("cask", "", "path to the current Homebrew Cask")
 	firstHomebrewRelease := flag.Bool("first-homebrew-release", false, "allow a release when the repository does not have a Homebrew Cask yet")
 	flag.Parse()
 
 	selected := 0
-	for _, enabled := range []bool{*write, *check, *checkHomebrew} {
+	for _, enabled := range []bool{*write, *check, *checkHomebrew, *checkVersion} {
 		if enabled {
 			selected++
 		}
 	}
 	if selected != 1 {
-		exitError(errors.New("exactly one of --write, --check, or --check-homebrew-version is required"))
+		exitError(errors.New("exactly one of --write, --check, --check-homebrew-version, or --check-version-file is required"))
 	}
 	root, err := os.Getwd()
 	if err != nil {
@@ -58,6 +62,14 @@ func main() {
 		}
 		return
 	}
+	if *checkVersion {
+		version, err := checkReleaseVersion(*versionFile, *previousVersionFile, *releasedTagsFile, *releaseTag)
+		if err != nil {
+			exitError(err)
+		}
+		fmt.Println(version)
+		return
+	}
 	if err := checkReleaseReady(root, *repository); err != nil {
 		exitError(err)
 	}
@@ -68,6 +80,88 @@ type semVersion struct {
 	minor      string
 	patch      string
 	prerelease []string
+}
+
+func checkReleaseVersion(versionFile string, previousVersionFile string, releasedTagsFile string, releaseTag string) (string, error) {
+	version, parsed, err := readReleaseVersionFile(versionFile)
+	if err != nil {
+		return "", err
+	}
+	if releaseTag != "" {
+		expectedTag := "v" + version
+		if releaseTag != expectedTag {
+			return "", fmt.Errorf("release tag %q does not match version file; want %q", releaseTag, expectedTag)
+		}
+	}
+	if previousVersionFile != "" {
+		previousVersion, previousParsed, err := readReleaseVersionFile(previousVersionFile)
+		if err != nil {
+			return "", fmt.Errorf("invalid previous version file: %w", err)
+		}
+		if order := compareSemVersion(parsed, previousParsed); order <= 0 {
+			return "", fmt.Errorf("release version %s must be greater than previous version %s", version, previousVersion)
+		}
+	}
+	if releasedTagsFile != "" {
+		raw, err := os.ReadFile(releasedTagsFile)
+		if err != nil {
+			return "", err
+		}
+		expectedTag := "v" + version
+		scanner := bufio.NewScanner(bytes.NewReader(raw))
+		for scanner.Scan() {
+			tag := scanner.Text()
+			if tag == expectedTag {
+				continue
+			}
+			if !strings.HasPrefix(tag, "v") {
+				return "", fmt.Errorf("existing release tag must start with v, got %q", tag)
+			}
+			released, err := parseSemVersion(strings.TrimPrefix(tag, "v"))
+			if err != nil {
+				return "", fmt.Errorf("invalid existing release tag %q: %w", tag, err)
+			}
+			if compareSemVersion(parsed, released) <= 0 {
+				return "", fmt.Errorf("release version %s must be greater than existing release tag %s", version, tag)
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			return "", err
+		}
+	}
+	return version, nil
+}
+
+func readReleaseVersionFile(path string) (string, semVersion, error) {
+	var parsed semVersion
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", parsed, err
+	}
+	if bytes.HasPrefix(raw, []byte{0xef, 0xbb, 0xbf}) {
+		return "", parsed, errors.New("version file must not contain a byte-order mark")
+	}
+	if len(raw) == 0 || raw[len(raw)-1] != '\n' {
+		return "", parsed, errors.New("version file must contain one line terminated by a newline")
+	}
+	if bytes.Count(raw, []byte{'\n'}) != 1 || bytes.Contains(raw, []byte{'\r'}) {
+		return "", parsed, errors.New("version file must contain exactly one Unix-style line")
+	}
+	version := string(raw[:len(raw)-1])
+	if version == "" || strings.TrimSpace(version) != version {
+		return "", parsed, errors.New("version file must not be empty or contain surrounding whitespace")
+	}
+	if strings.HasPrefix(version, "v") {
+		return "", parsed, errors.New("version file must not include the v tag prefix")
+	}
+	if strings.Contains(version, "+") {
+		return "", parsed, errors.New("version file must not include build metadata")
+	}
+	parsed, err = parseSemVersion(version)
+	if err != nil {
+		return "", parsed, fmt.Errorf("invalid release version %q: %w", version, err)
+	}
+	return version, parsed, nil
 }
 
 func checkHomebrewCaskVersion(releaseTag string, caskPath string, firstRelease bool) error {

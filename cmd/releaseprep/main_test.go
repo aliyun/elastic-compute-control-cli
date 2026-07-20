@@ -180,6 +180,114 @@ func TestCheckHomebrewCaskVersionRejectsMalformedInput(t *testing.T) {
 	}
 }
 
+func TestCheckReleaseVersionAllowsCanonicalAdvance(t *testing.T) {
+	root := t.TempDir()
+	current := filepath.Join(root, "current.txt")
+	previous := filepath.Join(root, "previous.txt")
+	writeFile(t, current, "1.3.0\n")
+	writeFile(t, previous, "1.2.3\n")
+
+	got, err := checkReleaseVersion(current, previous, "", "v1.3.0")
+	if err != nil {
+		t.Fatalf("checkReleaseVersion: %v", err)
+	}
+	if got != "1.3.0" {
+		t.Fatalf("checkReleaseVersion = %q, want 1.3.0", got)
+	}
+}
+
+func TestCheckReleaseVersionAllowsPrereleaseAdvance(t *testing.T) {
+	root := t.TempDir()
+	current := filepath.Join(root, "current.txt")
+	previous := filepath.Join(root, "previous.txt")
+	writeFile(t, current, "1.3.0-rc.2\n")
+	writeFile(t, previous, "1.3.0-rc.1\n")
+
+	if _, err := checkReleaseVersion(current, previous, "", "v1.3.0-rc.2"); err != nil {
+		t.Fatalf("checkReleaseVersion: %v", err)
+	}
+}
+
+func TestCheckReleaseVersionRejectsInvalidFiles(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		content string
+	}{
+		{name: "empty"},
+		{name: "missing newline", content: "1.2.3"},
+		{name: "multiple lines", content: "1.2.3\n1.2.4\n"},
+		{name: "carriage return", content: "1.2.3\r\n"},
+		{name: "surrounding whitespace", content: " 1.2.3\n"},
+		{name: "tag prefix", content: "v1.2.3\n"},
+		{name: "build metadata", content: "1.2.3+build.1\n"},
+		{name: "leading zero", content: "1.02.3\n"},
+		{name: "byte order mark", content: "\xef\xbb\xbf1.2.3\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "version.txt")
+			writeFile(t, path, test.content)
+			if _, err := checkReleaseVersion(path, "", "", ""); err == nil {
+				t.Fatal("checkReleaseVersion succeeded, want error")
+			}
+		})
+	}
+}
+
+func TestCheckReleaseVersionRejectsTagMismatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "version.txt")
+	writeFile(t, path, "1.2.3\n")
+
+	if _, err := checkReleaseVersion(path, "", "", "v1.2.4"); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("checkReleaseVersion error = %v, want tag mismatch", err)
+	}
+}
+
+func TestCheckReleaseVersionRejectsNonAdvance(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		current  string
+		previous string
+	}{
+		{name: "equal", current: "1.2.3\n", previous: "1.2.3\n"},
+		{name: "downgrade", current: "1.2.2\n", previous: "1.2.3\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			current := filepath.Join(root, "current.txt")
+			previous := filepath.Join(root, "previous.txt")
+			writeFile(t, current, test.current)
+			writeFile(t, previous, test.previous)
+			if _, err := checkReleaseVersion(current, previous, "", ""); err == nil || !strings.Contains(err.Error(), "must be greater") {
+				t.Fatalf("checkReleaseVersion error = %v, want non-advance", err)
+			}
+		})
+	}
+}
+
+func TestCheckReleaseVersionRejectsPublishedTagRegression(t *testing.T) {
+	root := t.TempDir()
+	current := filepath.Join(root, "version.txt")
+	tags := filepath.Join(root, "tags.txt")
+	writeFile(t, current, "1.3.0-rc.1\n")
+	writeFile(t, tags, "v1.2.0\nv1.3.0-rc.2\n")
+
+	if _, err := checkReleaseVersion(current, "", tags, "v1.3.0-rc.1"); err == nil || !strings.Contains(err.Error(), "existing release tag v1.3.0-rc.2") {
+		t.Fatalf("checkReleaseVersion error = %v, want published tag regression", err)
+	}
+}
+
+func TestCheckReleaseVersionAllowsRecoveryOfCurrentTag(t *testing.T) {
+	root := t.TempDir()
+	current := filepath.Join(root, "version.txt")
+	tags := filepath.Join(root, "tags.txt")
+	writeFile(t, current, "1.3.0\n")
+	writeFile(t, tags, "v1.2.0\nv1.3.0\n")
+
+	if _, err := checkReleaseVersion(current, "", tags, "v1.3.0"); err != nil {
+		t.Fatalf("checkReleaseVersion recovery: %v", err)
+	}
+}
+
 func TestCompareSemVersionPrereleaseOrdering(t *testing.T) {
 	ordered := []string{
 		"1.0.0-alpha",

@@ -100,6 +100,7 @@ homebrew_casks:
           system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/ecctl"]
 
 release:
+  prerelease: auto
   extra_files:
     - glob: version.txt
 

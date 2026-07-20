@@ -2,8 +2,18 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
+    paths:
+      - version.txt
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      recovery_tag:
+        description: Existing v* tag to recover; leave empty to release the selected main commit
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -16,15 +26,23 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      commit: ${{ steps.version.outputs.commit }}
+      release_exists: ${{ steps.release.outputs.exists }}
     steps:
-      - name: Checkout tagged source
+      - name: Checkout release source
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.recovery_tag || github.sha }}
           fetch-depth: 0
 
       - name: Validate release source
         env:
           EXPECTED_REPOSITORY: aliyun/elastic-compute-control-cli
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_REF: ${{ github.ref }}
         shell: bash
         run: |
           set -euo pipefail
@@ -32,9 +50,15 @@ jobs:
             echo "Releases must run from ${EXPECTED_REPOSITORY}; current repository is ${GITHUB_REPOSITORY}." >&2
             exit 1
           fi
+          if [[ "${RELEASE_EVENT}" == "workflow_dispatch" && "${RELEASE_REF}" != "refs/heads/main" ]]; then
+            echo "Manual releases must run from main; current ref is ${RELEASE_REF}." >&2
+            exit 1
+          fi
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
-          if ! git merge-base --is-ancestor "${GITHUB_SHA}" refs/remotes/origin/main; then
-            echo "Release commit ${GITHUB_SHA} is not reachable from origin/main." >&2
+          git fetch --force --tags origin
+          release_commit=$(git rev-parse HEAD)
+          if ! git merge-base --is-ancestor "${release_commit}" refs/remotes/origin/main; then
+            echo "Release commit ${release_commit} is not reachable from origin/main." >&2
             exit 1
           fi
 
@@ -44,9 +68,135 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Check Homebrew Cask advancement
+      - name: Resolve and validate release version
+        id: version
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          RECOVERY_TAG: ${{ inputs.recovery_tag }}
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_REF_NAME: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version_args=(--check-version-file --version-file version.txt)
+          previous_version=$(mktemp)
+          released_tags=$(mktemp)
+          trap 'rm -f "${previous_version}" "${released_tags}"' EXIT
+          git tag --merged refs/remotes/origin/main --list 'v*' > "${released_tags}"
+          version_args+=(--released-tags-file "${released_tags}")
+
+          comparison_ref=""
+          if [[ "${RELEASE_EVENT}" == "push" && "${RELEASE_REF}" == "refs/heads/main" ]]; then
+            if [[ -n "${BEFORE_SHA}" && ! "${BEFORE_SHA}" =~ ^0+$ ]]; then
+              comparison_ref=${BEFORE_SHA}
+            fi
+          else
+            comparison_ref=$(git rev-parse HEAD^1 2>/dev/null || true)
+          fi
+
+          if [[ -n "${comparison_ref}" ]]; then
+            if git show "${comparison_ref}:version.txt" > "${previous_version}" 2>/dev/null; then
+              version_args+=(--previous-version-file "${previous_version}")
+            else
+              latest_tag=$(git describe --tags --abbrev=0 --match 'v*' "${comparison_ref}" 2>/dev/null || true)
+              if [[ -n "${latest_tag}" ]]; then
+                printf '%s\n' "${latest_tag#v}" > "${previous_version}"
+                version_args+=(--previous-version-file "${previous_version}")
+                echo "No previous version.txt exists; comparing against ${latest_tag}."
+              else
+                echo "No prior release tag exists; treating this as the version baseline."
+              fi
+            fi
+          fi
+
+          if [[ -n "${RECOVERY_TAG}" ]]; then
+            if [[ "${RECOVERY_TAG}" != v* ]]; then
+              echo "Recovery tag must start with v, got ${RECOVERY_TAG}." >&2
+              exit 1
+            fi
+            version_args+=(--release-tag "${RECOVERY_TAG}")
+          elif [[ "${RELEASE_REF}" == refs/tags/* ]]; then
+            version_args+=(--release-tag "${RELEASE_REF_NAME}")
+          fi
+
+          version=$(go run ./cmd/releaseprep "${version_args[@]}")
+          tag="v${version}"
+          commit=$(git rev-parse HEAD)
+
+          tag_rows=$(git ls-remote --tags origin "refs/tags/${tag}" "refs/tags/${tag}^{}")
+          direct_sha=$(awk -v ref="refs/tags/${tag}" '$2 == ref { print $1 }' <<< "${tag_rows}")
+          peeled_sha=$(awk -v ref="refs/tags/${tag}^{}" '$2 == ref { print $1 }' <<< "${tag_rows}")
+          remote_sha=${peeled_sha:-${direct_sha}}
+          if [[ -n "${remote_sha}" && "${remote_sha}" != "${commit}" ]]; then
+            echo "Remote tag ${tag} points to ${remote_sha}, not release commit ${commit}." >&2
+            exit 1
+          fi
+
+          {
+            echo "version=${version}"
+            echo "tag=${tag}"
+            echo "commit=${commit}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Inspect existing GitHub release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          release_result=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" 2>&1)
+          release_status=$?
+          set -e
+          if [[ ${release_status} -ne 0 ]]; then
+            if [[ "${release_result}" == *"HTTP 404"* ]]; then
+              echo "exists=false" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            echo "Could not determine whether GitHub Release ${RELEASE_TAG} exists." >&2
+            echo "${release_result}" >&2
+            exit 1
+          fi
+
+          if [[ "${RELEASE_EVENT}" != "workflow_dispatch" ]]; then
+            echo "GitHub Release ${RELEASE_TAG} already exists; published releases are immutable." >&2
+            exit 1
+          fi
+
+          release_file=$(mktemp)
+          trap 'rm -f "${release_file}"' EXIT
+          printf '%s\n' "${release_result}" > "${release_file}"
+          jq -e --arg tag "${RELEASE_TAG}" --arg version "${RELEASE_VERSION}" '
+            .tag_name == $tag and
+            .draft == false and
+            .immutable == true and
+            .prerelease == ($version | contains("-")) and
+            ([.assets[].name] | sort) == ([
+              "checksums.txt",
+              "version.txt",
+              "ecctl_\($version)_darwin_amd64.tar.gz",
+              "ecctl_\($version)_darwin_arm64.tar.gz",
+              "ecctl_\($version)_linux_amd64.tar.gz",
+              "ecctl_\($version)_linux_arm64.tar.gz",
+              "ecctl_\($version)_windows_amd64.zip",
+              "ecctl_\($version)_windows_arm64.zip"
+            ] | sort)
+          ' "${release_file}" >/dev/null || {
+            echo "Existing GitHub Release ${RELEASE_TAG} is not a complete immutable release." >&2
+            exit 1
+          }
+          echo "Existing immutable release ${RELEASE_TAG} is complete; publish will be skipped."
+          echo "exists=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Check Homebrew Cask advancement
+        if: steps.release.outputs.exists != 'true'
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
@@ -65,31 +215,79 @@ jobs:
             "${cask_args[@]}"
 
       - name: Check public module release readiness
+        if: steps.release.outputs.exists != 'true'
         run: make check-public-release
 
       - name: Lint
+        if: steps.release.outputs.exists != 'true'
         run: make lint
 
       - name: Test
+        if: steps.release.outputs.exists != 'true'
         run: make test
 
+      - name: E2E offline gates
+        if: steps.release.outputs.exists != 'true'
+        run: |
+          make -C e2e test
+          make -C e2e lint
+          e2e/bin/ecctl-e2e coverage registry check \
+            --specs specs \
+            --cases e2e/cases \
+            --registry e2e/coverage.yaml \
+            --ecctl-bin e2e/bin/ecctl-public \
+            --surface public
+          e2e/bin/ecctl-e2e sweep check \
+            --cases e2e/cases \
+            --config e2e/sweep.yaml
+
       - name: Check GoReleaser configuration
+        if: steps.release.outputs.exists != 'true'
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: v2.17.0
           args: check
 
+      - name: Prepare local dry-run tag
+        if: steps.release.outputs.exists != 'true'
+        env:
+          RELEASE_COMMIT: ${{ steps.version.outputs.commit }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git rev-parse --verify --quiet "refs/tags/${RELEASE_TAG}" >/dev/null; then
+            if [[ "$(git rev-list -n 1 "${RELEASE_TAG}")" != "${RELEASE_COMMIT}" ]]; then
+              echo "Local tag ${RELEASE_TAG} does not point to ${RELEASE_COMMIT}." >&2
+              exit 1
+            fi
+          else
+            git tag "${RELEASE_TAG}" "${RELEASE_COMMIT}"
+          fi
+
+      - name: Dry-run release build
+        if: steps.release.outputs.exists != 'true'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: v2.17.0
+          args: release --clean --skip=publish
+        env:
+          GORELEASER_CURRENT_TAG: ${{ steps.version.outputs.tag }}
+
   publish:
     needs: validate
+    if: needs.validate.outputs.release_exists != 'true'
     runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: write
     steps:
-      - name: Checkout tagged source
+      - name: Checkout validated release source
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.validate.outputs.commit }}
           fetch-depth: 0
 
       - name: Setup Go
@@ -98,9 +296,53 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Prepare release metadata
+      - name: Revalidate release identity
+        env:
+          RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         shell: bash
-        run: printf '%s\n' "${GITHUB_REF_NAME#v}" > version.txt
+        run: |
+          set -euo pipefail
+          if [[ "$(git rev-parse HEAD)" != "${RELEASE_COMMIT}" ]]; then
+            echo "Checked out commit does not match validated release commit ${RELEASE_COMMIT}." >&2
+            exit 1
+          fi
+          actual_version=$(go run ./cmd/releaseprep \
+            --check-version-file \
+            --version-file version.txt \
+            --release-tag "${RELEASE_TAG}")
+          if [[ "${actual_version}" != "${RELEASE_VERSION}" ]]; then
+            echo "Validated version changed from ${RELEASE_VERSION} to ${actual_version}." >&2
+            exit 1
+          fi
+
+      - name: Create or verify release tag
+        env:
+          RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_rows=$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}" "refs/tags/${RELEASE_TAG}^{}")
+          direct_sha=$(awk -v ref="refs/tags/${RELEASE_TAG}" '$2 == ref { print $1 }' <<< "${tag_rows}")
+          peeled_sha=$(awk -v ref="refs/tags/${RELEASE_TAG}^{}" '$2 == ref { print $1 }' <<< "${tag_rows}")
+          remote_sha=${peeled_sha:-${direct_sha}}
+
+          if [[ -n "${remote_sha}" ]]; then
+            if [[ "${remote_sha}" != "${RELEASE_COMMIT}" ]]; then
+              echo "Remote tag ${RELEASE_TAG} points to ${remote_sha}, not ${RELEASE_COMMIT}." >&2
+              exit 1
+            fi
+            git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+            echo "Remote tag ${RELEASE_TAG} already points to ${RELEASE_COMMIT}."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${RELEASE_TAG}" "${RELEASE_COMMIT}" -m "Release ${RELEASE_TAG}"
+          git push origin "refs/tags/${RELEASE_TAG}"
 
       - name: Publish GitHub release
         uses: goreleaser/goreleaser-action@v6
@@ -110,9 +352,16 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          GORELEASER_CURRENT_TAG: ${{ needs.validate.outputs.tag }}
 
   notify:
-    needs: publish
+    needs:
+      - validate
+      - publish
+    if: >-
+      ${{ always() &&
+          needs.validate.result == 'success' &&
+          (needs.publish.result == 'success' || needs.publish.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -121,6 +370,8 @@ jobs:
       - name: Trigger release webhook
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
           RELEASE_WEBHOOK_TOKEN: ${{ secrets.RELEASE_WEBHOOK_TOKEN }}
           RELEASE_WEBHOOK_URL: ${{ secrets.RELEASE_WEBHOOK_URL }}
         shell: bash
@@ -150,15 +401,49 @@ jobs:
           trap 'rm -rf "${work_dir}"' EXIT
           release_file="${work_dir}/release.json"
           repository_file="${work_dir}/repository.json"
+          cask_file="${work_dir}/ecctl.rb"
           payload_file="${work_dir}/payload.json"
           response_file="${work_dir}/response.txt"
 
-          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" > "${release_file}"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" > "${release_file}"
           gh api "repos/${GITHUB_REPOSITORY}" > "${repository_file}"
-          jq -e --arg tag "${GITHUB_REF_NAME}" \
-            '.tag_name == $tag and .draft == false' "${release_file}" >/dev/null
+          if [[ "${RELEASE_VERSION}" != *-* ]]; then
+            gh api "repos/${GITHUB_REPOSITORY}/contents/Casks/ecctl.rb?ref=main" \
+              --jq '.content' | base64 --decode > "${cask_file}"
+            cask_version=$(sed -n 's/^[[:space:]]*version "\([^"]*\)"[[:space:]]*$/\1/p' "${cask_file}")
+            if [[ "${cask_version}" != "${RELEASE_VERSION}" ]]; then
+              echo "Homebrew Cask version ${cask_version:-<missing>} does not match ${RELEASE_VERSION}." >&2
+              exit 1
+            fi
+          fi
+          jq -e --arg tag "${RELEASE_TAG}" --arg version "${RELEASE_VERSION}" '
+            .tag_name == $tag and
+            .draft == false and
+            .immutable == true and
+            .prerelease == ($version | contains("-")) and
+            ([.assets[].name] | sort) == ([
+              "checksums.txt",
+              "version.txt",
+              "ecctl_\($version)_darwin_amd64.tar.gz",
+              "ecctl_\($version)_darwin_arm64.tar.gz",
+              "ecctl_\($version)_linux_amd64.tar.gz",
+              "ecctl_\($version)_linux_arm64.tar.gz",
+              "ecctl_\($version)_windows_amd64.zip",
+              "ecctl_\($version)_windows_arm64.zip"
+            ] | sort)
+          ' "${release_file}" >/dev/null
 
-          delivery_id=$(cat /proc/sys/kernel/random/uuid)
+          release_id=$(jq -er '.id' "${release_file}")
+          delivery_id=$(
+            python3 - "${GITHUB_REPOSITORY_ID}" "${release_id}" <<'PY'
+          import sys
+          import uuid
+
+          repository_id, release_id = sys.argv[1:]
+          identity = f"https://github.com/repositories/{repository_id}/releases/{release_id}"
+          print(uuid.uuid5(uuid.NAMESPACE_URL, identity))
+          PY
+          )
           sent_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
           jq -n \
             --arg delivery_id "${delivery_id}" \
