@@ -433,30 +433,12 @@ jobs:
             ] | sort)
           ' "${release_file}" >/dev/null
 
-          release_id=$(jq -er '.id' "${release_file}")
-          delivery_id=$(
-            python3 - "${GITHUB_REPOSITORY_ID}" "${release_id}" <<'PY'
-          import sys
-          import uuid
-
-          repository_id, release_id = sys.argv[1:]
-          identity = f"https://github.com/repositories/{repository_id}/releases/{release_id}"
-          print(uuid.uuid5(uuid.NAMESPACE_URL, identity))
-          PY
-          )
-          sent_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          delivery_id=$(uuidgen | tr '[:upper:]' '[:lower:]')
           jq -n \
-            --arg delivery_id "${delivery_id}" \
-            --arg sent_at "${sent_at}" \
             --slurpfile release "${release_file}" \
             --slurpfile repository "${repository_file}" \
-            '{
-              action: "published",
-              delivery_id: $delivery_id,
-              sent_at: $sent_at,
-              release: $release[0],
-              repository: $repository[0]
-            }' > "${payload_file}"
+            '{action: "edited", release: $release[0], repository: $repository[0]}' \
+            > "${payload_file}"
 
           signature=$(openssl dgst -sha256 -hmac "${RELEASE_WEBHOOK_TOKEN}" "${payload_file}" | awk '{print $2}')
           http_code=$(curl --proto '=https' --tlsv1.2 --silent --show-error \
