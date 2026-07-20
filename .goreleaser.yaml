@@ -7,14 +7,32 @@ before:
     - go mod download
 
 builds:
-  - id: ecctl
+  - id: ecctl-darwin
+    main: ./cmd/ecctl
+    binary: ecctl
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - >-
+        -s -w
+        -X ecctl/pkg/cli.version={{ .Version }}
+        -X ecctl/pkg/cli.commit={{ .Commit }}
+        -X ecctl/pkg/cli.date={{ .Date }}
+
+  - id: ecctl-other
     main: ./cmd/ecctl
     binary: ecctl
     env:
       - CGO_ENABLED=0
     goos:
       - linux
-      - darwin
       - windows
     goarch:
       - amd64
@@ -29,9 +47,20 @@ builds:
         -X ecctl/pkg/cli.date={{ .Date }}
 
 archives:
-  - id: ecctl
+  - id: ecctl-darwin
     ids:
-      - ecctl
+      - ecctl-darwin
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+      - LICENSE
+
+  - id: ecctl-other
+    ids:
+      - ecctl-other
     formats:
       - tar.gz
     format_overrides:
@@ -42,9 +71,37 @@ archives:
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     files:
       - README.md
+      - LICENSE
 
 checksum:
   name_template: checksums.txt
+
+homebrew_casks:
+  - name: ecctl
+    ids:
+      - ecctl-darwin
+    binaries:
+      - ecctl
+    repository:
+      owner: aliyun
+      name: elastic-compute-control-cli
+      branch: main
+    directory: Casks
+    url:
+      template: https://github.com/aliyun/elastic-compute-control-cli/releases/download/{{ .Tag }}/{{ .ArtifactName }}
+      verified: github.com/aliyun/elastic-compute-control-cli/
+    homepage: https://github.com/aliyun/elastic-compute-control-cli
+    description: Agent-first command-line controller for Alibaba Cloud elastic computing resources
+    commit_msg_template: "chore: update Homebrew Cask for {{ .Tag }}"
+    skip_upload: auto
+    hooks:
+      post:
+        install: |
+          system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/ecctl"]
+
+release:
+  extra_files:
+    - glob: version.txt
 
 snapshot:
   version_template: "{{ incpatch .Version }}-next"

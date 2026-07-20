@@ -1,6 +1,6 @@
 TEST_PACKAGES := ./pkg/... ./cmd/... ./specs/...
 
-.PHONY: help install build test coverage ci-test lint fmt clean generate prepare-public-release check-public-release
+.PHONY: help install build test coverage ci-test lint fmt clean generate prepare-public-release check-public-release check-binary-release
 
 install: ## Install git pre-commit hook
 	git config core.hooksPath .githooks
@@ -45,6 +45,9 @@ prepare-public-release: ## Freeze PUBLIC_MODULE into module path, imports, and d
 
 check-public-release: ## Check public release readiness gates
 	go run ./cmd/releaseprep --check
+
+check-binary-release: ## Check binary-only release readiness gates
+	go run ./cmd/releaseprep --check-binary-release --repository "$${GITHUB_REPOSITORY:-aliyun/elastic-compute-control-cli}"
 
 lint: ## Run formatting, vet, and generated-code checks
 	@test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './bin/*'))"

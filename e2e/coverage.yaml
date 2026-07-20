@@ -1466,7 +1466,7 @@ resources:
           coverage_source: command
       update:
         status: offline-valid
-        case: cases/lingjun/cluster-lifecycle.yaml
+        case: cases/lingjun/cluster-scaling-lifecycle.yaml
         steps:
           - update extend
           - update shrink

@@ -45,7 +45,8 @@ type CommandToken = {
   kind: 'prompt' | 'binary' | 'argument' | 'flag' | 'value' | 'plain';
 };
 
-const installCommand = 'go install github.com/aliyun/ecctl/cmd/ecctl@latest';
+const installCommand =
+  'brew tap aliyun/ecctl https://github.com/aliyun/elastic-compute-control-cli && brew install ecctl';
 
 const terminalResultLines: HomeCopy['terminalLines'] = [
   {kind: 'json', content: '{'},
@@ -113,7 +114,7 @@ function highlightCommand(command: string): CommandToken[] {
     if (text === '$') {
       return {text, kind: 'prompt'};
     }
-    if (text === 'ecctl' || (index === 0 && text === 'go')) {
+    if (text === 'ecctl' || (index === 0 && (text === 'brew' || text === 'go'))) {
       return {text, kind: 'binary'};
     }
     if (text.startsWith('-')) {

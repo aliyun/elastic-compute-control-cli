@@ -17,7 +17,8 @@ regions:
       #   ecs.instance_renew:
       #     instance_id: i-prepaid-instance
       #   lingjun.cluster:
-      #     # 两个不同节点组，每个节点组至少有一个可用的专用空闲节点。
+      #     # 仅供灵骏节点清单和集群扩缩容用例使用：两个不同节点组，
+      #     # 每个节点组至少有一个可用的专用空闲节点。
       #     node_group_ids:
       #       - ng-first
       #       - ng-second

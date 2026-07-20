@@ -19,7 +19,19 @@ behavior.
 
 ## Installation
 
-`ecctl` requires Go 1.25 or later.
+Install the latest public release with Homebrew:
+
+```bash
+brew tap aliyun/ecctl https://github.com/aliyun/elastic-compute-control-cli
+brew install ecctl
+ecctl --version
+```
+
+The first command uses this repository directly as the `aliyun/ecctl` Tap. Pre-built
+binaries for macOS, Linux, and Windows are also available from
+[GitHub Releases](https://github.com/aliyun/elastic-compute-control-cli/releases).
+
+Build from a source checkout:
 
 ```bash
 git clone https://github.com/aliyun/elastic-compute-control-cli.git
