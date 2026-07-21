@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {apiTable} from './gen-reference-lib.mjs';
+import {apiTable, escCell} from './gen-reference-lib.mjs';
 
 const english = {
   apiHeader: '| API | When called | Purpose |\n|---|---|---|',
@@ -43,6 +43,13 @@ const action = {
     },
   ],
 };
+
+test('escCell escapes existing backslashes before Markdown table separators', () => {
+  assert.equal(
+    escCell(String.raw`C:\tmp\file|next`),
+    String.raw`C:\\tmp\\file\|next`,
+  );
+});
 
 test('apiTable renders English conditions, repeated polling, and cached readback', () => {
   const got = apiTable(action, english);

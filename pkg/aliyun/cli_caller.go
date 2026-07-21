@@ -135,7 +135,7 @@ func (c *CLICommandCaller) requestArgs(operation string, request map[string]any)
 	if err != nil {
 		return nil, err
 	}
-	args := make([]string, 0, len(request)*2+2)
+	args := make([]string, 0, len(request))
 	if body != nil {
 		value, err := cliParamValue(body)
 		if err != nil {
