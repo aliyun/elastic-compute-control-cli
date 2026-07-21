@@ -1,6 +1,7 @@
-function escCell(text) {
+export function escCell(text) {
   return String(text || '')
     .replace(/\r?\n/g, ' ')
+    .replace(/\\/g, '\\\\')
     .replace(/\|/g, '\\|')
     .replace(/</g, '&lt;')
     .replace(/\{/g, '&#123;')

@@ -13,7 +13,7 @@ import {mkdirSync, writeFileSync, readFileSync, rmSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-import {apiTable} from './gen-reference-lib.mjs';
+import {apiTable, escCell} from './gen-reference-lib.mjs';
 import {
   resourceReferenceFilename,
   resourceReferenceLabel,
@@ -88,16 +88,6 @@ function schema(args, lang) {
     maxBuffer: 32 * 1024 * 1024,
   });
   return JSON.parse(out);
-}
-
-// Escape a value for a Markdown table cell, including MDX-sensitive characters.
-function escCell(text) {
-  return String(text || '')
-    .replace(/\r?\n/g, ' ')
-    .replace(/\|/g, '\\|')
-    .replace(/</g, '&lt;')
-    .replace(/\{/g, '&#123;')
-    .trim();
 }
 
 function orderedActions(actions) {
