@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {apiTable, escCell} from './gen-reference-lib.mjs';
+import * as referenceGenerator from './gen-reference-lib.mjs';
+
+const {apiTable, escCell} = referenceGenerator;
 
 const english = {
   apiHeader: '| API | When called | Purpose |\n|---|---|---|',
@@ -103,4 +105,111 @@ test('apiTable rejects a non-empty raw condition without a human description', (
       purpose: 'Update the thing.',
     }],
   }, english), /UpdateThing.*mystery\(input\.name\)/);
+});
+
+test('productIndexPage renders localized tables with ordered resource descriptions', () => {
+  const products = [
+    {
+      name: 'ecs',
+      description: 'Manage compute resources.',
+      resources: [
+        {name: 'instance', description: 'Manage instances | safely'},
+        {parent: 'policy', name: 'version', description: 'Manage policy versions'},
+      ],
+    },
+    {
+      name: 'vpc',
+      description: 'Manage networks.',
+      resources: [{name: 'vpc', description: 'Manage VPCs'}],
+    },
+  ];
+  const chineseProducts = [
+    {
+      name: 'ecs',
+      description: '管理计算资源。',
+      resources: [
+        {name: 'instance', description: '管理实例资源'},
+        {parent: 'policy', name: 'version', description: '管理策略版本'},
+      ],
+    },
+  ];
+  const englishIndex = {
+    title: 'Products',
+    description: 'Browse every public product and resource supported by ecctl.',
+    intro: 'Select a product or open a resource reference directly.',
+    resourceCount: (count) => `${count} resources`,
+    resourceHeader: 'Resource',
+    descriptionHeader: 'Description',
+  };
+  const chineseIndex = {
+    title: '产品',
+    description: '浏览 ecctl 支持的全部公开产品和资源。',
+    intro: '选择产品，或直接打开资源参考。',
+    resourceCount: (count) => `${count} 个资源`,
+    resourceHeader: '资源',
+    descriptionHeader: '描述',
+  };
+
+  const render = referenceGenerator.productIndexPage;
+  const englishPage = render?.(products, englishIndex) ?? '';
+  const chinesePage = render?.(chineseProducts, chineseIndex) ?? '';
+
+  assert.equal(
+    englishPage,
+    `---
+generated: true
+generated_by: "website/scripts/gen-reference.mjs"
+generated_command: "make build && npm --prefix website run gen:reference"
+title: Products
+description: "Browse every public product and resource supported by ecctl."
+---
+
+# Products
+
+Select a product or open a resource reference directly.
+
+## [ECS](../category/ecs)
+
+Manage compute resources.
+
+**2 resources**
+
+| Resource | Description |
+|---|---|
+| [instance](./resources/ecs/instance.md) | Manage instances \\| safely |
+| [policy version](./resources/ecs/policy-version.md) | Manage policy versions |
+
+## [VPC](../category/vpc)
+
+Manage networks.
+
+**1 resources**
+
+| Resource | Description |
+|---|---|
+| [vpc](./resources/vpc/vpc.md) | Manage VPCs |
+`,
+  );
+  assert.match(chinesePage, /^---\ngenerated: true\ngenerated_by: "website\/scripts\/gen-reference\.mjs"\ngenerated_command: "make build && npm --prefix website run gen:reference"\ntitle: 产品\n/);
+  assert.match(chinesePage, /浏览 ecctl 支持的全部公开产品和资源。/);
+  assert.match(chinesePage, /\*\*2 个资源\*\*/);
+  assert.match(chinesePage, /\| 资源 \| 描述 \|/);
+  assert.match(chinesePage, /\| \[policy version\]\(\.\/resources\/ecs\/policy-version\.md\) \| 管理策略版本 \|/);
+});
+
+test('productIndexPage rejects resources without localized descriptions', () => {
+  assert.throws(
+    () => referenceGenerator.productIndexPage(
+      [{name: 'ecs', resources: [{name: 'instance'}]}],
+      {
+        title: 'Products',
+        description: 'Products.',
+        intro: 'Products.',
+        resourceCount: (count) => `${count} resources`,
+        resourceHeader: 'Resource',
+        descriptionHeader: 'Description',
+      },
+    ),
+    /ecs\/instance.*description/,
+  );
 });

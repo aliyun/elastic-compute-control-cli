@@ -1,4 +1,7 @@
 ---
+generated: true
+generated_by: "website/scripts/gen-reference.mjs"
+generated_command: "make build && npm --prefix website run gen:reference"
 title: ecs snapshot-group
 sidebar_label: snapshot-group
 description: "Manage snapshot-consistent groups"

@@ -1,4 +1,7 @@
 ---
+generated: true
+generated_by: "website/scripts/gen-reference.mjs"
+generated_command: "make build && npm --prefix website run gen:reference"
 title: ack kubeconfig
 sidebar_label: kubeconfig
 description: "Manage ACK kubeconfig credentials"

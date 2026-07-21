@@ -1,4 +1,7 @@
 ---
+generated: true
+generated_by: "website/scripts/gen-reference.mjs"
+generated_command: "make build && npm --prefix website run gen:reference"
 title: ecs command
 sidebar_label: command
 description: "Manage ECS Cloud Assistant command templates and invocations"

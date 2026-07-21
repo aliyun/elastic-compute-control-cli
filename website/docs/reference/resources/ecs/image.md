@@ -1,4 +1,7 @@
 ---
+generated: true
+generated_by: "website/scripts/gen-reference.mjs"
+generated_command: "make build && npm --prefix website run gen:reference"
 title: ecs image
 sidebar_label: image
 description: "Manage ECS image resources"

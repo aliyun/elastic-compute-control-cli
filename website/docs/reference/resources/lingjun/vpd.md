@@ -1,4 +1,7 @@
 ---
+generated: true
+generated_by: "website/scripts/gen-reference.mjs"
+generated_command: "make build && npm --prefix website run gen:reference"
 title: lingjun vpd
 sidebar_label: vpd
 description: "Manage Lingjun VPD resources"

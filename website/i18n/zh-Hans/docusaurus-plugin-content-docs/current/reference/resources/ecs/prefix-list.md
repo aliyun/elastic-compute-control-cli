@@ -1,4 +1,7 @@
 ---
+generated: true
+generated_by: "website/scripts/gen-reference.mjs"
+generated_command: "make build && npm --prefix website run gen:reference"
 title: ecs prefix-list
 sidebar_label: prefix-list
 description: "管理前缀列表"

@@ -1,4 +1,7 @@
 ---
+generated: true
+generated_by: "website/scripts/gen-reference.mjs"
+generated_command: "make build && npm --prefix website run gen:reference"
 title: vpc vswitch
 sidebar_label: vswitch
 description: "管理交换机资源"

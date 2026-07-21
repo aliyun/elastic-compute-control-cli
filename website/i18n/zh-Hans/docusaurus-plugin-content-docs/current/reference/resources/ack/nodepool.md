@@ -1,4 +1,7 @@
 ---
+generated: true
+generated_by: "website/scripts/gen-reference.mjs"
+generated_command: "make build && npm --prefix website run gen:reference"
 title: ack nodepool
 sidebar_label: nodepool
 description: "管理 ACK 节点池资源"
