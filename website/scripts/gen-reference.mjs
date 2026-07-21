@@ -13,7 +13,12 @@ import {mkdirSync, writeFileSync, readFileSync, rmSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-import {apiTable, escCell} from './gen-reference-lib.mjs';
+import {
+  apiTable,
+  escCell,
+  generatedFrontMatter,
+  productIndexPage,
+} from './gen-reference-lib.mjs';
 import {
   resourceReferenceFilename,
   resourceReferenceLabel,
@@ -35,6 +40,15 @@ const LOCALES = [
   {
     lang: 'en',
     dir: join(WEBSITE_DIR, 'docs', 'reference', 'resources'),
+    indexPath: join(WEBSITE_DIR, 'docs', 'reference', 'products.md'),
+    productIndex: {
+      title: 'Products',
+      description: 'Browse every public product and resource supported by ecctl.',
+      intro: 'Select a product to browse its reference, or open a resource directly.',
+      resourceCount: (count) => `${count} ${count === 1 ? 'resource' : 'resources'}`,
+      resourceHeader: 'Resource',
+      descriptionHeader: 'Description',
+    },
     t: {
       intro: (cmd, dotted) =>
         `Run \`ecctl ${cmd} <action> -h\` for usage, or \`ecctl schema ${dotted}.<action> --full\` for the complete, agent-readable spec of every parameter and behavior.`,
@@ -63,6 +77,23 @@ const LOCALES = [
       'reference',
       'resources',
     ),
+    indexPath: join(
+      WEBSITE_DIR,
+      'i18n',
+      'zh-Hans',
+      'docusaurus-plugin-content-docs',
+      'current',
+      'reference',
+      'products.md',
+    ),
+    productIndex: {
+      title: '产品',
+      description: '浏览 ecctl 支持的全部公开产品和资源。',
+      intro: '选择产品浏览其参考文档，或直接打开资源参考。',
+      resourceCount: (count) => `${count} 个资源`,
+      resourceHeader: '资源',
+      descriptionHeader: '描述',
+    },
     t: {
       intro: (cmd, dotted) =>
         `运行 \`ecctl ${cmd} <action> -h\` 查看用法，或 \`ecctl schema ${dotted}.<action> --full\` 获取该命令完整的结构化规格——每个参数与行为，便于 Agent 读取和填参。`,
@@ -155,7 +186,11 @@ function resourcePage(product, resource, t) {
   if (!dotted) throw new Error(`resource ${product}/${resource.name} is missing schema_id`);
   const title = cmd;
   const blocks = [
-    ['---', `title: ${title}`, `sidebar_label: ${resourceReferenceLabel(resource)}`, `description: ${JSON.stringify(resource.description || title)}`, '---'].join('\n'),
+    generatedFrontMatter([
+      `title: ${title}`,
+      `sidebar_label: ${resourceReferenceLabel(resource)}`,
+      `description: ${JSON.stringify(resource.description || title)}`,
+    ]),
     `# ${title}`,
   ];
   if (resource.description) blocks.push(resource.description);
@@ -173,6 +208,7 @@ function run() {
     mkdirSync(locale.dir, {recursive: true});
 
     const products = schema(['--list'], locale.lang).products;
+    const indexProducts = [];
     products.forEach((p, index) => {
       const productDir = join(locale.dir, p.name);
       mkdirSync(productDir, {recursive: true});
@@ -194,12 +230,14 @@ function run() {
         ) + '\n',
       );
       const detail = schema(['--list', p.name], locale.lang);
+      indexProducts.push({...p, resources: detail.resources});
       for (const resource of detail.resources) {
         const page = resourcePage(p.name, resource, t);
         writeFileSync(join(productDir, resourceReferenceFilename(resource)), page);
       }
       console.log(`[${locale.lang}] ${p.name}: ${detail.resources.length} resources`);
     });
+    writeFileSync(locale.indexPath, productIndexPage(indexProducts, locale.productIndex));
   }
   writeZhCategoryTranslations();
   console.log('reference pages generated.');

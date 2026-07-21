@@ -1,4 +1,7 @@
 ---
+generated: true
+generated_by: "website/scripts/gen-reference.mjs"
+generated_command: "make build && npm --prefix website run gen:reference"
 title: ack permission
 sidebar_label: permission
 description: "Manage ACK RAM user and role permissions"

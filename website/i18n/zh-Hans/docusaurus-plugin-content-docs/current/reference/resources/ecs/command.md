@@ -1,4 +1,7 @@
 ---
+generated: true
+generated_by: "website/scripts/gen-reference.mjs"
+generated_command: "make build && npm --prefix website run gen:reference"
 title: ecs command
 sidebar_label: command
 description: "管理 ECS 云助手命令模板与执行记录"

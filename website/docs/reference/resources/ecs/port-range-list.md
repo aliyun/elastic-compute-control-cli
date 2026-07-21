@@ -1,4 +1,7 @@
 ---
+generated: true
+generated_by: "website/scripts/gen-reference.mjs"
+generated_command: "make build && npm --prefix website run gen:reference"
 title: ecs port-range-list
 sidebar_label: port-range-list
 description: "Manage ECS port range lists"

@@ -1,4 +1,7 @@
 ---
+generated: true
+generated_by: "website/scripts/gen-reference.mjs"
+generated_command: "make build && npm --prefix website run gen:reference"
 title: ecs auto-snapshot-policy
 sidebar_label: auto-snapshot-policy
 description: "管理自动快照策略"
