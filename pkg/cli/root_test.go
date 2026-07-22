@@ -22,6 +22,7 @@ import (
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/schema"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/updater"
 )
 
 func TestMain(m *testing.M) {
@@ -2109,6 +2110,220 @@ func TestFormatVersionKeepsDevForLocalBuilds(t *testing.T) {
 	})
 	if got != "dev" {
 		t.Fatalf("formatVersion = %q, want dev", got)
+	}
+}
+
+func TestUpdateCheckCommandReturnsStructuredResult(t *testing.T) {
+	oldVersion := version
+	oldCheck := checkUpdate
+	version = "1.2.2"
+	checkUpdate = func(_ context.Context, options updater.Options) (updater.Result, error) {
+		if options.CurrentVersion != "1.2.2" || options.TargetVersion != "" {
+			t.Fatalf("update options = %#v", options)
+		}
+		return updater.Result{
+			CurrentVersion: "1.2.2", TargetVersion: "1.2.3", UpdateAvailable: true,
+			Source: "oss", Installer: "direct",
+		}, nil
+	}
+	t.Cleanup(func() {
+		version = oldVersion
+		checkUpdate = oldCheck
+	})
+
+	stdout, stderr, code := runCLI("--lang", "en", "update", "--check")
+	if code != 0 {
+		t.Fatalf("update --check exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	payload := decodeObject(t, stdout)
+	if payload["target_version"] != "1.2.3" || payload["update_available"] != true || payload["source"] != "oss" {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+func TestUpdateCommandRoutesHomebrewResult(t *testing.T) {
+	oldVersion := version
+	oldInstall := installUpdate
+	version = "1.2.2"
+	installUpdate = func(_ context.Context, options updater.Options) (updater.Result, error) {
+		if options.TargetVersion != "1.2.3" || options.Force {
+			t.Fatalf("update options = %#v", options)
+		}
+		return updater.Result{
+			CurrentVersion: "1.2.2", TargetVersion: "1.2.3", Source: "oss",
+			Installer: "homebrew", Updated: true,
+		}, nil
+	}
+	t.Cleanup(func() {
+		version = oldVersion
+		installUpdate = oldInstall
+	})
+
+	stdout, stderr, code := runCLI("--lang", "en", "update", "1.2.3")
+	if code != 0 {
+		t.Fatalf("update exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	payload := decodeObject(t, stdout)
+	if payload["installer"] != "homebrew" || payload["updated"] != true {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+func TestUpdateCommandReportsPendingWindowsReplacement(t *testing.T) {
+	oldVersion := version
+	oldInstall := installUpdate
+	version = "1.2.2"
+	installUpdate = func(_ context.Context, _ updater.Options) (updater.Result, error) {
+		return updater.Result{
+			CurrentVersion: "1.2.2", TargetVersion: "1.2.3", Source: "oss",
+			Installer: "direct", UpdateAvailable: true, UpdatePending: true,
+		}, nil
+	}
+	t.Cleanup(func() {
+		version = oldVersion
+		installUpdate = oldInstall
+	})
+
+	stdout, stderr, code := runCLI("--lang", "en", "update")
+	if code != 0 {
+		t.Fatalf("update exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	payload := decodeObject(t, stdout)
+	if payload["update_pending"] != true || payload["updated"] != false || payload["update_available"] != true {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+func TestUpdateHelpIsLocalized(t *testing.T) {
+	stdout, stderr, code := runCLI("--lang", "zh-CN", "update", "--help")
+	if code != 0 {
+		t.Fatalf("update help exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	for _, want := range []string{"检查并安装 ecctl 更新", "仅检查更新，不执行安装", "重新安装目标版本"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("update help missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestUpdateFailureLocalizesMessageAndPreservesStructuredDetail(t *testing.T) {
+	oldVersion := version
+	oldCheck := checkUpdate
+	version = "1.2.2"
+	checkUpdate = func(context.Context, updater.Options) (updater.Result, error) {
+		return updater.Result{}, fmt.Errorf("private English transport detail")
+	}
+	t.Cleanup(func() {
+		version = oldVersion
+		checkUpdate = oldCheck
+	})
+
+	stdout, _, code := runCLI("--lang", "zh-CN", "update", "--check")
+	if code == 0 {
+		t.Fatalf("update --check succeeded: %s", stdout)
+	}
+	payload := decodeObject(t, stdout)["error"].(map[string]any)
+	if payload["code"] != "UpdateInstallFailed" || payload["message"] != "无法安装 ecctl 更新" {
+		t.Fatalf("failure is not localized and classified: %#v", payload)
+	}
+	if payload["detail"] != "private English transport detail" || payload["retryable"] != false || payload["kind"] != "client" {
+		t.Fatalf("failure detail/category = %#v", payload)
+	}
+}
+
+func TestUpdateFailureCodesAndRetryability(t *testing.T) {
+	tests := []struct {
+		kind      updater.ErrorKind
+		code      string
+		category  string
+		retryable bool
+	}{
+		{kind: updater.ErrorUnavailable, code: "UpdateUnavailable", category: "service", retryable: true},
+		{kind: updater.ErrorIntegrity, code: "UpdateIntegrityFailed", category: "client"},
+		{kind: updater.ErrorInvalidTarget, code: "UpdateInvalidTarget", category: "client"},
+		{kind: updater.ErrorPermission, code: "UpdatePermissionDenied", category: "client"},
+		{kind: updater.ErrorBusy, code: "UpdateBusy", category: "service", retryable: true},
+		{kind: updater.ErrorTimeout, code: "UpdateTimeout", category: "timeout"},
+		{kind: updater.ErrorCanceled, code: "UpdateCanceled", category: "client"},
+	}
+	for _, test := range tests {
+		t.Run(test.code, func(t *testing.T) {
+			err := updateCommandError("en", updater.WrapError(test.kind, fmt.Errorf("diagnostic detail")))
+			payload := err.Payload()
+			if payload.Code != test.code || payload.Kind != test.category || payload.Retryable != test.retryable || payload.Detail != "diagnostic detail" {
+				t.Fatalf("payload = %#v", payload)
+			}
+		})
+	}
+}
+
+func TestAutomaticUpdateCheckCoversEveryUserInvocation(t *testing.T) {
+	for _, args := range [][]string{
+		{},
+		{"--help"},
+		{"--version"},
+		{"help", "ecs"},
+		{"update"},
+		{"completion", "zsh"},
+		{"__complete", "ecs", ""},
+		{"__completeNoDesc", "ecs", ""},
+		{"ecs", "list"},
+		{"ack", "version", "list"},
+		{"ecs", "launch-template", "get", "lt-1", "--version", "2"},
+	} {
+		if skipAutomaticUpdateCheck(args) {
+			t.Errorf("skipAutomaticUpdateCheck(%v) = true", args)
+		}
+	}
+	if !skipAutomaticUpdateCheck([]string{"__update", "apply"}) {
+		t.Fatal("internal update helper must not start another update check")
+	}
+}
+
+func TestAutomaticUpdateCheckRunsForHelpVersionCompletionAndUpdate(t *testing.T) {
+	oldVersion := version
+	oldAutoCheck := autoCheckUpdate
+	oldCheck := checkUpdate
+	version = "1.2.2"
+	autoChecks := 0
+	autoCheckUpdate = func(context.Context, updater.AutoCheckOptions) (updater.AutoCheckResult, error) {
+		autoChecks++
+		return updater.AutoCheckResult{}, nil
+	}
+	checkUpdate = func(context.Context, updater.Options) (updater.Result, error) {
+		return updater.Result{}, nil
+	}
+	t.Cleanup(func() {
+		version = oldVersion
+		autoCheckUpdate = oldAutoCheck
+		checkUpdate = oldCheck
+	})
+	t.Setenv("ECCTL_DISABLE_UPDATE_CHECK", "")
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "root help", args: nil},
+		{name: "help flag", args: []string{"--help"}},
+		{name: "version", args: []string{"--version"}},
+		{name: "help command", args: []string{"help", "ecs"}},
+		{name: "completion script", args: []string{"completion", "zsh"}},
+		{name: "dynamic completion", args: []string{"__complete", "ecs", ""}},
+		{name: "dynamic completion without descriptions", args: []string{"__completeNoDesc", "ecs", ""}},
+		{name: "update", args: []string{"update", "--check"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			before := autoChecks
+			stdout, stderr, code := runCLI(test.args...)
+			if code != 0 {
+				t.Fatalf("runCLI(%v) exit %d stderr=%s stdout=%s", test.args, code, stderr, stdout)
+			}
+			if autoChecks != before+1 {
+				t.Fatalf("automatic checks = %d, want %d after runCLI(%v)", autoChecks, before+1, test.args)
+			}
+		})
 	}
 }
 
@@ -5012,6 +5227,7 @@ func TestProductCommandBuildTarget(t *testing.T) {
 		{name: "schema list", args: []string{"--lang=en", "schema", "--list", "vpc"}, stubsOnly: true},
 		{name: "capabilities", args: []string{"capabilities", "--output", "json"}, stubsOnly: true},
 		{name: "configure", args: []string{"configure", "get"}, stubsOnly: true},
+		{name: "internal update helper", args: []string{"__update", "apply"}, stubsOnly: true},
 		{name: "product command", args: []string{"--lang", "en", "vpc", "list"}, product: "vpc", resource: "list"},
 		{name: "product help", args: []string{"ecs", "--help"}, product: "ecs"},
 		{name: "resource command", args: []string{"ecs", "instance", "list"}, product: "ecs", resource: "instance"},
@@ -5736,7 +5952,7 @@ func TestIsRootCommandDistinguishesRootFromSubcommand(t *testing.T) {
 }
 
 func TestIsBuiltinRootCommandCoversAllBuiltins(t *testing.T) {
-	builtins := []string{"call", "configure", "schema", "capabilities", "completion", "help"}
+	builtins := []string{"call", "configure", "schema", "capabilities", "update", "completion", "__update", "help"}
 	for _, name := range builtins {
 		if !isBuiltinRootCommand(name) {
 			t.Errorf("isBuiltinRootCommand(%q) = false, want true", name)

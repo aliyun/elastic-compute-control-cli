@@ -22,13 +22,16 @@ brew install ecctl
 ecctl --version
 ```
 
-The first command explicitly uses this repository as the `aliyun/ecctl` Tap. To
-upgrade an existing installation:
+The first command explicitly uses this repository as the `aliyun/ecctl` Tap.
+To upgrade an existing installation:
 
 ```bash
-brew update
-brew upgrade ecctl
+ecctl update
 ```
+
+`ecctl update` supports both Homebrew and direct binary installations. You do
+not need to run `brew update` first. See [Updates](../user-guide/updates.md) for
+version checks, explicit versions, and automatic notifications.
 
 ## Download a Pre-built Binary
 

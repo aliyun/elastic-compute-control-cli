@@ -27,6 +27,7 @@ type ErrorPayload struct {
 	Retryable       bool     `json:"retryable"`
 	Suggestion      string   `json:"suggestion,omitempty"`
 	SuggestedAction string   `json:"suggested_action,omitempty"`
+	Detail          string   `json:"detail,omitempty"`
 	Field           string   `json:"field,omitempty"`
 	AcceptedValues  []string `json:"accepted_values,omitempty"`
 	CurrentState    string   `json:"current_state,omitempty"`
@@ -82,6 +83,12 @@ func WithSuggestion(suggestion string) Option {
 func WithSuggestedAction(action string) Option {
 	return func(err *AppError) {
 		err.payload.SuggestedAction = action
+	}
+}
+
+func WithDetail(detail string) Option {
+	return func(err *AppError) {
+		err.payload.Detail = detail
 	}
 }
 

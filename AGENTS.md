@@ -63,6 +63,17 @@ API calls in default tests.
   generate or rewrite it in CI, and never move an existing public tag.
 - Keep GitHub release immutability and the `main`/`v*` repository rulesets
   enabled; they are part of the release authorization and integrity boundary.
+- Treat Windows `__update` modes ending in `-v1` as a permanent cross-version
+  protocol. Add new modes instead of removing or changing the v1 decoders.
+- Keep every updater advisory-cache read and write under the same cache lock;
+  Windows cannot atomically replace the cache while another process reads it.
+- Treat the significant-line Homebrew Cask profile in
+  `internal/releaseartifact` as the immutable updater Cask v1 protocol. A new
+  Cask shape requires a versioned compatibility path while old clients still
+  receive a v1-compatible asset.
+- Keep the release platform/asset matrix synchronized across `.goreleaser.yaml`,
+  `.github/scripts/validate-release.jq`, `pkg/updater`, and the OSS verification
+  step in `.github/workflows/release.yml`; update their parity tests together.
 
 ## E2E Surface and Cleanup Gates
 

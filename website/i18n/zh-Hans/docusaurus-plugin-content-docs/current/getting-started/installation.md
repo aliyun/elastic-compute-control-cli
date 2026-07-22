@@ -25,9 +25,11 @@ ecctl --version
 第一条命令会将当前仓库显式添加为 `aliyun/ecctl` Tap。升级已有安装：
 
 ```bash
-brew update
-brew upgrade ecctl
+ecctl update
 ```
+
+`ecctl update` 同时支持 Homebrew 和直接安装的二进制，无需先运行 `brew update`。
+版本检查、指定版本和自动提醒见[更新](../user-guide/updates.md)。
 
 ## 下载预构建版本
 

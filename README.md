@@ -31,6 +31,10 @@ The first command uses this repository directly as the `aliyun/ecctl` Tap. Pre-b
 binaries for macOS, Linux, and Windows are also available from
 [GitHub Releases](https://github.com/aliyun/elastic-compute-control-cli/releases).
 
+Check for or install a newer release with `ecctl update --check` and
+`ecctl update`. The command supports both direct binary and Homebrew
+installations.
+
 Or install with Go 1.25 or later:
 
 ```bash

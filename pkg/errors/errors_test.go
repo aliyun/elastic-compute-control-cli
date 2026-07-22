@@ -29,6 +29,7 @@ func TestExitCodeMapping(t *testing.T) {
 
 func TestErrorPayloadIncludesStableAndOptionalFields(t *testing.T) {
 	err := Client("InstanceStateConflict", "instance is running",
+		WithDetail("raw diagnostic"),
 		WithField("state"),
 		WithAcceptedValues("stopped"),
 		WithCurrentState("running"),
@@ -45,6 +46,9 @@ func TestErrorPayloadIncludesStableAndOptionalFields(t *testing.T) {
 	}
 	if payload.Message != "instance is running" {
 		t.Fatalf("Message = %q", payload.Message)
+	}
+	if payload.Detail != "raw diagnostic" {
+		t.Fatalf("Detail = %q", payload.Detail)
 	}
 	if payload.Retryable {
 		t.Fatal("client errors must not be retryable by default")

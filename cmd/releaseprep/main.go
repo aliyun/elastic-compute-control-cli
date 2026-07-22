@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/aliyun/elastic-compute-control-cli/internal/releaseartifact"
 )
 
 var (
@@ -20,6 +22,7 @@ var (
 	semverIdentifier    = regexp.MustCompile(`^[0-9A-Za-z-]+$`)
 	semverNumeric       = regexp.MustCompile(`^[0-9]+$`)
 	caskVersionPattern  = regexp.MustCompile(`(?m)^[\t ]*version "([^"]+)"[\t ]*$`)
+	checksumLinePattern = regexp.MustCompile(`^([0-9a-f]{64})[\t ]+([^\t ]+)$`)
 )
 
 func main() {
@@ -28,23 +31,29 @@ func main() {
 	check := flag.Bool("check", false, "check whether the repository is ready for a public release tag")
 	checkHomebrew := flag.Bool("check-homebrew-version", false, "check whether a release tag advances the current Homebrew Cask")
 	checkVersion := flag.Bool("check-version-file", false, "check the canonical release version file")
+	verifyHomebrew := flag.Bool("verify-homebrew-cask", false, "strictly validate a generated Homebrew Cask against immutable release checksums")
 	repository := flag.String("repository", "", "GitHub repository identity for public release checks")
 	releaseTag := flag.String("release-tag", "", "candidate release tag for version and Homebrew checks")
 	versionFile := flag.String("version-file", "version.txt", "path to the canonical release version file")
 	previousVersionFile := flag.String("previous-version-file", "", "path to the previous canonical release version file")
 	releasedTagsFile := flag.String("released-tags-file", "", "path to newline-delimited existing release tags")
 	cask := flag.String("cask", "", "path to the current Homebrew Cask")
+	checksumsFile := flag.String("checksums-file", "", "path to the immutable release checksums")
 	firstHomebrewRelease := flag.Bool("first-homebrew-release", false, "allow a release when the repository does not have a Homebrew Cask yet")
+	allowExistingRelease := flag.Bool("allow-existing-release", false, "validate an existing immutable release without requiring version advancement")
 	flag.Parse()
 
 	selected := 0
-	for _, enabled := range []bool{*write, *check, *checkHomebrew, *checkVersion} {
+	for _, enabled := range []bool{*write, *check, *checkHomebrew, *checkVersion, *verifyHomebrew} {
 		if enabled {
 			selected++
 		}
 	}
 	if selected != 1 {
-		exitError(errors.New("exactly one of --write, --check, --check-homebrew-version, or --check-version-file is required"))
+		exitError(errors.New("exactly one operation is required"))
+	}
+	if *allowExistingRelease && !*checkVersion {
+		exitError(errors.New("--allow-existing-release is only valid with --check-version-file"))
 	}
 	root, err := os.Getwd()
 	if err != nil {
@@ -63,16 +72,77 @@ func main() {
 		return
 	}
 	if *checkVersion {
-		version, err := checkReleaseVersion(*versionFile, *previousVersionFile, *releasedTagsFile, *releaseTag)
+		version, err := checkReleaseVersion(*versionFile, *previousVersionFile, *releasedTagsFile, *releaseTag, *allowExistingRelease)
 		if err != nil {
 			exitError(err)
 		}
 		fmt.Println(version)
 		return
 	}
+	if *verifyHomebrew {
+		if err := verifyHomebrewCask(*cask, *checksumsFile, strings.TrimPrefix(*releaseTag, "v")); err != nil {
+			exitError(err)
+		}
+		return
+	}
 	if err := checkReleaseReady(root, *repository); err != nil {
 		exitError(err)
 	}
+}
+
+func verifyHomebrewCask(caskPath string, checksumsPath string, releaseVersion string) error {
+	if caskPath == "" || checksumsPath == "" || releaseVersion == "" {
+		return errors.New("--cask, --checksums-file, and --release-tag are required")
+	}
+	if _, err := parseSemVersion(releaseVersion); err != nil {
+		return fmt.Errorf("invalid release version %q: %w", releaseVersion, err)
+	}
+	caskRaw, err := os.ReadFile(caskPath)
+	if err != nil {
+		return err
+	}
+	checksums, err := readReleaseChecksums(checksumsPath)
+	if err != nil {
+		return err
+	}
+	intelName := "ecctl_" + releaseVersion + "_darwin_amd64.tar.gz"
+	armName := "ecctl_" + releaseVersion + "_darwin_arm64.tar.gz"
+	intel, ok := checksums[intelName]
+	if !ok {
+		return fmt.Errorf("release checksums are missing %s", intelName)
+	}
+	arm, ok := checksums[armName]
+	if !ok {
+		return fmt.Errorf("release checksums are missing %s", armName)
+	}
+	return releaseartifact.ValidateCask(caskRaw, releaseartifact.CaskExpectation{Version: releaseVersion, IntelSHA256: intel, ArmSHA256: arm})
+}
+
+func readReleaseChecksums(path string) (map[string]string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	checksums := map[string]string{}
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		match := checksumLinePattern.FindStringSubmatch(line)
+		if match == nil {
+			return nil, fmt.Errorf("invalid checksum line %q", line)
+		}
+		if _, exists := checksums[match[2]]; exists {
+			return nil, fmt.Errorf("duplicate checksum for %s", match[2])
+		}
+		checksums[match[2]] = match[1]
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return checksums, nil
 }
 
 type semVersion struct {
@@ -82,7 +152,17 @@ type semVersion struct {
 	prerelease []string
 }
 
-func checkReleaseVersion(versionFile string, previousVersionFile string, releasedTagsFile string, releaseTag string) (string, error) {
+func checkReleaseVersion(versionFile string, previousVersionFile string, releasedTagsFile string, releaseTag string, allowExistingRelease ...bool) (string, error) {
+	allowExisting := len(allowExistingRelease) == 1 && allowExistingRelease[0]
+	if len(allowExistingRelease) > 1 {
+		return "", errors.New("allow-existing-release may only be specified once")
+	}
+	if allowExisting && releaseTag == "" {
+		return "", errors.New("--allow-existing-release requires --release-tag")
+	}
+	if allowExisting && (previousVersionFile != "" || releasedTagsFile != "") {
+		return "", errors.New("--allow-existing-release cannot be combined with previous version or released tag advancement checks")
+	}
 	version, parsed, err := readReleaseVersionFile(versionFile)
 	if err != nil {
 		return "", err
@@ -92,6 +172,9 @@ func checkReleaseVersion(versionFile string, previousVersionFile string, release
 		if releaseTag != expectedTag {
 			return "", fmt.Errorf("release tag %q does not match version file; want %q", releaseTag, expectedTag)
 		}
+	}
+	if allowExisting {
+		return version, nil
 	}
 	if previousVersionFile != "" {
 		previousVersion, previousParsed, err := readReleaseVersionFile(previousVersionFile)

@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       recovery_tag:
-        description: Existing v* tag to recover; leave empty to release the selected main commit
+        description: Existing draft, current latest stable, or prerelease v* tag to recover; leave empty for a new main release
         required: false
         type: string
 
@@ -30,12 +30,20 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
       commit: ${{ steps.version.outputs.commit }}
-      release_exists: ${{ steps.release.outputs.exists }}
+      release_state: ${{ steps.release.outputs.state }}
     steps:
+      - name: Checkout release tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: tooling
+          fetch-depth: 0
+
       - name: Checkout release source
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.recovery_tag || github.sha }}
+          path: release-source
           fetch-depth: 0
 
       - name: Validate release source
@@ -46,6 +54,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cd release-source
           if [[ "${GITHUB_REPOSITORY}" != "${EXPECTED_REPOSITORY}" ]]; then
             echo "Releases must run from ${EXPECTED_REPOSITORY}; current repository is ${GITHUB_REPOSITORY}." >&2
             exit 1
@@ -65,7 +74,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: tooling/go.mod
           cache: true
 
       - name: Resolve and validate release version
@@ -79,48 +88,49 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version_args=(--check-version-file --version-file version.txt)
+          cd release-source
+          version_args=(--check-version-file --version-file "$(pwd)/version.txt")
           previous_version=$(mktemp)
           released_tags=$(mktemp)
           trap 'rm -f "${previous_version}" "${released_tags}"' EXIT
-          git tag --merged refs/remotes/origin/main --list 'v*' > "${released_tags}"
-          version_args+=(--released-tags-file "${released_tags}")
-
-          comparison_ref=""
-          if [[ "${RELEASE_EVENT}" == "push" && "${RELEASE_REF}" == "refs/heads/main" ]]; then
-            if [[ -n "${BEFORE_SHA}" && ! "${BEFORE_SHA}" =~ ^0+$ ]]; then
-              comparison_ref=${BEFORE_SHA}
-            fi
-          else
-            comparison_ref=$(git rev-parse HEAD^1 2>/dev/null || true)
-          fi
-
-          if [[ -n "${comparison_ref}" ]]; then
-            if git show "${comparison_ref}:version.txt" > "${previous_version}" 2>/dev/null; then
-              version_args+=(--previous-version-file "${previous_version}")
-            else
-              latest_tag=$(git describe --tags --abbrev=0 --match 'v*' "${comparison_ref}" 2>/dev/null || true)
-              if [[ -n "${latest_tag}" ]]; then
-                printf '%s\n' "${latest_tag#v}" > "${previous_version}"
-                version_args+=(--previous-version-file "${previous_version}")
-                echo "No previous version.txt exists; comparing against ${latest_tag}."
-              else
-                echo "No prior release tag exists; treating this as the version baseline."
-              fi
-            fi
-          fi
 
           if [[ -n "${RECOVERY_TAG}" ]]; then
             if [[ "${RECOVERY_TAG}" != v* ]]; then
               echo "Recovery tag must start with v, got ${RECOVERY_TAG}." >&2
               exit 1
             fi
-            version_args+=(--release-tag "${RECOVERY_TAG}")
-          elif [[ "${RELEASE_REF}" == refs/tags/* ]]; then
-            version_args+=(--release-tag "${RELEASE_REF_NAME}")
+            version_args+=(--release-tag "${RECOVERY_TAG}" --allow-existing-release)
+          else
+            git tag --merged refs/remotes/origin/main --list 'v*' > "${released_tags}"
+            version_args+=(--released-tags-file "${released_tags}")
+            comparison_ref=""
+            if [[ "${RELEASE_EVENT}" == "push" && "${RELEASE_REF}" == "refs/heads/main" ]]; then
+              if [[ -n "${BEFORE_SHA}" && ! "${BEFORE_SHA}" =~ ^0+$ ]]; then
+                comparison_ref=${BEFORE_SHA}
+              fi
+            else
+              comparison_ref=$(git rev-parse HEAD^1 2>/dev/null || true)
+            fi
+            if [[ -n "${comparison_ref}" ]]; then
+              if git show "${comparison_ref}:version.txt" > "${previous_version}" 2>/dev/null; then
+                version_args+=(--previous-version-file "${previous_version}")
+              else
+                latest_tag=$(git describe --tags --abbrev=0 --match 'v*' "${comparison_ref}" 2>/dev/null || true)
+                if [[ -n "${latest_tag}" ]]; then
+                  printf '%s\n' "${latest_tag#v}" > "${previous_version}"
+                  version_args+=(--previous-version-file "${previous_version}")
+                  echo "No previous version.txt exists; comparing against ${latest_tag}."
+                else
+                  echo "No prior release tag exists; treating this as the version baseline."
+                fi
+              fi
+            fi
+            if [[ "${RELEASE_REF}" == refs/tags/* ]]; then
+              version_args+=(--release-tag "${RELEASE_REF_NAME}")
+            fi
           fi
 
-          version=$(go run ./cmd/releaseprep "${version_args[@]}")
+          version=$(go -C ../tooling run ./cmd/releaseprep "${version_args[@]}")
           tag="v${version}"
           commit=$(git rev-parse HEAD)
 
@@ -143,19 +153,25 @@ jobs:
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
+          RECOVERY_TAG: ${{ inputs.recovery_tag }}
           RELEASE_EVENT: ${{ github.event_name }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
+          cd release-source
           set +e
           release_result=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" 2>&1)
           release_status=$?
           set -e
           if [[ ${release_status} -ne 0 ]]; then
             if [[ "${release_result}" == *"HTTP 404"* ]]; then
-              echo "exists=false" >> "${GITHUB_OUTPUT}"
+              if [[ -n "${RECOVERY_TAG}" ]]; then
+                echo "Recovery requires an existing draft or complete immutable GitHub Release for ${RECOVERY_TAG}." >&2
+                exit 1
+              fi
+              echo "state=missing" >> "${GITHUB_OUTPUT}"
               exit 0
             fi
             echo "Could not determine whether GitHub Release ${RELEASE_TAG} exists." >&2
@@ -163,43 +179,54 @@ jobs:
             exit 1
           fi
 
-          if [[ "${RELEASE_EVENT}" != "workflow_dispatch" ]]; then
-            echo "GitHub Release ${RELEASE_TAG} already exists; published releases are immutable." >&2
-            exit 1
-          fi
-
           release_file=$(mktemp)
           trap 'rm -f "${release_file}"' EXIT
           printf '%s\n' "${release_result}" > "${release_file}"
-          jq -e --arg tag "${RELEASE_TAG}" --arg version "${RELEASE_VERSION}" '
+
+          if jq -e --arg tag "${RELEASE_TAG}" --arg version "${RELEASE_VERSION}" '
             .tag_name == $tag and
-            .draft == false and
-            .immutable == true and
-            .prerelease == ($version | contains("-")) and
-            ([.assets[].name] | sort) == ([
-              "checksums.txt",
-              "version.txt",
-              "ecctl_\($version)_darwin_amd64.tar.gz",
-              "ecctl_\($version)_darwin_arm64.tar.gz",
-              "ecctl_\($version)_linux_amd64.tar.gz",
-              "ecctl_\($version)_linux_arm64.tar.gz",
-              "ecctl_\($version)_windows_amd64.zip",
-              "ecctl_\($version)_windows_arm64.zip"
-            ] | sort)
-          ' "${release_file}" >/dev/null || {
+            .draft == true and
+            .immutable == false and
+            .prerelease == ($version | contains("-"))
+          ' "${release_file}" >/dev/null; then
+            echo "Existing draft ${RELEASE_TAG} will be resumed by GoReleaser."
+            echo "state=draft" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if [[ -z "${RECOVERY_TAG}" || "${RELEASE_EVENT}" != "workflow_dispatch" ]]; then
+            echo "Published Release ${RELEASE_TAG} may only be replayed through recovery_tag." >&2
+            exit 1
+          fi
+          jq -e \
+            --arg tag "${RELEASE_TAG}" \
+            --arg version "${RELEASE_VERSION}" \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --argjson draft false \
+            --argjson immutable true \
+            -f "${GITHUB_WORKSPACE}/tooling/.github/scripts/validate-release.jq" \
+            "${release_file}" >/dev/null || {
             echo "Existing GitHub Release ${RELEASE_TAG} is not a complete immutable release." >&2
             exit 1
           }
+          if [[ "${RELEASE_VERSION}" != *-* ]]; then
+            latest_tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')
+            if [[ "${latest_tag}" != "${RELEASE_TAG}" ]]; then
+              echo "Stable recovery may only replay current latest ${latest_tag}; refusing ${RELEASE_TAG}." >&2
+              exit 1
+            fi
+          fi
           echo "Existing immutable release ${RELEASE_TAG} is complete; publish will be skipped."
-          echo "exists=true" >> "${GITHUB_OUTPUT}"
+          echo "state=immutable" >> "${GITHUB_OUTPUT}"
 
       - name: Check Homebrew Cask advancement
-        if: steps.release.outputs.exists != 'true'
+        if: steps.release.outputs.state != 'immutable'
         env:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
+          cd release-source
           current_cask=$(mktemp)
           trap 'rm -f "${current_cask}"' EXIT
           cask_args=(--first-homebrew-release)
@@ -209,25 +236,29 @@ jobs:
             echo "No Homebrew Cask exists on main; allowing the release."
           fi
 
-          go run ./cmd/releaseprep \
+          go -C ../tooling run ./cmd/releaseprep \
             --check-homebrew-version \
             --release-tag "${RELEASE_TAG}" \
             "${cask_args[@]}"
 
       - name: Check public module release readiness
-        if: steps.release.outputs.exists != 'true'
+        if: steps.release.outputs.state != 'immutable'
+        working-directory: release-source
         run: make check-public-release
 
       - name: Lint
-        if: steps.release.outputs.exists != 'true'
+        if: steps.release.outputs.state != 'immutable'
+        working-directory: release-source
         run: make lint
 
       - name: Test
-        if: steps.release.outputs.exists != 'true'
+        if: steps.release.outputs.state != 'immutable'
+        working-directory: release-source
         run: make test
 
       - name: E2E offline gates
-        if: steps.release.outputs.exists != 'true'
+        if: steps.release.outputs.state != 'immutable'
+        working-directory: release-source
         run: |
           make -C e2e test
           make -C e2e lint
@@ -242,21 +273,23 @@ jobs:
             --config e2e/sweep.yaml
 
       - name: Check GoReleaser configuration
-        if: steps.release.outputs.exists != 'true'
+        if: steps.release.outputs.state != 'immutable'
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: v2.17.0
-          args: check
+          args: check --config ../tooling/.goreleaser.yaml
+          workdir: release-source
 
       - name: Prepare local dry-run tag
-        if: steps.release.outputs.exists != 'true'
+        if: steps.release.outputs.state != 'immutable'
         env:
           RELEASE_COMMIT: ${{ steps.version.outputs.commit }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
+          cd release-source
           if git rev-parse --verify --quiet "refs/tags/${RELEASE_TAG}" >/dev/null; then
             if [[ "$(git rev-list -n 1 "${RELEASE_TAG}")" != "${RELEASE_COMMIT}" ]]; then
               echo "Local tag ${RELEASE_TAG} does not point to ${RELEASE_COMMIT}." >&2
@@ -267,33 +300,56 @@ jobs:
           fi
 
       - name: Dry-run release build
-        if: steps.release.outputs.exists != 'true'
+        if: steps.release.outputs.state != 'immutable'
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: v2.17.0
-          args: release --clean --skip=publish
+          args: release --clean --skip=publish --config ../tooling/.goreleaser.yaml
+          workdir: release-source
         env:
           GORELEASER_CURRENT_TAG: ${{ steps.version.outputs.tag }}
 
+      - name: Verify dry-run generated Homebrew Cask
+        if: ${{ steps.release.outputs.state != 'immutable' && !contains(steps.version.outputs.version, '-') }}
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -c release-source/dist/homebrew/Casks/ecctl.rb
+          go -C tooling run ./cmd/releaseprep \
+            --verify-homebrew-cask \
+            --release-tag "${RELEASE_TAG}" \
+            --cask "${GITHUB_WORKSPACE}/release-source/dist/homebrew/Casks/ecctl.rb" \
+            --checksums-file "${GITHUB_WORKSPACE}/release-source/dist/checksums.txt"
+
   publish:
     needs: validate
-    if: needs.validate.outputs.release_exists != 'true'
+    if: needs.validate.result == 'success'
     runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: write
     steps:
+      - name: Checkout release tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: tooling
+          fetch-depth: 0
+
       - name: Checkout validated release source
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.validate.outputs.commit }}
+          path: release-source
           fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: tooling/go.mod
           cache: true
 
       - name: Revalidate release identity
@@ -304,26 +360,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cd release-source
           if [[ "$(git rev-parse HEAD)" != "${RELEASE_COMMIT}" ]]; then
             echo "Checked out commit does not match validated release commit ${RELEASE_COMMIT}." >&2
             exit 1
           fi
-          actual_version=$(go run ./cmd/releaseprep \
-            --check-version-file \
-            --version-file version.txt \
-            --release-tag "${RELEASE_TAG}")
+          version_args=(--check-version-file --version-file "$(pwd)/version.txt" --release-tag "${RELEASE_TAG}")
+          if [[ "${{ needs.validate.outputs.release_state }}" == immutable ]]; then
+            version_args+=(--allow-existing-release)
+          fi
+          actual_version=$(go -C ../tooling run ./cmd/releaseprep "${version_args[@]}")
           if [[ "${actual_version}" != "${RELEASE_VERSION}" ]]; then
             echo "Validated version changed from ${RELEASE_VERSION} to ${actual_version}." >&2
             exit 1
           fi
 
       - name: Create or verify release tag
+        if: needs.validate.outputs.release_state != 'immutable'
         env:
           RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
+          cd release-source
           tag_rows=$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}" "refs/tags/${RELEASE_TAG}^{}")
           direct_sha=$(awk -v ref="refs/tags/${RELEASE_TAG}" '$2 == ref { print $1 }' <<< "${tag_rows}")
           peeled_sha=$(awk -v ref="refs/tags/${RELEASE_TAG}^{}" '$2 == ref { print $1 }' <<< "${tag_rows}")
@@ -344,15 +404,91 @@ jobs:
           git tag -a "${RELEASE_TAG}" "${RELEASE_COMMIT}" -m "Release ${RELEASE_TAG}"
           git push origin "refs/tags/${RELEASE_TAG}"
 
-      - name: Publish GitHub release
+      - name: Build GitHub release draft
+        if: needs.validate.outputs.release_state != 'immutable'
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: v2.17.0
-          args: release --clean
+          args: release --clean --config ../tooling/.goreleaser.yaml
+          workdir: release-source
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GORELEASER_CURRENT_TAG: ${{ needs.validate.outputs.tag }}
+
+      - name: Verify and attach generated Homebrew Cask to draft
+        if: ${{ needs.validate.outputs.release_state != 'immutable' && !contains(needs.validate.outputs.version, '-') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          generated="release-source/dist/homebrew/Casks/ecctl.rb"
+          asset="ecctl_${RELEASE_VERSION}_cask.rb"
+          mkdir -p release-cask
+          ruby -c "${generated}"
+          go -C tooling run ./cmd/releaseprep \
+            --verify-homebrew-cask \
+            --release-tag "${RELEASE_TAG}" \
+            --cask "${GITHUB_WORKSPACE}/${generated}" \
+            --checksums-file "${GITHUB_WORKSPACE}/release-source/dist/checksums.txt"
+          cp "${generated}" "release-cask/${asset}"
+          gh release upload "${RELEASE_TAG}" "release-cask/${asset}#${asset}" \
+            --repo "${GITHUB_REPOSITORY}" --clobber
+
+      - name: Validate complete draft and publish immutable release
+        if: needs.validate.outputs.release_state != 'immutable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          work_dir=$(mktemp -d)
+          trap 'rm -rf "${work_dir}"' EXIT
+          release_file="${work_dir}/release.json"
+          readback_file="${work_dir}/readback.json"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" > "${release_file}"
+          jq -e \
+            --arg tag "${RELEASE_TAG}" \
+            --arg version "${RELEASE_VERSION}" \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --argjson draft true \
+            --argjson immutable false \
+            -f "${GITHUB_WORKSPACE}/tooling/.github/scripts/validate-release.jq" \
+            "${release_file}" >/dev/null
+
+          while IFS=$'\t' read -r name digest; do
+            case "${name}" in
+              version.txt) local_file="release-source/version.txt" ;;
+              ecctl_*_cask.rb) local_file="release-cask/${name}" ;;
+              *) local_file="release-source/dist/${name}" ;;
+            esac
+            actual="sha256:$(sha256sum "${local_file}" | awk '{print $1}')"
+            if [[ "${actual}" != "${digest}" ]]; then
+              echo "Release asset ${name} digest ${digest} does not match local ${actual}." >&2
+              exit 1
+            fi
+          done < <(jq -r '.assets[] | [.name, .digest] | @tsv' "${release_file}")
+
+          release_id=$(jq -er '.id' "${release_file}")
+          prerelease=false
+          if [[ "${RELEASE_VERSION}" == *-* ]]; then prerelease=true; fi
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+            -F draft=false -F "prerelease=${prerelease}" >/dev/null
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" > "${readback_file}"
+          jq -e \
+            --arg tag "${RELEASE_TAG}" \
+            --arg version "${RELEASE_VERSION}" \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --argjson draft false \
+            --argjson immutable true \
+            -f "${GITHUB_WORKSPACE}/tooling/.github/scripts/validate-release.jq" \
+            "${readback_file}" >/dev/null
+          echo "Published immutable GitHub Release ${RELEASE_TAG}."
 
   notify:
     needs:
@@ -365,8 +501,79 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     permissions:
-      contents: read
+      contents: write
     steps:
+      - name: Checkout release tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: tooling
+          fetch-depth: 0
+
+      - name: Checkout validated release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          path: release-source
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tooling/go.mod
+          cache: true
+
+      - name: Download and verify immutable Homebrew Cask
+        if: ${{ !contains(needs.validate.outputs.version, '-') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          work_dir=$(mktemp -d)
+          trap 'rm -rf "${work_dir}"' EXIT
+          asset="ecctl_${RELEASE_VERSION}_cask.rb"
+          mkdir -p release-cask
+          gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" \
+            --pattern "${asset}" --dir release-cask
+          gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" \
+            --pattern checksums.txt --dir "${work_dir}"
+          expected_digest=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+            --jq ".assets[] | select(.name == \"${asset}\") | .digest")
+          actual_digest="sha256:$(sha256sum "release-cask/${asset}" | awk '{print $1}')"
+          if [[ "${actual_digest}" != "${expected_digest}" ]]; then
+            echo "Downloaded Homebrew Cask digest ${actual_digest} does not match immutable Release ${expected_digest}." >&2
+            exit 1
+          fi
+          ruby -c "release-cask/${asset}"
+          go -C tooling run ./cmd/releaseprep \
+            --verify-homebrew-cask \
+            --release-tag "${RELEASE_TAG}" \
+            --cask "${GITHUB_WORKSPACE}/release-cask/${asset}" \
+            --checksums-file "${work_dir}/checksums.txt"
+          mv "release-cask/${asset}" release-cask/ecctl.rb
+
+      - name: Snapshot stable OSS pointer before prerelease webhook
+        if: ${{ contains(needs.validate.outputs.version, '-') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          snapshot="${RUNNER_TEMP}/ecctl-oss-stable-version.txt"
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            --connect-timeout 5 --max-time 15 \
+            "https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/elastic-compute-control-cli/version.txt?run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-snapshot" \
+            > "${snapshot}"
+          python3 - "${snapshot}" <<'PY'
+          import re
+          import sys
+
+          raw = open(sys.argv[1], "rb").read()
+          if not re.fullmatch(rb"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:\n)?", raw):
+              raise SystemExit("OSS version.txt is not an exact stable SemVer pointer")
+          PY
+
       - name: Trigger release webhook
         env:
           GH_TOKEN: ${{ github.token }}
@@ -401,37 +608,19 @@ jobs:
           trap 'rm -rf "${work_dir}"' EXIT
           release_file="${work_dir}/release.json"
           repository_file="${work_dir}/repository.json"
-          cask_file="${work_dir}/ecctl.rb"
           payload_file="${work_dir}/payload.json"
           response_file="${work_dir}/response.txt"
 
           gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" > "${release_file}"
           gh api "repos/${GITHUB_REPOSITORY}" > "${repository_file}"
-          if [[ "${RELEASE_VERSION}" != *-* ]]; then
-            gh api "repos/${GITHUB_REPOSITORY}/contents/Casks/ecctl.rb?ref=main" \
-              --jq '.content' | base64 --decode > "${cask_file}"
-            cask_version=$(sed -n 's/^[[:space:]]*version "\([^"]*\)"[[:space:]]*$/\1/p' "${cask_file}")
-            if [[ "${cask_version}" != "${RELEASE_VERSION}" ]]; then
-              echo "Homebrew Cask version ${cask_version:-<missing>} does not match ${RELEASE_VERSION}." >&2
-              exit 1
-            fi
-          fi
-          jq -e --arg tag "${RELEASE_TAG}" --arg version "${RELEASE_VERSION}" '
-            .tag_name == $tag and
-            .draft == false and
-            .immutable == true and
-            .prerelease == ($version | contains("-")) and
-            ([.assets[].name] | sort) == ([
-              "checksums.txt",
-              "version.txt",
-              "ecctl_\($version)_darwin_amd64.tar.gz",
-              "ecctl_\($version)_darwin_arm64.tar.gz",
-              "ecctl_\($version)_linux_amd64.tar.gz",
-              "ecctl_\($version)_linux_arm64.tar.gz",
-              "ecctl_\($version)_windows_amd64.zip",
-              "ecctl_\($version)_windows_arm64.zip"
-            ] | sort)
-          ' "${release_file}" >/dev/null
+          jq -e \
+            --arg tag "${RELEASE_TAG}" \
+            --arg version "${RELEASE_VERSION}" \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --argjson draft false \
+            --argjson immutable true \
+            -f "${GITHUB_WORKSPACE}/tooling/.github/scripts/validate-release.jq" \
+            "${release_file}" >/dev/null
 
           delivery_id=$(uuidgen | tr '[:upper:]' '[:lower:]')
           jq -n \
@@ -473,3 +662,160 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Wait for verified OSS mirror
+        timeout-minutes: 95
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          STABLE_VERSION_SNAPSHOT: ${{ runner.temp }}/ecctl-oss-stable-version.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+          work_dir=$(mktemp -d)
+          trap 'rm -rf "${work_dir}"' EXIT
+          gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --pattern checksums.txt --dir "${work_dir}"
+          base_url="https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/elastic-compute-control-cli"
+          artifacts=(
+            "ecctl_${RELEASE_VERSION}_darwin_amd64.tar.gz"
+            "ecctl_${RELEASE_VERSION}_darwin_arm64.tar.gz"
+            "ecctl_${RELEASE_VERSION}_linux_amd64.tar.gz"
+            "ecctl_${RELEASE_VERSION}_linux_arm64.tar.gz"
+            "ecctl_${RELEASE_VERSION}_windows_amd64.zip"
+            "ecctl_${RELEASE_VERSION}_windows_arm64.zip"
+          )
+          asset_dir="${work_dir}/oss-assets"
+          mkdir -p "${asset_dir}"
+
+          if [[ "${RELEASE_VERSION}" == *-* ]]; then
+            if [[ ! -f "${STABLE_VERSION_SNAPSHOT}" ]]; then
+              echo "The prerelease stable-version snapshot is missing." >&2
+              exit 1
+            fi
+          else
+            printf '%s' "${RELEASE_VERSION}" > "${work_dir}/expected-version-bare.txt"
+            printf '%s\n' "${RELEASE_VERSION}" > "${work_dir}/expected-version-line.txt"
+          fi
+
+          for attempt in $(seq 1 360); do
+            cache_bust="run=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${attempt}"
+            ready=true
+            if [[ "${RELEASE_VERSION}" == *-* ]]; then
+              if ! curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+                --connect-timeout 5 --max-time 15 \
+                "${base_url}/version.txt?${cache_bust}" > "${work_dir}/version.txt"; then
+                ready=false
+              elif ! cmp -s "${STABLE_VERSION_SNAPSHOT}" "${work_dir}/version.txt"; then
+                if python3 - "${work_dir}/version.txt" <<'PY'
+          import re
+          import sys
+
+          raw = open(sys.argv[1], "rb").read()
+          raise SystemExit(0 if re.fullmatch(rb"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:\n)?", raw) else 1)
+          PY
+                then
+                  echo "OSS stable pointer changed while publishing prerelease ${RELEASE_VERSION}; refusing to validate against a stale snapshot." >&2
+                  exit 1
+                fi
+                ready=false
+              fi
+            else
+              if ! curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+                --connect-timeout 5 --max-time 15 \
+                "${base_url}/version.txt?${cache_bust}" > "${work_dir}/version.txt"; then
+                ready=false
+              elif ! cmp -s "${work_dir}/expected-version-bare.txt" "${work_dir}/version.txt" && \
+                ! cmp -s "${work_dir}/expected-version-line.txt" "${work_dir}/version.txt"; then
+                ready=false
+              fi
+            fi
+            if [[ "${ready}" == true ]]; then
+              if ! curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+                --connect-timeout 5 --max-time 15 \
+                "${base_url}/${RELEASE_VERSION}/checksums.txt?${cache_bust}" > "${work_dir}/oss-checksums.txt"; then
+                ready=false
+              elif ! cmp -s "${work_dir}/checksums.txt" "${work_dir}/oss-checksums.txt"; then
+                ready=false
+              fi
+            fi
+            if [[ "${ready}" == true ]]; then
+              for artifact in "${artifacts[@]}"; do
+                if ! curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+                  --connect-timeout 5 --max-time 180 --max-filesize 209715200 \
+                  --output "${asset_dir}/${artifact}" \
+                  "${base_url}/${RELEASE_VERSION}/${artifact}?${cache_bust}"; then
+                  ready=false
+                  break
+                fi
+              done
+              if [[ "${ready}" == true ]] && ! (
+                cd "${asset_dir}"
+                sha256sum --check --strict ../checksums.txt
+              ); then
+                ready=false
+              fi
+            fi
+            if [[ "${ready}" == true ]]; then
+              echo "OSS mirror ${RELEASE_VERSION} matches the immutable GitHub Release."
+              exit 0
+            fi
+            echo "OSS mirror is not complete yet (attempt ${attempt}/360)."
+            sleep 15
+          done
+          echo "OSS mirror did not become complete within 90 minutes." >&2
+          exit 1
+
+      - name: Publish verified Homebrew Cask
+        if: ${{ !contains(needs.validate.outputs.version, '-') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_STATE: ${{ needs.validate.outputs.release_state }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cask_file=release-cask/ecctl.rb
+          current_json=$(mktemp)
+          current_cask=$(mktemp)
+          readback=$(mktemp)
+          trap 'rm -f "${current_json}" "${current_cask}" "${readback}"' EXIT
+
+          set +e
+          current_error=$(gh api "repos/${GITHUB_REPOSITORY}/contents/Casks/ecctl.rb?ref=main" 2>&1 > "${current_json}")
+          current_status=$?
+          set -e
+          put_args=(-X PUT -f "message=chore: update Homebrew Cask for ${RELEASE_TAG}" -f branch=main)
+          if [[ ${current_status} -eq 0 ]]; then
+            jq -er '.content' "${current_json}" | base64 --decode > "${current_cask}"
+            if cmp -s "${current_cask}" "${cask_file}"; then
+              echo "Homebrew Cask ${RELEASE_VERSION} is already published."
+              exit 0
+            fi
+            current_version=$(sed -n 's/^[[:space:]]*version "\([^"]*\)"[[:space:]]*$/\1/p' "${current_cask}")
+            if [[ "${RELEASE_STATE}" == immutable && "${current_version}" == "${RELEASE_VERSION}" ]]; then
+              echo "Repairing same-version Homebrew Cask from the immutable release."
+            else
+            go -C tooling run ./cmd/releaseprep \
+                --check-homebrew-version \
+                --release-tag "${RELEASE_TAG}" \
+                --cask "${current_cask}"
+            fi
+            put_args+=(-f "sha=$(jq -er '.sha' "${current_json}")")
+          elif [[ "${current_error}" != *"HTTP 404"* ]]; then
+            echo "Could not read the current Homebrew Cask." >&2
+            echo "${current_error}" >&2
+            exit 1
+          fi
+
+          content=$(base64 < "${cask_file}" | tr -d '\n')
+          gh api "repos/${GITHUB_REPOSITORY}/contents/Casks/ecctl.rb" \
+            "${put_args[@]}" -f "content=${content}" >/dev/null
+          gh api "repos/${GITHUB_REPOSITORY}/contents/Casks/ecctl.rb?ref=main" \
+            --jq '.content' | base64 --decode > "${readback}"
+          cmp -s "${cask_file}" "${readback}" || {
+            echo "Published Homebrew Cask readback does not match prepared content." >&2
+            exit 1
+          }
+          echo "Published Homebrew Cask ${RELEASE_VERSION} after OSS verification."

@@ -82,3 +82,38 @@ jobs:
           distribution: goreleaser
           version: v2.17.0
           args: release --snapshot --clean --skip=publish
+
+      - name: Verify snapshot Homebrew Cask
+        shell: bash
+        run: |
+          set -euo pipefail
+          cask=dist/homebrew/Casks/ecctl.rb
+          ruby -c "${cask}"
+          cask_version=$(sed -n 's/^[[:space:]]*version "\([^"]*\)"[[:space:]]*$/\1/p' "${cask}")
+          if [[ -z "${cask_version}" ]]; then
+            echo "Generated Homebrew Cask has no version." >&2
+            exit 1
+          fi
+          go run ./cmd/releaseprep \
+            --verify-homebrew-cask \
+            --release-tag "v${cask_version}" \
+            --cask "${cask}" \
+            --checksums-file dist/checksums.txt
+
+  windows-updater:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test Windows self-update and locking
+        run: go test ./pkg/updater -run "TestWindows|TestCacheLock|TestAutoCheck" -count=1 -v
+
+      - name: Test Windows update command surface
+        run: go test ./pkg/cli -run "TestUpdateCommandReportsPendingWindowsReplacement|TestIsBuiltinRootCommandCoversAllBuiltins" -count=1
