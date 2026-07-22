@@ -40,16 +40,17 @@ steps:
     run: ecctl ack diagnosis check-item list --cluster c --type node
 `)
 	mustWrite(t, coveragePath, `
-version: 2
+version: 3
 resources:
-  ack/check-item:
-    operations:
-      list:
-        status: offline
-        case: cases/ack/check-item.yaml
-        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
-        time: "2026-07-15T00:00:00Z"
-        reason: not-run
+  ack:
+    check-item:
+      operations:
+        list:
+          status: offline
+          case: cases/ack/check-item.yaml
+          fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          time: "2026-07-15T00:00:00Z"
+          reason: not-run
 `)
 	rep, err := Check(Options{
 		CasesDir:     cases,
@@ -72,16 +73,17 @@ steps:
     run: ecctl rg role create --name role --assume-role-policy-document '{"Version":"1"}'
     teardown: ecctl rg role delete role
 `, `
-version: 2
+version: 3
 resources:
-  rg/role:
-    operations:
-      create:
-        status: offline
-        case: cases/ecs/instance.yaml
-        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
-        time: "2026-07-15T00:00:00Z"
-        reason: not-run
+  rg:
+    role:
+      operations:
+        create:
+          status: offline
+          case: cases/ecs/instance.yaml
+          fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          time: "2026-07-15T00:00:00Z"
+          reason: not-run
 `)
 
 	rep, err := Check(Options{CasesDir: cases, InputsDir: inputs, CoveragePath: coveragePath})
@@ -128,17 +130,22 @@ steps:
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			product, resource, ok := strings.Cut(tt.resource, "/")
+			if !ok {
+				t.Fatalf("invalid resource fixture %q", tt.resource)
+			}
 			_, cases, inputs, coveragePath := writeLintFixture(t, tt.caseBody, `
-version: 2
+version: 3
 resources:
-  `+tt.resource+`:
-    operations:
-      create:
-        status: offline
-        case: cases/ecs/instance.yaml
-        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
-        time: "2026-07-15T00:00:00Z"
-        reason: not-run
+  `+product+`:
+    `+resource+`:
+      operations:
+        create:
+          status: offline
+          case: cases/ecs/instance.yaml
+          fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          time: "2026-07-15T00:00:00Z"
+          reason: not-run
 `)
 			rep, err := Check(Options{CasesDir: cases, InputsDir: inputs, CoveragePath: coveragePath})
 			if err != nil {
@@ -158,16 +165,17 @@ steps:
   - name: get
     run: ecctl ecs instance get {{.region}}-{{.zone}}
 `, `
-version: 2
+version: 3
 resources:
-  ecs/instance:
-    operations:
-      get:
-        status: offline
-        case: cases/ecs/instance.yaml
-        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
-        time: "2026-07-15T00:00:00Z"
-        reason: not-run
+  ecs:
+    instance:
+      operations:
+        get:
+          status: offline
+          case: cases/ecs/instance.yaml
+          fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          time: "2026-07-15T00:00:00Z"
+          reason: not-run
 `)
 
 	rep, err := Check(Options{
@@ -195,16 +203,17 @@ steps:
   - name: get
     run: ecctl ecs instance get {{.prerequisites.ecs.instance_renew.instance_id}} --destination-region {{.regions.destination.id}} --token {{.regions.destination.prerequisites.ecs.image.token}}
 `, `
-version: 2
+version: 3
 resources:
-  ecs/instance:
-    operations:
-      get:
-        status: offline
-        case: cases/ecs/instance.yaml
-        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
-        time: "2026-07-15T00:00:00Z"
-        reason: not-run
+  ecs:
+    instance:
+      operations:
+        get:
+          status: offline
+          case: cases/ecs/instance.yaml
+          fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          time: "2026-07-15T00:00:00Z"
+          reason: not-run
 `)
 
 	rep, err := Check(Options{CasesDir: cases, InputsDir: inputs, CoveragePath: coveragePath})
@@ -223,16 +232,17 @@ steps:
   - name: get
     run: ecctl ecs instance get {{.prerequisites.ecs.instance_renew.instance_id}}
 `, `
-version: 2
+version: 3
 resources:
-  ecs/instance:
-    operations:
-      get:
-        status: offline
-        case: cases/ecs/instance.yaml
-        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
-        time: "2026-07-15T00:00:00Z"
-        reason: not-run
+  ecs:
+    instance:
+      operations:
+        get:
+          status: offline
+          case: cases/ecs/instance.yaml
+          fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          time: "2026-07-15T00:00:00Z"
+          reason: not-run
 `)
 
 	rep, err := Check(Options{CasesDir: cases, InputsDir: inputs, CoveragePath: coveragePath})
@@ -251,16 +261,17 @@ steps:
   - name: get
     run: ecctl ecs instance get {{.global.regions.primary}}
 `, `
-version: 2
+version: 3
 resources:
-  ecs/instance:
-    operations:
-      get:
-        status: offline
-        case: cases/ecs/instance.yaml
-        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
-        time: "2026-07-15T00:00:00Z"
-        reason: not-run
+  ecs:
+    instance:
+      operations:
+        get:
+          status: offline
+          case: cases/ecs/instance.yaml
+          fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          time: "2026-07-15T00:00:00Z"
+          reason: not-run
 `)
 	global := filepath.Join(root, "global.yaml")
 	mustWrite(t, global, `
@@ -290,16 +301,17 @@ steps:
   - name: get
     run: ecctl ecs instance get {{.params.ecs.instance_type}}
 `, `
-version: 2
+version: 3
 resources:
-  ecs/instance:
-    operations:
-      get:
-        status: offline
-        case: cases/ecs/instance.yaml
-        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
-        time: "2026-07-15T00:00:00Z"
-        reason: not-run
+  ecs:
+    instance:
+      operations:
+        get:
+          status: offline
+          case: cases/ecs/instance.yaml
+          fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          time: "2026-07-15T00:00:00Z"
+          reason: not-run
 `)
 	policy := filepath.Join(root, "parameter-policy.yaml")
 	mustWrite(t, policy, `
@@ -627,37 +639,39 @@ steps:
 
 func validCoverageYAML(casePath string) string {
 	return `
-version: 2
+version: 3
 resources:
-  ecs/instance:
-    operations:
-      create:
-        status: offline
-        case: ` + casePath + `
-        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
-        time: "2026-07-15T00:00:00Z"
-        reason: not-run
-      get:
-        status: offline
-        case: ` + casePath + `
-        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
-        time: "2026-07-15T00:00:00Z"
-        reason: not-run
+  ecs:
+    instance:
+      operations:
+        create:
+          status: offline
+          case: ` + casePath + `
+          fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          time: "2026-07-15T00:00:00Z"
+          reason: not-run
+        get:
+          status: offline
+          case: ` + casePath + `
+          fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          time: "2026-07-15T00:00:00Z"
+          reason: not-run
 `
 }
 
 func validCoverageWithMissingOperation(casePath string) string {
 	return `
-version: 2
+version: 3
 resources:
-  ecs/instance:
-    operations:
-      delete:
-        status: offline
-        case: ` + casePath + `
-        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
-        time: "2026-07-15T00:00:00Z"
-        reason: not-run
+  ecs:
+    instance:
+      operations:
+        delete:
+          status: offline
+          case: ` + casePath + `
+          fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          time: "2026-07-15T00:00:00Z"
+          reason: not-run
 `
 }
 

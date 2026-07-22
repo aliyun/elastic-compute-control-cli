@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,7 +18,7 @@ import (
 )
 
 const (
-	RegistryVersion = 2
+	RegistryVersion = 3
 
 	StatusOffline  = "offline"
 	StatusLivePass = "live-pass"
@@ -49,10 +50,10 @@ var allowedOfflineReasons = map[string]bool{
 
 // Registry is e2e/coverage.yaml.
 type Registry struct {
-	Version   int                         `yaml:"version" json:"version"`
-	Generated RegistryGenerated           `yaml:"generated,omitempty" json:"generated,omitempty"`
-	Summary   RegistryPublicSummary       `yaml:"summary" json:"summary"`
-	Resources map[string]RegistryResource `yaml:"resources" json:"resources"`
+	Version   int                        `yaml:"version" json:"version"`
+	Generated RegistryGenerated          `yaml:"generated,omitempty" json:"generated,omitempty"`
+	Summary   RegistryPublicSummary      `yaml:"summary" json:"summary"`
+	Resources map[string]RegistryProduct `yaml:"resources" json:"resources"`
 }
 
 type RegistryGenerated struct {
@@ -60,11 +61,15 @@ type RegistryGenerated struct {
 	CasesDir string `yaml:"cases_dir,omitempty" json:"cases_dir,omitempty"`
 }
 
+// RegistryProduct maps canonical resource names from specs to their coverage.
+// The product itself is the parent key in Registry.Resources.
+type RegistryProduct map[string]RegistryResource
+
 type RegistryResource struct {
 	Operations map[string]RegistryOperation `yaml:"operations" json:"operations"`
 }
 
-// RegistryOperation is the fixed version 2 operation schema. All fields are
+// RegistryOperation is the fixed version 3 operation schema. All fields are
 // required; operations without a case are omitted from the registry.
 type RegistryOperation struct {
 	Status      string `yaml:"status" json:"status"`
@@ -168,6 +173,15 @@ type legacyRegistry struct {
 	Resources map[string]legacyRegistryResource `yaml:"resources"`
 }
 
+// registryV2 is the former product/resource-keyed schema. It is accepted only
+// by registry init so status evidence can be migrated to the nested v3 shape.
+type registryV2 struct {
+	Version   int                         `yaml:"version"`
+	Generated RegistryGenerated           `yaml:"generated,omitempty"`
+	Summary   RegistryPublicSummary       `yaml:"summary"`
+	Resources map[string]RegistryResource `yaml:"resources"`
+}
+
 type legacyRegistryResource struct {
 	Operations map[string]legacyRegistryOperation `yaml:"operations"`
 }
@@ -193,18 +207,18 @@ type legacyRegistryEvidence struct {
 	VerifiedAt     string `yaml:"verified_at,omitempty"`
 }
 
-// LoadRegistryFile loads a strict version 2 registry. Unknown and legacy
+// LoadRegistryFile loads a strict version 3 registry. Unknown and legacy
 // fields are rejected so every consumer observes the same fixed schema.
 func LoadRegistryFile(path string) (*Registry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	return decodeRegistryV2(data)
+	return decodeRegistryV3(data)
 }
 
-// LoadRegistryForInit loads either the current version 2 schema or the legacy
-// version 1 schema used only by coverage registry init during migration.
+// LoadRegistryForInit loads the current version 3 schema or a legacy flat
+// schema used only by coverage registry init during migration.
 func LoadRegistryForInit(path string) (*Registry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -218,6 +232,8 @@ func LoadRegistryForInit(path string) (*Registry, error) {
 	}
 	switch header.Version {
 	case RegistryVersion:
+		return decodeRegistryV3(data)
+	case 2:
 		return decodeRegistryV2(data)
 	case 1:
 		return decodeLegacyRegistry(data)
@@ -226,20 +242,50 @@ func LoadRegistryForInit(path string) (*Registry, error) {
 	}
 }
 
-func decodeRegistryV2(data []byte) (*Registry, error) {
+func decodeRegistryV3(data []byte) (*Registry, error) {
 	var reg Registry
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&reg); err != nil {
 		return nil, err
 	}
+	if err := requireYAMLEOF(dec); err != nil {
+		return nil, err
+	}
 	if reg.Version != RegistryVersion {
 		return nil, fmt.Errorf("registry version must be %d", RegistryVersion)
 	}
 	if reg.Resources == nil {
-		reg.Resources = map[string]RegistryResource{}
+		reg.Resources = map[string]RegistryProduct{}
 	}
 	return &reg, nil
+}
+
+func decodeRegistryV2(data []byte) (*Registry, error) {
+	var old registryV2
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&old); err != nil {
+		return nil, err
+	}
+	if err := requireYAMLEOF(dec); err != nil {
+		return nil, err
+	}
+	if old.Version != 2 {
+		return nil, fmt.Errorf("legacy registry version must be 2")
+	}
+	reg := &Registry{
+		Version:   2,
+		Generated: old.Generated,
+		Summary:   old.Summary,
+		Resources: map[string]RegistryProduct{},
+	}
+	for resourceKey, resource := range old.Resources {
+		if err := setRegistryResource(reg.Resources, resourceKey, resource); err != nil {
+			return nil, fmt.Errorf("migrate registry v2 resource %q: %w", resourceKey, err)
+		}
+	}
+	return reg, nil
 }
 
 func decodeLegacyRegistry(data []byte) (*Registry, error) {
@@ -249,13 +295,16 @@ func decodeLegacyRegistry(data []byte) (*Registry, error) {
 	if err := dec.Decode(&legacy); err != nil {
 		return nil, err
 	}
+	if err := requireYAMLEOF(dec); err != nil {
+		return nil, err
+	}
 	if legacy.Version != 1 {
 		return nil, fmt.Errorf("legacy registry version must be 1")
 	}
 	reg := &Registry{
 		Version:   1,
 		Generated: legacy.Generated,
-		Resources: map[string]RegistryResource{},
+		Resources: map[string]RegistryProduct{},
 	}
 	for resource, legacyResource := range legacy.Resources {
 		operations := make(map[string]RegistryOperation, len(legacyResource.Operations))
@@ -266,13 +315,32 @@ func decodeLegacyRegistry(data []byte) (*Registry, error) {
 				Time:   legacyOperation.Evidence.VerifiedAt,
 			}
 		}
-		reg.Resources[resource] = RegistryResource{Operations: operations}
+		if err := setRegistryResource(reg.Resources, resource, RegistryResource{Operations: operations}); err != nil {
+			return nil, fmt.Errorf("migrate registry v1 resource %q: %w", resource, err)
+		}
 	}
 	return reg, nil
 }
 
+func requireYAMLEOF(dec *yaml.Decoder) error {
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("registry must contain exactly one YAML document")
+	}
+	return nil
+}
+
 // WriteRegistryFile writes a coverage registry with stable YAML ordering.
 func WriteRegistryFile(path string, reg *Registry) error {
+	if reg == nil {
+		return fmt.Errorf("registry must not be nil")
+	}
+	if reg.Version != RegistryVersion {
+		return fmt.Errorf("registry version must be %d before writing", RegistryVersion)
+	}
 	var b strings.Builder
 	enc := yaml.NewEncoder(&b)
 	enc.SetIndent(2)
@@ -285,7 +353,7 @@ func WriteRegistryFile(path string, reg *Registry) error {
 	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
-// InitRegistry creates or refreshes a version 2 registry from the declared
+// InitRegistry creates or refreshes a version 3 registry from the declared
 // specs and case commands.
 func InitRegistry(specsDir, casesDir string, existing *Registry, public PublicSurface) (*Registry, error) {
 	return initRegistry(specsDir, casesDir, existing, public, time.Now())
@@ -303,7 +371,7 @@ func initRegistry(specsDir, casesDir string, existing *Registry, public PublicSu
 	reg := &Registry{
 		Version:   RegistryVersion,
 		Generated: RegistryGenerated{SpecsDir: specsDir, CasesDir: casesDir},
-		Resources: map[string]RegistryResource{},
+		Resources: map[string]RegistryProduct{},
 	}
 	timestamp := now.Format(time.RFC3339Nano)
 	for _, cap := range sortedCapabilities(declared) {
@@ -315,7 +383,7 @@ func initRegistry(specsDir, casesDir string, existing *Registry, public PublicSu
 		if previous, ok := existingEntry(existing, cap); ok {
 			sameCase := sameCoverageCasePath(existing, previous.Case, info.Case, casesDir)
 			switch existing.Version {
-			case RegistryVersion:
+			case RegistryVersion, 2:
 				if sameCase && previous.Fingerprint == info.Fingerprint {
 					entry = previous
 					entry.Case = normalizeCasePath(info.Case)
@@ -341,16 +409,30 @@ func initRegistry(specsDir, casesDir string, existing *Registry, public PublicSu
 				}
 			}
 		}
-		resource := reg.Resources[cap.Resource]
+		productName, resourceName, ok := splitResourceKey(cap.Resource)
+		if !ok {
+			return nil, fmt.Errorf("invalid declared resource %q", cap.Resource)
+		}
+		product := reg.Resources[productName]
+		if product == nil {
+			product = RegistryProduct{}
+		}
+		resource := product[resourceName]
 		if resource.Operations == nil {
 			resource.Operations = map[string]RegistryOperation{}
 		}
 		resource.Operations[cap.Verb] = entry
-		reg.Resources[cap.Resource] = resource
+		product[resourceName] = resource
+		reg.Resources[productName] = product
 	}
 	reg.Summary, err = SummarizePublicSurface(reg, public)
 	if err != nil {
 		return nil, err
+	}
+	report := CheckRegistry(reg, declared, covered, casesDir, RegistryCheckOptions{PublicSurface: &public})
+	if report.Invalid > 0 {
+		first := report.Errors[0]
+		return nil, fmt.Errorf("generated registry is invalid: %s %s: %s: %s", first.Resource, first.Operation, first.Code, first.Message)
 	}
 	return reg, nil
 }
@@ -392,7 +474,7 @@ func casePathKey(path, casesDir string) string {
 	return filepath.ToSlash(path)
 }
 
-// CheckRegistryFile validates a version 2 coverage registry against current
+// CheckRegistryFile validates a version 3 coverage registry against current
 // specs and cases.
 func CheckRegistryFile(specsDir, casesDir, registryPath string, opts RegistryCheckOptions) (*RegistryCheckReport, error) {
 	reg, err := LoadRegistryFile(registryPath)
@@ -423,25 +505,33 @@ func CheckRegistry(reg *Registry, declared map[Capability]bool, covered map[Capa
 	validatePublicSummary(rep, reg, opts.PublicSurface)
 
 	entries := map[Capability]RegistryOperation{}
-	for _, resource := range sortedRegistryResources(reg.Resources) {
-		if !resourceSelected(resource, opts.ResourceFilter) {
+	for _, productName := range sortedRegistryProducts(reg.Resources) {
+		product := reg.Resources[productName]
+		if len(product) == 0 {
+			rep.add(productName, "", "empty_product", "registry products without resources must be omitted")
 			continue
 		}
-		rr := reg.Resources[resource]
-		if len(rr.Operations) == 0 {
-			rep.add(resource, "", "empty_resource", "registry resources without operations must be omitted")
-			continue
-		}
-		for _, verb := range sortedRegistryOperations(rr.Operations) {
-			op := rr.Operations[verb]
-			cap := Capability{Resource: resource, Verb: verb}
-			if !capabilitySelected(cap, opts) {
+		for _, resourceName := range sortedRegistryResources(product) {
+			resourceKey := productName + "/" + resourceName
+			if !resourceSelected(resourceKey, opts.ResourceFilter) {
 				continue
 			}
-			entries[cap] = op
-			rep.Entries++
-			rep.ByStatus[op.Status]++
-			validateEntry(rep, cap, op, declared, covered, casesDir, opts)
+			resource := product[resourceName]
+			if len(resource.Operations) == 0 {
+				rep.add(resourceKey, "", "empty_resource", "registry resources without operations must be omitted")
+				continue
+			}
+			for _, verb := range sortedRegistryOperations(resource.Operations) {
+				op := resource.Operations[verb]
+				cap := Capability{Resource: resourceKey, Verb: verb}
+				if !capabilitySelected(cap, opts) {
+					continue
+				}
+				entries[cap] = op
+				rep.Entries++
+				rep.ByStatus[op.Status]++
+				validateEntry(rep, cap, op, declared, covered, casesDir, opts)
+			}
 		}
 	}
 	if opts.FailOnNotLive {
@@ -470,7 +560,7 @@ func SummarizePublicSurface(reg *Registry, public PublicSurface) (RegistryPublic
 		Operations: len(public.Capabilities),
 	}
 	for capability := range public.Capabilities {
-		resource, ok := reg.Resources[capability.Resource]
+		resource, ok := registryResource(reg.Resources, capability.Resource)
 		if !ok {
 			summary.MissingCases++
 			continue
@@ -534,13 +624,16 @@ func SummarizeRegistry(reg *Registry, filters ...map[Capability]bool) RegistrySu
 	if len(filters) > 0 {
 		filter = filters[0]
 	}
-	for resource, registryResource := range reg.Resources {
-		for verb, operation := range registryResource.Operations {
-			if filter != nil && !filter[Capability{Resource: resource, Verb: verb}] {
-				continue
+	for productName, product := range reg.Resources {
+		for resourceName, resource := range product {
+			resourceKey := productName + "/" + resourceName
+			for verb, operation := range resource.Operations {
+				if filter != nil && !filter[Capability{Resource: resourceKey, Verb: verb}] {
+					continue
+				}
+				summary.Entries++
+				summary.ByStatus[operation.Status]++
 			}
-			summary.Entries++
-			summary.ByStatus[operation.Status]++
 		}
 	}
 	return summary
@@ -629,7 +722,7 @@ func existingEntry(existing *Registry, cap Capability) (RegistryOperation, bool)
 	if existing == nil {
 		return RegistryOperation{}, false
 	}
-	resource, ok := existing.Resources[cap.Resource]
+	resource, ok := registryResource(existing.Resources, cap.Resource)
 	if !ok {
 		return RegistryOperation{}, false
 	}
@@ -651,13 +744,57 @@ func sortedCapabilities(capabilities map[Capability]bool) []Capability {
 	return result
 }
 
-func sortedRegistryResources(resources map[string]RegistryResource) []string {
+func sortedRegistryProducts(resources map[string]RegistryProduct) []string {
 	result := make([]string, 0, len(resources))
-	for resource := range resources {
+	for product := range resources {
+		result = append(result, product)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func sortedRegistryResources(product RegistryProduct) []string {
+	result := make([]string, 0, len(product))
+	for resource := range product {
 		result = append(result, resource)
 	}
 	sort.Strings(result)
 	return result
+}
+
+func splitResourceKey(resourceKey string) (product, resource string, ok bool) {
+	product, resource, ok = strings.Cut(resourceKey, "/")
+	return product, resource, ok && product != "" && resource != "" && !strings.Contains(resource, "/")
+}
+
+func registryResource(resources map[string]RegistryProduct, resourceKey string) (RegistryResource, bool) {
+	productName, resourceName, ok := splitResourceKey(resourceKey)
+	if !ok {
+		return RegistryResource{}, false
+	}
+	product, ok := resources[productName]
+	if !ok {
+		return RegistryResource{}, false
+	}
+	resource, ok := product[resourceName]
+	return resource, ok
+}
+
+func setRegistryResource(resources map[string]RegistryProduct, resourceKey string, resource RegistryResource) error {
+	productName, resourceName, ok := splitResourceKey(resourceKey)
+	if !ok {
+		return fmt.Errorf("resource key must be product/resource")
+	}
+	product := resources[productName]
+	if product == nil {
+		product = RegistryProduct{}
+	}
+	if _, exists := product[resourceName]; exists {
+		return fmt.Errorf("duplicate canonical resource %s/%s", productName, resourceName)
+	}
+	product[resourceName] = resource
+	resources[productName] = product
+	return nil
 }
 
 func sortedRegistryOperations(operations map[string]RegistryOperation) []string {

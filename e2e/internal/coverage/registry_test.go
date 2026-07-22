@@ -18,7 +18,7 @@ var (
 	changeTime = parseTime.Add(time.Hour)
 )
 
-func TestRegistryCheckAcceptsValidV2Registry(t *testing.T) {
+func TestRegistryCheckAcceptsValidV3Registry(t *testing.T) {
 	root, specs, cases := writeRegistryFixture(t)
 	registryPath := filepath.Join(root, "coverage.yaml")
 	operation := validRegistryOperation(t, cases, StatusOffline, ReasonNotRun)
@@ -133,6 +133,29 @@ func TestRegistryCheckRejectsStaleOperation(t *testing.T) {
 	}
 }
 
+func TestRegistryCheckRejectsResourceAlias(t *testing.T) {
+	root, specs, cases := writeRegistryFixture(t)
+	registryPath := filepath.Join(root, "coverage.yaml")
+	operation := validRegistryOperation(t, cases, StatusOffline, ReasonNotRun)
+	registry := &Registry{
+		Version: RegistryVersion,
+		Summary: RegistryPublicSummary{Surface: "public", Resources: 1, Operations: 3, MissingCases: 3},
+		Resources: map[string]RegistryProduct{
+			"ecs": {"vm": {Operations: map[string]RegistryOperation{"create": operation}}},
+		},
+	}
+	if err := WriteRegistryFile(registryPath, registry); err != nil {
+		t.Fatal(err)
+	}
+	report, err := CheckRegistryFile(specs, cases, registryPath, RegistryCheckOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reportHasCode(report, "stale_entry") {
+		t.Fatalf("resource aliases must not be accepted as canonical keys: %+v", report.Errors)
+	}
+}
+
 func TestRegistryCheckRejectsEmptyResource(t *testing.T) {
 	root, specs, cases := writeRegistryFixture(t)
 	registryPath := filepath.Join(root, "coverage.yaml")
@@ -204,7 +227,7 @@ func TestRegistryCheckRejectsInvalidPublicSummary(t *testing.T) {
 	}
 }
 
-func TestRegistryV2LoaderRejectsLegacyAndUnknownFields(t *testing.T) {
+func TestRegistryV3LoaderRejectsLegacyAndUnknownFields(t *testing.T) {
 	root, _, cases := writeRegistryFixture(t)
 	fingerprint := mustFingerprint(t, filepath.Join(cases, "ecs", "instance.yaml"))
 	legacyPath := filepath.Join(root, "legacy.yaml")
@@ -212,7 +235,7 @@ func TestRegistryV2LoaderRejectsLegacyAndUnknownFields(t *testing.T) {
 version: 1
 resources: {}
 `)
-	if _, err := LoadRegistryFile(legacyPath); err == nil || !strings.Contains(err.Error(), "version must be 2") {
+	if _, err := LoadRegistryFile(legacyPath); err == nil || !strings.Contains(err.Error(), "version must be 3") {
 		t.Fatalf("strict loader must reject v1: %v", err)
 	}
 	if migrated, err := LoadRegistryForInit(legacyPath); err != nil || migrated.Version != 1 {
@@ -221,17 +244,18 @@ resources: {}
 
 	unknownPath := filepath.Join(root, "unknown.yaml")
 	mustWrite(t, unknownPath, fmt.Sprintf(`
-version: 2
+version: 3
 resources:
-  ecs/instance:
-    operations:
-      create:
-        status: offline
-        case: %s
-        fingerprint: %s
-        time: "2026-07-15T12:00:00+08:00"
-        reason: not-run
-        steps: [create]
+  ecs:
+    instance:
+      operations:
+        create:
+          status: offline
+          case: %s
+          fingerprint: %s
+          time: "2026-07-15T12:00:00+08:00"
+          reason: not-run
+          steps: [create]
 `, filepath.Join(cases, "ecs", "instance.yaml"), fingerprint))
 	if _, err := LoadRegistryFile(unknownPath); err == nil || !strings.Contains(err.Error(), "field steps not found") {
 		t.Fatalf("strict loader must reject unknown fields: %v", err)
@@ -239,13 +263,37 @@ resources:
 
 	partialSummaryPath := filepath.Join(root, "partial-summary.yaml")
 	mustWrite(t, partialSummaryPath, `
-version: 2
+version: 3
 summary:
   surface: public
 resources: {}
 `)
 	if _, err := LoadRegistryFile(partialSummaryPath); err == nil || !strings.Contains(err.Error(), "summary requires field") {
 		t.Fatalf("strict loader must reject incomplete summary: %v", err)
+	}
+
+	validPath := filepath.Join(root, "valid.yaml")
+	writeRegistry(t, validPath, map[string]RegistryOperation{})
+	validData, err := os.ReadFile(validPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, validPath, string(validData)+"---\nversion: 3\nresources: {}\n")
+	if _, err := LoadRegistryFile(validPath); err == nil || !strings.Contains(err.Error(), "exactly one YAML document") {
+		t.Fatalf("strict loader must reject trailing YAML documents: %v", err)
+	}
+}
+
+func TestWriteRegistryFileRejectsMigrationIntermediate(t *testing.T) {
+	registry := &Registry{
+		Version: 2,
+		Resources: map[string]RegistryProduct{
+			"ecs": {"instance": {Operations: map[string]RegistryOperation{}}},
+		},
+	}
+	err := WriteRegistryFile(filepath.Join(t.TempDir(), "coverage.yaml"), registry)
+	if err == nil || !strings.Contains(err.Error(), "version must be 3") {
+		t.Fatalf("write must reject a migrated registry before init produces v3: %v", err)
 	}
 }
 
@@ -270,7 +318,7 @@ operations:
 	if first.Summary != wantSummary {
 		t.Fatalf("public summary = %+v, want %+v", first.Summary, wantSummary)
 	}
-	operations := first.Resources["ecs/instance"].Operations
+	operations := first.Resources["ecs"]["instance"].Operations
 	if len(operations) != 2 {
 		t.Fatalf("expected only create/delete case operations, got %+v", operations)
 	}
@@ -309,9 +357,80 @@ operations:
 	if err := yaml.Unmarshal(firstData, &raw); err != nil {
 		t.Fatal(err)
 	}
-	operationMap := raw["resources"].(map[string]any)["ecs/instance"].(map[string]any)["operations"].(map[string]any)["create"].(map[string]any)
+	operationMap := raw["resources"].(map[string]any)["ecs"].(map[string]any)["instance"].(map[string]any)["operations"].(map[string]any)["create"].(map[string]any)
 	if len(operationMap) != 5 {
 		t.Fatalf("operation must have exactly five fields: %#v", operationMap)
+	}
+	if _, exists := raw["resources"].(map[string]any)["ecs/instance"]; exists {
+		t.Fatalf("registry must not use flat product/resource keys: %#v", raw["resources"])
+	}
+	if _, exists := raw["resources"].(map[string]any)["ecs"].(map[string]any)["vm"]; exists {
+		t.Fatalf("registry must use the canonical spec resource, not its alias: %#v", raw["resources"])
+	}
+}
+
+func TestInitRegistryMigratesV2FlatKeysAndPreservesLiveEvidence(t *testing.T) {
+	root, specs, cases := writeRegistryFixture(t)
+	casePath := filepath.Join(cases, "ecs", "instance.yaml")
+	legacyPath := filepath.Join(root, "coverage-v2.yaml")
+	mustWrite(t, legacyPath, fmt.Sprintf(`
+version: 2
+generated:
+  cases_dir: %s
+summary:
+  surface: public
+  resources: 1
+  operations: 3
+  missing_cases: 1
+  passed: 1
+  not_passed: 1
+resources:
+  ecs/instance:
+    operations:
+      create:
+        status: live-pass
+        case: %s
+        fingerprint: %s
+        time: "2026-07-15T12:00:00+08:00"
+        reason: live-verified
+`, cases, casePath, mustFingerprint(t, casePath)))
+
+	existing, err := LoadRegistryForInit(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if existing.Version != 2 {
+		t.Fatalf("loaded version = %d, want 2", existing.Version)
+	}
+	legacyData, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trailingPath := filepath.Join(root, "coverage-v2-trailing.yaml")
+	mustWrite(t, trailingPath, string(legacyData)+"---\nversion: 2\nresources: {}\n")
+	if _, err := LoadRegistryForInit(trailingPath); err == nil || !strings.Contains(err.Error(), "exactly one YAML document") {
+		t.Fatalf("v2 migration must reject trailing YAML documents: %v", err)
+	}
+	migrated, err := initRegistry(specs, cases, existing, fixturePublicSurface(), changeTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := migrated.Resources["ecs"]["instance"].Operations["create"]
+	want := RegistryOperation{
+		Status:      StatusLivePass,
+		Case:        normalizeCasePath(casePath),
+		Fingerprint: mustFingerprint(t, casePath),
+		Time:        "2026-07-15T12:00:00+08:00",
+		Reason:      ReasonLiveVerified,
+	}
+	if migrated.Version != RegistryVersion || create != want {
+		t.Fatalf("v2 live evidence was not preserved: version=%d create=%+v want=%+v", migrated.Version, create, want)
+	}
+	create.Status = StatusOffline
+	create.Reason = "invalid-reason"
+	existing.Resources["ecs"]["instance"].Operations["create"] = create
+	if _, err := initRegistry(specs, cases, existing, fixturePublicSurface(), changeTime); err == nil || !strings.Contains(err.Error(), "invalid_reason") {
+		t.Fatalf("init must reject invalid preserved v2 operations: %v", err)
 	}
 }
 
@@ -321,10 +440,10 @@ func TestInitRegistryResetsStatusWhenCaseContentChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	create := registry.Resources["ecs/instance"].Operations["create"]
+	create := registry.Resources["ecs"]["instance"].Operations["create"]
 	create.Status = StatusLivePass
 	create.Reason = ReasonLiveVerified
-	registry.Resources["ecs/instance"].Operations["create"] = create
+	registry.Resources["ecs"]["instance"].Operations["create"] = create
 	oldFingerprint := create.Fingerprint
 
 	casePath := filepath.Join(cases, "ecs", "instance.yaml")
@@ -337,7 +456,7 @@ func TestInitRegistryResetsStatusWhenCaseContentChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, operation := range refreshed.Resources["ecs/instance"].Operations {
+	for name, operation := range refreshed.Resources["ecs"]["instance"].Operations {
 		if operation.Status != StatusOffline || operation.Reason != ReasonCaseChanged || operation.Time != changeTime.Format(time.RFC3339Nano) {
 			t.Fatalf("%s must reset after content change: %+v", name, operation)
 		}
@@ -353,17 +472,17 @@ func TestInitRegistryResetsStatusWhenCasePathChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	create := registry.Resources["ecs/instance"].Operations["create"]
+	create := registry.Resources["ecs"]["instance"].Operations["create"]
 	create.Status = StatusLivePass
 	create.Reason = ReasonLiveVerified
 	create.Case = filepath.Join(cases, "ecs", "old-name.yaml")
-	registry.Resources["ecs/instance"].Operations["create"] = create
+	registry.Resources["ecs"]["instance"].Operations["create"] = create
 
 	refreshed, err := initRegistry(specs, cases, registry, fixturePublicSurface(), changeTime)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := refreshed.Resources["ecs/instance"].Operations["create"]
+	got := refreshed.Resources["ecs"]["instance"].Operations["create"]
 	if got.Status != StatusOffline || got.Reason != ReasonCaseChanged || got.Time != changeTime.Format(time.RFC3339Nano) {
 		t.Fatalf("path change must reset status: %+v", got)
 	}
@@ -392,6 +511,7 @@ func TestInitRegistryMigratesV1AndTrustsLocalLivePass(t *testing.T) {
 	mustWrite(t, filepath.Join(specs, "ecs", "instance.yaml"), `
 product: ecs
 resource: instance
+aliases: [vm]
 operations:
   create: {}
   delete: {}
@@ -443,7 +563,7 @@ resources:
 	if err != nil {
 		t.Fatal(err)
 	}
-	operations := migrated.Resources["ecs/instance"].Operations
+	operations := migrated.Resources["ecs"]["instance"].Operations
 	if len(operations) != 2 {
 		t.Fatalf("manual-only, planned, and quarantined operations without cases must be omitted: %+v", operations)
 	}
@@ -465,17 +585,19 @@ func TestInitRegistryPreservesLiveAcrossEquivalentCasesDirSpelling(t *testing.T)
 	existing := &Registry{
 		Version:   1,
 		Generated: RegistryGenerated{CasesDir: "cases"},
-		Resources: map[string]RegistryResource{
-			"ecs/instance": {Operations: map[string]RegistryOperation{
-				"create": {Status: StatusLivePass, Case: "cases/ecs/instance.yaml", Time: "2026-07-01T00:00:00Z"},
-			}},
+		Resources: map[string]RegistryProduct{
+			"ecs": {
+				"instance": {Operations: map[string]RegistryOperation{
+					"create": {Status: StatusLivePass, Case: "cases/ecs/instance.yaml", Time: "2026-07-01T00:00:00Z"},
+				}},
+			},
 		},
 	}
 	migrated, err := initRegistry(specs, cases, existing, fixturePublicSurface(), parseTime)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := migrated.Resources["ecs/instance"].Operations["create"]
+	got := migrated.Resources["ecs"]["instance"].Operations["create"]
 	if got.Status != StatusLivePass || got.Time != "2026-07-01T00:00:00Z" {
 		t.Fatalf("equivalent path spelling must preserve live-pass: %+v", got)
 	}
@@ -493,7 +615,7 @@ steps:
 	if err != nil {
 		t.Fatal(err)
 	}
-	create := registry.Resources["ecs/instance"].Operations["create"]
+	create := registry.Resources["ecs"]["instance"].Operations["create"]
 	want := normalizeCasePath(filepath.Join(cases, "ecs", "instance.yaml"))
 	if create.Case != want {
 		t.Fatalf("expected matching resource case %q, got %+v", want, create)
@@ -503,11 +625,13 @@ steps:
 func TestRegistrySummaryJSON(t *testing.T) {
 	registry := &Registry{
 		Version: RegistryVersion,
-		Resources: map[string]RegistryResource{
-			"ecs/instance": {Operations: map[string]RegistryOperation{
-				"create": {Status: StatusOffline},
-				"delete": {Status: StatusLivePass},
-			}},
+		Resources: map[string]RegistryProduct{
+			"ecs": {
+				"instance": {Operations: map[string]RegistryOperation{
+					"create": {Status: StatusOffline},
+					"delete": {Status: StatusLivePass},
+				}},
+			},
 		},
 	}
 	summary := SummarizeRegistry(registry)
@@ -533,6 +657,7 @@ func writeRegistryFixture(t *testing.T) (root, specs, cases string) {
 	mustWrite(t, filepath.Join(specs, "ecs", "instance.yaml"), `
 product: ecs
 resource: instance
+aliases: [vm]
 operations:
   create: {}
   delete: {}
@@ -571,8 +696,8 @@ func writeRegistry(t *testing.T, path string, operations map[string]RegistryOper
 	t.Helper()
 	registry := &Registry{
 		Version: RegistryVersion,
-		Resources: map[string]RegistryResource{
-			"ecs/instance": {Operations: operations},
+		Resources: map[string]RegistryProduct{
+			"ecs": {"instance": {Operations: operations}},
 		},
 	}
 	summary, err := SummarizePublicSurface(registry, fixturePublicSurface())

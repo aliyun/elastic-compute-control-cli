@@ -45,12 +45,37 @@ binary (or vice versa).
 operations declared under `../specs`. Operations without a case are omitted;
 resources without any case-backed operations are omitted as well.
 
+Registry version 3 groups entries by canonical product and resource names from
+the specs. Resource aliases are accepted by the CLI but are never written as
+registry keys. For example, `cluster` is an alias of the canonical ACK resource
+`ack`, so its entry is:
+
+```yaml
+version: 3
+resources:
+  ack:
+    ack:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:...
+          time: "2026-07-14T16:30:43+08:00"
+          reason: live-verified
+```
+
+E2E case commands should likewise use canonical resource names; aliases are a
+CLI convenience, not coverage identities.
+
 Initialize or refresh it after changing specs or cases:
 
 ```bash
 ecctl-e2e coverage registry init --specs ../specs --cases cases --registry coverage.yaml \
   --ecctl-bin bin/ecctl-public
 ```
+
+When init reads a version 2 registry, it migrates the flat `product/resource`
+keys to version 3 and preserves all five fields of every unchanged operation.
 
 Init requires either `--ecctl-bin` or `--capabilities`. The supplied capability
 document must identify the `public` surface and is used to generate the

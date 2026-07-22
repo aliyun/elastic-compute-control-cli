@@ -773,20 +773,21 @@ func TestCoverageRegistryCheckReturnsExitErrorOnInvalidRegistry(t *testing.T) {
 	root, specs, cases := writeCLIFixture(t)
 	registry := filepath.Join(root, "coverage.yaml")
 	mustWriteFile(t, registry, `
-version: 2
+version: 3
 resources:
-  ecs/instance:
-    operations:
-      create:
-        status: maybe
-      delete:
-        status: offline
-        case: cases/ecs/instance.yaml
-        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
-        time: "2026-07-15T00:00:00Z"
-        reason: not-run
-      list:
-        status: missing
+  ecs:
+    instance:
+      operations:
+        create:
+          status: maybe
+        delete:
+          status: offline
+          case: cases/ecs/instance.yaml
+          fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          time: "2026-07-15T00:00:00Z"
+          reason: not-run
+        list:
+          status: missing
 `)
 
 	cmd := coverageCmd()
@@ -1049,22 +1050,23 @@ steps:
 
 func validLintCLICoverage(casePath string) string {
 	return `
-version: 2
+version: 3
 resources:
-  ecs/instance:
-    operations:
-      create:
-        status: offline
-        case: ` + casePath + `
-        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
-        time: "2026-07-15T00:00:00Z"
-        reason: not-run
-      delete:
-        status: offline
-        case: ` + casePath + `
-        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
-        time: "2026-07-15T00:00:00Z"
-        reason: not-run
+  ecs:
+    instance:
+      operations:
+        create:
+          status: offline
+          case: ` + casePath + `
+          fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          time: "2026-07-15T00:00:00Z"
+          reason: not-run
+        delete:
+          status: offline
+          case: ` + casePath + `
+          fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          time: "2026-07-15T00:00:00Z"
+          reason: not-run
 `
 }
 
