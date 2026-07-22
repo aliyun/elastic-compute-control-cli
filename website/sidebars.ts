@@ -25,6 +25,7 @@ const sidebars: SidebarsConfig = {
         'user-guide/discovery',
         'user-guide/resource-operations',
         'user-guide/output',
+        'user-guide/updates',
         {
           type: 'category',
           label: 'Resource-specific Optimizations',

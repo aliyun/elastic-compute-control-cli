@@ -21,6 +21,7 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/output"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/schema"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/updater"
 )
 
 // RegionVerifier is the surface exposed by aliyun.RegionVerifier and any test
@@ -83,9 +84,12 @@ const (
 )
 
 var (
-	version = "dev"
-	commit  = ""
-	date    = ""
+	version         = "dev"
+	commit          = ""
+	date            = ""
+	checkUpdate     = updater.Check
+	installUpdate   = updater.Update
+	autoCheckUpdate = updater.AutoCheck
 )
 
 type buildInfoReader func() (*debug.BuildInfo, bool)
@@ -138,6 +142,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		options.output = output.ModeJSON
 		options.forceJSON = true
 	}
+	maybeCheckForUpdate(ctx, args, stderr, options)
 	root := newRootCommand(options, stdout, args)
 	root.SetArgs(args)
 	root.SetOut(stdout)
@@ -357,6 +362,16 @@ func newRootCommand(options *globalOptions, stdout io.Writer, args []string) *co
 	examplesCmd := newExamplesCommand(options, stdout)
 	examplesCmd.GroupID = rootCommandGroupTools
 	examplesCmd.Hidden = true
+	updateCmd := newUpdateCommand(options, stdout)
+	updateCmd.GroupID = rootCommandGroupTools
+	internalUpdateCmd := &cobra.Command{
+		Use:    "__update",
+		Hidden: true,
+		Args:   cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, args []string) error {
+			return updater.RunInternalUpdate(args)
+		},
+	}
 	productCommands := newProductCommands(options, stdout, productCommandBuildTarget(args))
 	for _, cmd := range productCommands {
 		cmd.GroupID = rootCommandGroupCloudProducts
@@ -367,11 +382,121 @@ func newRootCommand(options *globalOptions, stdout io.Writer, args []string) *co
 	root.AddCommand(configCmd)
 	root.AddCommand(apiCmd)
 	root.AddCommand(examplesCmd)
+	root.AddCommand(updateCmd)
+	root.AddCommand(internalUpdateCmd)
 	root.AddCommand(productCommands...)
 	root.InitDefaultHelpCmd()
 	root.InitDefaultCompletionCmd()
 	localizeHelp(root, options.lang, requestedNoColor)
 	return root
+}
+
+func newUpdateCommand(options *globalOptions, stdout io.Writer) *cobra.Command {
+	var checkOnly bool
+	var force bool
+	cmd := &cobra.Command{
+		Use:     "update [version]",
+		Short:   "Check for and install ecctl updates",
+		Example: "  ecctl update --check\n  ecctl update\n  ecctl update 0.2.0\n  ecctl update --force",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if checkOnly && force {
+				return ecerrors.Client("ConflictingParameters", "--check cannot be combined with --force")
+			}
+			target := ""
+			if len(args) == 1 {
+				target = args[0]
+			}
+			updateOptions := updater.Options{
+				CurrentVersion: currentReleaseVersion(),
+				TargetVersion:  target,
+				Force:          force,
+			}
+			operationCtx, cancel := context.WithTimeout(cmd.Context(), 15*time.Minute)
+			defer cancel()
+			var (
+				result updater.Result
+				err    error
+			)
+			if checkOnly {
+				result, err = checkUpdate(operationCtx, updateOptions)
+			} else {
+				result, err = installUpdate(operationCtx, updateOptions)
+			}
+			if err != nil {
+				return updateCommandError(options.lang, err)
+			}
+			return writeCommandOutput(options, stdout, result)
+		},
+	}
+	cmd.Flags().BoolVar(&checkOnly, "check", false, "check for an update without installing it")
+	cmd.Flags().BoolVar(&force, "force", false, "reinstall the target version or allow a downgrade")
+	return cmd
+}
+
+func updateCommandError(lang string, err error) *ecerrors.AppError {
+	kind := updater.ErrorKindOf(err)
+	code := map[updater.ErrorKind]string{
+		updater.ErrorUnavailable:   "UpdateUnavailable",
+		updater.ErrorIntegrity:     "UpdateIntegrityFailed",
+		updater.ErrorInvalidTarget: "UpdateInvalidTarget",
+		updater.ErrorPermission:    "UpdatePermissionDenied",
+		updater.ErrorBusy:          "UpdateBusy",
+		updater.ErrorTimeout:       "UpdateTimeout",
+		updater.ErrorCanceled:      "UpdateCanceled",
+		updater.ErrorInstallation:  "UpdateInstallFailed",
+	}[kind]
+	if code == "" {
+		code = "UpdateInstallFailed"
+	}
+	message := i18n.NewLocalizer(lang).Message(code)
+	options := []ecerrors.Option{ecerrors.WithDetail(err.Error())}
+	if kind == updater.ErrorTimeout {
+		return ecerrors.Timeout(code, message, options...)
+	}
+	if updater.ErrorRetryable(kind) {
+		return ecerrors.Service(code, message, true, options...)
+	}
+	return ecerrors.Client(code, message, options...)
+}
+
+func currentReleaseVersion() string {
+	display := displayVersion()
+	if fields := strings.Fields(display); len(fields) > 0 {
+		return strings.TrimPrefix(fields[0], "v")
+	}
+	return display
+}
+
+func maybeCheckForUpdate(ctx context.Context, args []string, stderr io.Writer, options *globalOptions) {
+	if os.Getenv("ECCTL_DISABLE_UPDATE_CHECK") == "1" || skipAutomaticUpdateCheck(args) {
+		return
+	}
+	current := currentReleaseVersion()
+	if _, err := updater.NormalizeVersion(current); err != nil {
+		return
+	}
+	interactive := writerIsTerminal(stderr)
+	checkCtx, cancel := context.WithTimeout(ctx, 900*time.Millisecond)
+	defer cancel()
+	result, err := autoCheckUpdate(checkCtx, updater.AutoCheckOptions{
+		CurrentVersion:   current,
+		Client:           updater.NewClient(800 * time.Millisecond),
+		MarkNotification: interactive,
+	})
+	if err != nil || !interactive || !result.Notify {
+		return
+	}
+	localizer := i18n.NewLocalizer(options.lang)
+	_, _ = fmt.Fprintln(stderr, localizer.MessageData("UpdateAvailableNotice", map[string]any{
+		"CurrentVersion": current,
+		"LatestVersion":  result.LatestVersion,
+	}))
+}
+
+func skipAutomaticUpdateCheck(args []string) bool {
+	positionals := commandPositionals(args)
+	return len(positionals) > 0 && positionals[0] == "__update"
 }
 
 func newSchemaCommand(options *globalOptions, stdout io.Writer) *cobra.Command {
@@ -1936,7 +2061,7 @@ func productCommandBuildTarget(args []string) productBuildTarget {
 	}
 	first := positional[0]
 	switch first {
-	case "call", "configure", "schema", "capabilities":
+	case "call", "configure", "schema", "capabilities", "update", "__update":
 		return productBuildTarget{stubsOnly: true}
 	case "completion", "__complete", "__completeNoDesc":
 		return productBuildTarget{buildAll: true}
@@ -2000,7 +2125,7 @@ func commandValueFlag(name string) bool {
 
 func isBuiltinRootCommand(name string) bool {
 	switch name {
-	case "call", "config", "configure", "schema", "capabilities", "examples", "completion", "__complete", "__completeNoDesc", "help":
+	case "call", "config", "configure", "schema", "capabilities", "examples", "update", "completion", "__complete", "__completeNoDesc", "__update", "help":
 		return true
 	default:
 		return false

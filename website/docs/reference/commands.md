@@ -24,6 +24,18 @@ ecctl configure list
 
 Commands that read or switch a profile require a configured profile.
 
+## Updates
+
+```bash
+ecctl update --check
+ecctl update
+ecctl update <version>
+ecctl update --force
+```
+
+See [Updates](../user-guide/updates.md) for Homebrew support, explicit versions,
+and automatic version checks.
+
 ## Schema
 
 ```bash

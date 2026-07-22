@@ -7,12 +7,13 @@ require (
 	github.com/alibabacloud-go/tea v1.4.0
 	github.com/aliyun/aliyun-openapi-meta v0.0.0-20260421122526-2563691c2222
 	github.com/goccy/go-yaml v1.19.2
+	github.com/gofrs/flock v0.13.0
 	github.com/nicksnyder/go-i18n/v2 v2.6.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/text v0.37.0
 )
 
-require github.com/stretchr/testify v1.10.0 // indirect
+require golang.org/x/sys v0.45.0 // indirect
 
 require (
 	github.com/alibabacloud-go/alibabacloud-gateway-spi v0.0.5 // indirect

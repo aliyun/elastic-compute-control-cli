@@ -23,6 +23,17 @@ ecctl configure list
 
 读取或切换 profile 的命令要求已存在可用 profile。
 
+## 更新
+
+```bash
+ecctl update --check
+ecctl update
+ecctl update <version>
+ecctl update --force
+```
+
+Homebrew 支持、指定版本和自动版本检测见[更新](../user-guide/updates.md)。
+
 ## Schema
 
 ```bash
