@@ -32,10 +32,10 @@ run-full: build-full lint ## Real full-surface run for hidden resources
 	$(BIN) run --surface full --ecctl-bin $(FULL_ECCTL) --report-dir $(REPORTS)
 
 coverage: build-public ## Enforce the public capability registry is fully live-pass
-	$(BIN) coverage registry check --specs ../specs --cases cases --registry coverage.yaml --ecctl-bin $(PUBLIC_ECCTL) --surface public --fail-on-missing --fail-on-not-live
+	$(BIN) coverage registry check --specs ../specs --cases cases --registry coverage.yaml --ecctl-bin $(PUBLIC_ECCTL) --surface public --fail-on-not-live
 
 coverage-full: build-full ## Enforce the full capability registry is fully live-pass
-	$(BIN) coverage registry check --specs ../specs --cases cases --registry coverage.yaml --ecctl-bin $(FULL_ECCTL) --surface full --fail-on-missing --fail-on-not-live
+	$(BIN) coverage registry check --specs ../specs --cases cases --registry coverage.yaml --ecctl-bin $(FULL_ECCTL) --surface full --fail-on-not-live
 
 sweep: sweep-public ## Sweep leftovers created by public-surface cases
 

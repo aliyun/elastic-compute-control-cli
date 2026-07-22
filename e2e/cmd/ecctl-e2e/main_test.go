@@ -10,25 +10,45 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/coverage"
 )
 
 func TestCoverageRegistryCheckAndSummary(t *testing.T) {
 	root, specs, cases := writeCLIFixture(t)
 	registry := filepath.Join(root, "coverage.yaml")
+	capabilities := filepath.Join(root, "capabilities.json")
+	mustWriteFile(t, capabilities, `{
+  "surface": "public",
+  "products": [{
+    "product": "ecs",
+    "resources": [{"name": "instance", "actions": ["create", "delete", "list"]}]
+  }]
+}`)
 	runCLI(t,
 		"registry", "init",
 		"--specs", specs,
 		"--cases", cases,
 		"--registry", registry,
+		"--capabilities", capabilities,
 	)
+	reg, err := coverage.LoadRegistryFile(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPublic := coverage.RegistryPublicSummary{Surface: "public", Resources: 1, Operations: 3, MissingCases: 1, NotPassed: 2}
+	if reg.Summary != wantPublic {
+		t.Fatalf("public summary = %+v, want %+v", reg.Summary, wantPublic)
+	}
 
 	out := runCLI(t,
 		"registry", "check",
 		"--specs", specs,
 		"--cases", cases,
 		"--registry", registry,
+		"--capabilities", capabilities,
 	)
-	if !strings.Contains(out, "registry: 3 operations, 0 live-pass, 2 offline-valid, 0 planned, 1 missing, 0 invalid") {
+	if !strings.Contains(out, "registry: 2 operations, 0 live-pass, 2 offline, 0 invalid") {
 		t.Fatalf("unexpected check output:\n%s", out)
 	}
 
@@ -44,8 +64,43 @@ func TestCoverageRegistryCheckAndSummary(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &summary); err != nil {
 		t.Fatalf("summary is not JSON: %v\n%s", err, out)
 	}
-	if summary.Entries != 3 || summary.ByStatus["offline-valid"] != 2 || summary.ByStatus["missing"] != 1 {
+	if summary.Entries != 2 || summary.ByStatus["offline"] != 2 {
 		t.Fatalf("unexpected summary: %+v", summary)
+	}
+}
+
+func TestCoverageRegistryInitRequiresPublicCapabilities(t *testing.T) {
+	root, specs, cases := writeCLIFixture(t)
+	registry := filepath.Join(root, "coverage.yaml")
+	cmd := coverageCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"registry", "init",
+		"--specs", specs,
+		"--cases", cases,
+		"--registry", registry,
+	})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "requires --ecctl-bin or --capabilities") {
+		t.Fatalf("init without public capabilities error = %v, output=%s", err, out.String())
+	}
+
+	fullCapabilities := filepath.Join(root, "full-capabilities.json")
+	mustWriteFile(t, fullCapabilities, `{"surface":"full","products":[{"product":"ecs","resources":[]}]}`)
+	cmd = coverageCmd()
+	out.Reset()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"registry", "init",
+		"--specs", specs,
+		"--cases", cases,
+		"--registry", registry,
+		"--capabilities", fullCapabilities,
+	})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), `does not match requested "public"`) {
+		t.Fatalf("init with full capabilities error = %v, output=%s", err, out.String())
 	}
 }
 
@@ -54,7 +109,7 @@ func TestCapabilityFilterRequiresSurfaceMarker(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"products":[{"product":"ecs","resources":[]}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadCapabilityFilter(path, "", "public"); err == nil || !strings.Contains(err.Error(), "surface") {
+	if _, err := loadCapabilitySelection(path, "", "public"); err == nil || !strings.Contains(err.Error(), "surface") {
 		t.Fatalf("err = %v, want missing-surface validation", err)
 	}
 }
@@ -718,16 +773,18 @@ func TestCoverageRegistryCheckReturnsExitErrorOnInvalidRegistry(t *testing.T) {
 	root, specs, cases := writeCLIFixture(t)
 	registry := filepath.Join(root, "coverage.yaml")
 	mustWriteFile(t, registry, `
-version: 1
+version: 2
 resources:
   ecs/instance:
     operations:
       create:
         status: maybe
       delete:
-        status: offline-valid
+        status: offline
         case: cases/ecs/instance.yaml
-        steps: [delete]
+        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+        time: "2026-07-15T00:00:00Z"
+        reason: not-run
       list:
         status: missing
 `)
@@ -765,8 +822,10 @@ func TestCoverageRegistryCheckHelpDoesNotExposeTierFlags(t *testing.T) {
 		t.Fatalf("help failed: %v\n%s", err, out.String())
 	}
 	got := out.String()
-	if strings.Contains(got, "--tier") || strings.Contains(got, "--tiers") {
-		t.Fatalf("coverage registry check must not expose tier flags:\n%s", got)
+	for _, removed := range []string{"--tier", "--tiers", "--allow-stale", "--fail-on-missing", "--fail-on-stale"} {
+		if strings.Contains(got, removed) {
+			t.Fatalf("coverage registry check must not expose %s:\n%s", removed, got)
+		}
 	}
 }
 
@@ -990,18 +1049,22 @@ steps:
 
 func validLintCLICoverage(casePath string) string {
 	return `
-version: 1
+version: 2
 resources:
   ecs/instance:
     operations:
       create:
-        status: offline-valid
+        status: offline
         case: ` + casePath + `
-        steps: [create]
+        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+        time: "2026-07-15T00:00:00Z"
+        reason: not-run
       delete:
-        status: offline-valid
+        status: offline
         case: ` + casePath + `
-        steps: [delete]
+        fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+        time: "2026-07-15T00:00:00Z"
+        reason: not-run
 `
 }
 

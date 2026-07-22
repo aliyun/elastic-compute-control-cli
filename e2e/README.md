@@ -41,22 +41,44 @@ binary (or vice versa).
 
 ## Coverage registry
 
-`coverage.yaml` is the machine-checkable status registry for every operation
-declared under `../specs`. It turns the advisory `coverage` gap list into a
-durable loop state file.
+`coverage.yaml` is the machine-checkable status registry for case-backed
+operations declared under `../specs`. Operations without a case are omitted;
+resources without any case-backed operations are omitted as well.
 
 Initialize or refresh it after changing specs or cases:
 
 ```bash
-ecctl-e2e coverage registry init --specs ../specs --cases cases --registry coverage.yaml
+ecctl-e2e coverage registry init --specs ../specs --cases cases --registry coverage.yaml \
+  --ecctl-bin bin/ecctl-public
 ```
+
+Init requires either `--ecctl-bin` or `--capabilities`. The supplied capability
+document must identify the `public` surface and is used to generate the
+top-level completion summary:
+
+```yaml
+summary:
+  surface: public
+  resources: 27
+  operations: 142
+  missing_cases: 0
+  passed: 133
+  not_passed: 9
+```
+
+`resources` and `operations` count the capabilities exposed by the public
+binary. `missing_cases` counts public operations with no registry entry;
+`passed` counts public `live-pass` operations; and `not_passed` counts public
+`offline` operations. Therefore `operations` always equals `missing_cases +
+passed + not_passed`. A check supplied with public capabilities recomputes these
+counts and rejects a stale summary.
 
 Validate it without cloud credentials. Pass the selected binary when the
 registry is used as a surface-specific gate:
 
 ```bash
 ecctl-e2e coverage registry check --specs ../specs --cases cases --registry coverage.yaml \
-  --ecctl-bin bin/ecctl-public --surface public --fail-on-missing --fail-on-not-live
+  --ecctl-bin bin/ecctl-public --surface public --fail-on-not-live
 ```
 
 Print status counts for CI summaries:
@@ -65,24 +87,32 @@ Print status counts for CI summaries:
 ecctl-e2e coverage registry summary --registry coverage.yaml --output json
 ```
 
-Fail when any declared operation is still `missing`:
+The registry has two statuses:
 
-```bash
-ecctl-e2e coverage registry check --specs ../specs --cases cases --registry coverage.yaml --fail-on-missing
-```
+- `offline`: the operation has a case but has not been accepted by a real cloud
+  run against the current case contents.
+- `live-pass`: the current case contents passed a real cloud run.
 
-Offline authoring uses these status values:
+Every operation has the same five required fields:
 
-- `offline-valid`: the operation is covered by current case commands and those
-  cases load via `run --collect-only`.
-- `missing`: the operation is declared in specs but has no E2E case yet.
+- `status`: `offline` or `live-pass`.
+- `case`: path to the case that covers the operation.
+- `fingerprint`: `sha256:` plus the SHA-256 digest of the complete raw case YAML
+  bytes.
+- `time`: RFC3339 time of the validation or review represented by the status.
+- `reason`: `live-verified`, `not-run`, `case-changed`, `prerequisite`,
+  `test-failed`, or `unknown`. `live-pass` requires `live-verified`; `offline`
+  accepts the other five values.
 
-For the public surface, `manual-only` and `quarantined` are not completion
-states: account setup, region selection, and final cleanup are automated. The
-registry uses `planned` while a case is being added, `offline-valid` after the
-case passes deterministic lint/collection, and `live-pass` only after a real
-cloud run with report evidence. `manual-only`/`quarantined` remain available
-only for separately tracked full-surface exceptions.
+`registry init` preserves all five values of an unchanged entry, so repeated
+initialization produces byte-identical canonical YAML. If its case path or raw
+contents change, init writes the current fingerprint and time and resets the
+entry to `offline` with reason `case-changed`. A new case-backed operation starts
+as `offline/not-run`. Detailed prerequisite and test failures remain in the run
+report; the registry stores only the reason enum and is not updated implicitly
+from the latest report. A normal check permits declared operations with no case;
+`--fail-on-not-live` treats both omitted and `offline` selected operations as a
+failed completion gate.
 
 ## Run configuration, dynamic parameters, and execution order
 

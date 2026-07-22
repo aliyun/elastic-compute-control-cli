@@ -1,7 +1,9 @@
 package coverage
 
 import (
-	"encoding/json"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,51 +17,41 @@ import (
 )
 
 const (
-	StatusMissing      = "missing"
-	StatusPlanned      = "planned"
-	StatusDrafted      = "drafted"
-	StatusOfflineValid = "offline-valid"
-	StatusLivePass     = "live-pass"
-	StatusManualOnly   = "manual-only"
-	StatusQuarantined  = "quarantined"
-	StatusRetired      = "retired"
+	RegistryVersion = 2
+
+	StatusOffline  = "offline"
+	StatusLivePass = "live-pass"
+
+	ReasonLiveVerified = "live-verified"
+	ReasonNotRun       = "not-run"
+	ReasonCaseChanged  = "case-changed"
+	ReasonPrerequisite = "prerequisite"
+	ReasonTestFailed   = "test-failed"
+	ReasonUnknown      = "unknown"
+)
+
+const (
+	legacyStatusOfflineValid = "offline-valid"
 )
 
 var allowedStatuses = map[string]bool{
-	StatusMissing:      true,
-	StatusPlanned:      true,
-	StatusDrafted:      true,
-	StatusOfflineValid: true,
-	StatusLivePass:     true,
-	StatusManualOnly:   true,
-	StatusQuarantined:  true,
-	StatusRetired:      true,
+	StatusOffline:  true,
+	StatusLivePass: true,
 }
 
-var allowedManualReasons = map[string]bool{
-	"cost":                      true,
-	"quota":                     true,
-	"requires-prepaid":          true,
-	"requires-existing-cluster": true,
-	"requires-human-approval":   true,
-	"unsafe-delete":             true,
-	"unsupported-region":        true,
-	"provider-limitation":       true,
-}
-
-var allowedQuarantineReasons = map[string]bool{
-	"flaky-provider":    true,
-	"known-product-bug": true,
-	"known-ecctl-bug":   true,
-	"quota-blocked":     true,
-	"cleanup-risk":      true,
-	"credential-scope":  true,
+var allowedOfflineReasons = map[string]bool{
+	ReasonNotRun:       true,
+	ReasonCaseChanged:  true,
+	ReasonPrerequisite: true,
+	ReasonTestFailed:   true,
+	ReasonUnknown:      true,
 }
 
 // Registry is e2e/coverage.yaml.
 type Registry struct {
 	Version   int                         `yaml:"version" json:"version"`
 	Generated RegistryGenerated           `yaml:"generated,omitempty" json:"generated,omitempty"`
+	Summary   RegistryPublicSummary       `yaml:"summary" json:"summary"`
 	Resources map[string]RegistryResource `yaml:"resources" json:"resources"`
 }
 
@@ -72,33 +64,38 @@ type RegistryResource struct {
 	Operations map[string]RegistryOperation `yaml:"operations" json:"operations"`
 }
 
+// RegistryOperation is the fixed version 2 operation schema. All fields are
+// required; operations without a case are omitted from the registry.
 type RegistryOperation struct {
-	Status       string           `yaml:"status" json:"status"`
-	Case         string           `yaml:"case,omitempty" json:"case,omitempty"`
-	Steps        []string         `yaml:"steps,omitempty" json:"steps,omitempty"`
-	Reason       string           `yaml:"reason,omitempty" json:"reason,omitempty"`
-	ReviewAfter  string           `yaml:"review_after,omitempty" json:"review_after,omitempty"`
-	Owner        string           `yaml:"owner,omitempty" json:"owner,omitempty"`
-	TargetPhase  int              `yaml:"target_phase,omitempty" json:"target_phase,omitempty"`
-	Issue        string           `yaml:"issue,omitempty" json:"issue,omitempty"`
-	LastChecked  string           `yaml:"last_checked,omitempty" json:"last_checked,omitempty"`
-	RemovedAfter string           `yaml:"removed_after,omitempty" json:"removed_after,omitempty"`
-	Evidence     RegistryEvidence `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+	Status      string `yaml:"status" json:"status"`
+	Case        string `yaml:"case" json:"case"`
+	Fingerprint string `yaml:"fingerprint" json:"fingerprint"`
+	Time        string `yaml:"time" json:"time"`
+	Reason      string `yaml:"reason" json:"reason"`
 }
 
-type RegistryEvidence struct {
-	CoverageSource string `yaml:"coverage_source,omitempty" json:"coverage_source,omitempty"`
-	Report         string `yaml:"report,omitempty" json:"report,omitempty"`
-	RunID          string `yaml:"run_id,omitempty" json:"run_id,omitempty"`
-	VerifiedAt     string `yaml:"verified_at,omitempty" json:"verified_at,omitempty"`
+// RegistryPublicSummary records completion counts for the public CLI surface,
+// including operations omitted from Resources because they have no case.
+type RegistryPublicSummary struct {
+	Surface      string `yaml:"surface" json:"surface"`
+	Resources    int    `yaml:"resources" json:"resources"`
+	Operations   int    `yaml:"operations" json:"operations"`
+	MissingCases int    `yaml:"missing_cases" json:"missing_cases"`
+	Passed       int    `yaml:"passed" json:"passed"`
+	NotPassed    int    `yaml:"not_passed" json:"not_passed"`
+}
+
+// PublicSurface is a capability snapshot supplied by ecctl-public.
+type PublicSurface struct {
+	ResourceCount int
+	Capabilities  map[Capability]bool
 }
 
 type RegistryCheckOptions struct {
-	AllowStale       bool
-	FailOnMissing    bool
 	FailOnNotLive    bool
 	ResourceFilter   map[string]bool
 	CapabilityFilter map[Capability]bool
+	PublicSurface    *PublicSurface
 }
 
 type RegistryCheckReport struct {
@@ -125,22 +122,153 @@ type coverageInfo struct {
 	Case          string
 	Steps         []string
 	SuiteResource string
+	Fingerprint   string
 }
 
-// LoadRegistryFile reads a coverage registry from YAML.
+func (s *RegistryPublicSummary) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("summary must be a mapping")
+	}
+	required := map[string]bool{
+		"surface":       false,
+		"resources":     false,
+		"operations":    false,
+		"missing_cases": false,
+		"passed":        false,
+		"not_passed":    false,
+	}
+	for i := 0; i < len(node.Content); i += 2 {
+		field := node.Content[i].Value
+		seen, ok := required[field]
+		if !ok {
+			return fmt.Errorf("unknown summary field %q", field)
+		}
+		if seen {
+			return fmt.Errorf("duplicate summary field %q", field)
+		}
+		required[field] = true
+	}
+	for field, seen := range required {
+		if !seen {
+			return fmt.Errorf("summary requires field %q", field)
+		}
+	}
+	type plain RegistryPublicSummary
+	var decoded plain
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*s = RegistryPublicSummary(decoded)
+	return nil
+}
+
+type legacyRegistry struct {
+	Version   int                               `yaml:"version"`
+	Generated RegistryGenerated                 `yaml:"generated,omitempty"`
+	Resources map[string]legacyRegistryResource `yaml:"resources"`
+}
+
+type legacyRegistryResource struct {
+	Operations map[string]legacyRegistryOperation `yaml:"operations"`
+}
+
+type legacyRegistryOperation struct {
+	Status       string                 `yaml:"status"`
+	Case         string                 `yaml:"case,omitempty"`
+	Steps        []string               `yaml:"steps,omitempty"`
+	Reason       string                 `yaml:"reason,omitempty"`
+	ReviewAfter  string                 `yaml:"review_after,omitempty"`
+	Owner        string                 `yaml:"owner,omitempty"`
+	TargetPhase  int                    `yaml:"target_phase,omitempty"`
+	Issue        string                 `yaml:"issue,omitempty"`
+	LastChecked  string                 `yaml:"last_checked,omitempty"`
+	RemovedAfter string                 `yaml:"removed_after,omitempty"`
+	Evidence     legacyRegistryEvidence `yaml:"evidence,omitempty"`
+}
+
+type legacyRegistryEvidence struct {
+	CoverageSource string `yaml:"coverage_source,omitempty"`
+	Report         string `yaml:"report,omitempty"`
+	RunID          string `yaml:"run_id,omitempty"`
+	VerifiedAt     string `yaml:"verified_at,omitempty"`
+}
+
+// LoadRegistryFile loads a strict version 2 registry. Unknown and legacy
+// fields are rejected so every consumer observes the same fixed schema.
 func LoadRegistryFile(path string) (*Registry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var reg Registry
-	if err := yaml.Unmarshal(data, &reg); err != nil {
+	return decodeRegistryV2(data)
+}
+
+// LoadRegistryForInit loads either the current version 2 schema or the legacy
+// version 1 schema used only by coverage registry init during migration.
+func LoadRegistryForInit(path string) (*Registry, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
 		return nil, err
+	}
+	var header struct {
+		Version int `yaml:"version"`
+	}
+	if err := yaml.Unmarshal(data, &header); err != nil {
+		return nil, err
+	}
+	switch header.Version {
+	case RegistryVersion:
+		return decodeRegistryV2(data)
+	case 1:
+		return decodeLegacyRegistry(data)
+	default:
+		return nil, fmt.Errorf("unsupported registry version %d", header.Version)
+	}
+}
+
+func decodeRegistryV2(data []byte) (*Registry, error) {
+	var reg Registry
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&reg); err != nil {
+		return nil, err
+	}
+	if reg.Version != RegistryVersion {
+		return nil, fmt.Errorf("registry version must be %d", RegistryVersion)
 	}
 	if reg.Resources == nil {
 		reg.Resources = map[string]RegistryResource{}
 	}
 	return &reg, nil
+}
+
+func decodeLegacyRegistry(data []byte) (*Registry, error) {
+	var legacy legacyRegistry
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&legacy); err != nil {
+		return nil, err
+	}
+	if legacy.Version != 1 {
+		return nil, fmt.Errorf("legacy registry version must be 1")
+	}
+	reg := &Registry{
+		Version:   1,
+		Generated: legacy.Generated,
+		Resources: map[string]RegistryResource{},
+	}
+	for resource, legacyResource := range legacy.Resources {
+		operations := make(map[string]RegistryOperation, len(legacyResource.Operations))
+		for operation, legacyOperation := range legacyResource.Operations {
+			operations[operation] = RegistryOperation{
+				Status: legacyOperation.Status,
+				Case:   legacyOperation.Case,
+				Time:   legacyOperation.Evidence.VerifiedAt,
+			}
+		}
+		reg.Resources[resource] = RegistryResource{Operations: operations}
+	}
+	return reg, nil
 }
 
 // WriteRegistryFile writes a coverage registry with stable YAML ordering.
@@ -157,7 +285,13 @@ func WriteRegistryFile(path string, reg *Registry) error {
 	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
-func InitRegistry(specsDir, casesDir string, existing *Registry) (*Registry, error) {
+// InitRegistry creates or refreshes a version 2 registry from the declared
+// specs and case commands.
+func InitRegistry(specsDir, casesDir string, existing *Registry, public PublicSurface) (*Registry, error) {
+	return initRegistry(specsDir, casesDir, existing, public, time.Now())
+}
+
+func initRegistry(specsDir, casesDir string, existing *Registry, public PublicSurface, now time.Time) (*Registry, error) {
 	declared, index, err := loadDeclared(specsDir)
 	if err != nil {
 		return nil, err
@@ -167,43 +301,72 @@ func InitRegistry(specsDir, casesDir string, existing *Registry) (*Registry, err
 		return nil, err
 	}
 	reg := &Registry{
-		Version:   1,
+		Version:   RegistryVersion,
 		Generated: RegistryGenerated{SpecsDir: specsDir, CasesDir: casesDir},
 		Resources: map[string]RegistryResource{},
 	}
+	timestamp := now.Format(time.RFC3339Nano)
 	for _, cap := range sortedCapabilities(declared) {
-		if reg.Resources[cap.Resource].Operations == nil {
-			reg.Resources[cap.Resource] = RegistryResource{Operations: map[string]RegistryOperation{}}
-		}
-		entry, keep := existingEntry(existing, cap)
 		info, isCovered := covered[cap]
-		if keep && entry.Status == StatusPlanned && isCovered {
-			keep = false
+		if !isCovered {
+			continue
 		}
-		if keep && entry.Status == StatusLivePass && isCovered {
-			if !sameCoverageCasePath(existing, entry.Case, info.Case, casesDir) || !equalStrings(entry.Steps, info.Steps) {
-				keep = false
-			}
-		}
-		if !keep {
-			if isCovered {
-				entry = RegistryOperation{
-					Status: StatusOfflineValid,
-					Case:   info.Case,
-					Steps:  append([]string(nil), info.Steps...),
-					Evidence: RegistryEvidence{
-						CoverageSource: "command",
-					},
+		entry := newOfflineEntry(info, timestamp, ReasonNotRun)
+		if previous, ok := existingEntry(existing, cap); ok {
+			sameCase := sameCoverageCasePath(existing, previous.Case, info.Case, casesDir)
+			switch existing.Version {
+			case RegistryVersion:
+				if sameCase && previous.Fingerprint == info.Fingerprint {
+					entry = previous
+					entry.Case = normalizeCasePath(info.Case)
+				} else {
+					entry = newOfflineEntry(info, timestamp, ReasonCaseChanged)
 				}
-			} else {
-				entry = RegistryOperation{Status: StatusMissing}
+			case 1:
+				switch {
+				case previous.Status == StatusLivePass && sameCase && previous.Time != "":
+					entry = RegistryOperation{
+						Status:      StatusLivePass,
+						Case:        normalizeCasePath(info.Case),
+						Fingerprint: info.Fingerprint,
+						Time:        previous.Time,
+						Reason:      ReasonLiveVerified,
+					}
+				case previous.Status == StatusLivePass && !sameCase:
+					entry = newOfflineEntry(info, timestamp, ReasonCaseChanged)
+				case previous.Status == legacyStatusOfflineValid:
+					entry = newOfflineEntry(info, timestamp, ReasonNotRun)
+				default:
+					entry = newOfflineEntry(info, timestamp, ReasonNotRun)
+				}
 			}
 		}
-		res := reg.Resources[cap.Resource]
-		res.Operations[cap.Verb] = entry
-		reg.Resources[cap.Resource] = res
+		resource := reg.Resources[cap.Resource]
+		if resource.Operations == nil {
+			resource.Operations = map[string]RegistryOperation{}
+		}
+		resource.Operations[cap.Verb] = entry
+		reg.Resources[cap.Resource] = resource
+	}
+	reg.Summary, err = SummarizePublicSurface(reg, public)
+	if err != nil {
+		return nil, err
 	}
 	return reg, nil
+}
+
+func newOfflineEntry(info coverageInfo, timestamp, reason string) RegistryOperation {
+	return RegistryOperation{
+		Status:      StatusOffline,
+		Case:        normalizeCasePath(info.Case),
+		Fingerprint: info.Fingerprint,
+		Time:        timestamp,
+		Reason:      reason,
+	}
+}
+
+func normalizeCasePath(path string) string {
+	return filepath.ToSlash(filepath.Clean(path))
 }
 
 func sameCoverageCasePath(existing *Registry, oldPath, currentPath, currentCasesDir string) bool {
@@ -229,18 +392,8 @@ func casePathKey(path, casesDir string) string {
 	return filepath.ToSlash(path)
 }
 
-func equalStrings(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
-}
-
+// CheckRegistryFile validates a version 2 coverage registry against current
+// specs and cases.
 func CheckRegistryFile(specsDir, casesDir, registryPath string, opts RegistryCheckOptions) (*RegistryCheckReport, error) {
 	reg, err := LoadRegistryFile(registryPath)
 	if err != nil {
@@ -254,20 +407,20 @@ func CheckRegistryFile(specsDir, casesDir, registryPath string, opts RegistryChe
 	if err != nil {
 		return nil, err
 	}
-	base := filepath.Dir(registryPath)
-	return CheckRegistry(reg, declared, covered, casesDir, base, opts), nil
+	return CheckRegistry(reg, declared, covered, casesDir, opts), nil
 }
 
-func CheckRegistry(reg *Registry, declared map[Capability]bool, covered map[Capability]coverageInfo, casesDir, registryDir string, opts RegistryCheckOptions) *RegistryCheckReport {
+func CheckRegistry(reg *Registry, declared map[Capability]bool, covered map[Capability]coverageInfo, casesDir string, opts RegistryCheckOptions) *RegistryCheckReport {
 	rep := &RegistryCheckReport{ByStatus: map[string]int{}}
 	for cap := range declared {
 		if capabilitySelected(cap, opts) {
 			rep.Declared++
 		}
 	}
-	if reg.Version != 1 {
-		rep.add("", "", "invalid_version", "registry version must be 1")
+	if reg.Version != RegistryVersion {
+		rep.add("", "", "invalid_version", fmt.Sprintf("registry version must be %d", RegistryVersion))
 	}
+	validatePublicSummary(rep, reg, opts.PublicSurface)
 
 	entries := map[Capability]RegistryOperation{}
 	for _, resource := range sortedRegistryResources(reg.Resources) {
@@ -275,6 +428,10 @@ func CheckRegistry(reg *Registry, declared map[Capability]bool, covered map[Capa
 			continue
 		}
 		rr := reg.Resources[resource]
+		if len(rr.Operations) == 0 {
+			rep.add(resource, "", "empty_resource", "registry resources without operations must be omitted")
+			continue
+		}
 		for _, verb := range sortedRegistryOperations(rr.Operations) {
 			op := rr.Operations[verb]
 			cap := Capability{Resource: resource, Verb: verb}
@@ -284,114 +441,177 @@ func CheckRegistry(reg *Registry, declared map[Capability]bool, covered map[Capa
 			entries[cap] = op
 			rep.Entries++
 			rep.ByStatus[op.Status]++
-			validateEntry(rep, cap, op, declared, covered, casesDir, registryDir, opts)
+			validateEntry(rep, cap, op, declared, covered, casesDir, opts)
 		}
 	}
-	for cap := range declared {
-		if !capabilitySelected(cap, opts) {
-			continue
-		}
-		if _, ok := entries[cap]; !ok {
-			rep.add(cap.Resource, cap.Verb, "missing_entry", "declared operation is missing from registry")
+	if opts.FailOnNotLive {
+		for cap := range declared {
+			if !capabilitySelected(cap, opts) {
+				continue
+			}
+			if _, ok := entries[cap]; !ok {
+				rep.add(cap.Resource, cap.Verb, "not_live", "selected operation has no case-backed registry entry")
+			}
 		}
 	}
 	rep.Invalid = len(rep.Errors)
 	return rep
 }
 
+// SummarizePublicSurface derives persisted public completion counts from the
+// public capability snapshot and the case-backed registry entries.
+func SummarizePublicSurface(reg *Registry, public PublicSurface) (RegistryPublicSummary, error) {
+	if public.ResourceCount < 0 {
+		return RegistryPublicSummary{}, fmt.Errorf("public resource count must not be negative")
+	}
+	summary := RegistryPublicSummary{
+		Surface:    string(scenario.SurfacePublic),
+		Resources:  public.ResourceCount,
+		Operations: len(public.Capabilities),
+	}
+	for capability := range public.Capabilities {
+		resource, ok := reg.Resources[capability.Resource]
+		if !ok {
+			summary.MissingCases++
+			continue
+		}
+		operation, ok := resource.Operations[capability.Verb]
+		if !ok {
+			summary.MissingCases++
+			continue
+		}
+		switch operation.Status {
+		case StatusLivePass:
+			summary.Passed++
+		case StatusOffline:
+			summary.NotPassed++
+		default:
+			return RegistryPublicSummary{}, fmt.Errorf("cannot summarize %s %s with status %q", capability.Resource, capability.Verb, operation.Status)
+		}
+	}
+	return summary, nil
+}
+
+func validatePublicSummary(report *RegistryCheckReport, registry *Registry, public *PublicSurface) {
+	summary := registry.Summary
+	if summary.Surface != string(scenario.SurfacePublic) {
+		report.add("", "", "invalid_summary_surface", `summary surface must be "public"`)
+	}
+	counts := []struct {
+		name  string
+		value int
+	}{
+		{name: "resources", value: summary.Resources},
+		{name: "operations", value: summary.Operations},
+		{name: "missing_cases", value: summary.MissingCases},
+		{name: "passed", value: summary.Passed},
+		{name: "not_passed", value: summary.NotPassed},
+	}
+	for _, count := range counts {
+		if count.value < 0 {
+			report.add("", "", "invalid_summary_count", fmt.Sprintf("summary %s must not be negative", count.name))
+		}
+	}
+	if summary.Operations != summary.MissingCases+summary.Passed+summary.NotPassed {
+		report.add("", "", "invalid_summary_total", "summary operations must equal missing_cases + passed + not_passed")
+	}
+	if public == nil {
+		return
+	}
+	expected, err := SummarizePublicSurface(registry, *public)
+	if err != nil {
+		report.add("", "", "invalid_public_summary", err.Error())
+		return
+	}
+	if summary != expected {
+		report.add("", "", "stale_summary", fmt.Sprintf("stored public summary %+v does not match current capabilities %+v", summary, expected))
+	}
+}
+
 func SummarizeRegistry(reg *Registry, filters ...map[Capability]bool) RegistrySummary {
-	sum := RegistrySummary{ByStatus: map[string]int{}}
+	summary := RegistrySummary{ByStatus: map[string]int{}}
 	var filter map[Capability]bool
 	if len(filters) > 0 {
 		filter = filters[0]
 	}
-	for resource, rr := range reg.Resources {
-		for verb, op := range rr.Operations {
+	for resource, registryResource := range reg.Resources {
+		for verb, operation := range registryResource.Operations {
 			if filter != nil && !filter[Capability{Resource: resource, Verb: verb}] {
 				continue
 			}
-			sum.Entries++
-			sum.ByStatus[op.Status]++
+			summary.Entries++
+			summary.ByStatus[operation.Status]++
 		}
 	}
-	return sum
+	return summary
 }
 
-func (r *RegistryCheckReport) add(resource, operation, code, msg string) {
+func (r *RegistryCheckReport) add(resource, operation, code, message string) {
 	r.Errors = append(r.Errors, RegistryValidationError{
-		Resource: resource, Operation: operation, Code: code, Message: msg,
+		Resource: resource, Operation: operation, Code: code, Message: message,
 	})
 }
 
-func validateEntry(rep *RegistryCheckReport, cap Capability, op RegistryOperation, declared map[Capability]bool, covered map[Capability]coverageInfo, casesDir, registryDir string, opts RegistryCheckOptions) {
+func validateEntry(rep *RegistryCheckReport, cap Capability, op RegistryOperation, declared map[Capability]bool, covered map[Capability]coverageInfo, casesDir string, opts RegistryCheckOptions) {
 	if !allowedStatuses[op.Status] {
 		rep.add(cap.Resource, cap.Verb, "unknown_status", fmt.Sprintf("unknown status %q", op.Status))
 		return
 	}
-	exists := declared[cap]
-	if !exists && op.Status != StatusRetired {
+	if !declared[cap] {
 		rep.add(cap.Resource, cap.Verb, "stale_entry", "registry operation no longer exists in specs")
-	}
-	if exists && op.Status == StatusRetired {
-		rep.add(cap.Resource, cap.Verb, "retired_existing", "retired operation still exists in specs")
 	}
 	if opts.FailOnNotLive && op.Status != StatusLivePass {
 		rep.add(cap.Resource, cap.Verb, "not_live", "selected operation is not live-pass")
 	}
 
-	switch op.Status {
-	case StatusMissing:
-		if opts.FailOnMissing {
-			rep.add(cap.Resource, cap.Verb, "missing_status", "operation is still marked missing")
-		}
-		if _, ok := covered[cap]; ok && !opts.AllowStale {
-			rep.add(cap.Resource, cap.Verb, "covered_missing", "missing operation is covered by current cases")
-		}
-	case StatusPlanned:
-		if op.Owner == "" {
-			rep.add(cap.Resource, cap.Verb, "missing_owner", "planned operation requires owner")
-		}
-		if op.TargetPhase <= 0 {
-			rep.add(cap.Resource, cap.Verb, "invalid_target_phase", "planned operation requires positive target_phase")
-		}
-	case StatusDrafted:
-		validateCasePath(rep, cap, op, casesDir)
-	case StatusOfflineValid:
-		validateCasePath(rep, cap, op, casesDir)
-		if len(op.Steps) == 0 {
-			rep.add(cap.Resource, cap.Verb, "missing_steps", "offline-valid operation requires steps")
-		}
-		if _, ok := covered[cap]; !ok {
-			rep.add(cap.Resource, cap.Verb, "not_covered", "offline-valid operation is not covered by current cases")
-		}
-	case StatusLivePass:
-		validateCasePath(rep, cap, op, casesDir)
-		if len(op.Steps) == 0 {
-			rep.add(cap.Resource, cap.Verb, "missing_steps", "live-pass operation requires steps")
-		}
-		if op.Evidence.Report == "" || op.Evidence.RunID == "" || op.Evidence.VerifiedAt == "" {
-			rep.add(cap.Resource, cap.Verb, "missing_evidence", "live-pass operation requires report, run_id and verified_at")
-		}
-	case StatusManualOnly:
-		if op.Reason == "" {
-			rep.add(cap.Resource, cap.Verb, "missing_reason", "manual-only operation requires reason")
-		} else if !allowedManualReasons[op.Reason] {
-			rep.add(cap.Resource, cap.Verb, "invalid_reason", fmt.Sprintf("manual-only reason %q is not allowed", op.Reason))
-		}
-		validateDate(rep, cap, "review_after", op.ReviewAfter)
-	case StatusQuarantined:
-		if op.Reason == "" {
-			rep.add(cap.Resource, cap.Verb, "missing_reason", "quarantined operation requires reason")
-		} else if !allowedQuarantineReasons[op.Reason] {
-			rep.add(cap.Resource, cap.Verb, "invalid_reason", fmt.Sprintf("quarantine reason %q is not allowed", op.Reason))
-		}
-		if op.Issue == "" {
-			rep.add(cap.Resource, cap.Verb, "missing_issue", "quarantined operation requires issue")
-		}
-		validateDate(rep, cap, "last_checked", op.LastChecked)
-	case StatusRetired:
-		validateDate(rep, cap, "removed_after", op.RemovedAfter)
+	info, isCovered := covered[cap]
+	if op.Case == "" {
+		rep.add(cap.Resource, cap.Verb, "missing_case", "registry operation requires case")
+	} else if !isCovered {
+		rep.add(cap.Resource, cap.Verb, "not_covered", "registry operation is not covered by current cases")
+	} else if casePathKey(op.Case, casesDir) != casePathKey(info.Case, casesDir) {
+		rep.add(cap.Resource, cap.Verb, "case_mismatch", fmt.Sprintf("registry case %s does not match current case %s", op.Case, normalizeCasePath(info.Case)))
 	}
+
+	if op.Fingerprint == "" {
+		rep.add(cap.Resource, cap.Verb, "missing_fingerprint", "registry operation requires fingerprint")
+	} else if !validFingerprint(op.Fingerprint) {
+		rep.add(cap.Resource, cap.Verb, "invalid_fingerprint", "fingerprint must use sha256:<64 lowercase hexadecimal digits>")
+	} else if isCovered && op.Fingerprint != info.Fingerprint {
+		rep.add(cap.Resource, cap.Verb, "fingerprint_mismatch", "registry fingerprint does not match current case contents")
+	}
+
+	if op.Time == "" {
+		rep.add(cap.Resource, cap.Verb, "missing_time", "registry operation requires time")
+	} else if _, err := time.Parse(time.RFC3339, op.Time); err != nil {
+		rep.add(cap.Resource, cap.Verb, "invalid_time", "time must use RFC3339")
+	}
+
+	if op.Reason == "" {
+		rep.add(cap.Resource, cap.Verb, "missing_reason", "registry operation requires reason")
+	} else if !validReason(op.Status, op.Reason) {
+		rep.add(cap.Resource, cap.Verb, "invalid_reason", fmt.Sprintf("reason %q is invalid for status %q", op.Reason, op.Status))
+	}
+}
+
+func validReason(status, reason string) bool {
+	switch status {
+	case StatusLivePass:
+		return reason == ReasonLiveVerified
+	case StatusOffline:
+		return allowedOfflineReasons[reason]
+	default:
+		return false
+	}
+}
+
+func validFingerprint(fingerprint string) bool {
+	value, ok := strings.CutPrefix(fingerprint, "sha256:")
+	if !ok || len(value) != sha256.Size*2 || strings.ToLower(value) != value {
+		return false
+	}
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == sha256.Size
 }
 
 func resourceSelected(resource string, filter map[string]bool) bool {
@@ -405,86 +625,48 @@ func capabilitySelected(cap Capability, opts RegistryCheckOptions) bool {
 	return opts.CapabilityFilter == nil || opts.CapabilityFilter[cap]
 }
 
-func validateCasePath(rep *RegistryCheckReport, cap Capability, op RegistryOperation, casesDir string) {
-	if op.Case == "" {
-		rep.add(cap.Resource, cap.Verb, "missing_case", fmt.Sprintf("%s operation requires case", op.Status))
-		return
-	}
-	if _, err := os.Stat(resolvePath(op.Case, filepath.Dir(casesDir))); err != nil {
-		rep.add(cap.Resource, cap.Verb, "case_missing", fmt.Sprintf("case %s not found", op.Case))
-	}
-}
-
-func validateDate(rep *RegistryCheckReport, cap Capability, field, value string) {
-	if value == "" {
-		rep.add(cap.Resource, cap.Verb, "missing_"+field, fmt.Sprintf("%s is required", field))
-		return
-	}
-	if _, err := time.Parse("2006-01-02", value); err != nil {
-		rep.add(cap.Resource, cap.Verb, "invalid_date", fmt.Sprintf("%s must use YYYY-MM-DD", field))
-	}
-}
-
-func resolvePath(path, base string) string {
-	if path == "" || filepath.IsAbs(path) {
-		return path
-	}
-	if _, err := os.Stat(path); err == nil {
-		return path
-	}
-	return filepath.Join(base, path)
-}
-
 func existingEntry(existing *Registry, cap Capability) (RegistryOperation, bool) {
 	if existing == nil {
 		return RegistryOperation{}, false
 	}
-	rr, ok := existing.Resources[cap.Resource]
+	resource, ok := existing.Resources[cap.Resource]
 	if !ok {
 		return RegistryOperation{}, false
 	}
-	op, ok := rr.Operations[cap.Verb]
-	if !ok {
-		return RegistryOperation{}, false
-	}
-	switch op.Status {
-	case StatusManualOnly, StatusQuarantined, StatusPlanned, StatusLivePass:
-		return op, true
-	default:
-		return RegistryOperation{}, false
-	}
+	operation, ok := resource.Operations[cap.Verb]
+	return operation, ok
 }
 
-func sortedCapabilities(m map[Capability]bool) []Capability {
-	out := make([]Capability, 0, len(m))
-	for cap := range m {
-		out = append(out, cap)
+func sortedCapabilities(capabilities map[Capability]bool) []Capability {
+	result := make([]Capability, 0, len(capabilities))
+	for capability := range capabilities {
+		result = append(result, capability)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Resource != out[j].Resource {
-			return out[i].Resource < out[j].Resource
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Resource != result[j].Resource {
+			return result[i].Resource < result[j].Resource
 		}
-		return out[i].Verb < out[j].Verb
+		return result[i].Verb < result[j].Verb
 	})
-	return out
+	return result
 }
 
 func sortedRegistryResources(resources map[string]RegistryResource) []string {
-	out := make([]string, 0, len(resources))
+	result := make([]string, 0, len(resources))
 	for resource := range resources {
-		out = append(out, resource)
+		result = append(result, resource)
 	}
-	sort.Strings(out)
-	return out
+	sort.Strings(result)
+	return result
 }
 
-func sortedRegistryOperations(ops map[string]RegistryOperation) []string {
-	out := make([]string, 0, len(ops))
-	for op := range ops {
-		out = append(out, op)
+func sortedRegistryOperations(operations map[string]RegistryOperation) []string {
+	result := make([]string, 0, len(operations))
+	for operation := range operations {
+		result = append(result, operation)
 	}
-	sort.Strings(out)
-	return out
+	sort.Strings(result)
+	return result
 }
 
 func loadCoveredDetails(casesDir string, index map[string]map[string]bool) (map[Capability]coverageInfo, error) {
@@ -493,76 +675,50 @@ func loadCoveredDetails(casesDir string, index map[string]map[string]bool) (map[
 		return nil, err
 	}
 	covered := map[Capability]coverageInfo{}
-	for _, s := range suites {
-		for _, st := range s.Steps {
-			cap, ok := commandCapability(st.Run, index)
+	for _, suite := range suites {
+		fingerprint, err := caseFingerprint(suite.Path)
+		if err != nil {
+			return nil, err
+		}
+		for _, step := range suite.Steps {
+			capability, ok := commandCapability(step.Run, index)
 			if !ok {
 				continue
 			}
-			info := covered[cap]
+			info := covered[capability]
 			switch {
 			case info.Case == "":
 				info = coverageInfo{
-					Case:          s.Path,
-					SuiteResource: s.Resource,
+					Case:          suite.Path,
+					SuiteResource: suite.Resource,
+					Fingerprint:   fingerprint,
 				}
-			case info.Case == s.Path:
-			case s.Resource == cap.Resource && info.SuiteResource != cap.Resource:
+			case info.Case == suite.Path:
+			case suite.Resource == capability.Resource && info.SuiteResource != capability.Resource:
 				info = coverageInfo{
-					Case:          s.Path,
-					SuiteResource: s.Resource,
+					Case:          suite.Path,
+					SuiteResource: suite.Resource,
+					Fingerprint:   fingerprint,
 				}
 			default:
 				continue
 			}
-			info.Steps = append(info.Steps, st.Name)
-			covered[cap] = info
+			info.Steps = append(info.Steps, step.Name)
+			covered[capability] = info
 		}
 	}
-	for cap, info := range covered {
+	for capability, info := range covered {
 		sort.Strings(info.Steps)
-		covered[cap] = info
+		covered[capability] = info
 	}
 	return covered, nil
 }
 
-func (r RegistryEvidence) IsZero() bool {
-	return r.CoverageSource == "" && r.Report == "" && r.RunID == "" && r.VerifiedAt == ""
-}
-
-func (r RegistryEvidence) MarshalYAML() (any, error) {
-	if r.IsZero() {
-		return nil, nil
+func caseFingerprint(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
 	}
-	type alias RegistryEvidence
-	return alias(r), nil
-}
-
-func (r RegistryEvidence) MarshalJSON() ([]byte, error) {
-	if r.IsZero() {
-		return []byte(`{}`), nil
-	}
-	type alias RegistryEvidence
-	return json.Marshal(alias(r))
-}
-
-func (r RegistryOperation) MarshalYAML() (any, error) {
-	type alias RegistryOperation
-	return alias(r), nil
-}
-
-func (r RegistryOperation) MarshalJSON() ([]byte, error) {
-	type alias RegistryOperation
-	return json.Marshal(alias(r))
-}
-
-func (r RegistryOperation) String() string {
-	var parts []string
-	if r.Status != "" {
-		parts = append(parts, "status="+r.Status)
-	}
-	if r.Case != "" {
-		parts = append(parts, "case="+r.Case)
-	}
-	return strings.Join(parts, " ")
+	digest := sha256.Sum256(data)
+	return fmt.Sprintf("sha256:%x", digest), nil
 }

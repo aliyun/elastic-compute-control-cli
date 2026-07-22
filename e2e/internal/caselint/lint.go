@@ -456,36 +456,38 @@ func checkCoverageCases(rep *Report, suites []*scenario.Suite, opts Options) err
 	if err != nil {
 		return err
 	}
-	casePaths := map[string]bool{}
-	caseSteps := map[string]map[string]bool{}
+	resources := map[string]bool{}
+	for resource := range reg.Resources {
+		resources[resource] = true
+	}
+	caseCapabilities := map[string]map[coverage.Capability]bool{}
 	for _, suite := range suites {
 		resolved := normalizePath(suite.Path, "")
-		casePaths[resolved] = true
-		caseSteps[resolved] = map[string]bool{}
+		caseCapabilities[resolved] = map[coverage.Capability]bool{}
 		for _, st := range suite.Steps {
-			caseSteps[resolved][st.Name] = true
+			info := parseCommand(st.Run)
+			if !info.Valid || info.Call {
+				continue
+			}
+			resource, operation := commandResourceVerb(info.Positionals, resources)
+			if resource != "" && operation != "" {
+				caseCapabilities[resolved][coverage.Capability{Resource: resource, Verb: operation}] = true
+			}
 		}
 	}
 	for _, resource := range sortedCoverageResources(reg) {
 		rr := reg.Resources[resource]
 		for _, opName := range sortedCoverageOps(rr) {
 			op := rr.Operations[opName]
-			switch op.Status {
-			case coverage.StatusDrafted, coverage.StatusOfflineValid, coverage.StatusLivePass:
-				if op.Case == "" {
-					rep.add(opts.CoveragePath, resource+"/"+opName, "coverage_case_missing", "coverage entry requires case path")
-					continue
-				}
-				resolved := normalizePath(op.Case, filepath.Dir(opts.CasesDir))
-				if !casePaths[resolved] {
-					rep.add(opts.CoveragePath, resource+"/"+opName, "coverage_case_missing", fmt.Sprintf("case %s is not loaded from cases directory", op.Case))
-					continue
-				}
-				for _, step := range op.Steps {
-					if !caseSteps[resolved][step] {
-						rep.add(opts.CoveragePath, resource+"/"+opName, "coverage_step_missing", fmt.Sprintf("case %s has no step %q", op.Case, step))
-					}
-				}
+			resolved := normalizePath(op.Case, filepath.Dir(opts.CasesDir))
+			capabilities, loaded := caseCapabilities[resolved]
+			if !loaded {
+				rep.add(opts.CoveragePath, resource+"/"+opName, "coverage_case_missing", fmt.Sprintf("case %s is not loaded from cases directory", op.Case))
+				continue
+			}
+			capability := coverage.Capability{Resource: resource, Verb: opName}
+			if !capabilities[capability] {
+				rep.add(opts.CoveragePath, resource+"/"+opName, "coverage_operation_missing", fmt.Sprintf("case %s does not run %s %s", op.Case, resource, opName))
 			}
 		}
 	}
