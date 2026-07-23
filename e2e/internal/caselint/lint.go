@@ -456,35 +456,43 @@ func checkCoverageCases(rep *Report, suites []*scenario.Suite, opts Options) err
 	if err != nil {
 		return err
 	}
-	casePaths := map[string]bool{}
-	caseSteps := map[string]map[string]bool{}
-	for _, suite := range suites {
-		resolved := normalizePath(suite.Path, "")
-		casePaths[resolved] = true
-		caseSteps[resolved] = map[string]bool{}
-		for _, st := range suite.Steps {
-			caseSteps[resolved][st.Name] = true
+	resources := map[string]bool{}
+	for productName, product := range reg.Resources {
+		for resourceName := range product {
+			resources[productName+"/"+resourceName] = true
 		}
 	}
-	for _, resource := range sortedCoverageResources(reg) {
-		rr := reg.Resources[resource]
-		for _, opName := range sortedCoverageOps(rr) {
-			op := rr.Operations[opName]
-			switch op.Status {
-			case coverage.StatusDrafted, coverage.StatusOfflineValid, coverage.StatusLivePass:
-				if op.Case == "" {
-					rep.add(opts.CoveragePath, resource+"/"+opName, "coverage_case_missing", "coverage entry requires case path")
-					continue
-				}
+	caseCapabilities := map[string]map[coverage.Capability]bool{}
+	for _, suite := range suites {
+		resolved := normalizePath(suite.Path, "")
+		caseCapabilities[resolved] = map[coverage.Capability]bool{}
+		for _, st := range suite.Steps {
+			info := parseCommand(st.Run)
+			if !info.Valid || info.Call {
+				continue
+			}
+			resource, operation := commandResourceVerb(info.Positionals, resources)
+			if resource != "" && operation != "" {
+				caseCapabilities[resolved][coverage.Capability{Resource: resource, Verb: operation}] = true
+			}
+		}
+	}
+	for _, productName := range sortedCoverageProducts(reg) {
+		product := reg.Resources[productName]
+		for _, resourceName := range sortedCoverageResources(product) {
+			resource := product[resourceName]
+			resourceKey := productName + "/" + resourceName
+			for _, opName := range sortedCoverageOps(resource) {
+				op := resource.Operations[opName]
 				resolved := normalizePath(op.Case, filepath.Dir(opts.CasesDir))
-				if !casePaths[resolved] {
-					rep.add(opts.CoveragePath, resource+"/"+opName, "coverage_case_missing", fmt.Sprintf("case %s is not loaded from cases directory", op.Case))
+				capabilities, loaded := caseCapabilities[resolved]
+				if !loaded {
+					rep.add(opts.CoveragePath, resourceKey+"/"+opName, "coverage_case_missing", fmt.Sprintf("case %s is not loaded from cases directory", op.Case))
 					continue
 				}
-				for _, step := range op.Steps {
-					if !caseSteps[resolved][step] {
-						rep.add(opts.CoveragePath, resource+"/"+opName, "coverage_step_missing", fmt.Sprintf("case %s has no step %q", op.Case, step))
-					}
+				capability := coverage.Capability{Resource: resourceKey, Verb: opName}
+				if !capabilities[capability] {
+					rep.add(opts.CoveragePath, resourceKey+"/"+opName, "coverage_operation_missing", fmt.Sprintf("case %s does not run %s %s", op.Case, resourceKey, opName))
 				}
 			}
 		}
@@ -652,8 +660,10 @@ func loadCoverageResources(path string) (map[string]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	for resource := range reg.Resources {
-		out[resource] = true
+	for productName, product := range reg.Resources {
+		for resourceName := range product {
+			out[productName+"/"+resourceName] = true
+		}
 	}
 	return out, nil
 }
@@ -862,9 +872,18 @@ func normalizePath(path, base string) string {
 	return filepath.Clean(abs)
 }
 
-func sortedCoverageResources(reg *coverage.Registry) []string {
+func sortedCoverageProducts(reg *coverage.Registry) []string {
 	out := make([]string, 0, len(reg.Resources))
-	for resource := range reg.Resources {
+	for product := range reg.Resources {
+		out = append(out, product)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sortedCoverageResources(product coverage.RegistryProduct) []string {
+	out := make([]string, 0, len(product))
+	for resource := range product {
 		out = append(out, resource)
 	}
 	sort.Strings(out)

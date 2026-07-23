@@ -896,20 +896,30 @@ func coverageRegistryCmd() *cobra.Command {
 }
 
 func coverageRegistryInitCmd() *cobra.Command {
-	var specsDir, casesDir, registryPath string
+	var specsDir, casesDir, registryPath, ecctlBin, capabilitiesPath string
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create or refresh e2e/coverage.yaml from specs and cases",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			selection, err := loadCapabilitySelection(capabilitiesPath, ecctlBin, string(scenario.SurfacePublic))
+			if err != nil {
+				return err
+			}
+			if selection == nil {
+				return fmt.Errorf("coverage registry init requires --ecctl-bin or --capabilities")
+			}
 			var existing *coverage.Registry
 			if _, err := os.Stat(registryPath); err == nil {
-				reg, err := coverage.LoadRegistryFile(registryPath)
+				reg, err := coverage.LoadRegistryForInit(registryPath)
 				if err != nil {
 					return err
 				}
 				existing = reg
 			}
-			reg, err := coverage.InitRegistry(specsDir, casesDir, existing)
+			reg, err := coverage.InitRegistry(specsDir, casesDir, existing, coverage.PublicSurface{
+				ResourceCount: selection.ResourceCount,
+				Capabilities:  selection.Filter,
+			})
 			if err != nil {
 				return err
 			}
@@ -925,26 +935,34 @@ func coverageRegistryInitCmd() *cobra.Command {
 	f.StringVar(&specsDir, "specs", "../specs", "ecctl specs directory")
 	f.StringVar(&casesDir, "cases", "cases", "E2E cases directory")
 	f.StringVar(&registryPath, "registry", "coverage.yaml", "coverage registry file")
+	f.StringVar(&ecctlBin, "ecctl-bin", "", "public ecctl binary whose capabilities populate the summary")
+	f.StringVar(&capabilitiesPath, "capabilities", "", "public capabilities JSON file (overrides --ecctl-bin)")
 	return cmd
 }
 
 func coverageRegistryCheckCmd() *cobra.Command {
 	var specsDir, casesDir, registryPath, output, ecctlBin, capabilitiesPath, surface string
-	var allowStale, failOnMissing, failOnStale, failOnNotLive bool
+	var failOnNotLive bool
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Validate e2e/coverage.yaml against specs and cases",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			_ = failOnStale // stale entries are always invalid; the flag keeps the phase-8 command stable.
-			filter, err := loadCapabilityFilter(capabilitiesPath, ecctlBin, surface)
+			selection, err := loadCapabilitySelection(capabilitiesPath, ecctlBin, surface)
 			if err != nil {
 				return err
 			}
+			var filter map[coverage.Capability]bool
+			var public *coverage.PublicSurface
+			if selection != nil {
+				filter = selection.Filter
+				if surface == string(scenario.SurfacePublic) {
+					public = &coverage.PublicSurface{ResourceCount: selection.ResourceCount, Capabilities: selection.Filter}
+				}
+			}
 			rep, err := coverage.CheckRegistryFile(specsDir, casesDir, registryPath, coverage.RegistryCheckOptions{
-				AllowStale:       allowStale,
-				FailOnMissing:    failOnMissing,
 				FailOnNotLive:    failOnNotLive,
 				CapabilityFilter: filter,
+				PublicSurface:    public,
 			})
 			if err != nil {
 				return err
@@ -956,8 +974,8 @@ func coverageRegistryCheckCmd() *cobra.Command {
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), string(b))
 			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "registry: %d operations, %d live-pass, %d offline-valid, %d planned, %d missing, %d invalid\n",
-					rep.Entries, rep.ByStatus[coverage.StatusLivePass], rep.ByStatus[coverage.StatusOfflineValid], rep.ByStatus[coverage.StatusPlanned], rep.ByStatus[coverage.StatusMissing], rep.Invalid)
+				fmt.Fprintf(cmd.OutOrStdout(), "registry: %d operations, %d live-pass, %d offline, %d invalid\n",
+					rep.Entries, rep.ByStatus[coverage.StatusLivePass], rep.ByStatus[coverage.StatusOffline], rep.Invalid)
 				for _, e := range rep.Errors {
 					fmt.Fprintf(cmd.OutOrStdout(), "error: %s %s: %s: %s\n", e.Resource, e.Operation, e.Code, e.Message)
 				}
@@ -976,10 +994,7 @@ func coverageRegistryCheckCmd() *cobra.Command {
 	f.StringVar(&ecctlBin, "ecctl-bin", "", "ecctl binary whose capabilities define the selected surface")
 	f.StringVar(&capabilitiesPath, "capabilities", "", "capabilities JSON file (overrides --ecctl-bin)")
 	f.StringVar(&surface, "surface", string(scenario.SurfacePublic), "capability surface: public|full")
-	f.BoolVar(&allowStale, "allow-stale", false, "allow stale missing/covered status during manual transitions")
-	f.BoolVar(&failOnMissing, "fail-on-missing", false, "exit non-zero when operations are still marked missing")
 	f.BoolVar(&failOnNotLive, "fail-on-not-live", false, "exit non-zero when selected operations are not live-pass")
-	f.BoolVar(&failOnStale, "fail-on-stale", false, "kept for explicit completion gates; stale entries are always invalid")
 	return cmd
 }
 
@@ -993,9 +1008,13 @@ func coverageRegistrySummaryCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			filter, err := loadCapabilityFilter(capabilitiesPath, ecctlBin, surface)
+			selection, err := loadCapabilitySelection(capabilitiesPath, ecctlBin, surface)
 			if err != nil {
 				return err
+			}
+			var filter map[coverage.Capability]bool
+			if selection != nil {
+				filter = selection.Filter
 			}
 			sum := coverage.SummarizeRegistry(reg, filter)
 			if output == "json" {
@@ -1005,8 +1024,8 @@ func coverageRegistrySummaryCmd() *cobra.Command {
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), string(b))
 			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "registry: %d operations, %d live-pass, %d offline-valid, %d planned, %d missing\n",
-					sum.Entries, sum.ByStatus[coverage.StatusLivePass], sum.ByStatus[coverage.StatusOfflineValid], sum.ByStatus[coverage.StatusPlanned], sum.ByStatus[coverage.StatusMissing])
+				fmt.Fprintf(cmd.OutOrStdout(), "registry: %d operations, %d live-pass, %d offline\n",
+					sum.Entries, sum.ByStatus[coverage.StatusLivePass], sum.ByStatus[coverage.StatusOffline])
 			}
 			return nil
 		},
@@ -1020,7 +1039,12 @@ func coverageRegistrySummaryCmd() *cobra.Command {
 	return cmd
 }
 
-func loadCapabilityFilter(path, bin, wantSurface string) (map[coverage.Capability]bool, error) {
+type capabilitySelection struct {
+	Filter        map[coverage.Capability]bool
+	ResourceCount int
+}
+
+func loadCapabilitySelection(path, bin, wantSurface string) (*capabilitySelection, error) {
 	if path == "" && bin == "" {
 		return nil, nil
 	}
@@ -1041,15 +1065,19 @@ func loadCapabilityFilter(path, bin, wantSurface string) (map[coverage.Capabilit
 	if wantSurface != "" && caps.Surface != wantSurface {
 		return nil, fmt.Errorf("capabilities surface %q does not match requested %q", caps.Surface, wantSurface)
 	}
-	filter := map[coverage.Capability]bool{}
+	selection := &capabilitySelection{Filter: map[coverage.Capability]bool{}}
+	resources := map[string]bool{}
 	for _, product := range caps.Products {
 		for _, resource := range product.Resources {
+			resourceName := product.Name + "/" + resource.Name
 			for _, action := range resource.Actions {
-				filter[coverage.Capability{Resource: product.Name + "/" + resource.Name, Verb: action}] = true
+				resources[resourceName] = true
+				selection.Filter[coverage.Capability{Resource: resourceName, Verb: action}] = true
 			}
 		}
 	}
-	return filter, nil
+	selection.ResourceCount = len(resources)
+	return selection, nil
 }
 
 func coveragePathForCases(casesDir string) string {

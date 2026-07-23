@@ -2,486 +2,678 @@ package coverage
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
-func TestRegistryCheckAcceptsValidRegistry(t *testing.T) {
-	root, specs, cases := writeRegistryFixture(t)
-	registry := filepath.Join(root, "coverage.yaml")
-	mustWrite(t, registry, `
-version: 1
-resources:
-  ecs/instance:
-    operations:
-      create:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [create]
-      delete:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [delete]
-      list:
-        status: missing
-`)
+var (
+	parseTime  = time.Date(2026, 7, 15, 12, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	changeTime = parseTime.Add(time.Hour)
+)
 
-	rep, err := CheckRegistryFile(specs, cases, registry, RegistryCheckOptions{})
+func TestRegistryCheckAcceptsValidV3Registry(t *testing.T) {
+	root, specs, cases := writeRegistryFixture(t)
+	registryPath := filepath.Join(root, "coverage.yaml")
+	operation := validRegistryOperation(t, cases, StatusOffline, ReasonNotRun)
+	writeRegistry(t, registryPath, map[string]RegistryOperation{
+		"create": operation,
+		"delete": withStatus(operation, StatusLivePass, ReasonLiveVerified),
+	})
+
+	report, err := CheckRegistryFile(specs, cases, registryPath, RegistryCheckOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Invalid != 0 || len(rep.Errors) != 0 {
-		t.Fatalf("expected valid registry, got %+v", rep)
+	if report.Invalid != 0 || len(report.Errors) != 0 {
+		t.Fatalf("expected valid registry, got %+v", report)
 	}
-	if rep.Declared != 3 || rep.Entries != 3 {
-		t.Fatalf("unexpected counts: %+v", rep)
+	if report.Declared != 3 || report.Entries != 2 {
+		t.Fatalf("unexpected counts: %+v", report)
 	}
-	if rep.ByStatus["offline-valid"] != 2 || rep.ByStatus["missing"] != 1 {
-		t.Fatalf("unexpected status summary: %+v", rep.ByStatus)
+	if report.ByStatus[StatusOffline] != 1 || report.ByStatus[StatusLivePass] != 1 {
+		t.Fatalf("unexpected status summary: %+v", report.ByStatus)
 	}
 }
 
-func TestRegistryCheckFiltersCapabilitiesAndRequiresLivePass(t *testing.T) {
+func TestRegistryCheckRequiresSelectedCapabilitiesToBeLive(t *testing.T) {
 	root, specs, cases := writeRegistryFixture(t)
-	registry := filepath.Join(root, "coverage.yaml")
-	mustWrite(t, registry, `
-version: 1
-resources:
-  ecs/instance:
-    operations:
-      create:
-        status: live-pass
-        case: cases/ecs/instance.yaml
-        steps: [create]
-        evidence: {report: reports/e2e-report.json, run_id: run-1, verified_at: 2026-07-10}
-      delete:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [delete]
-      list:
-        status: missing
-`)
-	rep, err := CheckRegistryFile(specs, cases, registry, RegistryCheckOptions{
+	registryPath := filepath.Join(root, "coverage.yaml")
+	operation := validRegistryOperation(t, cases, StatusLivePass, ReasonLiveVerified)
+	writeRegistry(t, registryPath, map[string]RegistryOperation{"create": operation})
+
+	report, err := CheckRegistryFile(specs, cases, registryPath, RegistryCheckOptions{
 		CapabilityFilter: map[Capability]bool{{Resource: "ecs/instance", Verb: "create"}: true},
 		FailOnNotLive:    true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Declared != 1 || rep.Entries != 1 || rep.Invalid != 0 || rep.ByStatus[StatusLivePass] != 1 {
-		t.Fatalf("filtered report = %+v", rep)
+	if report.Invalid != 0 || report.ByStatus[StatusLivePass] != 1 {
+		t.Fatalf("live filtered report = %+v", report)
 	}
 
-	rep, err = CheckRegistryFile(specs, cases, registry, RegistryCheckOptions{
+	report, err = CheckRegistryFile(specs, cases, registryPath, RegistryCheckOptions{
 		CapabilityFilter: map[Capability]bool{{Resource: "ecs/instance", Verb: "delete"}: true},
 		FailOnNotLive:    true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reportHasCode(rep, "not_live") {
-		t.Fatalf("expected not_live for offline operation, got %+v", rep.Errors)
+	if !reportHasCode(report, "not_live") {
+		t.Fatalf("absent selected capability must be not_live: %+v", report.Errors)
+	}
+
+	operation = withStatus(operation, StatusOffline, ReasonTestFailed)
+	writeRegistry(t, registryPath, map[string]RegistryOperation{"create": operation})
+	report, err = CheckRegistryFile(specs, cases, registryPath, RegistryCheckOptions{FailOnNotLive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reportHasCode(report, "not_live") {
+		t.Fatalf("offline operation must be not_live: %+v", report.Errors)
 	}
 }
 
-func TestRegistryCheckRejectsInvalidRegistries(t *testing.T) {
+func TestRegistryCheckRejectsMissingCaseBackedEntry(t *testing.T) {
+	root, specs, cases := writeRegistryFixture(t)
+	registryPath := filepath.Join(root, "coverage.yaml")
+	operation := validRegistryOperation(t, cases, StatusOffline, ReasonNotRun)
+	writeRegistry(t, registryPath, map[string]RegistryOperation{"create": operation})
+
+	report, err := CheckRegistryFile(specs, cases, registryPath, RegistryCheckOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reportHasCode(report, "covered_missing_entry") {
+		t.Fatalf("case-backed operations must have registry entries: %+v", report.Errors)
+	}
+}
+
+func TestRegistryCheckRejectsEmptyOrUnknownCapabilitySelection(t *testing.T) {
+	root, specs, cases := writeRegistryFixture(t)
+	registryPath := filepath.Join(root, "coverage.yaml")
+	operation := validRegistryOperation(t, cases, StatusOffline, ReasonNotRun)
+	writeRegistry(t, registryPath, map[string]RegistryOperation{
+		"create": operation,
+		"delete": operation,
+	})
+
 	tests := []struct {
-		name string
-		body string
-		code string
+		name      string
+		selection map[Capability]bool
+		wantCode  string
 	}{
 		{
-			name: "unknown status",
-			body: `
-version: 1
-resources:
-  ecs/instance:
-    operations:
-      create:
-        status: maybe
-      delete:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [delete]
-      list:
-        status: missing
-`,
-			code: "unknown_status",
+			name:      "empty",
+			selection: map[Capability]bool{},
+			wantCode:  "empty_capability_selection",
 		},
 		{
-			name: "missing declared operation",
-			body: `
-version: 1
-resources:
-  ecs/instance:
-    operations:
-      create:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [create]
-      delete:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [delete]
-`,
-			code: "missing_entry",
-		},
-		{
-			name: "stale non retired operation",
-			body: `
-version: 1
-resources:
-  ecs/instance:
-    operations:
-      create:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [create]
-      delete:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [delete]
-      list:
-        status: missing
-      reboot:
-        status: missing
-`,
-			code: "stale_entry",
-		},
-		{
-			name: "manual only missing reason",
-			body: `
-version: 1
-resources:
-  ecs/instance:
-    operations:
-      create:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [create]
-      delete:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [delete]
-      list:
-        status: manual-only
-        review_after: 2026-08-03
-`,
-			code: "missing_reason",
-		},
-		{
-			name: "manual only invalid date",
-			body: `
-version: 1
-resources:
-  ecs/instance:
-    operations:
-      create:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [create]
-      delete:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [delete]
-      list:
-        status: manual-only
-        reason: cost
-        review_after: soon
-`,
-			code: "invalid_date",
-		},
-		{
-			name: "offline valid without case",
-			body: `
-version: 1
-resources:
-  ecs/instance:
-    operations:
-      create:
-        status: offline-valid
-        steps: [create]
-      delete:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [delete]
-      list:
-        status: missing
-`,
-			code: "missing_case",
-		},
-		{
-			name: "offline valid uncovered",
-			body: `
-version: 1
-resources:
-  ecs/instance:
-    operations:
-      create:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [create]
-      delete:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [delete]
-      list:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [list]
-`,
-			code: "not_covered",
+			name: "unknown",
+			selection: map[Capability]bool{
+				{Resource: "ecs/instance", Verb: "future-op"}: true,
+			},
+			wantCode: "unknown_selected_capability",
 		},
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			root, specs, cases := writeRegistryFixture(t)
-			registry := filepath.Join(root, "coverage.yaml")
-			mustWrite(t, registry, tt.body)
-			rep, err := CheckRegistryFile(specs, cases, registry, RegistryCheckOptions{})
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			report, err := CheckRegistryFile(specs, cases, registryPath, RegistryCheckOptions{
+				CapabilityFilter: test.selection,
+				FailOnNotLive:    true,
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reportHasCode(rep, tt.code) {
-				t.Fatalf("expected error code %q, got %+v", tt.code, rep.Errors)
+			if !reportHasCode(report, test.wantCode) {
+				t.Fatalf("expected %s, got %+v", test.wantCode, report.Errors)
 			}
 		})
 	}
 }
 
-func TestRegistryCheckAllowsStaleRetiredOperation(t *testing.T) {
-	root, specs, cases := writeRegistryFixture(t)
-	registry := filepath.Join(root, "coverage.yaml")
-	mustWrite(t, registry, `
-version: 1
-resources:
-  ecs/instance:
-    operations:
-      create:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [create]
-      delete:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [delete]
-      list:
-        status: missing
-      reboot:
-        status: retired
-        removed_after: 2026-07-03
-`)
-
-	rep, err := CheckRegistryFile(specs, cases, registry, RegistryCheckOptions{})
-	if err != nil {
-		t.Fatal(err)
+func TestRegistryCheckRejectsInvalidEntries(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*RegistryOperation)
+		code   string
+	}{
+		{name: "unknown status", mutate: func(op *RegistryOperation) { op.Status = "maybe" }, code: "unknown_status"},
+		{name: "missing case", mutate: func(op *RegistryOperation) { op.Case = "" }, code: "missing_case"},
+		{name: "wrong case", mutate: func(op *RegistryOperation) { op.Case = "cases/ecs/other.yaml" }, code: "case_mismatch"},
+		{name: "missing fingerprint", mutate: func(op *RegistryOperation) { op.Fingerprint = "" }, code: "missing_fingerprint"},
+		{name: "invalid fingerprint", mutate: func(op *RegistryOperation) { op.Fingerprint = "sha256:ABC" }, code: "invalid_fingerprint"},
+		{name: "stale fingerprint", mutate: func(op *RegistryOperation) { op.Fingerprint = "sha256:" + strings.Repeat("0", 64) }, code: "fingerprint_mismatch"},
+		{name: "missing time", mutate: func(op *RegistryOperation) { op.Time = "" }, code: "missing_time"},
+		{name: "invalid time", mutate: func(op *RegistryOperation) { op.Time = "soon" }, code: "invalid_time"},
+		{name: "missing reason", mutate: func(op *RegistryOperation) { op.Reason = "" }, code: "missing_reason"},
+		{name: "live with offline reason", mutate: func(op *RegistryOperation) { op.Status, op.Reason = StatusLivePass, ReasonNotRun }, code: "invalid_reason"},
+		{name: "offline with live reason", mutate: func(op *RegistryOperation) { op.Reason = ReasonLiveVerified }, code: "invalid_reason"},
 	}
-	if rep.Invalid != 0 {
-		t.Fatalf("expected retired stale entry to be allowed, got %+v", rep.Errors)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root, specs, cases := writeRegistryFixture(t)
+			registryPath := filepath.Join(root, "coverage.yaml")
+			operation := validRegistryOperation(t, cases, StatusOffline, ReasonNotRun)
+			test.mutate(&operation)
+			writeRegistry(t, registryPath, map[string]RegistryOperation{"create": operation})
+			report, err := CheckRegistryFile(specs, cases, registryPath, RegistryCheckOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reportHasCode(report, test.code) {
+				t.Fatalf("expected %q, got %+v", test.code, report.Errors)
+			}
+		})
 	}
 }
 
-func TestRegistryCheckCanFailOnMissingAndFilterResources(t *testing.T) {
+func TestRegistryCheckRejectsStaleOperation(t *testing.T) {
 	root, specs, cases := writeRegistryFixture(t)
-	registry := filepath.Join(root, "coverage.yaml")
-	mustWrite(t, registry, `
-version: 1
-resources:
-  ecs/instance:
-    operations:
-      create:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [create]
-      delete:
-        status: offline-valid
-        case: cases/ecs/instance.yaml
-        steps: [delete]
-      list:
-        status: missing
-`)
-
-	rep, err := CheckRegistryFile(specs, cases, registry, RegistryCheckOptions{FailOnMissing: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reportHasCode(rep, "missing_status") {
-		t.Fatalf("expected fail-on-missing error, got %+v", rep.Errors)
-	}
-
-	rep, err = CheckRegistryFile(specs, cases, registry, RegistryCheckOptions{
-		FailOnMissing: true,
-		ResourceFilter: map[string]bool{
-			"ecs/other": true,
-		},
+	registryPath := filepath.Join(root, "coverage.yaml")
+	writeRegistry(t, registryPath, map[string]RegistryOperation{
+		"reboot": validRegistryOperation(t, cases, StatusOffline, ReasonNotRun),
 	})
+	report, err := CheckRegistryFile(specs, cases, registryPath, RegistryCheckOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Invalid != 0 || rep.Entries != 0 || rep.Declared != 0 {
-		t.Fatalf("resource filter should exclude registry entries, got %+v", rep)
+	if !reportHasCode(report, "stale_entry") {
+		t.Fatalf("expected stale_entry, got %+v", report.Errors)
 	}
 }
 
-func TestRegistryCheckDoesNotReadLiveEvidenceReport(t *testing.T) {
+func TestRegistryCheckRejectsResourceAlias(t *testing.T) {
 	root, specs, cases := writeRegistryFixture(t)
-	registry := filepath.Join(root, "coverage.yaml")
-	mustWrite(t, registry, `
+	registryPath := filepath.Join(root, "coverage.yaml")
+	operation := validRegistryOperation(t, cases, StatusOffline, ReasonNotRun)
+	registry := &Registry{
+		Version: RegistryVersion,
+		Summary: RegistryPublicSummary{Surface: "public", Resources: 1, Operations: 3, MissingCases: 3},
+		Resources: map[string]RegistryProduct{
+			"ecs": {"vm": {Operations: map[string]RegistryOperation{"create": operation}}},
+		},
+	}
+	if err := WriteRegistryFile(registryPath, registry); err != nil {
+		t.Fatal(err)
+	}
+	report, err := CheckRegistryFile(specs, cases, registryPath, RegistryCheckOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reportHasCode(report, "stale_entry") {
+		t.Fatalf("resource aliases must not be accepted as canonical keys: %+v", report.Errors)
+	}
+}
+
+func TestRegistryCheckRejectsEmptyResource(t *testing.T) {
+	root, specs, cases := writeRegistryFixture(t)
+	registryPath := filepath.Join(root, "coverage.yaml")
+	writeRegistry(t, registryPath, map[string]RegistryOperation{})
+	report, err := CheckRegistryFile(specs, cases, registryPath, RegistryCheckOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reportHasCode(report, "empty_resource") {
+		t.Fatalf("expected empty_resource, got %+v", report.Errors)
+	}
+}
+
+func TestRegistryCheckRejectsStalePublicSummary(t *testing.T) {
+	root, specs, cases := writeRegistryFixture(t)
+	registryPath := filepath.Join(root, "coverage.yaml")
+	operation := validRegistryOperation(t, cases, StatusLivePass, ReasonLiveVerified)
+	writeRegistry(t, registryPath, map[string]RegistryOperation{"create": operation})
+	registry, err := LoadRegistryFile(registryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry.Summary.Passed = 0
+	registry.Summary.MissingCases = 3
+	if err := WriteRegistryFile(registryPath, registry); err != nil {
+		t.Fatal(err)
+	}
+	public := fixturePublicSurface()
+	report, err := CheckRegistryFile(specs, cases, registryPath, RegistryCheckOptions{PublicSurface: &public})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reportHasCode(report, "stale_summary") {
+		t.Fatalf("expected stale_summary, got %+v", report.Errors)
+	}
+}
+
+func TestSummarizePublicSurfaceRejectsEmptyCapabilities(t *testing.T) {
+	registry := &Registry{Version: RegistryVersion, Resources: map[string]RegistryProduct{}}
+	if _, err := SummarizePublicSurface(registry, PublicSurface{ResourceCount: 1, Capabilities: map[Capability]bool{}}); err == nil {
+		t.Fatal("empty public capability selection must be rejected")
+	}
+}
+
+func TestInitRegistryRejectsUnknownPublicCapability(t *testing.T) {
+	_, specs, cases := writeRegistryFixture(t)
+	public := fixturePublicSurface()
+	public.Capabilities[Capability{Resource: "ecs/instance", Verb: "future-op"}] = true
+	if _, err := initRegistry(specs, cases, nil, public, parseTime); err == nil {
+		t.Fatal("public capabilities absent from specs must be rejected")
+	}
+}
+
+func TestRegistryCheckRejectsInvalidPublicSummary(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*RegistryPublicSummary)
+		code   string
+	}{
+		{name: "surface", mutate: func(summary *RegistryPublicSummary) { summary.Surface = "full" }, code: "invalid_summary_surface"},
+		{name: "negative count", mutate: func(summary *RegistryPublicSummary) { summary.Resources = -1 }, code: "invalid_summary_count"},
+		{name: "unbalanced total", mutate: func(summary *RegistryPublicSummary) { summary.Operations++ }, code: "invalid_summary_total"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root, specs, cases := writeRegistryFixture(t)
+			registryPath := filepath.Join(root, "coverage.yaml")
+			writeRegistry(t, registryPath, map[string]RegistryOperation{})
+			registry, err := LoadRegistryFile(registryPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(&registry.Summary)
+			if err := WriteRegistryFile(registryPath, registry); err != nil {
+				t.Fatal(err)
+			}
+			report, err := CheckRegistryFile(specs, cases, registryPath, RegistryCheckOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reportHasCode(report, test.code) {
+				t.Fatalf("expected %s, got %+v", test.code, report.Errors)
+			}
+		})
+	}
+}
+
+func TestRegistryV3LoaderRejectsLegacyAndUnknownFields(t *testing.T) {
+	root, _, cases := writeRegistryFixture(t)
+	fingerprint := mustFingerprint(t, filepath.Join(cases, "ecs", "instance.yaml"))
+	legacyPath := filepath.Join(root, "legacy.yaml")
+	mustWrite(t, legacyPath, `
 version: 1
+resources: {}
+`)
+	if _, err := LoadRegistryFile(legacyPath); err == nil || !strings.Contains(err.Error(), "version must be 3") {
+		t.Fatalf("strict loader must reject v1: %v", err)
+	}
+	if migrated, err := LoadRegistryForInit(legacyPath); err != nil || migrated.Version != 1 {
+		t.Fatalf("init loader must accept v1: version=%v err=%v", migrated, err)
+	}
+
+	unknownPath := filepath.Join(root, "unknown.yaml")
+	mustWrite(t, unknownPath, fmt.Sprintf(`
+version: 3
+resources:
+  ecs:
+    instance:
+      operations:
+        create:
+          status: offline
+          case: %s
+          fingerprint: %s
+          time: "2026-07-15T12:00:00+08:00"
+          reason: not-run
+          steps: [create]
+`, filepath.Join(cases, "ecs", "instance.yaml"), fingerprint))
+	if _, err := LoadRegistryFile(unknownPath); err == nil || !strings.Contains(err.Error(), "field steps not found") {
+		t.Fatalf("strict loader must reject unknown fields: %v", err)
+	}
+
+	partialSummaryPath := filepath.Join(root, "partial-summary.yaml")
+	mustWrite(t, partialSummaryPath, `
+version: 3
+summary:
+  surface: public
+resources: {}
+`)
+	if _, err := LoadRegistryFile(partialSummaryPath); err == nil || !strings.Contains(err.Error(), "summary requires field") {
+		t.Fatalf("strict loader must reject incomplete summary: %v", err)
+	}
+
+	validPath := filepath.Join(root, "valid.yaml")
+	writeRegistry(t, validPath, map[string]RegistryOperation{})
+	validData, err := os.ReadFile(validPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, validPath, string(validData)+"---\nversion: 3\nresources: {}\n")
+	if _, err := LoadRegistryFile(validPath); err == nil || !strings.Contains(err.Error(), "exactly one YAML document") {
+		t.Fatalf("strict loader must reject trailing YAML documents: %v", err)
+	}
+}
+
+func TestWriteRegistryFileRejectsMigrationIntermediate(t *testing.T) {
+	registry := &Registry{
+		Version: 2,
+		Resources: map[string]RegistryProduct{
+			"ecs": {"instance": {Operations: map[string]RegistryOperation{}}},
+		},
+	}
+	err := WriteRegistryFile(filepath.Join(t.TempDir(), "coverage.yaml"), registry)
+	if err == nil || !strings.Contains(err.Error(), "version must be 3") {
+		t.Fatalf("write must reject a migrated registry before init produces v3: %v", err)
+	}
+}
+
+func TestInitRegistryCreatesCaseBackedEntriesOnlyAndIsIdempotent(t *testing.T) {
+	root, specs, cases := writeRegistryFixture(t)
+	mustMkdir(t, filepath.Join(specs, "vpc"))
+	mustWrite(t, filepath.Join(specs, "vpc", "vpc.yaml"), `
+product: vpc
+resource: vpc
+operations:
+  create: {}
+`)
+
+	first, err := initRegistry(specs, cases, nil, fixturePublicSurface(), parseTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Version != RegistryVersion || len(first.Resources) != 1 {
+		t.Fatalf("unexpected registry shape: %+v", first)
+	}
+	wantSummary := RegistryPublicSummary{Surface: "public", Resources: 1, Operations: 3, MissingCases: 1, NotPassed: 2}
+	if first.Summary != wantSummary {
+		t.Fatalf("public summary = %+v, want %+v", first.Summary, wantSummary)
+	}
+	operations := first.Resources["ecs"]["instance"].Operations
+	if len(operations) != 2 {
+		t.Fatalf("expected only create/delete case operations, got %+v", operations)
+	}
+	for name, operation := range operations {
+		if operation.Status != StatusOffline || operation.Reason != ReasonNotRun || operation.Time != parseTime.Format(time.RFC3339Nano) {
+			t.Fatalf("%s = %+v", name, operation)
+		}
+		if operation.Fingerprint != mustFingerprint(t, operation.Case) {
+			t.Fatalf("%s fingerprint mismatch: %+v", name, operation)
+		}
+	}
+
+	second, err := initRegistry(specs, cases, first, fixturePublicSurface(), changeTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("unchanged init must preserve the registry:\nfirst=%+v\nsecond=%+v", first, second)
+	}
+
+	firstPath := filepath.Join(root, "first.yaml")
+	secondPath := filepath.Join(root, "second.yaml")
+	if err := WriteRegistryFile(firstPath, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteRegistryFile(secondPath, second); err != nil {
+		t.Fatal(err)
+	}
+	firstData, _ := os.ReadFile(firstPath)
+	secondData, _ := os.ReadFile(secondPath)
+	if string(firstData) != string(secondData) {
+		t.Fatalf("unchanged output must be byte-identical")
+	}
+
+	var raw map[string]any
+	if err := yaml.Unmarshal(firstData, &raw); err != nil {
+		t.Fatal(err)
+	}
+	operationMap := raw["resources"].(map[string]any)["ecs"].(map[string]any)["instance"].(map[string]any)["operations"].(map[string]any)["create"].(map[string]any)
+	if len(operationMap) != 5 {
+		t.Fatalf("operation must have exactly five fields: %#v", operationMap)
+	}
+	if _, exists := raw["resources"].(map[string]any)["ecs/instance"]; exists {
+		t.Fatalf("registry must not use flat product/resource keys: %#v", raw["resources"])
+	}
+	if _, exists := raw["resources"].(map[string]any)["ecs"].(map[string]any)["vm"]; exists {
+		t.Fatalf("registry must use the canonical spec resource, not its alias: %#v", raw["resources"])
+	}
+}
+
+func TestInitRegistryMigratesV2FlatKeysAndPreservesLiveEvidence(t *testing.T) {
+	root, specs, cases := writeRegistryFixture(t)
+	casePath := filepath.Join(cases, "ecs", "instance.yaml")
+	legacyPath := filepath.Join(root, "coverage-v2.yaml")
+	mustWrite(t, legacyPath, fmt.Sprintf(`
+version: 2
+generated:
+  cases_dir: %s
+summary:
+  surface: public
+  resources: 1
+  operations: 3
+  missing_cases: 1
+  passed: 1
+  not_passed: 1
 resources:
   ecs/instance:
     operations:
       create:
         status: live-pass
-        case: cases/ecs/instance.yaml
+        case: %s
+        fingerprint: %s
+        time: "2026-07-15T12:00:00+08:00"
+        reason: live-verified
+`, cases, casePath, mustFingerprint(t, casePath)))
+
+	existing, err := LoadRegistryForInit(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if existing.Version != 2 {
+		t.Fatalf("loaded version = %d, want 2", existing.Version)
+	}
+	legacyData, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trailingPath := filepath.Join(root, "coverage-v2-trailing.yaml")
+	mustWrite(t, trailingPath, string(legacyData)+"---\nversion: 2\nresources: {}\n")
+	if _, err := LoadRegistryForInit(trailingPath); err == nil || !strings.Contains(err.Error(), "exactly one YAML document") {
+		t.Fatalf("v2 migration must reject trailing YAML documents: %v", err)
+	}
+	migrated, err := initRegistry(specs, cases, existing, fixturePublicSurface(), changeTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := migrated.Resources["ecs"]["instance"].Operations["create"]
+	want := RegistryOperation{
+		Status:      StatusLivePass,
+		Case:        normalizeCasePath(casePath),
+		Fingerprint: mustFingerprint(t, casePath),
+		Time:        "2026-07-15T12:00:00+08:00",
+		Reason:      ReasonLiveVerified,
+	}
+	if migrated.Version != RegistryVersion || create != want {
+		t.Fatalf("v2 live evidence was not preserved: version=%d create=%+v want=%+v", migrated.Version, create, want)
+	}
+	create.Status = StatusOffline
+	create.Reason = "invalid-reason"
+	existing.Resources["ecs"]["instance"].Operations["create"] = create
+	if _, err := initRegistry(specs, cases, existing, fixturePublicSurface(), changeTime); err == nil || !strings.Contains(err.Error(), "invalid_reason") {
+		t.Fatalf("init must reject invalid preserved v2 operations: %v", err)
+	}
+}
+
+func TestInitRegistryResetsStatusWhenCaseContentChanges(t *testing.T) {
+	_, specs, cases := writeRegistryFixture(t)
+	registry, err := initRegistry(specs, cases, nil, fixturePublicSurface(), parseTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := registry.Resources["ecs"]["instance"].Operations["create"]
+	create.Status = StatusLivePass
+	create.Reason = ReasonLiveVerified
+	registry.Resources["ecs"]["instance"].Operations["create"] = create
+	oldFingerprint := create.Fingerprint
+
+	casePath := filepath.Join(cases, "ecs", "instance.yaml")
+	data, err := os.ReadFile(casePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, casePath, string(data)+"\n# changed\n")
+	refreshed, err := initRegistry(specs, cases, registry, fixturePublicSurface(), changeTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, operation := range refreshed.Resources["ecs"]["instance"].Operations {
+		if operation.Status != StatusOffline || operation.Reason != ReasonCaseChanged || operation.Time != changeTime.Format(time.RFC3339Nano) {
+			t.Fatalf("%s must reset after content change: %+v", name, operation)
+		}
+		if operation.Fingerprint == oldFingerprint {
+			t.Fatalf("%s fingerprint did not change", name)
+		}
+	}
+}
+
+func TestInitRegistryResetsStatusWhenCasePathChanges(t *testing.T) {
+	_, specs, cases := writeRegistryFixture(t)
+	registry, err := initRegistry(specs, cases, nil, fixturePublicSurface(), parseTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := registry.Resources["ecs"]["instance"].Operations["create"]
+	create.Status = StatusLivePass
+	create.Reason = ReasonLiveVerified
+	create.Case = filepath.Join(cases, "ecs", "old-name.yaml")
+	registry.Resources["ecs"]["instance"].Operations["create"] = create
+
+	refreshed, err := initRegistry(specs, cases, registry, fixturePublicSurface(), changeTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := refreshed.Resources["ecs"]["instance"].Operations["create"]
+	if got.Status != StatusOffline || got.Reason != ReasonCaseChanged || got.Time != changeTime.Format(time.RFC3339Nano) {
+		t.Fatalf("path change must reset status: %+v", got)
+	}
+}
+
+func TestInitRegistryRemovesMissingCasesAndEmptyResources(t *testing.T) {
+	_, specs, cases := writeRegistryFixture(t)
+	registry, err := initRegistry(specs, cases, nil, fixturePublicSurface(), parseTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(cases, "ecs", "instance.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	refreshed, err := initRegistry(specs, cases, registry, fixturePublicSurface(), changeTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refreshed.Resources) != 0 {
+		t.Fatalf("empty resources must be omitted: %+v", refreshed.Resources)
+	}
+}
+
+func TestInitRegistryMigratesV1WithoutTrustingUnboundLivePass(t *testing.T) {
+	root, specs, cases := writeRegistryFixture(t)
+	mustWrite(t, filepath.Join(specs, "ecs", "instance.yaml"), `
+product: ecs
+resource: instance
+aliases: [vm]
+operations:
+  create: {}
+  delete: {}
+  get: {}
+  list: {}
+  update: {}
+`)
+	legacyPath := filepath.Join(root, "coverage-v1.yaml")
+	mustWrite(t, legacyPath, fmt.Sprintf(`
+version: 1
+generated:
+  cases_dir: %s
+resources:
+  ecs/instance:
+    operations:
+      create:
+        status: live-pass
+        case: %s
         steps: [create]
         evidence:
-          report: reports/local-only/e2e-report.json
+          report: reports/live.json
           run_id: run-1
-          verified_at: "2026-07-06T17:00:00+08:00"
+          verified_at: "2026-07-14T16:30:43+08:00"
       delete:
         status: offline-valid
-        case: cases/ecs/instance.yaml
+        case: %s
         steps: [delete]
+        evidence:
+          coverage_source: command
       list:
-        status: missing
-`)
-
-	rep, err := CheckRegistryFile(specs, cases, registry, RegistryCheckOptions{})
+        status: manual-only
+        reason: requires-existing-cluster
+        review_after: "2026-10-06"
+      get:
+        status: planned
+        owner: e2e
+        target_phase: 9
+      update:
+        status: quarantined
+        reason: known-ecctl-bug
+        issue: local
+        last_checked: "2026-07-15"
+`, cases, filepath.Join(cases, "ecs", "instance.yaml"), filepath.Join(cases, "ecs", "instance.yaml")))
+	legacy, err := LoadRegistryForInit(legacyPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Invalid != 0 {
-		t.Fatalf("registry check should not require local report files, got %+v", rep.Errors)
+	migrated, err := initRegistry(specs, cases, legacy, fixturePublicSurface(), parseTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operations := migrated.Resources["ecs"]["instance"].Operations
+	if len(operations) != 2 {
+		t.Fatalf("manual-only, planned, and quarantined operations without cases must be omitted: %+v", operations)
+	}
+	create := operations["create"]
+	if create.Status != StatusOffline || create.Reason != ReasonUnknown || create.Time != parseTime.Format(time.RFC3339Nano) {
+		t.Fatalf("v1 live-pass without a fingerprint must be reset: %+v", create)
+	}
+	if create.Fingerprint != mustFingerprint(t, create.Case) {
+		t.Fatalf("migrated offline fingerprint mismatch: %+v", create)
+	}
+	deleted := operations["delete"]
+	if deleted.Status != StatusOffline || deleted.Reason != ReasonNotRun || deleted.Time != parseTime.Format(time.RFC3339Nano) {
+		t.Fatalf("offline-valid migration = %+v", deleted)
 	}
 }
 
-func TestInitRegistryUsesCoverageAndPreservesManualMetadata(t *testing.T) {
-	root, specs, cases := writeRegistryFixture(t)
-	existing := &Registry{
-		Version: 1,
-		Resources: map[string]RegistryResource{
-			"ecs/instance": {
-				Operations: map[string]RegistryOperation{
-					"create": {
-						Status:      StatusPlanned,
-						Owner:       "e2e",
-						TargetPhase: 1,
-					},
-					"delete": {
-						Status: StatusLivePass,
-						Case:   filepath.Join(cases, "ecs", "instance.yaml"),
-						Steps:  []string{"delete"},
-						Evidence: RegistryEvidence{
-							Report: "reports/live.json",
-						},
-					},
-					"list": {
-						Status:      StatusManualOnly,
-						Reason:      "cost",
-						ReviewAfter: "2026-08-03",
-					},
-				},
-			},
-		},
-	}
-
-	reg, err := InitRegistry(specs, cases, existing)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ops := reg.Resources["ecs/instance"].Operations
-	if ops["create"].Status != StatusOfflineValid {
-		t.Fatalf("covered planned operation should become offline-valid: %+v", ops)
-	}
-	if ops["create"].Case != filepath.Join(cases, "ecs", "instance.yaml") {
-		t.Fatalf("unexpected case path: %q", ops["create"].Case)
-	}
-	if ops["delete"].Status != StatusLivePass || ops["delete"].Case != filepath.Join(cases, "ecs", "instance.yaml") || ops["delete"].Evidence.Report != "reports/live.json" {
-		t.Fatalf("live evidence should be preserved while case metadata refreshes: %+v", ops["delete"])
-	}
-	if ops["list"].Status != StatusManualOnly || ops["list"].Reason != "cost" || ops["list"].ReviewAfter != "2026-08-03" {
-		t.Fatalf("manual metadata not preserved: %+v", ops["list"])
-	}
-
-	first := filepath.Join(root, "first.yaml")
-	second := filepath.Join(root, "second.yaml")
-	if err := WriteRegistryFile(first, reg); err != nil {
-		t.Fatal(err)
-	}
-	if err := WriteRegistryFile(second, reg); err != nil {
-		t.Fatal(err)
-	}
-	a, err := os.ReadFile(first)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(a) != string(b) {
-		t.Fatalf("registry output is not deterministic:\nfirst:\n%s\nsecond:\n%s", a, b)
-	}
-}
-
-func TestInitRegistryDowngradesLiveEvidenceWhenCaseProvenanceChanges(t *testing.T) {
-	_, specs, cases := writeRegistryFixture(t)
-	existing := &Registry{
-		Version: 1,
-		Resources: map[string]RegistryResource{
-			"ecs/instance": {Operations: map[string]RegistryOperation{
-				"delete": {
-					Status: StatusLivePass,
-					Case:   "cases/ecs/renamed-old.yaml",
-					Steps:  []string{"old delete"},
-					Evidence: RegistryEvidence{
-						Report: "reports/live.json", RunID: "old", VerifiedAt: "2026-07-01T00:00:00Z",
-					},
-				},
-			}},
-		},
-	}
-
-	reg, err := InitRegistry(specs, cases, existing)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := reg.Resources["ecs/instance"].Operations["delete"]
-	if got.Status != StatusOfflineValid || got.Case != filepath.Join(cases, "ecs", "instance.yaml") || got.Evidence.CoverageSource != "command" {
-		t.Fatalf("renamed live provenance should require fresh evidence: %+v", got)
-	}
-}
-
-func TestInitRegistryPreservesLiveEvidenceAcrossEquivalentCasesDirSpelling(t *testing.T) {
+func TestInitRegistryDoesNotPreserveV1LiveAcrossEquivalentCasesDirSpelling(t *testing.T) {
 	_, specs, cases := writeRegistryFixture(t)
 	existing := &Registry{
 		Version:   1,
 		Generated: RegistryGenerated{CasesDir: "cases"},
-		Resources: map[string]RegistryResource{
-			"ecs/instance": {Operations: map[string]RegistryOperation{
-				"delete": {
-					Status: StatusLivePass,
-					Case:   "cases/ecs/instance.yaml",
-					Steps:  []string{"delete"},
-					Evidence: RegistryEvidence{
-						Report: "reports/live.json", RunID: "run-1", VerifiedAt: "2026-07-01T00:00:00Z",
-					},
-				},
-			}},
+		Resources: map[string]RegistryProduct{
+			"ecs": {
+				"instance": {Operations: map[string]RegistryOperation{
+					"create": {Status: StatusLivePass, Case: "cases/ecs/instance.yaml", Time: "2026-07-01T00:00:00Z"},
+				}},
+			},
 		},
 	}
-
-	reg, err := InitRegistry(specs, cases, existing)
+	migrated, err := initRegistry(specs, cases, existing, fixturePublicSurface(), parseTime)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := reg.Resources["ecs/instance"].Operations["delete"]
-	if got.Status != StatusLivePass || got.Evidence.RunID != "run-1" {
-		t.Fatalf("equivalent cases roots must preserve live evidence: %+v", got)
+	got := migrated.Resources["ecs"]["instance"].Operations["create"]
+	if got.Status != StatusOffline || got.Reason != ReasonUnknown || got.Time != parseTime.Format(time.RFC3339Nano) {
+		t.Fatalf("v1 live-pass without a fingerprint must be reset: %+v", got)
 	}
 }
 
@@ -493,42 +685,38 @@ steps:
   - name: helper create instance
     run: ecctl ecs instance create --name helper
 `)
-
-	reg, err := InitRegistry(specs, cases, nil)
+	registry, err := initRegistry(specs, cases, nil, fixturePublicSurface(), parseTime)
 	if err != nil {
 		t.Fatal(err)
 	}
-	create := reg.Resources["ecs/instance"].Operations["create"]
-	if create.Case != filepath.Join(cases, "ecs", "instance.yaml") {
-		t.Fatalf("expected matching case path, got %+v", create)
-	}
-	if len(create.Steps) != 1 || create.Steps[0] != "create" {
-		t.Fatalf("expected only matching case steps, got %+v", create.Steps)
+	create := registry.Resources["ecs"]["instance"].Operations["create"]
+	want := normalizeCasePath(filepath.Join(cases, "ecs", "instance.yaml"))
+	if create.Case != want {
+		t.Fatalf("expected matching resource case %q, got %+v", want, create)
 	}
 }
 
 func TestRegistrySummaryJSON(t *testing.T) {
-	reg := &Registry{
-		Version: 1,
-		Resources: map[string]RegistryResource{
-			"ecs/instance": {
-				Operations: map[string]RegistryOperation{
-					"create": {Status: StatusOfflineValid},
-					"delete": {Status: StatusOfflineValid},
-					"list":   {Status: StatusMissing},
-				},
+	registry := &Registry{
+		Version: RegistryVersion,
+		Resources: map[string]RegistryProduct{
+			"ecs": {
+				"instance": {Operations: map[string]RegistryOperation{
+					"create": {Status: StatusOffline},
+					"delete": {Status: StatusLivePass},
+				}},
 			},
 		},
 	}
-	sum := SummarizeRegistry(reg)
-	if sum.Entries != 3 || sum.ByStatus[StatusOfflineValid] != 2 || sum.ByStatus[StatusMissing] != 1 {
-		t.Fatalf("unexpected summary: %+v", sum)
+	summary := SummarizeRegistry(registry)
+	if summary.Entries != 2 || summary.ByStatus[StatusOffline] != 1 || summary.ByStatus[StatusLivePass] != 1 {
+		t.Fatalf("unexpected summary: %+v", summary)
 	}
-	raw, err := json.Marshal(sum)
+	raw, err := json.Marshal(summary)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `"entries":3`) {
+	if !strings.Contains(string(raw), `"entries":2`) {
 		t.Fatalf("summary JSON missing entries: %s", raw)
 	}
 }
@@ -543,6 +731,7 @@ func writeRegistryFixture(t *testing.T) (root, specs, cases string) {
 	mustWrite(t, filepath.Join(specs, "ecs", "instance.yaml"), `
 product: ecs
 resource: instance
+aliases: [vm]
 operations:
   create: {}
   delete: {}
@@ -559,9 +748,65 @@ steps:
 	return root, specs, cases
 }
 
-func reportHasCode(rep *RegistryCheckReport, code string) bool {
-	for _, e := range rep.Errors {
-		if e.Code == code {
+func validRegistryOperation(t *testing.T, cases, status, reason string) RegistryOperation {
+	t.Helper()
+	casePath := filepath.Join(cases, "ecs", "instance.yaml")
+	return RegistryOperation{
+		Status:      status,
+		Case:        normalizeCasePath(casePath),
+		Fingerprint: mustFingerprint(t, casePath),
+		Time:        parseTime.Format(time.RFC3339Nano),
+		Reason:      reason,
+	}
+}
+
+func withStatus(operation RegistryOperation, status, reason string) RegistryOperation {
+	operation.Status = status
+	operation.Reason = reason
+	return operation
+}
+
+func writeRegistry(t *testing.T, path string, operations map[string]RegistryOperation) {
+	t.Helper()
+	registry := &Registry{
+		Version: RegistryVersion,
+		Resources: map[string]RegistryProduct{
+			"ecs": {"instance": {Operations: operations}},
+		},
+	}
+	summary, err := SummarizePublicSurface(registry, fixturePublicSurface())
+	if err != nil {
+		summary = RegistryPublicSummary{Surface: "public", Resources: 1, Operations: 3, MissingCases: 3}
+	}
+	registry.Summary = summary
+	if err := WriteRegistryFile(path, registry); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func fixturePublicSurface() PublicSurface {
+	return PublicSurface{
+		ResourceCount: 1,
+		Capabilities: map[Capability]bool{
+			{Resource: "ecs/instance", Verb: "create"}: true,
+			{Resource: "ecs/instance", Verb: "delete"}: true,
+			{Resource: "ecs/instance", Verb: "list"}:   true,
+		},
+	}
+}
+
+func mustFingerprint(t *testing.T, path string) string {
+	t.Helper()
+	fingerprint, err := caseFingerprint(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fingerprint
+}
+
+func reportHasCode(report *RegistryCheckReport, code string) bool {
+	for _, validationError := range report.Errors {
+		if validationError.Code == code {
 			return true
 		}
 	}

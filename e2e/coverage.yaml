@@ -1,2127 +1,1072 @@
-version: 1
+version: 3
 generated:
   specs_dir: ../specs
   cases_dir: cases
+summary:
+  surface: public
+  resources: 27
+  operations: 142
+  missing_cases: 0
+  passed: 133
+  not_passed: 9
 resources:
-  ack/ack:
-    operations:
-      create:
-        status: live-pass
-        case: cases/ack/ack-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/ack-fix-rerun2-20260714/e2e-report.json
-          run_id: ack-fix-rerun2-20260714
-          verified_at: "2026-07-14T16:30:43.020872+08:00"
-      delete:
-        status: live-pass
-        case: cases/ack/ack-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/ack-fix-rerun2-20260714/e2e-report.json
-          run_id: ack-fix-rerun2-20260714
-          verified_at: "2026-07-14T16:30:43.020872+08:00"
-      get:
-        status: live-pass
-        case: cases/ack/ack-lifecycle.yaml
-        steps:
-          - get
-        evidence:
-          report: reports/ack-fix-rerun2-20260714/e2e-report.json
-          run_id: ack-fix-rerun2-20260714
-          verified_at: "2026-07-14T16:30:43.020872+08:00"
-      list:
-        status: live-pass
-        case: cases/ack/ack-lifecycle.yaml
-        steps:
-          - list
-        evidence:
-          report: reports/ack-fix-rerun2-20260714/e2e-report.json
-          run_id: ack-fix-rerun2-20260714
-          verified_at: "2026-07-14T16:30:43.020872+08:00"
-      update:
-        status: live-pass
-        case: cases/ack/ack-lifecycle.yaml
-        steps:
-          - update
-        evidence:
-          report: reports/ack-fix-rerun2-20260714/e2e-report.json
-          run_id: ack-fix-rerun2-20260714
-          verified_at: "2026-07-14T16:30:43.020872+08:00"
-      upgrade:
-        status: live-pass
-        case: cases/ack/ack-upgrade-lifecycle.yaml
-        steps:
-          - upgrade
-        evidence:
-          report: reports/ack-fix-rerun8-20260714/e2e-report.json
-          run_id: ack-fix-rerun8-20260714
-          verified_at: "2026-07-14T18:59:17.749221+08:00"
-  ack/addon:
-    operations:
-      create:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      delete:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      get:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      list:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      update:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      upgrade:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-  ack/alert:
-    operations:
-      update:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-  ack/audit:
-    operations:
-      get:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      update:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-  ack/auto-repair-policy:
-    operations:
-      create:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      delete:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      get:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      list:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      update:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-  ack/check:
-    operations:
-      create:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      get:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      list:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-  ack/check-item:
-    operations:
-      list:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-  ack/config:
-    operations:
-      delete:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      get:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      update:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-  ack/contact:
-    operations:
-      delete:
-        status: manual-only
-        reason: unsafe-delete
-        review_after: "2026-10-06"
-  ack/contact-group:
-    operations:
-      delete:
-        status: manual-only
-        reason: unsafe-delete
-        review_after: "2026-10-06"
-      update:
-        status: manual-only
-        reason: unsafe-delete
-        review_after: "2026-10-06"
-  ack/control-plane-log:
-    operations:
-      get:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      update:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-  ack/diagnosis:
-    operations:
-      create:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      get:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-  ack/event:
-    operations:
-      list:
-        status: offline-valid
-        case: cases/ack/event-readonly.yaml
-        steps:
-          - list regional events
-        evidence:
-          coverage_source: command
-  ack/instance:
-    operations:
-      create:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      delete:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      get:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      list:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      update:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-  ack/kubeconfig:
-    operations:
-      create:
-        status: live-pass
-        case: cases/ack/kubeconfig-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/ack-access-rerun7b-20260715/e2e-report.json
-          run_id: ack-access-rerun7b-20260715
-          verified_at: "2026-07-15T10:29:46.153532+08:00"
-      get:
-        status: live-pass
-        case: cases/ack/kubeconfig-lifecycle.yaml
-        steps:
-          - get
-        evidence:
-          report: reports/ack-access-rerun7b-20260715/e2e-report.json
-          run_id: ack-access-rerun7b-20260715
-          verified_at: "2026-07-15T10:29:46.153532+08:00"
-      list:
-        status: live-pass
-        case: cases/ack/kubeconfig-lifecycle.yaml
-        steps:
-          - list
-        evidence:
-          report: reports/ack-access-rerun7b-20260715/e2e-report.json
-          run_id: ack-access-rerun7b-20260715
-          verified_at: "2026-07-15T10:29:46.153532+08:00"
-      revoke:
-        status: live-pass
-        case: cases/ack/kubeconfig-lifecycle.yaml
-        steps:
-          - revoke
-        evidence:
-          report: reports/ack-access-rerun7b-20260715/e2e-report.json
-          run_id: ack-access-rerun7b-20260715
-          verified_at: "2026-07-15T10:29:46.153532+08:00"
-      update:
-        status: offline-valid
-        case: cases/ack/kubeconfig-update-lifecycle.yaml
-        steps:
-          - update
-        evidence:
-          coverage_source: command
-  ack/node:
-    operations:
-      attach:
-        status: live-pass
-        case: cases/ack/node-lifecycle.yaml
-        steps:
-          - attach
-        evidence:
-          report: reports/ack-fix-rerun9-20260714/e2e-report.json
-          run_id: ack-fix-rerun9-20260714
-          verified_at: "2026-07-14T19:09:12.190565+08:00"
-      delete:
-        status: live-pass
-        case: cases/ack/node-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/ack-fix-rerun9-20260714/e2e-report.json
-          run_id: ack-fix-rerun9-20260714
-          verified_at: "2026-07-14T19:09:12.190565+08:00"
-      get:
-        status: live-pass
-        case: cases/ack/node-lifecycle.yaml
-        steps:
-          - get
-        evidence:
-          report: reports/ack-fix-rerun9-20260714/e2e-report.json
-          run_id: ack-fix-rerun9-20260714
-          verified_at: "2026-07-14T19:09:12.190565+08:00"
-      list:
-        status: live-pass
-        case: cases/ack/node-lifecycle.yaml
-        steps:
-          - list
-        evidence:
-          report: reports/ack-fix-rerun9-20260714/e2e-report.json
-          run_id: ack-fix-rerun9-20260714
-          verified_at: "2026-07-14T19:09:12.190565+08:00"
-  ack/nodepool:
-    operations:
-      attach:
-        status: live-pass
-        case: cases/ack/nodepool-lifecycle.yaml
-        steps:
-          - attach
-        evidence:
-          report: reports/ack-fix-rerun12-20260714/e2e-report.json
-          run_id: ack-fix-rerun12-20260714
-          verified_at: "2026-07-14T19:56:42.555206+08:00"
-      create:
-        status: live-pass
-        case: cases/ack/nodepool-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/ack-fix-rerun12-20260714/e2e-report.json
-          run_id: ack-fix-rerun12-20260714
-          verified_at: "2026-07-14T19:56:42.555206+08:00"
-      delete:
-        status: live-pass
-        case: cases/ack/nodepool-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/ack-fix-rerun12-20260714/e2e-report.json
-          run_id: ack-fix-rerun12-20260714
-          verified_at: "2026-07-14T19:56:42.555206+08:00"
-      detach:
-        status: live-pass
-        case: cases/ack/nodepool-lifecycle.yaml
-        steps:
-          - detach
-        evidence:
-          report: reports/ack-fix-rerun12-20260714/e2e-report.json
-          run_id: ack-fix-rerun12-20260714
-          verified_at: "2026-07-14T19:56:42.555206+08:00"
-      get:
-        status: live-pass
-        case: cases/ack/nodepool-lifecycle.yaml
-        steps:
-          - get
-        evidence:
-          report: reports/ack-fix-rerun12-20260714/e2e-report.json
-          run_id: ack-fix-rerun12-20260714
-          verified_at: "2026-07-14T19:56:42.555206+08:00"
-      list:
-        status: live-pass
-        case: cases/ack/nodepool-lifecycle.yaml
-        steps:
-          - list
-        evidence:
-          report: reports/ack-fix-rerun12-20260714/e2e-report.json
-          run_id: ack-fix-rerun12-20260714
-          verified_at: "2026-07-14T19:56:42.555206+08:00"
-      repair:
-        status: live-pass
-        case: cases/ack/nodepool-lifecycle.yaml
-        steps:
-          - repair
-        evidence:
-          report: reports/ack-fix-rerun12-20260714/e2e-report.json
-          run_id: ack-fix-rerun12-20260714
-          verified_at: "2026-07-14T19:56:42.555206+08:00"
-      update:
-        status: live-pass
-        case: cases/ack/nodepool-lifecycle.yaml
-        steps:
-          - update
-        evidence:
-          report: reports/ack-fix-rerun12-20260714/e2e-report.json
-          run_id: ack-fix-rerun12-20260714
-          verified_at: "2026-07-14T19:56:42.555206+08:00"
-      upgrade:
-        status: live-pass
-        case: cases/ack/nodepool-upgrade-lifecycle.yaml
-        steps:
-          - upgrade
-        evidence:
-          report: reports/ack-fix-rerun13-20260714/e2e-report.json
-          run_id: ack-fix-rerun13-20260714
-          verified_at: "2026-07-14T20:21:05.124532+08:00"
-  ack/operation-plan:
-    operations:
-      cancel:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      get:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      list:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-  ack/permission:
-    operations:
-      delete:
-        status: live-pass
-        case: cases/ack/permission-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/ack-access-rerun7b-20260715/e2e-report.json
-          run_id: ack-access-rerun7b-20260715
-          verified_at: "2026-07-15T10:29:46.153532+08:00"
-      get:
-        status: live-pass
-        case: cases/ack/permission-lifecycle.yaml
-        steps:
-          - get
-        evidence:
-          report: reports/ack-access-rerun7b-20260715/e2e-report.json
-          run_id: ack-access-rerun7b-20260715
-          verified_at: "2026-07-15T10:29:46.153532+08:00"
-      list:
-        status: live-pass
-        case: cases/ack/permission-lifecycle.yaml
-        steps:
-          - list
-        evidence:
-          report: reports/ack-access-rerun7b-20260715/e2e-report.json
-          run_id: ack-access-rerun7b-20260715
-          verified_at: "2026-07-15T10:29:46.153532+08:00"
-      update:
-        status: live-pass
-        case: cases/ack/permission-lifecycle.yaml
-        steps:
-          - update
-        evidence:
-          report: reports/ack-access-rerun7b-20260715/e2e-report.json
-          run_id: ack-access-rerun7b-20260715
-          verified_at: "2026-07-15T10:29:46.153532+08:00"
-  ack/policy:
-    operations:
-      get:
-        status: offline-valid
-        case: cases/ack/policy-readonly.yaml
-        steps:
-          - get policy
-        evidence:
-          coverage_source: command
-      list:
-        status: offline-valid
-        case: cases/ack/policy-readonly.yaml
-        steps:
-          - list policies
-        evidence:
-          coverage_source: command
-  ack/region:
-    operations:
-      list:
-        status: live-pass
-        case: cases/ack/region-lifecycle.yaml
-        steps:
-          - list regions
-        evidence:
-          report: reports/public-live-ack-node-region-20260714-134254/e2e-report.json
-          run_id: public-live-ack-node-region-20260714-134254
-          verified_at: "2026-07-14T13:43:29.792992+08:00"
-  ack/report:
-    operations:
-      create:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      get:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      list:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-  ack/task:
-    operations:
-      cancel:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      get:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      list:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      pause:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      resume:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-  ack/template:
-    operations:
-      create:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      delete:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      get:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      list:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      update:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-  ack/trigger:
-    operations:
-      create:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      delete:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      get:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      list:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-  ack/version:
-    operations:
-      list:
-        status: live-pass
-        case: cases/ack/region-lifecycle.yaml
-        steps:
-          - list versions
-        evidence:
-          report: reports/public-live-ack-node-region-20260714-134254/e2e-report.json
-          run_id: public-live-ack-node-region-20260714-134254
-          verified_at: "2026-07-14T13:43:29.792992+08:00"
-  ack/vuls:
-    operations:
-      create:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-      list:
-        status: manual-only
-        reason: requires-existing-cluster
-        review_after: "2026-10-06"
-  ecs/assistant:
-    operations:
-      get:
-        status: live-pass
-        case: cases/ecs/assistant-lifecycle.yaml
-        steps:
-          - get service settings
-        evidence:
-          report: reports/fix-rerun3-20260714/e2e-report.json
-          run_id: fix-rerun3-20260714
-          verified_at: "2026-07-14T15:55:56.239775+08:00"
-      install:
-        status: live-pass
-        case: cases/ecs/assistant-lifecycle.yaml
-        steps:
-          - install agent
-        evidence:
-          report: reports/fix-rerun3-20260714/e2e-report.json
-          run_id: fix-rerun3-20260714
-          verified_at: "2026-07-14T15:55:56.239775+08:00"
-      update:
-        status: live-pass
-        case: cases/ecs/assistant-lifecycle.yaml
-        steps:
-          - update service settings idempotently
-        evidence:
-          report: reports/fix-rerun3-20260714/e2e-report.json
-          run_id: fix-rerun3-20260714
-          verified_at: "2026-07-14T15:55:56.239775+08:00"
-  ecs/auto-snapshot-policy:
-    operations:
-      create:
-        status: live-pass
-        case: cases/ecs/auto-snapshot-policy-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-      delete:
-        status: live-pass
-        case: cases/ecs/auto-snapshot-policy-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-      get:
-        status: live-pass
-        case: cases/ecs/auto-snapshot-policy-lifecycle.yaml
-        steps:
-          - get (read-back after update)
-          - get (read-back)
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-      list:
-        status: live-pass
-        case: cases/ecs/auto-snapshot-policy-lifecycle.yaml
-        steps:
-          - list (find ours)
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-      update:
-        status: live-pass
-        case: cases/ecs/auto-snapshot-policy-lifecycle.yaml
-        steps:
-          - update
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-  ecs/command:
-    operations:
-      create:
-        status: live-pass
-        case: cases/ecs/command-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-      delete:
-        status: live-pass
-        case: cases/ecs/command-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-      get:
-        status: live-pass
-        case: cases/ecs/command-lifecycle.yaml
-        steps:
-          - get (after update)
-          - get (read-back)
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-      invoke:
-        status: live-pass
-        case: cases/ecs/command-lifecycle.yaml
-        steps:
-          - invoke
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-      list:
-        status: live-pass
-        case: cases/ecs/command-lifecycle.yaml
-        steps:
-          - list (find ours)
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-      stop:
-        status: live-pass
-        case: cases/ecs/command-lifecycle.yaml
-        steps:
-          - stop
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-      update:
-        status: live-pass
-        case: cases/ecs/command-lifecycle.yaml
-        steps:
-          - update
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-  ecs/disk:
-    operations:
-      attach:
-        status: live-pass
-        case: cases/ecs/disk-lifecycle.yaml
-        steps:
-          - attach
-        evidence:
-          report: reports/fix-rerun3-20260714/e2e-report.json
-          run_id: fix-rerun3-20260714
-          verified_at: "2026-07-14T15:55:56.239775+08:00"
-      clone:
-        status: live-pass
-        case: cases/ecs/disk-lifecycle.yaml
-        steps:
-          - clone
-        evidence:
-          report: reports/fix-rerun3-20260714/e2e-report.json
-          run_id: fix-rerun3-20260714
-          verified_at: "2026-07-14T15:55:56.239775+08:00"
-      create:
-        status: live-pass
-        case: cases/ecs/disk-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/fix-rerun3-20260714/e2e-report.json
-          run_id: fix-rerun3-20260714
-          verified_at: "2026-07-14T15:55:56.239775+08:00"
-      delete:
-        status: live-pass
-        case: cases/ecs/disk-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/fix-rerun3-20260714/e2e-report.json
-          run_id: fix-rerun3-20260714
-          verified_at: "2026-07-14T15:55:56.239775+08:00"
-      detach:
-        status: live-pass
-        case: cases/ecs/disk-lifecycle.yaml
-        steps:
-          - detach
-        evidence:
-          report: reports/fix-rerun3-20260714/e2e-report.json
-          run_id: fix-rerun3-20260714
-          verified_at: "2026-07-14T15:55:56.239775+08:00"
-      get:
-        status: live-pass
-        case: cases/ecs/disk-lifecycle.yaml
-        steps:
-          - get (read-back after attach)
-          - get (read-back after update)
-          - get (read-back)
-        evidence:
-          report: reports/fix-rerun3-20260714/e2e-report.json
-          run_id: fix-rerun3-20260714
-          verified_at: "2026-07-14T15:55:56.239775+08:00"
-      list:
-        status: live-pass
-        case: cases/ecs/disk-lifecycle.yaml
-        steps:
-          - list (find ours)
-          - resolve cloned disk
-          - resolve host system disk
-        evidence:
-          report: reports/fix-rerun3-20260714/e2e-report.json
-          run_id: fix-rerun3-20260714
-          verified_at: "2026-07-14T15:55:56.239775+08:00"
-      monitor:
-        status: live-pass
-        case: cases/ecs/disk-lifecycle.yaml
-        steps:
-          - monitor
-        evidence:
-          report: reports/fix-rerun3-20260714/e2e-report.json
-          run_id: fix-rerun3-20260714
-          verified_at: "2026-07-14T15:55:56.239775+08:00"
-      reinit:
-        status: live-pass
-        case: cases/ecs/disk-lifecycle.yaml
-        steps:
-          - reinitialize system disk
-        evidence:
-          report: reports/fix-rerun3-20260714/e2e-report.json
-          run_id: fix-rerun3-20260714
-          verified_at: "2026-07-14T15:55:56.239775+08:00"
-      reset:
-        status: live-pass
-        case: cases/ecs/disk-lifecycle.yaml
-        steps:
-          - reset system disk
-        evidence:
-          report: reports/fix-rerun3-20260714/e2e-report.json
-          run_id: fix-rerun3-20260714
-          verified_at: "2026-07-14T15:55:56.239775+08:00"
-      update:
-        status: live-pass
-        case: cases/ecs/disk-lifecycle.yaml
-        steps:
-          - update
-        evidence:
-          report: reports/fix-rerun3-20260714/e2e-report.json
-          run_id: fix-rerun3-20260714
-          verified_at: "2026-07-14T15:55:56.239775+08:00"
-  ecs/eni:
-    operations:
-      attach:
-        status: live-pass
-        case: cases/ecs/eni-lifecycle.yaml
-        steps:
-          - attach
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-      create:
-        status: live-pass
-        case: cases/ecs/eni-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-      delete:
-        status: live-pass
-        case: cases/ecs/eni-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-      detach:
-        status: live-pass
-        case: cases/ecs/eni-lifecycle.yaml
-        steps:
-          - detach
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-      get:
-        status: live-pass
-        case: cases/ecs/eni-lifecycle.yaml
-        steps:
-          - get (read-back after update)
-          - get (read-back attached)
-          - get (read-back)
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-      list:
-        status: live-pass
-        case: cases/ecs/eni-lifecycle.yaml
-        steps:
-          - list (find ours)
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-      update:
-        status: live-pass
-        case: cases/ecs/eni-lifecycle.yaml
-        steps:
-          - update
-        evidence:
-          report: reports/fix-rerun2-20260714/e2e-report.json
-          run_id: fix-rerun2-20260714
-          verified_at: "2026-07-14T15:42:36.355234+08:00"
-  ecs/image:
-    operations:
-      copy:
-        status: live-pass
-        case: cases/ecs/image-copy-lifecycle.yaml
-        steps:
-          - copy
-        evidence:
-          report: reports/public-live-20260714-124001/e2e-report.json
-          run_id: public-live-20260714-124001
-          verified_at: "2026-07-14T13:11:12.283909+08:00"
-      create:
-        status: live-pass
-        case: cases/ecs/image-copy-lifecycle.yaml
-        steps:
-          - create source image
-        evidence:
-          report: reports/public-live-20260714-124001/e2e-report.json
-          run_id: public-live-20260714-124001
-          verified_at: "2026-07-14T13:11:12.283909+08:00"
-      delete:
-        status: live-pass
-        case: cases/ecs/image-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      export:
-        status: offline-valid
-        case: cases/ecs/image-export-lifecycle.yaml
-        steps:
-          - export
-        evidence:
-          coverage_source: command
-      get:
-        status: live-pass
-        case: cases/ecs/image-lifecycle.yaml
-        steps:
-          - get
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      import:
-        status: offline-valid
-        case: cases/ecs/image-import-lifecycle.yaml
-        steps:
-          - import
-        evidence:
-          coverage_source: command
-      list:
-        status: live-pass
-        case: cases/ecs/image-lifecycle.yaml
-        steps:
-          - list
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      update:
-        status: live-pass
-        case: cases/ecs/image-lifecycle.yaml
-        steps:
-          - update
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-  ecs/instance:
-    operations:
-      create:
-        status: live-pass
-        case: cases/ecs/instance-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      delete:
-        status: live-pass
-        case: cases/ecs/instance-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      exec:
-        status: live-pass
-        case: cases/ecs/instance-lifecycle.yaml
-        steps:
-          - exec
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      get:
-        status: live-pass
-        case: cases/ecs/instance-lifecycle.yaml
-        steps:
-          - get (read-back rename)
-          - get (read-back)
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      list:
-        status: live-pass
-        case: cases/ecs/instance-lifecycle.yaml
-        steps:
-          - list (find ours)
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      monitor:
-        status: live-pass
-        case: cases/ecs/instance-lifecycle.yaml
-        steps:
-          - monitor
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      reboot:
-        status: live-pass
-        case: cases/ecs/instance-lifecycle.yaml
-        steps:
-          - reboot
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      renew:
-        status: offline-valid
-        case: cases/ecs/instance-renew-lifecycle.yaml
-        steps:
-          - renew
-        evidence:
-          coverage_source: command
-      sendfile:
-        status: live-pass
-        case: cases/ecs/instance-lifecycle.yaml
-        steps:
-          - sendfile
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      start:
-        status: live-pass
-        case: cases/ecs/instance-lifecycle.yaml
-        steps:
-          - start
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      stop:
-        status: live-pass
-        case: cases/ecs/instance-lifecycle.yaml
-        steps:
-          - stop
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      update:
-        status: live-pass
-        case: cases/ecs/instance-lifecycle.yaml
-        steps:
-          - update (rename)
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-  ecs/keypair:
-    operations:
-      create:
-        status: live-pass
-        case: cases/ecs/keypair-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      delete:
-        status: live-pass
-        case: cases/ecs/keypair-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      get:
-        status: live-pass
-        case: cases/ecs/keypair-lifecycle.yaml
-        steps:
-          - get (read-back)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      list:
-        status: live-pass
-        case: cases/ecs/keypair-lifecycle.yaml
-        steps:
-          - list (find ours)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-  ecs/launch-template:
-    operations:
-      create:
-        status: live-pass
-        case: cases/ecs/launch-template-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      delete:
-        status: live-pass
-        case: cases/ecs/launch-template-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      get:
-        status: live-pass
-        case: cases/ecs/launch-template-lifecycle.yaml
-        steps:
-          - get (read-back)
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      list:
-        status: live-pass
-        case: cases/ecs/launch-template-lifecycle.yaml
-        steps:
-          - list (find ours)
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      update:
-        status: live-pass
-        case: cases/ecs/launch-template-lifecycle.yaml
-        steps:
-          - update (create a new version)
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-  ecs/port-range-list:
-    operations:
-      create:
-        status: live-pass
-        case: cases/ecs/port-range-list-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      delete:
-        status: live-pass
-        case: cases/ecs/port-range-list-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      get:
-        status: live-pass
-        case: cases/ecs/port-range-list-lifecycle.yaml
-        steps:
-          - get (read-back after update)
-          - get (read-back)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      list:
-        status: live-pass
-        case: cases/ecs/port-range-list-lifecycle.yaml
-        steps:
-          - list (find ours)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      update:
-        status: live-pass
-        case: cases/ecs/port-range-list-lifecycle.yaml
-        steps:
-          - update (rename + add entry)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-  ecs/prefix-list:
-    operations:
-      create:
-        status: live-pass
-        case: cases/ecs/prefix-list-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      delete:
-        status: live-pass
-        case: cases/ecs/prefix-list-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      get:
-        status: live-pass
-        case: cases/ecs/prefix-list-lifecycle.yaml
-        steps:
-          - get (read-back after update)
-          - get (read-back)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      list:
-        status: live-pass
-        case: cases/ecs/prefix-list-lifecycle.yaml
-        steps:
-          - list (find ours)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      update:
-        status: live-pass
-        case: cases/ecs/prefix-list-lifecycle.yaml
-        steps:
-          - update (rename + add entry)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-  ecs/region:
-    operations:
-      list:
-        status: live-pass
-        case: cases/ecs/region-lifecycle.yaml
-        steps:
-          - list
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-  ecs/sg:
-    operations:
-      authorize:
-        status: live-pass
-        case: cases/ecs/sg-lifecycle.yaml
-        steps:
-          - authorize (ingress rule)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      create:
-        status: live-pass
-        case: cases/ecs/sg-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      delete:
-        status: live-pass
-        case: cases/ecs/sg-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      get:
-        status: live-pass
-        case: cases/ecs/sg-lifecycle.yaml
-        steps:
-          - get (read-back after update)
-          - get (read-back)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      list:
-        status: live-pass
-        case: cases/ecs/sg-lifecycle.yaml
-        steps:
-          - list (find ours)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      revoke:
-        status: live-pass
-        case: cases/ecs/sg-lifecycle.yaml
-        steps:
-          - revoke (ingress rule)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      update:
-        status: live-pass
-        case: cases/ecs/sg-lifecycle.yaml
-        steps:
-          - update (rename)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-  ecs/snapshot:
-    operations:
-      copy:
-        status: live-pass
-        case: cases/ecs/snapshot-copy-lifecycle.yaml
-        steps:
-          - copy
-        evidence:
-          report: reports/snapshot-copy-fix-rerun-20260715/e2e-report.json
-          run_id: snapshot-copy-fix-rerun-20260715
-          verified_at: "2026-07-15T09:49:15.711572+08:00"
-      create:
-        status: live-pass
-        case: cases/ecs/snapshot-copy-lifecycle.yaml
-        steps:
-          - create source snapshot
-        evidence:
-          report: reports/snapshot-copy-fix-rerun-20260715/e2e-report.json
-          run_id: snapshot-copy-fix-rerun-20260715
-          verified_at: "2026-07-15T09:49:15.711572+08:00"
-      delete:
-        status: live-pass
-        case: cases/ecs/snapshot-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      get:
-        status: live-pass
-        case: cases/ecs/snapshot-lifecycle.yaml
-        steps:
-          - get (read-back after update)
-          - get (read-back)
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      list:
-        status: live-pass
-        case: cases/ecs/snapshot-lifecycle.yaml
-        steps:
-          - list (find ours)
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      update:
-        status: live-pass
-        case: cases/ecs/snapshot-lifecycle.yaml
-        steps:
-          - update (rename)
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-  ecs/snapshot-group:
-    operations:
-      create:
-        status: live-pass
-        case: cases/ecs/snapshot-group-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      delete:
-        status: live-pass
-        case: cases/ecs/snapshot-group-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      get:
-        status: live-pass
-        case: cases/ecs/snapshot-group-lifecycle.yaml
-        steps:
-          - get (read-back after update)
-          - get (read-back)
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      list:
-        status: live-pass
-        case: cases/ecs/snapshot-group-lifecycle.yaml
-        steps:
-          - list (find ours)
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      update:
-        status: live-pass
-        case: cases/ecs/snapshot-group-lifecycle.yaml
-        steps:
-          - update (rename)
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-  ecs/zone:
-    operations:
-      list:
-        status: live-pass
-        case: cases/ecs/zone-lifecycle.yaml
-        steps:
-          - list
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-  lingjun/cluster:
-    operations:
-      create:
-        status: offline-valid
-        case: cases/lingjun/cluster-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          coverage_source: command
-      delete:
-        status: offline-valid
-        case: cases/lingjun/cluster-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          coverage_source: command
-      get:
-        status: offline-valid
-        case: cases/lingjun/cluster-lifecycle.yaml
-        steps:
-          - get
-        evidence:
-          coverage_source: command
-      list:
-        status: offline-valid
-        case: cases/lingjun/cluster-lifecycle.yaml
-        steps:
-          - list
-        evidence:
-          coverage_source: command
-      update:
-        status: offline-valid
-        case: cases/lingjun/cluster-scaling-lifecycle.yaml
-        steps:
-          - update extend
-          - update shrink
-        evidence:
-          coverage_source: command
-  lingjun/eni:
-    operations:
-      attach:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      create:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      delete:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      detach:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      get:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      list:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      update:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-  lingjun/er:
-    operations:
-      create:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      delete:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      get:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      list:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      update:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-  lingjun/lni:
-    operations:
-      get:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      list:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      update:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-  lingjun/net-test:
-    operations:
-      create:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      get:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      list:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-  lingjun/node:
-    operations:
-      delete:
-        status: planned
-        owner: e2e
-        target_phase: 1
-      exec:
-        status: planned
-        owner: e2e
-        target_phase: 1
-      get:
-        status: planned
-        owner: e2e
-        target_phase: 1
-      list:
-        status: offline-valid
-        case: cases/lingjun/node-readonly.yaml
-        steps:
-          - list free nodes
-        evidence:
-          coverage_source: command
-      reboot:
-        status: planned
-        owner: e2e
-        target_phase: 1
-      sendfile:
-        status: planned
-        owner: e2e
-        target_phase: 1
-      stop:
-        status: planned
-        owner: e2e
-        target_phase: 1
-  lingjun/node-group:
-    operations:
-      create:
-        status: planned
-        owner: e2e
-        target_phase: 1
-      delete:
-        status: planned
-        owner: e2e
-        target_phase: 1
-      list:
-        status: planned
-        owner: e2e
-        target_phase: 1
-      update:
-        status: planned
-        owner: e2e
-        target_phase: 1
-  lingjun/subnet:
-    operations:
-      create:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      delete:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      get:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      list:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      update:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-  lingjun/vcc:
-    operations:
-      create:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      delete:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      get:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      list:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      update:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-  lingjun/vpd:
-    operations:
-      create:
-        status: live-pass
-        case: cases/lingjun/vpd-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      delete:
-        status: live-pass
-        case: cases/lingjun/vpd-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      get:
-        status: live-pass
-        case: cases/lingjun/vpd-lifecycle.yaml
-        steps:
-          - get
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      list:
-        status: live-pass
-        case: cases/lingjun/vpd-lifecycle.yaml
-        steps:
-          - list
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-      update:
-        status: live-pass
-        case: cases/lingjun/vpd-lifecycle.yaml
-        steps:
-          - update
-        evidence:
-          report: reports/fix-rerun-20260714-150552/e2e-report.json
-          run_id: fix-rerun-20260714-150552
-          verified_at: "2026-07-14T15:23:15.281625+08:00"
-  lingjun/vsc:
-    operations:
-      create:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      delete:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      get:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-      list:
-        status: quarantined
-        reason: known-ecctl-bug
-        issue: docs/design/evidence/phase6-verification.md#lingjun-command-surface-quarantine
-        last_checked: "2026-07-06"
-  rg/admin-setting:
-    operations:
-      get:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      update:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-  rg/associated-transfer:
-    operations:
-      disable:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      enable:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      list:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      update:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-  rg/group:
-    operations:
-      create:
-        status: live-pass
-        case: cases/rg/group-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/evidence/phase5-live/e2e-report.json
-          run_id: 20260706-143456
-          verified_at: "2026-07-06T14:35:30+08:00"
-      delete:
-        status: live-pass
-        case: cases/rg/group-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/evidence/phase5-live/e2e-report.json
-          run_id: 20260706-143456
-          verified_at: "2026-07-06T14:35:30+08:00"
-      get:
-        status: live-pass
-        case: cases/rg/group-lifecycle.yaml
-        steps:
-          - get (read-back)
-        evidence:
-          report: reports/evidence/phase5-live/e2e-report.json
-          run_id: 20260706-143456
-          verified_at: "2026-07-06T14:35:30+08:00"
-      list:
-        status: live-pass
-        case: cases/rg/group-lifecycle.yaml
-        steps:
-          - list (find ours)
-        evidence:
-          report: reports/evidence/phase5-live/e2e-report.json
-          run_id: 20260706-143456
-          verified_at: "2026-07-06T14:35:30+08:00"
-      update:
-        status: live-pass
-        case: cases/rg/group-lifecycle.yaml
-        steps:
-          - update
-        evidence:
-          report: reports/evidence/phase5-live/e2e-report.json
-          run_id: 20260706-143456
-          verified_at: "2026-07-06T14:35:30+08:00"
-  rg/notification:
-    operations:
-      disable:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      enable:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      get:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-  rg/policy:
-    operations:
-      attach:
-        status: offline-valid
-        case: cases/rg/policy-lifecycle.yaml
-        steps:
-          - attach policy to ServiceRole
-        evidence:
-          coverage_source: command
-      create:
-        status: offline-valid
-        case: cases/rg/policy-lifecycle.yaml
-        steps:
-          - create custom policy
-        evidence:
-          coverage_source: command
-      delete:
-        status: offline-valid
-        case: cases/rg/policy-lifecycle.yaml
-        steps:
-          - delete custom policy
-        evidence:
-          coverage_source: command
-      detach:
-        status: offline-valid
-        case: cases/rg/policy-lifecycle.yaml
-        steps:
-          - detach policy from ServiceRole
-        evidence:
-          coverage_source: command
-      get:
-        status: offline-valid
-        case: cases/rg/governance-readonly.yaml
-        steps:
-          - get system policy
-        evidence:
-          coverage_source: command
-      list:
-        status: offline-valid
-        case: cases/rg/governance-readonly.yaml
-        steps:
-          - list custom policies
-        evidence:
-          coverage_source: command
-  rg/resource:
-    operations:
-      list:
-        status: offline-valid
-        case: cases/rg/governance-readonly.yaml
-        steps:
-          - list resources
-        evidence:
-          coverage_source: command
-      update:
-        status: planned
-        owner: e2e
-        target_phase: 1
-  rg/role:
-    operations:
-      create:
-        status: offline-valid
-        case: cases/rg/policy-lifecycle.yaml
-        steps:
-          - create ServiceRole prerequisite
-        evidence:
-          coverage_source: command
-      delete:
-        status: offline-valid
-        case: cases/rg/policy-lifecycle.yaml
-        steps:
-          - delete ServiceRole
-        evidence:
-          coverage_source: command
-      get:
-        status: planned
-        owner: e2e
-        target_phase: 1
-      list:
-        status: offline-valid
-        case: cases/rg/governance-readonly.yaml
-        steps:
-          - list roles
-        evidence:
-          coverage_source: command
-      update:
-        status: planned
-        owner: e2e
-        target_phase: 1
-  rg/service-linked-role:
-    operations:
-      create:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      delete:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-  rg/version:
-    operations:
-      create:
-        status: planned
-        owner: e2e
-        target_phase: 1
-      delete:
-        status: planned
-        owner: e2e
-        target_phase: 1
-      get:
-        status: planned
-        owner: e2e
-        target_phase: 1
-      list:
-        status: planned
-        owner: e2e
-        target_phase: 1
-      update:
-        status: planned
-        owner: e2e
-        target_phase: 1
-  tag/associated-resource-rule:
-    operations:
-      create:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      delete:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      list:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      update:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-  tag/policy:
-    operations:
-      attach:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      create:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      delete:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      detach:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      get:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      list:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-      update:
-        status: manual-only
-        reason: requires-human-approval
-        review_after: "2026-10-06"
-  tag/resource:
-    operations:
-      apply:
-        status: live-pass
-        case: cases/tag/resource-lifecycle.yaml
-        steps:
-          - apply
-        evidence:
-          report: reports/evidence/phase5-live/e2e-report.json
-          run_id: 20260706-143456
-          verified_at: "2026-07-06T14:35:30+08:00"
-      list:
-        status: live-pass
-        case: cases/tag/resource-lifecycle.yaml
-        steps:
-          - list by arn
-        evidence:
-          report: reports/evidence/phase5-live/e2e-report.json
-          run_id: 20260706-143456
-          verified_at: "2026-07-06T14:35:30+08:00"
-      remove:
-        status: live-pass
-        case: cases/tag/resource-lifecycle.yaml
-        steps:
-          - remove
-        evidence:
-          report: reports/evidence/phase5-live/e2e-report.json
-          run_id: 20260706-143456
-          verified_at: "2026-07-06T14:35:30+08:00"
-  vpc/vpc:
-    operations:
-      create:
-        status: live-pass
-        case: cases/vpc/vpc-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      delete:
-        status: live-pass
-        case: cases/vpc/vpc-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      get:
-        status: live-pass
-        case: cases/vpc/vpc-lifecycle.yaml
-        steps:
-          - get (read-back)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      list:
-        status: live-pass
-        case: cases/vpc/vpc-lifecycle.yaml
-        steps:
-          - list (find ours)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      update:
-        status: live-pass
-        case: cases/vpc/vpc-lifecycle.yaml
-        steps:
-          - update
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-  vpc/vswitch:
-    operations:
-      create:
-        status: live-pass
-        case: cases/vpc/vswitch-lifecycle.yaml
-        steps:
-          - create
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      delete:
-        status: live-pass
-        case: cases/vpc/vswitch-lifecycle.yaml
-        steps:
-          - delete
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      get:
-        status: live-pass
-        case: cases/vpc/vswitch-lifecycle.yaml
-        steps:
-          - get (read-back after update)
-          - get (read-back)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      list:
-        status: live-pass
-        case: cases/vpc/vswitch-lifecycle.yaml
-        steps:
-          - list (find ours)
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
-      update:
-        status: live-pass
-        case: cases/vpc/vswitch-lifecycle.yaml
-        steps:
-          - update
-        evidence:
-          report: reports/public-live-remaining-20260714-131331/e2e-report.json
-          run_id: public-live-remaining-20260714-131331
-          verified_at: "2026-07-14T13:39:51.320077+08:00"
+  ack:
+    ack:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:909042f388045603a598bf54088a9a6777cd35f5ae8d41472b82f067bca768f8
+          time: "2026-07-14T16:30:43.020872+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:909042f388045603a598bf54088a9a6777cd35f5ae8d41472b82f067bca768f8
+          time: "2026-07-14T16:30:43.020872+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:909042f388045603a598bf54088a9a6777cd35f5ae8d41472b82f067bca768f8
+          time: "2026-07-14T16:30:43.020872+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:909042f388045603a598bf54088a9a6777cd35f5ae8d41472b82f067bca768f8
+          time: "2026-07-14T16:30:43.020872+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:909042f388045603a598bf54088a9a6777cd35f5ae8d41472b82f067bca768f8
+          time: "2026-07-14T16:30:43.020872+08:00"
+          reason: live-verified
+        upgrade:
+          status: live-pass
+          case: cases/ack/ack-upgrade-lifecycle.yaml
+          fingerprint: sha256:b4bc6fa99249e4632074525e082846d058d08c4944a87d592a543fc1cac9e994
+          time: "2026-07-14T18:59:17.749221+08:00"
+          reason: live-verified
+    event:
+      operations:
+        list:
+          status: offline
+          case: cases/ack/event-readonly.yaml
+          fingerprint: sha256:3d14309727fa2585dbfca535e971a55749ceb3a75c27526f3591b6969d98f8cc
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+    kubeconfig:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ack/kubeconfig-lifecycle.yaml
+          fingerprint: sha256:24f7da700973fc531f4353d4086b891c3f9ceb28aef470fbf91ee1a2315c5c19
+          time: "2026-07-15T10:29:46.153532+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ack/kubeconfig-lifecycle.yaml
+          fingerprint: sha256:24f7da700973fc531f4353d4086b891c3f9ceb28aef470fbf91ee1a2315c5c19
+          time: "2026-07-15T10:29:46.153532+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ack/kubeconfig-lifecycle.yaml
+          fingerprint: sha256:24f7da700973fc531f4353d4086b891c3f9ceb28aef470fbf91ee1a2315c5c19
+          time: "2026-07-15T10:29:46.153532+08:00"
+          reason: live-verified
+        revoke:
+          status: live-pass
+          case: cases/ack/kubeconfig-lifecycle.yaml
+          fingerprint: sha256:24f7da700973fc531f4353d4086b891c3f9ceb28aef470fbf91ee1a2315c5c19
+          time: "2026-07-15T10:29:46.153532+08:00"
+          reason: live-verified
+        update:
+          status: offline
+          case: cases/ack/kubeconfig-update-lifecycle.yaml
+          fingerprint: sha256:16e030b7cee2b3d7cdec44360ff705020ffdcebd1f2de8d4f6ceb0c6075a7c3c
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+    node:
+      operations:
+        attach:
+          status: live-pass
+          case: cases/ack/node-lifecycle.yaml
+          fingerprint: sha256:25cdcc0b417fa19ace776c9bff965436f494024d53b8c1443b0d1f030cb98e99
+          time: "2026-07-14T19:09:12.190565+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ack/node-lifecycle.yaml
+          fingerprint: sha256:25cdcc0b417fa19ace776c9bff965436f494024d53b8c1443b0d1f030cb98e99
+          time: "2026-07-14T19:09:12.190565+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ack/node-lifecycle.yaml
+          fingerprint: sha256:25cdcc0b417fa19ace776c9bff965436f494024d53b8c1443b0d1f030cb98e99
+          time: "2026-07-14T19:09:12.190565+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ack/node-lifecycle.yaml
+          fingerprint: sha256:25cdcc0b417fa19ace776c9bff965436f494024d53b8c1443b0d1f030cb98e99
+          time: "2026-07-14T19:09:12.190565+08:00"
+          reason: live-verified
+    nodepool:
+      operations:
+        attach:
+          status: live-pass
+          case: cases/ack/nodepool-lifecycle.yaml
+          fingerprint: sha256:cd840bbd60a1baaf891364de8bbba0b2ffac96837069142104ec5cef7104cf92
+          time: "2026-07-14T19:56:42.555206+08:00"
+          reason: live-verified
+        create:
+          status: live-pass
+          case: cases/ack/nodepool-lifecycle.yaml
+          fingerprint: sha256:cd840bbd60a1baaf891364de8bbba0b2ffac96837069142104ec5cef7104cf92
+          time: "2026-07-14T19:56:42.555206+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ack/nodepool-lifecycle.yaml
+          fingerprint: sha256:cd840bbd60a1baaf891364de8bbba0b2ffac96837069142104ec5cef7104cf92
+          time: "2026-07-14T19:56:42.555206+08:00"
+          reason: live-verified
+        detach:
+          status: live-pass
+          case: cases/ack/nodepool-lifecycle.yaml
+          fingerprint: sha256:cd840bbd60a1baaf891364de8bbba0b2ffac96837069142104ec5cef7104cf92
+          time: "2026-07-14T19:56:42.555206+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ack/nodepool-lifecycle.yaml
+          fingerprint: sha256:cd840bbd60a1baaf891364de8bbba0b2ffac96837069142104ec5cef7104cf92
+          time: "2026-07-14T19:56:42.555206+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ack/nodepool-lifecycle.yaml
+          fingerprint: sha256:cd840bbd60a1baaf891364de8bbba0b2ffac96837069142104ec5cef7104cf92
+          time: "2026-07-14T19:56:42.555206+08:00"
+          reason: live-verified
+        repair:
+          status: live-pass
+          case: cases/ack/nodepool-lifecycle.yaml
+          fingerprint: sha256:cd840bbd60a1baaf891364de8bbba0b2ffac96837069142104ec5cef7104cf92
+          time: "2026-07-14T19:56:42.555206+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ack/nodepool-lifecycle.yaml
+          fingerprint: sha256:cd840bbd60a1baaf891364de8bbba0b2ffac96837069142104ec5cef7104cf92
+          time: "2026-07-14T19:56:42.555206+08:00"
+          reason: live-verified
+        upgrade:
+          status: live-pass
+          case: cases/ack/nodepool-upgrade-lifecycle.yaml
+          fingerprint: sha256:4ac3b82f2ce3288ea57fd0b0173de131786c88cf432ff117da681dc58e779bc5
+          time: "2026-07-14T20:21:05.124532+08:00"
+          reason: live-verified
+    permission:
+      operations:
+        delete:
+          status: live-pass
+          case: cases/ack/permission-lifecycle.yaml
+          fingerprint: sha256:68fc66ee6bceb7977776ee5bb73aa3ae6050141ea2faf3b7c821419c626f3d15
+          time: "2026-07-15T10:29:46.153532+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ack/permission-lifecycle.yaml
+          fingerprint: sha256:68fc66ee6bceb7977776ee5bb73aa3ae6050141ea2faf3b7c821419c626f3d15
+          time: "2026-07-15T10:29:46.153532+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ack/permission-lifecycle.yaml
+          fingerprint: sha256:68fc66ee6bceb7977776ee5bb73aa3ae6050141ea2faf3b7c821419c626f3d15
+          time: "2026-07-15T10:29:46.153532+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ack/permission-lifecycle.yaml
+          fingerprint: sha256:68fc66ee6bceb7977776ee5bb73aa3ae6050141ea2faf3b7c821419c626f3d15
+          time: "2026-07-15T10:29:46.153532+08:00"
+          reason: live-verified
+    policy:
+      operations:
+        get:
+          status: offline
+          case: cases/ack/policy-readonly.yaml
+          fingerprint: sha256:59d2e9c44b2d076f8bc351321bf6758e79408200908e6ccce312ba38b2ea42d7
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+        list:
+          status: offline
+          case: cases/ack/policy-readonly.yaml
+          fingerprint: sha256:59d2e9c44b2d076f8bc351321bf6758e79408200908e6ccce312ba38b2ea42d7
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+    region:
+      operations:
+        list:
+          status: live-pass
+          case: cases/ack/region-lifecycle.yaml
+          fingerprint: sha256:17be88e7fc9c4fe5bc9d071a3fc8ca83dd5cde60dc30134fd45b099539c3d286
+          time: "2026-07-14T13:43:29.792992+08:00"
+          reason: live-verified
+    version:
+      operations:
+        list:
+          status: live-pass
+          case: cases/ack/region-lifecycle.yaml
+          fingerprint: sha256:17be88e7fc9c4fe5bc9d071a3fc8ca83dd5cde60dc30134fd45b099539c3d286
+          time: "2026-07-14T13:43:29.792992+08:00"
+          reason: live-verified
+  ecs:
+    assistant:
+      operations:
+        get:
+          status: live-pass
+          case: cases/ecs/assistant-lifecycle.yaml
+          fingerprint: sha256:87f92e4b7f3d9e99b962e608c79e695de375599aba12816b59c8207301eedb01
+          time: "2026-07-14T15:55:56.239775+08:00"
+          reason: live-verified
+        install:
+          status: live-pass
+          case: cases/ecs/assistant-lifecycle.yaml
+          fingerprint: sha256:87f92e4b7f3d9e99b962e608c79e695de375599aba12816b59c8207301eedb01
+          time: "2026-07-14T15:55:56.239775+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ecs/assistant-lifecycle.yaml
+          fingerprint: sha256:87f92e4b7f3d9e99b962e608c79e695de375599aba12816b59c8207301eedb01
+          time: "2026-07-14T15:55:56.239775+08:00"
+          reason: live-verified
+    auto-snapshot-policy:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ecs/auto-snapshot-policy-lifecycle.yaml
+          fingerprint: sha256:2783800dc38c328219242e8d5e30f03e7cde5108b8cc1fdcd5d7dda733bc20d8
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ecs/auto-snapshot-policy-lifecycle.yaml
+          fingerprint: sha256:2783800dc38c328219242e8d5e30f03e7cde5108b8cc1fdcd5d7dda733bc20d8
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ecs/auto-snapshot-policy-lifecycle.yaml
+          fingerprint: sha256:2783800dc38c328219242e8d5e30f03e7cde5108b8cc1fdcd5d7dda733bc20d8
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ecs/auto-snapshot-policy-lifecycle.yaml
+          fingerprint: sha256:2783800dc38c328219242e8d5e30f03e7cde5108b8cc1fdcd5d7dda733bc20d8
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ecs/auto-snapshot-policy-lifecycle.yaml
+          fingerprint: sha256:2783800dc38c328219242e8d5e30f03e7cde5108b8cc1fdcd5d7dda733bc20d8
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+    command:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ecs/command-lifecycle.yaml
+          fingerprint: sha256:aec5cae5927c095d621aaae8de00f3b644b59f8f106760471bd0f3bc2fe01c03
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ecs/command-lifecycle.yaml
+          fingerprint: sha256:aec5cae5927c095d621aaae8de00f3b644b59f8f106760471bd0f3bc2fe01c03
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ecs/command-lifecycle.yaml
+          fingerprint: sha256:aec5cae5927c095d621aaae8de00f3b644b59f8f106760471bd0f3bc2fe01c03
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+        invoke:
+          status: live-pass
+          case: cases/ecs/command-lifecycle.yaml
+          fingerprint: sha256:aec5cae5927c095d621aaae8de00f3b644b59f8f106760471bd0f3bc2fe01c03
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ecs/command-lifecycle.yaml
+          fingerprint: sha256:aec5cae5927c095d621aaae8de00f3b644b59f8f106760471bd0f3bc2fe01c03
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+        stop:
+          status: live-pass
+          case: cases/ecs/command-lifecycle.yaml
+          fingerprint: sha256:aec5cae5927c095d621aaae8de00f3b644b59f8f106760471bd0f3bc2fe01c03
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ecs/command-lifecycle.yaml
+          fingerprint: sha256:aec5cae5927c095d621aaae8de00f3b644b59f8f106760471bd0f3bc2fe01c03
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+    disk:
+      operations:
+        attach:
+          status: live-pass
+          case: cases/ecs/disk-lifecycle.yaml
+          fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
+          time: "2026-07-14T15:55:56.239775+08:00"
+          reason: live-verified
+        clone:
+          status: live-pass
+          case: cases/ecs/disk-lifecycle.yaml
+          fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
+          time: "2026-07-14T15:55:56.239775+08:00"
+          reason: live-verified
+        create:
+          status: live-pass
+          case: cases/ecs/disk-lifecycle.yaml
+          fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
+          time: "2026-07-14T15:55:56.239775+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ecs/disk-lifecycle.yaml
+          fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
+          time: "2026-07-14T15:55:56.239775+08:00"
+          reason: live-verified
+        detach:
+          status: live-pass
+          case: cases/ecs/disk-lifecycle.yaml
+          fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
+          time: "2026-07-14T15:55:56.239775+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ecs/disk-lifecycle.yaml
+          fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
+          time: "2026-07-14T15:55:56.239775+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ecs/disk-lifecycle.yaml
+          fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
+          time: "2026-07-14T15:55:56.239775+08:00"
+          reason: live-verified
+        monitor:
+          status: live-pass
+          case: cases/ecs/disk-lifecycle.yaml
+          fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
+          time: "2026-07-14T15:55:56.239775+08:00"
+          reason: live-verified
+        reinit:
+          status: live-pass
+          case: cases/ecs/disk-lifecycle.yaml
+          fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
+          time: "2026-07-14T15:55:56.239775+08:00"
+          reason: live-verified
+        reset:
+          status: live-pass
+          case: cases/ecs/disk-lifecycle.yaml
+          fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
+          time: "2026-07-14T15:55:56.239775+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ecs/disk-lifecycle.yaml
+          fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
+          time: "2026-07-14T15:55:56.239775+08:00"
+          reason: live-verified
+    eni:
+      operations:
+        attach:
+          status: live-pass
+          case: cases/ecs/eni-lifecycle.yaml
+          fingerprint: sha256:ed30050c782b4c24d9cf0cbff5ff03dda851c8ca3bd0c2b3b541b0f43221e8f2
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+        create:
+          status: live-pass
+          case: cases/ecs/eni-lifecycle.yaml
+          fingerprint: sha256:ed30050c782b4c24d9cf0cbff5ff03dda851c8ca3bd0c2b3b541b0f43221e8f2
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ecs/eni-lifecycle.yaml
+          fingerprint: sha256:ed30050c782b4c24d9cf0cbff5ff03dda851c8ca3bd0c2b3b541b0f43221e8f2
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+        detach:
+          status: live-pass
+          case: cases/ecs/eni-lifecycle.yaml
+          fingerprint: sha256:ed30050c782b4c24d9cf0cbff5ff03dda851c8ca3bd0c2b3b541b0f43221e8f2
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ecs/eni-lifecycle.yaml
+          fingerprint: sha256:ed30050c782b4c24d9cf0cbff5ff03dda851c8ca3bd0c2b3b541b0f43221e8f2
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ecs/eni-lifecycle.yaml
+          fingerprint: sha256:ed30050c782b4c24d9cf0cbff5ff03dda851c8ca3bd0c2b3b541b0f43221e8f2
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ecs/eni-lifecycle.yaml
+          fingerprint: sha256:ed30050c782b4c24d9cf0cbff5ff03dda851c8ca3bd0c2b3b541b0f43221e8f2
+          time: "2026-07-14T15:42:36.355234+08:00"
+          reason: live-verified
+    image:
+      operations:
+        copy:
+          status: live-pass
+          case: cases/ecs/image-copy-lifecycle.yaml
+          fingerprint: sha256:c60f3599549305621ae0b07689a269e44b70cdb1bd282b59d301dc5bc45962f8
+          time: "2026-07-14T13:11:12.283909+08:00"
+          reason: live-verified
+        create:
+          status: live-pass
+          case: cases/ecs/image-copy-lifecycle.yaml
+          fingerprint: sha256:c60f3599549305621ae0b07689a269e44b70cdb1bd282b59d301dc5bc45962f8
+          time: "2026-07-14T13:11:12.283909+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ecs/image-lifecycle.yaml
+          fingerprint: sha256:74c13f162a1e3b5eeb99d2b8462b26d603762634d8c626b4ca2c646ece6e817c
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        export:
+          status: offline
+          case: cases/ecs/image-export-lifecycle.yaml
+          fingerprint: sha256:0dd803e4c2c04b9b4b9f9a855ffd0398e4aa3b2937d73a710755022e480083a5
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+        get:
+          status: live-pass
+          case: cases/ecs/image-lifecycle.yaml
+          fingerprint: sha256:74c13f162a1e3b5eeb99d2b8462b26d603762634d8c626b4ca2c646ece6e817c
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        import:
+          status: offline
+          case: cases/ecs/image-import-lifecycle.yaml
+          fingerprint: sha256:49ce7836ed6f996cc1bac92a4d3785ead829ce58b35573cd12a2c4f0590d2389
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+        list:
+          status: live-pass
+          case: cases/ecs/image-lifecycle.yaml
+          fingerprint: sha256:74c13f162a1e3b5eeb99d2b8462b26d603762634d8c626b4ca2c646ece6e817c
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ecs/image-lifecycle.yaml
+          fingerprint: sha256:74c13f162a1e3b5eeb99d2b8462b26d603762634d8c626b4ca2c646ece6e817c
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+    instance:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ecs/instance-lifecycle.yaml
+          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ecs/instance-lifecycle.yaml
+          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        exec:
+          status: live-pass
+          case: cases/ecs/instance-lifecycle.yaml
+          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ecs/instance-lifecycle.yaml
+          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ecs/instance-lifecycle.yaml
+          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        monitor:
+          status: live-pass
+          case: cases/ecs/instance-lifecycle.yaml
+          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        reboot:
+          status: live-pass
+          case: cases/ecs/instance-lifecycle.yaml
+          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        renew:
+          status: offline
+          case: cases/ecs/instance-renew-lifecycle.yaml
+          fingerprint: sha256:e0b8de197bdabacad440146ca8badbb26ece809a8ba7dc88f872859dd27d4a8c
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+        sendfile:
+          status: live-pass
+          case: cases/ecs/instance-lifecycle.yaml
+          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        start:
+          status: live-pass
+          case: cases/ecs/instance-lifecycle.yaml
+          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        stop:
+          status: live-pass
+          case: cases/ecs/instance-lifecycle.yaml
+          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ecs/instance-lifecycle.yaml
+          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+    keypair:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ecs/keypair-lifecycle.yaml
+          fingerprint: sha256:7e6e104c77946326eef5dbc8fef06e12f2bd68786e1abff0034434674951528d
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ecs/keypair-lifecycle.yaml
+          fingerprint: sha256:7e6e104c77946326eef5dbc8fef06e12f2bd68786e1abff0034434674951528d
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ecs/keypair-lifecycle.yaml
+          fingerprint: sha256:7e6e104c77946326eef5dbc8fef06e12f2bd68786e1abff0034434674951528d
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ecs/keypair-lifecycle.yaml
+          fingerprint: sha256:7e6e104c77946326eef5dbc8fef06e12f2bd68786e1abff0034434674951528d
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+    launch-template:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ecs/launch-template-lifecycle.yaml
+          fingerprint: sha256:ba10f05315e47ab65733e256dab1255d74eb4feb5fb0662e5182f320c2ae1878
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ecs/launch-template-lifecycle.yaml
+          fingerprint: sha256:ba10f05315e47ab65733e256dab1255d74eb4feb5fb0662e5182f320c2ae1878
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ecs/launch-template-lifecycle.yaml
+          fingerprint: sha256:ba10f05315e47ab65733e256dab1255d74eb4feb5fb0662e5182f320c2ae1878
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ecs/launch-template-lifecycle.yaml
+          fingerprint: sha256:ba10f05315e47ab65733e256dab1255d74eb4feb5fb0662e5182f320c2ae1878
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ecs/launch-template-lifecycle.yaml
+          fingerprint: sha256:ba10f05315e47ab65733e256dab1255d74eb4feb5fb0662e5182f320c2ae1878
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+    port-range-list:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ecs/port-range-list-lifecycle.yaml
+          fingerprint: sha256:e009e37f9dabc71fcfbff7a26068c4dc91aec04a12cb1d5f4adf2bab08e0bf79
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ecs/port-range-list-lifecycle.yaml
+          fingerprint: sha256:e009e37f9dabc71fcfbff7a26068c4dc91aec04a12cb1d5f4adf2bab08e0bf79
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ecs/port-range-list-lifecycle.yaml
+          fingerprint: sha256:e009e37f9dabc71fcfbff7a26068c4dc91aec04a12cb1d5f4adf2bab08e0bf79
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ecs/port-range-list-lifecycle.yaml
+          fingerprint: sha256:e009e37f9dabc71fcfbff7a26068c4dc91aec04a12cb1d5f4adf2bab08e0bf79
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ecs/port-range-list-lifecycle.yaml
+          fingerprint: sha256:e009e37f9dabc71fcfbff7a26068c4dc91aec04a12cb1d5f4adf2bab08e0bf79
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+    prefix-list:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ecs/prefix-list-lifecycle.yaml
+          fingerprint: sha256:e08b78abb42dcfb6b27c86be0a4a74c5ee430498e32e445558286bd9baa286f9
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ecs/prefix-list-lifecycle.yaml
+          fingerprint: sha256:e08b78abb42dcfb6b27c86be0a4a74c5ee430498e32e445558286bd9baa286f9
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ecs/prefix-list-lifecycle.yaml
+          fingerprint: sha256:e08b78abb42dcfb6b27c86be0a4a74c5ee430498e32e445558286bd9baa286f9
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ecs/prefix-list-lifecycle.yaml
+          fingerprint: sha256:e08b78abb42dcfb6b27c86be0a4a74c5ee430498e32e445558286bd9baa286f9
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ecs/prefix-list-lifecycle.yaml
+          fingerprint: sha256:e08b78abb42dcfb6b27c86be0a4a74c5ee430498e32e445558286bd9baa286f9
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+    region:
+      operations:
+        list:
+          status: live-pass
+          case: cases/ecs/region-lifecycle.yaml
+          fingerprint: sha256:6f670ecdb7651381193a60e02dec15664d96a1b3e8ed19ba2f643aeffd338237
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+    sg:
+      operations:
+        authorize:
+          status: live-pass
+          case: cases/ecs/sg-lifecycle.yaml
+          fingerprint: sha256:be54627ba46faf2942467c69f8bc0f65dfb75b278aa7d7d9ab974637b6181f71
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        create:
+          status: live-pass
+          case: cases/ecs/sg-lifecycle.yaml
+          fingerprint: sha256:be54627ba46faf2942467c69f8bc0f65dfb75b278aa7d7d9ab974637b6181f71
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ecs/sg-lifecycle.yaml
+          fingerprint: sha256:be54627ba46faf2942467c69f8bc0f65dfb75b278aa7d7d9ab974637b6181f71
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ecs/sg-lifecycle.yaml
+          fingerprint: sha256:be54627ba46faf2942467c69f8bc0f65dfb75b278aa7d7d9ab974637b6181f71
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ecs/sg-lifecycle.yaml
+          fingerprint: sha256:be54627ba46faf2942467c69f8bc0f65dfb75b278aa7d7d9ab974637b6181f71
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        revoke:
+          status: live-pass
+          case: cases/ecs/sg-lifecycle.yaml
+          fingerprint: sha256:be54627ba46faf2942467c69f8bc0f65dfb75b278aa7d7d9ab974637b6181f71
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ecs/sg-lifecycle.yaml
+          fingerprint: sha256:be54627ba46faf2942467c69f8bc0f65dfb75b278aa7d7d9ab974637b6181f71
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+    snapshot:
+      operations:
+        copy:
+          status: live-pass
+          case: cases/ecs/snapshot-copy-lifecycle.yaml
+          fingerprint: sha256:f6c784600e0f9415590e4fe41671fb87e7d3e9be1281d027d70decaa7aaf4fdd
+          time: "2026-07-15T09:49:15.711572+08:00"
+          reason: live-verified
+        create:
+          status: live-pass
+          case: cases/ecs/snapshot-copy-lifecycle.yaml
+          fingerprint: sha256:f6c784600e0f9415590e4fe41671fb87e7d3e9be1281d027d70decaa7aaf4fdd
+          time: "2026-07-15T09:49:15.711572+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ecs/snapshot-lifecycle.yaml
+          fingerprint: sha256:401bfce2ba00b53dc145c767397e8b878199b968a654faf2ff8bd4857b3b90ba
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ecs/snapshot-lifecycle.yaml
+          fingerprint: sha256:401bfce2ba00b53dc145c767397e8b878199b968a654faf2ff8bd4857b3b90ba
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ecs/snapshot-lifecycle.yaml
+          fingerprint: sha256:401bfce2ba00b53dc145c767397e8b878199b968a654faf2ff8bd4857b3b90ba
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ecs/snapshot-lifecycle.yaml
+          fingerprint: sha256:401bfce2ba00b53dc145c767397e8b878199b968a654faf2ff8bd4857b3b90ba
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+    snapshot-group:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ecs/snapshot-group-lifecycle.yaml
+          fingerprint: sha256:05b5693d9849d959a419da1db0f7ec1fab2b7e7bdfe1786027be5b89fab2e125
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ecs/snapshot-group-lifecycle.yaml
+          fingerprint: sha256:05b5693d9849d959a419da1db0f7ec1fab2b7e7bdfe1786027be5b89fab2e125
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ecs/snapshot-group-lifecycle.yaml
+          fingerprint: sha256:05b5693d9849d959a419da1db0f7ec1fab2b7e7bdfe1786027be5b89fab2e125
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ecs/snapshot-group-lifecycle.yaml
+          fingerprint: sha256:05b5693d9849d959a419da1db0f7ec1fab2b7e7bdfe1786027be5b89fab2e125
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ecs/snapshot-group-lifecycle.yaml
+          fingerprint: sha256:05b5693d9849d959a419da1db0f7ec1fab2b7e7bdfe1786027be5b89fab2e125
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+    zone:
+      operations:
+        list:
+          status: live-pass
+          case: cases/ecs/zone-lifecycle.yaml
+          fingerprint: sha256:9fc34fb66f89cc5d283ee7590872f14cbecd64609d108e5437646b558ac91b3d
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+  lingjun:
+    cluster:
+      operations:
+        create:
+          status: offline
+          case: cases/lingjun/cluster-lifecycle.yaml
+          fingerprint: sha256:a8353a1c2c2e9600f353a73a9e4d29bd7c71fbb8a315b1496cce27dadb824c88
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+        delete:
+          status: offline
+          case: cases/lingjun/cluster-lifecycle.yaml
+          fingerprint: sha256:a8353a1c2c2e9600f353a73a9e4d29bd7c71fbb8a315b1496cce27dadb824c88
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+        get:
+          status: offline
+          case: cases/lingjun/cluster-lifecycle.yaml
+          fingerprint: sha256:a8353a1c2c2e9600f353a73a9e4d29bd7c71fbb8a315b1496cce27dadb824c88
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+        list:
+          status: offline
+          case: cases/lingjun/cluster-lifecycle.yaml
+          fingerprint: sha256:a8353a1c2c2e9600f353a73a9e4d29bd7c71fbb8a315b1496cce27dadb824c88
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+        update:
+          status: offline
+          case: cases/lingjun/cluster-scaling-lifecycle.yaml
+          fingerprint: sha256:b5f303beb9b5e80535d02e1379f15ffff3a077fcd20f5628d8f335aa841fd91c
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+    node:
+      operations:
+        list:
+          status: offline
+          case: cases/lingjun/node-readonly.yaml
+          fingerprint: sha256:32cb11773a9cc2a00bc0afb72b9acf3f98e520a2c00623a3deeb6c3b9208de7c
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+    vpd:
+      operations:
+        create:
+          status: live-pass
+          case: cases/lingjun/vpd-lifecycle.yaml
+          fingerprint: sha256:3c79eb73b0ab80314fe2073e4c9de56b391b99d487498d543632fc109aa97575
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/lingjun/vpd-lifecycle.yaml
+          fingerprint: sha256:3c79eb73b0ab80314fe2073e4c9de56b391b99d487498d543632fc109aa97575
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/lingjun/vpd-lifecycle.yaml
+          fingerprint: sha256:3c79eb73b0ab80314fe2073e4c9de56b391b99d487498d543632fc109aa97575
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/lingjun/vpd-lifecycle.yaml
+          fingerprint: sha256:3c79eb73b0ab80314fe2073e4c9de56b391b99d487498d543632fc109aa97575
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/lingjun/vpd-lifecycle.yaml
+          fingerprint: sha256:3c79eb73b0ab80314fe2073e4c9de56b391b99d487498d543632fc109aa97575
+          time: "2026-07-14T15:23:15.281625+08:00"
+          reason: live-verified
+  rg:
+    group:
+      operations:
+        create:
+          status: live-pass
+          case: cases/rg/group-lifecycle.yaml
+          fingerprint: sha256:7dfaef0f0090bac95cfa9292b84f590907a227555aaf2f7e3af14271833b430e
+          time: "2026-07-06T14:35:30+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/rg/group-lifecycle.yaml
+          fingerprint: sha256:7dfaef0f0090bac95cfa9292b84f590907a227555aaf2f7e3af14271833b430e
+          time: "2026-07-06T14:35:30+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/rg/group-lifecycle.yaml
+          fingerprint: sha256:7dfaef0f0090bac95cfa9292b84f590907a227555aaf2f7e3af14271833b430e
+          time: "2026-07-06T14:35:30+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/rg/group-lifecycle.yaml
+          fingerprint: sha256:7dfaef0f0090bac95cfa9292b84f590907a227555aaf2f7e3af14271833b430e
+          time: "2026-07-06T14:35:30+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/rg/group-lifecycle.yaml
+          fingerprint: sha256:7dfaef0f0090bac95cfa9292b84f590907a227555aaf2f7e3af14271833b430e
+          time: "2026-07-06T14:35:30+08:00"
+          reason: live-verified
+    policy:
+      operations:
+        attach:
+          status: offline
+          case: cases/rg/policy-lifecycle.yaml
+          fingerprint: sha256:be73e7a6fc69fa697a306d083b12c24206857dab7284efb91dd708ebcf1ae146
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+        create:
+          status: offline
+          case: cases/rg/policy-lifecycle.yaml
+          fingerprint: sha256:be73e7a6fc69fa697a306d083b12c24206857dab7284efb91dd708ebcf1ae146
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+        delete:
+          status: offline
+          case: cases/rg/policy-lifecycle.yaml
+          fingerprint: sha256:be73e7a6fc69fa697a306d083b12c24206857dab7284efb91dd708ebcf1ae146
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+        detach:
+          status: offline
+          case: cases/rg/policy-lifecycle.yaml
+          fingerprint: sha256:be73e7a6fc69fa697a306d083b12c24206857dab7284efb91dd708ebcf1ae146
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+        get:
+          status: offline
+          case: cases/rg/governance-readonly.yaml
+          fingerprint: sha256:13b0d6dba565953577665fa0bcbb9d5e1152efe6a68367d19a760bfab0a24b84
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+        list:
+          status: offline
+          case: cases/rg/governance-readonly.yaml
+          fingerprint: sha256:13b0d6dba565953577665fa0bcbb9d5e1152efe6a68367d19a760bfab0a24b84
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+    resource:
+      operations:
+        list:
+          status: offline
+          case: cases/rg/governance-readonly.yaml
+          fingerprint: sha256:13b0d6dba565953577665fa0bcbb9d5e1152efe6a68367d19a760bfab0a24b84
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+    role:
+      operations:
+        create:
+          status: offline
+          case: cases/rg/policy-lifecycle.yaml
+          fingerprint: sha256:be73e7a6fc69fa697a306d083b12c24206857dab7284efb91dd708ebcf1ae146
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+        delete:
+          status: offline
+          case: cases/rg/policy-lifecycle.yaml
+          fingerprint: sha256:be73e7a6fc69fa697a306d083b12c24206857dab7284efb91dd708ebcf1ae146
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+        list:
+          status: offline
+          case: cases/rg/governance-readonly.yaml
+          fingerprint: sha256:13b0d6dba565953577665fa0bcbb9d5e1152efe6a68367d19a760bfab0a24b84
+          time: "2026-07-22T15:14:26.963337+08:00"
+          reason: not-run
+  tag:
+    resource:
+      operations:
+        apply:
+          status: live-pass
+          case: cases/tag/resource-lifecycle.yaml
+          fingerprint: sha256:46704c5c1cede9637810e4a316545887618c5f453fcf7f3714befcc29a813be1
+          time: "2026-07-06T14:35:30+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/tag/resource-lifecycle.yaml
+          fingerprint: sha256:46704c5c1cede9637810e4a316545887618c5f453fcf7f3714befcc29a813be1
+          time: "2026-07-06T14:35:30+08:00"
+          reason: live-verified
+        remove:
+          status: live-pass
+          case: cases/tag/resource-lifecycle.yaml
+          fingerprint: sha256:46704c5c1cede9637810e4a316545887618c5f453fcf7f3714befcc29a813be1
+          time: "2026-07-06T14:35:30+08:00"
+          reason: live-verified
+  vpc:
+    vpc:
+      operations:
+        create:
+          status: live-pass
+          case: cases/vpc/vpc-lifecycle.yaml
+          fingerprint: sha256:d6d0b70f082de48132605da2ee1ece45740251e1ae4887bc59b5f35e10368e0e
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/vpc/vpc-lifecycle.yaml
+          fingerprint: sha256:d6d0b70f082de48132605da2ee1ece45740251e1ae4887bc59b5f35e10368e0e
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/vpc/vpc-lifecycle.yaml
+          fingerprint: sha256:d6d0b70f082de48132605da2ee1ece45740251e1ae4887bc59b5f35e10368e0e
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/vpc/vpc-lifecycle.yaml
+          fingerprint: sha256:d6d0b70f082de48132605da2ee1ece45740251e1ae4887bc59b5f35e10368e0e
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/vpc/vpc-lifecycle.yaml
+          fingerprint: sha256:d6d0b70f082de48132605da2ee1ece45740251e1ae4887bc59b5f35e10368e0e
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+    vswitch:
+      operations:
+        create:
+          status: live-pass
+          case: cases/vpc/vswitch-lifecycle.yaml
+          fingerprint: sha256:3402be1a4208b5e58e70465c449d7b1c4c21cf5a1d86d2e4d12785d69da0717c
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/vpc/vswitch-lifecycle.yaml
+          fingerprint: sha256:3402be1a4208b5e58e70465c449d7b1c4c21cf5a1d86d2e4d12785d69da0717c
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/vpc/vswitch-lifecycle.yaml
+          fingerprint: sha256:3402be1a4208b5e58e70465c449d7b1c4c21cf5a1d86d2e4d12785d69da0717c
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/vpc/vswitch-lifecycle.yaml
+          fingerprint: sha256:3402be1a4208b5e58e70465c449d7b1c4c21cf5a1d86d2e4d12785d69da0717c
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/vpc/vswitch-lifecycle.yaml
+          fingerprint: sha256:3402be1a4208b5e58e70465c449d7b1c4c21cf5a1d86d2e4d12785d69da0717c
+          time: "2026-07-14T13:39:51.320077+08:00"
+          reason: live-verified
