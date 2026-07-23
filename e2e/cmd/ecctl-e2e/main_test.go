@@ -114,6 +114,29 @@ func TestCapabilityFilterRequiresSurfaceMarker(t *testing.T) {
 	}
 }
 
+func TestCapabilitySelectionCountsOnlyResourcesWithActions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "capabilities.json")
+	if err := os.WriteFile(path, []byte(`{
+	  "surface": "public",
+	  "products": [{
+	    "product": "ecs",
+	    "resources": [
+	      {"name": "instance", "actions": ["list"]},
+	      {"name": "empty", "actions": []}
+	    ]
+	  }]
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	selection, err := loadCapabilitySelection(path, "", "public")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.ResourceCount != 1 || len(selection.Filter) != 1 {
+		t.Fatalf("selection = %+v, want one actionable resource and operation", selection)
+	}
+}
+
 func TestRunCollectOnlyFiltersBySurface(t *testing.T) {
 	root := t.TempDir()
 	cases := filepath.Join(root, "cases")

@@ -81,6 +81,64 @@ func TestRegistryCheckRequiresSelectedCapabilitiesToBeLive(t *testing.T) {
 	}
 }
 
+func TestRegistryCheckRejectsMissingCaseBackedEntry(t *testing.T) {
+	root, specs, cases := writeRegistryFixture(t)
+	registryPath := filepath.Join(root, "coverage.yaml")
+	operation := validRegistryOperation(t, cases, StatusOffline, ReasonNotRun)
+	writeRegistry(t, registryPath, map[string]RegistryOperation{"create": operation})
+
+	report, err := CheckRegistryFile(specs, cases, registryPath, RegistryCheckOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reportHasCode(report, "covered_missing_entry") {
+		t.Fatalf("case-backed operations must have registry entries: %+v", report.Errors)
+	}
+}
+
+func TestRegistryCheckRejectsEmptyOrUnknownCapabilitySelection(t *testing.T) {
+	root, specs, cases := writeRegistryFixture(t)
+	registryPath := filepath.Join(root, "coverage.yaml")
+	operation := validRegistryOperation(t, cases, StatusOffline, ReasonNotRun)
+	writeRegistry(t, registryPath, map[string]RegistryOperation{
+		"create": operation,
+		"delete": operation,
+	})
+
+	tests := []struct {
+		name      string
+		selection map[Capability]bool
+		wantCode  string
+	}{
+		{
+			name:      "empty",
+			selection: map[Capability]bool{},
+			wantCode:  "empty_capability_selection",
+		},
+		{
+			name: "unknown",
+			selection: map[Capability]bool{
+				{Resource: "ecs/instance", Verb: "future-op"}: true,
+			},
+			wantCode: "unknown_selected_capability",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			report, err := CheckRegistryFile(specs, cases, registryPath, RegistryCheckOptions{
+				CapabilityFilter: test.selection,
+				FailOnNotLive:    true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reportHasCode(report, test.wantCode) {
+				t.Fatalf("expected %s, got %+v", test.wantCode, report.Errors)
+			}
+		})
+	}
+}
+
 func TestRegistryCheckRejectsInvalidEntries(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -190,6 +248,22 @@ func TestRegistryCheckRejectsStalePublicSummary(t *testing.T) {
 	}
 	if !reportHasCode(report, "stale_summary") {
 		t.Fatalf("expected stale_summary, got %+v", report.Errors)
+	}
+}
+
+func TestSummarizePublicSurfaceRejectsEmptyCapabilities(t *testing.T) {
+	registry := &Registry{Version: RegistryVersion, Resources: map[string]RegistryProduct{}}
+	if _, err := SummarizePublicSurface(registry, PublicSurface{ResourceCount: 1, Capabilities: map[Capability]bool{}}); err == nil {
+		t.Fatal("empty public capability selection must be rejected")
+	}
+}
+
+func TestInitRegistryRejectsUnknownPublicCapability(t *testing.T) {
+	_, specs, cases := writeRegistryFixture(t)
+	public := fixturePublicSurface()
+	public.Capabilities[Capability{Resource: "ecs/instance", Verb: "future-op"}] = true
+	if _, err := initRegistry(specs, cases, nil, public, parseTime); err == nil {
+		t.Fatal("public capabilities absent from specs must be rejected")
 	}
 }
 
@@ -506,7 +580,7 @@ func TestInitRegistryRemovesMissingCasesAndEmptyResources(t *testing.T) {
 	}
 }
 
-func TestInitRegistryMigratesV1AndTrustsLocalLivePass(t *testing.T) {
+func TestInitRegistryMigratesV1WithoutTrustingUnboundLivePass(t *testing.T) {
 	root, specs, cases := writeRegistryFixture(t)
 	mustWrite(t, filepath.Join(specs, "ecs", "instance.yaml"), `
 product: ecs
@@ -568,11 +642,11 @@ resources:
 		t.Fatalf("manual-only, planned, and quarantined operations without cases must be omitted: %+v", operations)
 	}
 	create := operations["create"]
-	if create.Status != StatusLivePass || create.Reason != ReasonLiveVerified || create.Time != "2026-07-14T16:30:43+08:00" {
-		t.Fatalf("local v1 live-pass must be trusted: %+v", create)
+	if create.Status != StatusOffline || create.Reason != ReasonUnknown || create.Time != parseTime.Format(time.RFC3339Nano) {
+		t.Fatalf("v1 live-pass without a fingerprint must be reset: %+v", create)
 	}
 	if create.Fingerprint != mustFingerprint(t, create.Case) {
-		t.Fatalf("migrated live fingerprint mismatch: %+v", create)
+		t.Fatalf("migrated offline fingerprint mismatch: %+v", create)
 	}
 	deleted := operations["delete"]
 	if deleted.Status != StatusOffline || deleted.Reason != ReasonNotRun || deleted.Time != parseTime.Format(time.RFC3339Nano) {
@@ -580,7 +654,7 @@ resources:
 	}
 }
 
-func TestInitRegistryPreservesLiveAcrossEquivalentCasesDirSpelling(t *testing.T) {
+func TestInitRegistryDoesNotPreserveV1LiveAcrossEquivalentCasesDirSpelling(t *testing.T) {
 	_, specs, cases := writeRegistryFixture(t)
 	existing := &Registry{
 		Version:   1,
@@ -598,8 +672,8 @@ func TestInitRegistryPreservesLiveAcrossEquivalentCasesDirSpelling(t *testing.T)
 		t.Fatal(err)
 	}
 	got := migrated.Resources["ecs"]["instance"].Operations["create"]
-	if got.Status != StatusLivePass || got.Time != "2026-07-01T00:00:00Z" {
-		t.Fatalf("equivalent path spelling must preserve live-pass: %+v", got)
+	if got.Status != StatusOffline || got.Reason != ReasonUnknown || got.Time != parseTime.Format(time.RFC3339Nano) {
+		t.Fatalf("v1 live-pass without a fingerprint must be reset: %+v", got)
 	}
 }
 

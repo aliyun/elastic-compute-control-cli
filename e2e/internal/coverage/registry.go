@@ -364,6 +364,9 @@ func initRegistry(specsDir, casesDir string, existing *Registry, public PublicSu
 	if err != nil {
 		return nil, err
 	}
+	if err := validatePublicCapabilities(public, declared); err != nil {
+		return nil, err
+	}
 	covered, err := loadCoveredDetails(casesDir, index)
 	if err != nil {
 		return nil, err
@@ -392,15 +395,9 @@ func initRegistry(specsDir, casesDir string, existing *Registry, public PublicSu
 				}
 			case 1:
 				switch {
-				case previous.Status == StatusLivePass && sameCase && previous.Time != "":
-					entry = RegistryOperation{
-						Status:      StatusLivePass,
-						Case:        normalizeCasePath(info.Case),
-						Fingerprint: info.Fingerprint,
-						Time:        previous.Time,
-						Reason:      ReasonLiveVerified,
-					}
-				case previous.Status == StatusLivePass && !sameCase:
+				case previous.Status == StatusLivePass && sameCase:
+					entry = newOfflineEntry(info, timestamp, ReasonUnknown)
+				case previous.Status == StatusLivePass:
 					entry = newOfflineEntry(info, timestamp, ReasonCaseChanged)
 				case previous.Status == legacyStatusOfflineValid:
 					entry = newOfflineEntry(info, timestamp, ReasonNotRun)
@@ -503,6 +500,7 @@ func CheckRegistry(reg *Registry, declared map[Capability]bool, covered map[Capa
 		rep.add("", "", "invalid_version", fmt.Sprintf("registry version must be %d", RegistryVersion))
 	}
 	validatePublicSummary(rep, reg, opts.PublicSurface)
+	validateCapabilitySelection(rep, declared, opts.CapabilityFilter)
 
 	entries := map[Capability]RegistryOperation{}
 	for _, productName := range sortedRegistryProducts(reg.Resources) {
@@ -534,6 +532,14 @@ func CheckRegistry(reg *Registry, declared map[Capability]bool, covered map[Capa
 			}
 		}
 	}
+	for capability := range covered {
+		if !declared[capability] || !capabilitySelected(capability, opts) {
+			continue
+		}
+		if _, ok := entries[capability]; !ok {
+			rep.add(capability.Resource, capability.Verb, "covered_missing_entry", "case-backed operation is missing from the registry")
+		}
+	}
 	if opts.FailOnNotLive {
 		for cap := range declared {
 			if !capabilitySelected(cap, opts) {
@@ -554,12 +560,19 @@ func SummarizePublicSurface(reg *Registry, public PublicSurface) (RegistryPublic
 	if public.ResourceCount < 0 {
 		return RegistryPublicSummary{}, fmt.Errorf("public resource count must not be negative")
 	}
+	operationCount := selectedCapabilityCount(public.Capabilities)
+	if operationCount == 0 {
+		return RegistryPublicSummary{}, fmt.Errorf("public capability selection must contain at least one operation")
+	}
 	summary := RegistryPublicSummary{
 		Surface:    string(scenario.SurfacePublic),
 		Resources:  public.ResourceCount,
-		Operations: len(public.Capabilities),
+		Operations: operationCount,
 	}
-	for capability := range public.Capabilities {
+	for capability, selected := range public.Capabilities {
+		if !selected {
+			continue
+		}
 		resource, ok := registryResource(reg.Resources, capability.Resource)
 		if !ok {
 			summary.MissingCases++
@@ -616,6 +629,43 @@ func validatePublicSummary(report *RegistryCheckReport, registry *Registry, publ
 	if summary != expected {
 		report.add("", "", "stale_summary", fmt.Sprintf("stored public summary %+v does not match current capabilities %+v", summary, expected))
 	}
+}
+
+func validateCapabilitySelection(report *RegistryCheckReport, declared, selected map[Capability]bool) {
+	if selected == nil {
+		return
+	}
+	if selectedCapabilityCount(selected) == 0 {
+		report.add("", "", "empty_capability_selection", "capability selection must contain at least one operation")
+		return
+	}
+	for capability, include := range selected {
+		if include && !declared[capability] {
+			report.add(capability.Resource, capability.Verb, "unknown_selected_capability", "selected capability is not declared in specs")
+		}
+	}
+}
+
+func validatePublicCapabilities(public PublicSurface, declared map[Capability]bool) error {
+	if selectedCapabilityCount(public.Capabilities) == 0 {
+		return fmt.Errorf("public capability selection must contain at least one operation")
+	}
+	for capability, selected := range public.Capabilities {
+		if selected && !declared[capability] {
+			return fmt.Errorf("public capability %s %s is not declared in specs", capability.Resource, capability.Verb)
+		}
+	}
+	return nil
+}
+
+func selectedCapabilityCount(capabilities map[Capability]bool) int {
+	count := 0
+	for _, selected := range capabilities {
+		if selected {
+			count++
+		}
+	}
+	return count
 }
 
 func SummarizeRegistry(reg *Registry, filters ...map[Capability]bool) RegistrySummary {

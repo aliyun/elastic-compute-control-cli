@@ -1070,8 +1070,8 @@ func loadCapabilitySelection(path, bin, wantSurface string) (*capabilitySelectio
 	for _, product := range caps.Products {
 		for _, resource := range product.Resources {
 			resourceName := product.Name + "/" + resource.Name
-			resources[resourceName] = true
 			for _, action := range resource.Actions {
+				resources[resourceName] = true
 				selection.Filter[coverage.Capability{Resource: resourceName, Verb: action}] = true
 			}
 		}
