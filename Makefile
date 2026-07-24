@@ -1,6 +1,12 @@
 TEST_PACKAGES := ./internal/... ./pkg/... ./cmd/... ./specs/...
+REVIEW_CACHE_DIR ?= $(patsubst %/,%,$(if $(TMPDIR),$(TMPDIR),/tmp))/ecctl-review-$(notdir $(CURDIR))
+REVIEW_GOPATH ?= $(REVIEW_CACHE_DIR)/go
+REVIEW_GOCACHE ?= $(REVIEW_CACHE_DIR)/go-build
+REVIEW_GOMODCACHE ?= $(REVIEW_CACHE_DIR)/go-mod
+REVIEW_NPM_CACHE ?= $(REVIEW_CACHE_DIR)/npm
+REVIEW_ENV = env GOPATH="$(REVIEW_GOPATH)" GOCACHE="$(REVIEW_GOCACHE)" GOMODCACHE="$(REVIEW_GOMODCACHE)" npm_config_cache="$(REVIEW_NPM_CACHE)"
 
-.PHONY: help install build test coverage ci-test lint fmt clean generate prepare-public-release check-public-release check-release-version
+.PHONY: help install build test coverage ci-test lint fmt clean generate prepare-public-release check-public-release check-release-version review-final review-e2e review-website
 
 install: ## Install git pre-commit hook
 	git config core.hooksPath .githooks
@@ -53,6 +59,33 @@ lint: ## Run formatting, vet, and generated-code checks
 	@test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './bin/*'))"
 	go vet ./...
 	go run ./cmd/specgen -spec-dir specs -out pkg/spec/catalog_generated.go -check
+
+review-final: ## Run the complete offline review gates once for a final candidate SHA
+	@mkdir -p "$(REVIEW_GOPATH)" "$(REVIEW_GOCACHE)" "$(REVIEW_GOMODCACHE)" "$(REVIEW_NPM_CACHE)"
+	@printf 'review cache: %s\n' "$(REVIEW_CACHE_DIR)"
+	$(REVIEW_ENV) $(MAKE) lint
+	$(REVIEW_ENV) $(MAKE) test
+	$(REVIEW_ENV) $(MAKE) review-e2e
+	$(REVIEW_ENV) $(MAKE) review-website
+
+review-e2e: ## Run E2E unit tests and offline public-surface gates
+	$(MAKE) -C e2e test
+	$(MAKE) -C e2e lint
+	e2e/bin/ecctl-e2e coverage registry check \
+		--specs specs \
+		--cases e2e/cases \
+		--registry e2e/coverage.yaml \
+		--ecctl-bin e2e/bin/ecctl-public \
+		--surface public
+	e2e/bin/ecctl-e2e sweep check \
+		--cases e2e/cases \
+		--config e2e/sweep.yaml
+
+review-website: ## Install and run website tests, typecheck, and production build
+	npm --prefix website ci
+	npm --prefix website run test
+	npm --prefix website run typecheck
+	npm --prefix website run build
 
 fmt: ## Format Go packages
 	go fmt ./...
