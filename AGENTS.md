@@ -18,6 +18,30 @@ repository.
 - Do not refactor adjacent code unless the change requires it.
 - Remove only dead code introduced by your own change.
 
+## Review Efficiency Contract
+
+For repository-wide `/check` or equivalent reviews:
+
+- Start in a fresh task with only the request, base/head refs, and repository
+  instructions. Do not carry the implementation transcript into the review.
+- Complete the initial review and collect the full blocker list before editing.
+  Apply one repair batch instead of alternating between individual findings and
+  broad rereviews.
+- Give delegated reviewers a bounded scope plus compact diff context, not the
+  full task history.
+- Run at most one initial review and one final rereview for each review scope.
+  If the final rereview finds a new blocker, stop and report it instead of
+  recursively starting another broad review cycle.
+- While repairing findings, run only the smallest relevant tests. Run
+  `make review-final` exactly once for each final candidate SHA, from an
+  isolated worktree based on the latest `origin/main`.
+- Reuse the worktree-scoped Go and npm caches prepared by `make review-final`
+  throughout a check. Set `REVIEW_CACHE_DIR` once when an explicit run-scoped
+  location is needed; do not rotate cache directories between reviewers or
+  verification commands.
+- Limit live E2E for each changed or newly exposed operation to three rounds:
+  reproduction, one diagnostic rerun when needed, and final public validation.
+
 ## Spec-Driven Cloud Behavior
 
 Cloud resource behavior should be declared in `specs/*.yaml` first. Use Go hooks
@@ -79,7 +103,15 @@ API calls in default tests.
 
 - Public E2E runs use `e2e/bin/ecctl-public` with `--surface public`; hidden
   cases use the separately built `e2e/bin/ecctl-full` and `--surface full`.
-- Before a live run, run `make -C e2e lint`; completion uses the matching
-  capability-filtered `coverage registry check --fail-on-not-live` gate.
+- Before a live run, run `make -C e2e lint`.
+- Offline review validates the entire matching capability surface without
+  `--fail-on-not-live` and rejects invalid registry entries.
+- Live completion is delta-based: every changed or newly exposed operation must
+  be `live-pass`, and the branch may introduce no new `offline` or invalid
+  entries relative to its base. Existing prerequisite-bound `offline` entries
+  are not regressions when their registry records are unchanged.
+- Use the matching capability-filtered
+  `coverage registry check --fail-on-not-live` whole-surface gate only after all
+  baseline offline exceptions have been cleared.
 - Cleanup journals are run-specific and may only replay validated `ecctl`
   delete commands with matching region, surface, and binary metadata.
