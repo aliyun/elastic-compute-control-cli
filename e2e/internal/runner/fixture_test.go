@@ -105,6 +105,28 @@ func TestLingjunClusterScalingPrerequisiteIsIsolated(t *testing.T) {
 	}
 }
 
+func TestGovernanceResourceGroupNamesUseBoundedPrefix(t *testing.T) {
+	for _, path := range []string{
+		filepath.Join("..", "..", "cases", "rg", "group-lifecycle.yaml"),
+		filepath.Join("..", "..", "cases", "rg", "policy-lifecycle.yaml"),
+		filepath.Join("..", "..", "cases", "rg", "resource-lifecycle.yaml"),
+		filepath.Join("..", "..", "cases", "rg", "role-lifecycle.yaml"),
+	} {
+		suite, err := scenario.Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, step := range suite.Steps {
+			if !strings.Contains(step.Run, "rg group create") {
+				continue
+			}
+			if !strings.Contains(step.Run, "--name {{.resource_prefix}}") {
+				t.Fatalf("%s step %q must use the bounded resource prefix: %q", path, step.Name, step.Run)
+			}
+		}
+	}
+}
+
 func TestACKPermissionLifecycleUsesProvisionedRAMUser(t *testing.T) {
 	suite, err := scenario.Load(filepath.Join("..", "..", "cases", "ack", "permission-lifecycle.yaml"))
 	if err != nil {

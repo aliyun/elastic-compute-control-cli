@@ -1,0 +1,60 @@
+resource: rg/role
+serial: true
+
+steps:
+  - name: create identity group
+    run: >
+      ecctl rg group create
+      --name {{.resource_prefix}}-role-rg
+      --display-name {{.run_id}}-role-rg
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.group
+    expect:
+      id: { type: string, prefix: rg- }
+      account_id: { type: string }
+    capture:
+      identity_group_id: id
+      account_id: account_id
+    teardown: ecctl rg group delete {{.identity_group_id}}
+
+  - name: create
+    run: >
+      ecctl rg role create
+      --name {{.resource_prefix}}-role
+      --assume-role-policy-document
+      '{"Version":"1","Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"RAM":["acs:ram::{{.account_id}}:root"]}}]}'
+    at: $.role
+    expect:
+      name: { eq: "{{.resource_prefix}}-role" }
+      role_principal_name: { type: string }
+    capture:
+      role_name: name
+    teardown: ecctl rg role delete {{.role_name}}
+
+  - name: get
+    run: ecctl rg role get {{.role_name}}
+    at: $.role
+    expect:
+      name: { eq: "{{.role_name}}" }
+
+  - name: update
+    run: ecctl rg role update {{.role_name}} --description {{.run_id}}-updated
+    at: $.role
+    expect:
+      name: { eq: "{{.role_name}}" }
+      description: { eq: "{{.run_id}}-updated" }
+
+  - name: list
+    run: ecctl rg role list --limit 100
+    assert:
+      - len($.roles) >= 1
+
+  - name: delete
+    run: ecctl rg role delete {{.role_name}}
+    expect:
+      deleted: true
+
+  - name: delete identity group
+    run: ecctl rg group delete {{.identity_group_id}}
+    expect:
+      deleted: true

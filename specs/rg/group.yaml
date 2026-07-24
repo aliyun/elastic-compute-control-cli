@@ -95,7 +95,6 @@ controls:
     description:
       en: additional request parameter key=value
       zh-CN: 额外请求参数 key=value
-
 probes:
   list:
     api: ListResourceGroups
@@ -190,7 +189,6 @@ waiters:
     timeout: 10s
     failure:
       states: [PendingDelete]
-
 bindings:
   create_group:
     api: CreateResourceGroup
@@ -285,10 +283,20 @@ operations:
         - api_param
     workflow:
       - binding: delete_group
+      - probe: list
+        ids:
+          - $input.id
+        as: final
+      - emit:
+          fields:
+            id: $input.id
+          deleted: false
+        when: has(context.final)
       - emit:
           fields:
             id: $input.id
           deleted: true
+        unless: has(context.final)
 
   get:
     aliases: [show, describe]

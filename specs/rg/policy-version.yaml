@@ -52,6 +52,11 @@ schema:
       description:
         en: set as the default version
         zh-CN: 设置为默认版本
+    fallback_default_version:
+      type: string
+      description:
+        en: restore this default version before deleting the requested version
+        zh-CN: 删除指定版本前恢复为该默认版本
 
 controls:
   api_param:
@@ -132,6 +137,18 @@ bindings:
       ApiParam:
         raw: $.api_param
     request_id_from: $.RequestId
+  restore_default:
+    api: SetDefaultPolicyVersion
+    hooks:
+      before: [validate_fallback_default]
+      after_error: [preserve_delete_target_on_restore_not_found]
+    request:
+      PolicyName: $.policy_name
+      VersionId: $.fallback_default_version
+      DeleteTargetVersionId: $.version_id
+      ApiParam:
+        raw: $.api_param
+    request_id_from: $.RequestId
 
 operations:
   create:
@@ -193,9 +210,12 @@ operations:
             positional: true
         - policy_name:
             required: true
+        - fallback_default_version
       controls:
         - api_param
     workflow:
+      - binding: restore_default
+        when: has(input.fallback_default_version)
       - binding: delete_version
       - emit:
           fields:

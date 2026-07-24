@@ -1,0 +1,81 @@
+# Move a temporary VPC into and back out of an E2E resource group. Moving it
+# back before deletion keeps resource-group cleanup independent of VPC release
+# propagation.
+resource: rg/resource
+serial: true
+
+steps:
+  - name: create target group
+    run: >
+      ecctl rg group create
+      --name {{.resource_prefix}}-move-rg
+      --display-name {{.run_id}}-move-rg
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.group
+    expect:
+      id: { type: string, prefix: rg- }
+    capture:
+      target_group_id: id
+    teardown: ecctl rg group delete {{.target_group_id}}
+
+  - name: create movable vpc
+    run: >
+      ecctl vpc create
+      --name {{.run_name}}-move-vpc
+      --cidr 10.24.0.0/16
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.vpc
+    expect:
+      id: { type: string, prefix: vpc- }
+      resource_group: { type: string, prefix: rg- }
+    capture:
+      vpc_id: id
+      original_group_id: resource_group
+    teardown: ecctl vpc delete {{.vpc_id}}
+
+  - name: list resource in original group
+    run: ecctl rg resource list {{.original_group_id}} --filter resource-id={{.vpc_id}}
+    assert:
+      - len($.resources) >= 1
+    capture:
+      movable_resource_type: $.resources[0].resource_type
+      movable_service: $.resources[0].service
+      movable_region: $.resources[0].region_id
+
+  - name: move resource to target group
+    run: >
+      ecctl rg resource update {{.target_group_id}}
+      --resource resource-id={{.vpc_id}},resource-type={{.movable_resource_type}},service={{.movable_service}},region-id={{.movable_region}}
+    assert:
+      - len($.resources) >= 1
+
+  - name: list moved resource
+    run: ecctl rg resource list {{.target_group_id}} --filter resource-id={{.vpc_id}}
+    at: $.resources[0]
+    expect:
+      resource_id: { eq: "{{.vpc_id}}" }
+      resource_group_id: { eq: "{{.target_group_id}}" }
+
+  - name: restore resource to original group
+    run: >
+      ecctl rg resource update {{.original_group_id}}
+      --resource resource-id={{.vpc_id}},resource-type={{.movable_resource_type}},service={{.movable_service}},region-id={{.movable_region}}
+    assert:
+      - len($.resources) >= 1
+
+  - name: verify target group is empty
+    run: ecctl rg resource list {{.target_group_id}} --filter resource-id={{.vpc_id}}
+    expect:
+      $.resources: { type: array, len: 0 }
+
+  - name: delete movable vpc
+    run: ecctl vpc delete {{.vpc_id}}
+    at: $.vpc
+    expect:
+      id: { eq: "{{.vpc_id}}" }
+      $.deleted: { eq: true }
+
+  - name: delete target group
+    run: ecctl rg group delete {{.target_group_id}}
+    expect:
+      deleted: true

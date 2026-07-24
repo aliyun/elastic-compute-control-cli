@@ -25,7 +25,8 @@ func (e *Executor) executeOperationCall(ctx context.Context, req Request, operat
 		return Result{}, err
 	}
 	if operation.Call.NotFound == "error" && len(probeResult.Items) == 0 {
-		return Result{}, ecerrors.NotFound("NotFound", e.spec.Resource+" not found")
+		err := ecerrors.NotFound("NotFound", e.spec.Resource+" not found")
+		return Result{}, ecerrors.WithActions(err, probeResult.Actions)
 	}
 
 	result := Result{
@@ -35,6 +36,7 @@ func (e *Executor) executeOperationCall(ctx context.Context, req Request, operat
 		HasTotal:  probeResult.HasTotal,
 		NextToken: probeResult.NextToken,
 		RequestID: probeResult.RequestID,
+		Actions:   probeResult.Actions,
 	}
 	if !operation.Call.Many && len(probeResult.Items) > 0 {
 		result.Item = probeResult.Items[0]
@@ -90,13 +92,11 @@ func (e *Executor) executeOperationWorkflow(ctx context.Context, req Request, op
 			}
 			probeResult, err := e.wait(ctx, req, step.Wait, execCtx, ids)
 			if err != nil {
-				return Result{}, err
+				return Result{}, ecerrors.WithActions(err, append(result.Actions, actionsFromError(err, e.spec.Probes[e.spec.Waiters[step.Wait].Probe].API)...))
 			}
 			applyProbeResult(&result, probeResult)
+			result.Actions = append(result.Actions, probeResult.Actions...)
 			waitSpec := e.spec.Waiters[step.Wait]
-			if probeSpec, ok := e.spec.Probes[waitSpec.Probe]; ok && probeSpec.API != "" {
-				recordAction(&result.Actions, ecerrors.Action{RequestID: probeResult.RequestID, ActionName: probeSpec.API})
-			}
 			result.Capabilities = appendCapability(result.Capabilities, "auto_wait")
 			cached = &cachedProbeResult{name: waitSpec.Probe, ids: ids, result: probeResult}
 		case step.Probe != "":
@@ -110,15 +110,14 @@ func (e *Executor) executeOperationWorkflow(ctx context.Context, req Request, op
 			usedCache := cached != nil && cached.name == step.Probe && equalStrings(cached.ids, ids)
 			probeResult, err := e.workflowProbe(ctx, step.Probe, execCtx, ids, cached)
 			if err != nil {
-				return Result{}, err
+				return Result{}, ecerrors.WithActions(err, append(result.Actions, actionsFromError(err, e.spec.Probes[step.Probe].API)...))
 			}
 			if step.NotFound == "error" && len(probeResult.Items) == 0 {
-				return Result{}, ecerrors.NotFound("NotFound", e.spec.Resource+" not found")
+				err := ecerrors.NotFound("NotFound", e.spec.Resource+" not found")
+				return Result{}, ecerrors.WithActions(err, append(result.Actions, probeResult.Actions...))
 			}
 			if !usedCache {
-				if probeSpec, ok := e.spec.Probes[step.Probe]; ok && probeSpec.API != "" {
-					recordAction(&result.Actions, ecerrors.Action{RequestID: probeResult.RequestID, ActionName: probeSpec.API})
-				}
+				result.Actions = append(result.Actions, probeResult.Actions...)
 			}
 			if step.As != "" {
 				if result.Captures == nil {
@@ -359,14 +358,47 @@ func (e *Executor) runSingleBinding(ctx context.Context, req Request, step spec.
 			request[transition.Idempotency.Field] = transitionToken(req, transition)
 		}
 	}
+	beforeHookRequest := cloneMap(request)
 	request, err = e.applyBeforeBindingHooks(ctx, binding, request)
 	if err != nil {
 		return nil, err
 	}
 	response, err := e.callTransition(ctx, transition, request, execCtx)
 	if err != nil {
+		hookRequest := afterErrorHookRequest(beforeHookRequest, request)
+		err = e.applyAfterErrorBindingHooks(ctx, binding, hookRequest, err)
+		return nil, ecerrors.WithActions(err, append(result.Actions, actionsFromError(err, transition.Call)...))
+	}
+	responseCheck := checkBindingResponse(binding, response, execCtx)
+	if responseCheck.err != nil {
+		err = responseCheck.err
+		actions := responseCheck.actions
+		if len(responseCheck.successful.Items) > 0 && transition.Wait != "" {
+			skipWait, skipErr := shouldSkip(step.WaitUnless, execCtx)
+			if skipErr != nil {
+				return nil, skipErr
+			}
+			if !skipWait {
+				reconcileCtx := execCtx
+				reconcileCtx.Captures = cloneCaptureResults(execCtx.Captures)
+				reconcileCtx.Captures[binding.Response.Match.Capture] = responseCheck.successful
+				ids := e.currentResourceIDs(reconcileCtx)
+				probeResult, waitErr := e.wait(ctx, req, transition.Wait, reconcileCtx, ids)
+				waitSpec := e.spec.Waiters[transition.Wait]
+				probeSpec := e.spec.Probes[waitSpec.Probe]
+				if waitErr != nil {
+					actions = append(actions, actionsFromError(waitErr, probeSpec.API)...)
+					err = ecerrors.WithDetails(err, ecerrors.WithDetail("provider-reported successful resources could not be reconciled: "+waitErr.Error()))
+				} else {
+					actions = append(actions, probeResult.Actions...)
+				}
+			}
+		}
 		err = e.applyAfterErrorBindingHooks(ctx, binding, request, err)
-		return nil, ecerrors.WithActions(err, appendAction(result.Actions, ecerrors.ActionFromError(transition.Call, err)))
+		if len(actions) == 0 {
+			actions = []ecerrors.Action{ecerrors.ActionFromError(transition.Call, err)}
+		}
+		return nil, ecerrors.WithActions(err, append(result.Actions, actions...))
 	}
 	requestID := ExtractString(response, transition.RequestIDFrom)
 	recordAction(&result.Actions, ecerrors.Action{RequestID: requestID, ActionName: transition.Call})
@@ -402,15 +434,202 @@ func (e *Executor) runSingleBinding(ctx context.Context, req Request, step spec.
 	ids := e.currentResourceIDs(execCtx)
 	probeResult, err := e.wait(ctx, req, transition.Wait, execCtx, ids)
 	if err != nil {
-		return nil, err
+		return nil, ecerrors.WithActions(err, append(result.Actions, actionsFromError(err, e.spec.Probes[e.spec.Waiters[transition.Wait].Probe].API)...))
 	}
 	applyProbeResult(result, probeResult)
 	waitSpec := e.spec.Waiters[transition.Wait]
-	if probeSpec, ok := e.spec.Probes[waitSpec.Probe]; ok && probeSpec.API != "" {
-		recordAction(&result.Actions, ecerrors.Action{RequestID: probeResult.RequestID, ActionName: probeSpec.API})
-	}
+	result.Actions = append(result.Actions, probeResult.Actions...)
 	result.Capabilities = appendCapability(result.Capabilities, "auto_wait")
 	return &cachedProbeResult{name: waitSpec.Probe, ids: ids, result: probeResult}, nil
+}
+
+type bindingResponseCheck struct {
+	err        error
+	actions    []ecerrors.Action
+	successful CaptureResult
+}
+
+func checkBindingResponse(binding spec.Binding, response map[string]any, execCtx ExecutionContext) bindingResponseCheck {
+	validation := binding.Response
+	if validation.Items == "" {
+		return bindingResponseCheck{}
+	}
+	rawItems, ok := ExtractPath(response, validation.Items)
+	if !ok {
+		return bindingResponseCheck{err: invalidBindingResponseError(binding, response, fmt.Sprintf("response did not include items at %s", validation.Items))}
+	}
+	items := listValue(rawItems)
+	if len(items) == 0 {
+		return bindingResponseCheck{err: invalidBindingResponseError(binding, response, fmt.Sprintf("response included no items at %s", validation.Items))}
+	}
+	objects := make([]map[string]any, 0, len(items))
+	statuses := make([]string, 0, len(items))
+	var matchErr error
+	for index, rawItem := range items {
+		item, ok := objectValue(rawItem)
+		if !ok {
+			if matchErr == nil {
+				matchErr = invalidBindingResponseError(binding, response, fmt.Sprintf("response item %d at %s is not an object", index, validation.Items))
+			}
+			continue
+		}
+		status := ExtractString(item, validation.Status)
+		if status == "" {
+			if matchErr == nil {
+				matchErr = invalidBindingResponseError(binding, response, fmt.Sprintf("response item %d did not include status at %s", index, validation.Status))
+			}
+			continue
+		}
+		objects = append(objects, item)
+		statuses = append(statuses, status)
+	}
+
+	var matchedCaptures []map[string]any
+	var matchedItems []map[string]any
+	if validation.Match.Capture != "" {
+		capture, ok := execCtx.Captures[validation.Match.Capture]
+		if !ok {
+			return bindingResponseCheck{err: invalidBindingResponseError(binding, response, fmt.Sprintf("response match capture %q was not recorded", validation.Match.Capture))}
+		}
+		matchedItems = make([]map[string]any, 0, len(objects))
+		for _, item := range objects {
+			matched := map[string]any{}
+			for field, path := range validation.Match.Fields {
+				value, ok := ExtractPath(item, path)
+				if ok && !isEmpty(value) {
+					matched[field] = value
+				}
+			}
+			matchedItems = append(matchedItems, matched)
+		}
+		matchedCaptures, ok = matchCaptureItems(matchedItems, capture, validation.Match.By)
+		if !ok && matchErr == nil {
+			matchErr = invalidBindingResponseError(binding, response,
+				fmt.Sprintf("response items at %s did not match requested capture %q one-to-one", validation.Items, validation.Match.Capture))
+		}
+	}
+
+	check := bindingResponseCheck{}
+	var firstFailureCode, firstFailureMessage, firstFailureRequestID string
+	for index, item := range objects {
+		status := statuses[index]
+		succeeded := bindingResponseSucceeded(status, validation.Success)
+		code := ExtractString(item, validation.ErrorCode)
+		message := ExtractString(item, validation.ErrorMessage)
+		requestID := ExtractString(item, validation.RequestID)
+		if requestID == "" {
+			requestID = ExtractString(response, binding.RequestIDFrom)
+		}
+		identity := ""
+		if index < len(matchedItems) {
+			identity = bindingResponseIdentity(matchedItems[index], validation.Match.By)
+		}
+		if succeeded {
+			matched := validation.Match.Capture == "" ||
+				(index < len(matchedCaptures) && matchedCaptures[index] != nil)
+			if matched {
+				check.actions = append(check.actions, ecerrors.Action{
+					RequestID:  requestID,
+					ActionName: binding.API,
+					Code:       status,
+					Message:    bindingResponseOutcomeMessage(identity, "status "+status),
+				})
+			}
+			if validation.Match.Capture != "" && matched {
+				check.successful.Items = append(check.successful.Items, matchedCaptures[index])
+			}
+			continue
+		}
+		if code == "" {
+			code = status
+		}
+		if message == "" {
+			message = fmt.Sprintf("%s returned status %s", binding.API, status)
+		}
+		check.actions = append(check.actions, ecerrors.Action{
+			RequestID:  requestID,
+			ActionName: binding.API,
+			Code:       code,
+			Message:    bindingResponseOutcomeMessage(identity, message),
+		})
+		if firstFailureCode == "" {
+			firstFailureCode = code
+			firstFailureMessage = message
+			firstFailureRequestID = requestID
+		}
+	}
+	if matchErr != nil {
+		check.err = matchErr
+		check.actions = append(check.actions, ecerrors.ActionFromError(binding.API, matchErr))
+	} else if firstFailureCode != "" {
+		check.err = ecerrors.Service("CloudAPIError", firstFailureMessage, false,
+			ecerrors.WithRequestID(firstFailureRequestID),
+			ecerrors.WithRawCause(firstFailureCode, firstFailureMessage),
+		)
+	}
+	if check.err == nil {
+		check.actions = nil
+		check.successful = CaptureResult{}
+	}
+	return check
+}
+
+func matchCaptureItems(items []map[string]any, capture CaptureResult, fields []string) ([]map[string]any, bool) {
+	used := map[int]bool{}
+	matched := make([]map[string]any, len(items))
+	for itemIndex, item := range items {
+		for index, want := range capture.Items {
+			if used[index] || !captureItemMatches(item, want, fields) {
+				continue
+			}
+			used[index] = true
+			matched[itemIndex] = want
+			break
+		}
+	}
+	return matched, len(items) > 0 && len(items) == len(capture.Items) && len(used) == len(capture.Items)
+}
+
+func bindingResponseIdentity(item map[string]any, fields []string) string {
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if value, ok := item[field]; ok && !isEmpty(value) {
+			parts = append(parts, field+"="+fmt.Sprint(value))
+		}
+	}
+	return strings.Join(parts, ",")
+}
+
+func bindingResponseOutcomeMessage(identity, message string) string {
+	if identity == "" {
+		return message
+	}
+	return identity + ": " + message
+}
+
+func cloneCaptureResults(captures map[string]CaptureResult) map[string]CaptureResult {
+	cloned := make(map[string]CaptureResult, len(captures))
+	for name, capture := range captures {
+		cloned[name] = capture
+	}
+	return cloned
+}
+
+func bindingResponseSucceeded(status string, success []string) bool {
+	for _, expected := range success {
+		if strings.EqualFold(strings.TrimSpace(status), strings.TrimSpace(expected)) {
+			return true
+		}
+	}
+	return false
+}
+
+func invalidBindingResponseError(binding spec.Binding, response map[string]any, message string) error {
+	requestID := ExtractString(response, binding.RequestIDFrom)
+	return ecerrors.Service("CloudAPIError", message, false,
+		ecerrors.WithRequestID(requestID),
+		ecerrors.WithRawCause("InvalidResponse", message),
+	)
 }
 
 func recordCapture(result *Result, execCtx ExecutionContext, name string, capture CaptureResult) {
@@ -448,6 +667,16 @@ func (e *Executor) applyAfterErrorBindingHooks(ctx context.Context, binding spec
 		err = hook(ctx, operationHookCaller{caller: e.caller}, request, err)
 	}
 	return err
+}
+
+func afterErrorHookRequest(before, resolved map[string]any) map[string]any {
+	request := cloneMap(resolved)
+	for key, value := range before {
+		if _, ok := request[key]; !ok {
+			request[key] = value
+		}
+	}
+	return request
 }
 
 type operationHookCaller struct {

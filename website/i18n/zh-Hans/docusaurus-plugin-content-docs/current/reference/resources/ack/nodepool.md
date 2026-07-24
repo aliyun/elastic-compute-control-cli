@@ -56,18 +56,16 @@ ecctl ack nodepool update <id> [flags]
 更新节点池
 
 - 类型：`mutation` · 风险：medium
-- 同步：等待 `active`（waiter `active_after_change`，超时 `600s`）；用 `--no-wait` 跳过等待。
+- 同步：等待 `success`（waiter `task_succeeded`，超时 `3600s`）；用 `--no-wait` 跳过等待。
 
 | API | 调用时机 | 用途 |
 |---|---|---|
 | `ModifyClusterNodePool` | 指定 `--config` 时 | 执行资源操作。 |
-| `DescribeClusterNodePoolDetail` | 指定 `--config` 且未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
+| `DescribeTaskInfo` | 指定 `--config` 且未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
 | `ScaleClusterNodePool` | 指定 `--desired-size` 时 | 执行资源操作。 |
-| `DescribeClusterNodePoolDetail` | 指定 `--desired-size` 且未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
+| `DescribeTaskInfo` | 指定 `--desired-size` 且未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
 | `ModifyNodePoolNodeConfig` | 指定 `--with-node-config` 时 | 执行资源操作。 |
-| `DescribeClusterNodePoolDetail` | 指定 `--with-node-config` 且未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
-| `TagResources` | 指定 `--tag` 时 | 执行资源操作。 |
-| `UntagResources` | 指定 `--untag` 时 | 执行资源操作。 |
+| `DescribeTaskInfo` | 指定 `--with-node-config` 且未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
 | `DescribeClusterNodePoolDetail` | 未指定 `--no-wait` 时 | 读取资源视图。 |
 
 | 参数 | 类型 | 必填 | 说明 |
@@ -77,8 +75,6 @@ ecctl ack nodepool update <id> [flags]
 | `--config` | object |  | 节点池请求体，JSON 对象或 @file |
 | `--desired-size` | integer |  | 节点池期望节点数 |
 | `--node-config` | object |  | 节点级配置请求体，JSON 对象或 @file |
-| `--tag` | key_value |  | 阿里云资源标签赋值 key=value |
-| `--untag` | string_array |  | 要移除的阿里云资源标签键 |
 | `--with-node-config` | boolean |  | 将 update 路由到节点级配置 |
 
 ## delete
@@ -90,11 +86,12 @@ ecctl ack nodepool delete <id> [flags]
 删除节点池
 
 - 类型：`mutation` · 风险：high
-- 同步：等待 `absent`（waiter `absent_after_delete`，超时 `600s`）；用 `--no-wait` 跳过等待。
+- 同步：等待 `success`（waiter `task_succeeded`，超时 `3600s`）；用 `--no-wait` 跳过等待。
 
 | API | 调用时机 | 用途 |
 |---|---|---|
 | `DeleteClusterNodepool` | 每次执行命令时 | 执行资源操作。 |
+| `DescribeTaskInfo` | 未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
 | `DescribeClusterNodePools` | 未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
 
 | 参数 | 类型 | 必填 | 说明 |
@@ -156,12 +153,12 @@ ecctl ack nodepool attach <id> [flags]
 将实例加入节点池
 
 - 类型：`mutation` · 风险：medium
-- 同步：等待 `active`（waiter `active_after_change`，超时 `600s`）；用 `--no-wait` 跳过等待。
+- 同步：等待 `success`（waiter `task_succeeded`，超时 `3600s`）；用 `--no-wait` 跳过等待。
 
 | API | 调用时机 | 用途 |
 |---|---|---|
 | `AttachInstancesToNodePool` | 未指定 `--print-script-only` 时 | 执行资源操作。 |
-| `DescribeClusterNodePoolDetail` | 未指定 `--print-script-only` 且未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
+| `DescribeTaskInfo` | 未指定 `--print-script-only` 且未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
 | `DescribeClusterAttachScripts` | 指定 `--print-script-only` 时 | 读取资源视图。 |
 | `DescribeClusterNodePoolDetail` | 未指定 `--no-wait` 且未指定 `--print-script-only` 时 | 读取资源视图。 |
 
@@ -182,13 +179,13 @@ ecctl ack nodepool detach <id> [flags]
 从节点池移除节点
 
 - 类型：`mutation` · 风险：medium
-- 同步：等待 `active`（waiter `active_after_change`，超时 `600s`）；用 `--no-wait` 跳过等待。
+- 同步：等待 `success`（waiter `task_succeeded`，超时 `3600s`）；用 `--no-wait` 跳过等待。
 
 | API | 调用时机 | 用途 |
 |---|---|---|
 | `RemoveNodePoolNodes` | 每次执行命令时 | 执行资源操作。 |
-| `DescribeClusterNodePoolDetail` | 未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
-| `DescribeClusterNodePoolDetail` | 未指定 `--no-wait` 时 | 返回最终资源视图。（复用等待结果，不额外请求） |
+| `DescribeTaskInfo` | 未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
+| `DescribeClusterNodePoolDetail` | 未指定 `--no-wait` 时 | 读取资源视图。 |
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
@@ -209,14 +206,14 @@ ecctl ack nodepool repair <id> [flags]
 修复节点池
 
 - 类型：`mutation` · 风险：medium
-- 同步：等待 `active`（waiter `active_after_change`，超时 `600s`）；用 `--no-wait` 跳过等待。
+- 同步：等待 `success`（waiter `task_succeeded`，超时 `3600s`）；用 `--no-wait` 跳过等待。
 
 | API | 调用时机 | 用途 |
 |---|---|---|
 | `RepairClusterNodePool` | 指定 `--node` 或指定 `--config` 或指定 `--api-param` 时 | 执行资源操作。 |
-| `DescribeClusterNodePoolDetail` | （指定 `--node` 或指定 `--config` 或指定 `--api-param`）且未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
+| `DescribeTaskInfo` | （指定 `--node` 或指定 `--config` 或指定 `--api-param`）且未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
 | `FixNodePoolVuls` | 指定 `--vulnerabilities` 时 | 执行资源操作。 |
-| `DescribeClusterNodePoolDetail` | 指定 `--vulnerabilities` 且未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
+| `DescribeTaskInfo` | 指定 `--vulnerabilities` 且未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
 | `DescribeClusterNodePoolDetail` | 未指定 `--no-wait` 时 | 读取资源视图。 |
 
 | 参数 | 类型 | 必填 | 说明 |
@@ -236,13 +233,13 @@ ecctl ack nodepool upgrade <id> [flags]
 升级节点池
 
 - 类型：`mutation` · 风险：medium
-- 同步：等待 `active`（waiter `active_after_change`，超时 `600s`）；用 `--no-wait` 跳过等待。
+- 同步：等待 `success`（waiter `task_succeeded`，超时 `3600s`）；用 `--no-wait` 跳过等待。
 
 | API | 调用时机 | 用途 |
 |---|---|---|
 | `UpgradeClusterNodepool` | 每次执行命令时 | 执行资源操作。 |
-| `DescribeClusterNodePoolDetail` | 未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
-| `DescribeClusterNodePoolDetail` | 未指定 `--no-wait` 时 | 返回最终资源视图。（复用等待结果，不额外请求） |
+| `DescribeTaskInfo` | 未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
+| `DescribeClusterNodePoolDetail` | 未指定 `--no-wait` 时 | 读取资源视图。 |
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|

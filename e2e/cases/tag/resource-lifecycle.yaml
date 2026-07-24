@@ -28,14 +28,23 @@ steps:
 
   - name: list by arn
     run: ecctl tag resource list --filter arn=arn:acs:vpc:{{.region}}:{{.owner_id}}:vpc/{{.vpc_id}}
-    assert:
-      - len($.resources) >= 0
+    at: $.resources[0]
+    expect:
+      arn: { eq: "arn:acs:vpc:{{.region}}:{{.owner_id}}:vpc/{{.vpc_id}}" }
+      '$.resources[0].tags["validation-run"]': { eq: "{{.run_id}}" }
 
   - name: remove
     run: >
       ecctl tag resource remove
       --arn arn:acs:vpc:{{.region}}:{{.owner_id}}:vpc/{{.vpc_id}}
       --tag-key validation-run
+
+  - name: verify removal
+    run: ecctl tag resource list --filter arn=arn:acs:vpc:{{.region}}:{{.owner_id}}:vpc/{{.vpc_id}}
+    at: $.resources[0]
+    expect:
+      arn: { eq: "arn:acs:vpc:{{.region}}:{{.owner_id}}:vpc/{{.vpc_id}}" }
+      '$.resources[0].tags["validation-run"]': { exists: false }
 
   - name: delete vpc prerequisite
     run: ecctl vpc delete {{.vpc_id}}

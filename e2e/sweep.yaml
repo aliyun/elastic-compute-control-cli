@@ -177,6 +177,9 @@ non_sweepable:
   - resource: rg/policy
     reason: provider-limitation
     review_after: "2026-10-06"
+  - resource: rg/policy-version
+    reason: provider-limitation
+    review_after: "2026-10-06"
   # ACK cluster listing cannot filter by tags; node pools and kubeconfigs can
   # only be enumerated in the context of a configured cluster/principal. Their
   # case teardown or short-lived revoke lifecycle remains the recovery path.

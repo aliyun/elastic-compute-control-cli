@@ -475,6 +475,7 @@ func TestOutputValueHonorsBooleanConditions(t *testing.T) {
 		input: map[string]any{
 			"enabled": false,
 			"skip":    false,
+			"target":  "rg-123",
 		},
 		result: engine.Result{},
 	}
@@ -492,6 +493,14 @@ func TestOutputValueHonorsBooleanConditions(t *testing.T) {
 	}, ctx)
 	if !ok || got != "visible" {
 		t.Fatalf("outputValue with false unless = %#v ok=%v, want visible true", got, ok)
+	}
+
+	got, ok = outputValue(map[string]any{
+		"value": "attachment",
+		"when":  "has(input.target) || has(input.principal)",
+	}, ctx)
+	if !ok || got != "attachment" {
+		t.Fatalf("outputValue with composite input condition = %#v ok=%v, want attachment true", got, ok)
 	}
 
 	if got, ok := outputValue(map[string]any{

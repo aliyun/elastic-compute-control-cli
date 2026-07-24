@@ -1,0 +1,9 @@
+{
+  "label": "TAG",
+  "position": 5,
+  "link": {
+    "type": "generated-index",
+    "title": "TAG resources",
+    "description": "Manage tag governance resources"
+  }
+}

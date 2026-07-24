@@ -207,11 +207,12 @@ type WaiterFailure struct {
 }
 
 type WaiterMatch struct {
-	Capture  string            `yaml:"capture"`
-	By       []string          `yaml:"by"`
-	Fields   map[string]string `yaml:"fields"`
-	Contains map[string]string `yaml:"contains"`
-	Excludes map[string]string `yaml:"excludes"`
+	Capture          string            `yaml:"capture"`
+	By               []string          `yaml:"by"`
+	ProbeEachCapture bool              `yaml:"probe_each_capture"`
+	Fields           map[string]string `yaml:"fields"`
+	Contains         map[string]string `yaml:"contains"`
+	Excludes         map[string]string `yaml:"excludes"`
 }
 
 type WaiterPending struct {
@@ -265,6 +266,7 @@ type Binding struct {
 	Capture       any               `yaml:"capture"`
 	Hooks         BindingHooks      `yaml:"hooks"`
 	Request       map[string]any    `yaml:"request"`
+	Response      BindingResponse   `yaml:"response"`
 	RequireAny    []Requirement     `yaml:"require_any"`
 	RequireAll    []Requirement     `yaml:"require_all"`
 	Idempotency   Idempotency       `yaml:"idempotency"`
@@ -273,6 +275,22 @@ type Binding struct {
 	RequestIDFrom string            `yaml:"request_id_from"`
 	ContextFrom   map[string]string `yaml:"context_from"`
 	Wait          string            `yaml:"wait"`
+}
+
+type BindingResponse struct {
+	Items        string               `yaml:"items"`
+	Status       string               `yaml:"status"`
+	Success      []string             `yaml:"success"`
+	ErrorCode    string               `yaml:"error_code"`
+	ErrorMessage string               `yaml:"error_message"`
+	RequestID    string               `yaml:"request_id"`
+	Match        BindingResponseMatch `yaml:"match"`
+}
+
+type BindingResponseMatch struct {
+	Capture string            `yaml:"capture"`
+	By      []string          `yaml:"by"`
+	Fields  map[string]string `yaml:"fields"`
 }
 
 type BindingHooks struct {
@@ -959,6 +977,9 @@ func Validate(spec ResourceSpec) error {
 		if waiter.Match.Capture != "" && len(waiter.Match.By) == 0 {
 			return fmt.Errorf("waiter %q match by is required", name)
 		}
+		if waiter.Match.ProbeEachCapture && waiter.Match.Capture == "" {
+			return fmt.Errorf("waiter %q match probe_each_capture requires capture", name)
+		}
 		if waiter.Match.Capture != "" && (len(waiter.Match.Fields) > 0 || len(waiter.Match.Contains) > 0 || len(waiter.Match.Excludes) > 0) {
 			return fmt.Errorf("waiter %q match capture cannot be combined with field expressions", name)
 		}
@@ -986,6 +1007,77 @@ func Validate(spec ResourceSpec) error {
 		}
 		if binding.Request == nil {
 			return fmt.Errorf("binding %q request is required", name)
+		}
+		requestCaptures, err := bindingRequestCaptureFields(binding.Request)
+		if err != nil {
+			return fmt.Errorf("binding %q request capture: %w", name, err)
+		}
+		if binding.Response.Items != "" {
+			if !validResponsePath(binding.Response.Items) {
+				return fmt.Errorf("binding %q response items path %q is invalid", name, binding.Response.Items)
+			}
+			if binding.Response.Status == "" {
+				return fmt.Errorf("binding %q response status is required when response items is set", name)
+			}
+			if !validResponsePath(binding.Response.Status) {
+				return fmt.Errorf("binding %q response status path %q is invalid", name, binding.Response.Status)
+			}
+			if len(binding.Response.Success) == 0 {
+				return fmt.Errorf("binding %q response success is required when response items is set", name)
+			}
+			for _, success := range binding.Response.Success {
+				if strings.TrimSpace(success) == "" {
+					return fmt.Errorf("binding %q response success entries must not be empty", name)
+				}
+			}
+			if binding.Response.ErrorCode == "" {
+				return fmt.Errorf("binding %q response error_code is required when response items is set", name)
+			}
+			if !validResponsePath(binding.Response.ErrorCode) {
+				return fmt.Errorf("binding %q response error_code path %q is invalid", name, binding.Response.ErrorCode)
+			}
+			if binding.Response.ErrorMessage == "" {
+				return fmt.Errorf("binding %q response error_message is required when response items is set", name)
+			}
+			if !validResponsePath(binding.Response.ErrorMessage) {
+				return fmt.Errorf("binding %q response error_message path %q is invalid", name, binding.Response.ErrorMessage)
+			}
+			if binding.Response.RequestID != "" && !validResponsePath(binding.Response.RequestID) {
+				return fmt.Errorf("binding %q response request_id path %q is invalid", name, binding.Response.RequestID)
+			}
+			if binding.Response.Match.Capture != "" {
+				if len(binding.Response.Match.By) == 0 {
+					return fmt.Errorf("binding %q response match by is required when capture is set", name)
+				}
+				captureFields, ok := requestCaptures[binding.Response.Match.Capture]
+				if !ok {
+					return fmt.Errorf("binding %q response match capture %q is not declared in the binding request", name, binding.Response.Match.Capture)
+				}
+				for _, field := range binding.Response.Match.By {
+					if !validResponsePath(binding.Response.Match.Fields[field]) {
+						return fmt.Errorf("binding %q response match field %q is required", name, field)
+					}
+					if !captureFields[field] {
+						return fmt.Errorf("binding %q response match field %q is not declared by capture %q", name, field, binding.Response.Match.Capture)
+					}
+				}
+				for field, path := range binding.Response.Match.Fields {
+					if !validResponsePath(path) {
+						return fmt.Errorf("binding %q response match field %q path %q is invalid", name, field, path)
+					}
+				}
+			} else if len(binding.Response.Match.By) > 0 || len(binding.Response.Match.Fields) > 0 {
+				return fmt.Errorf("binding %q response match capture is required when match is configured", name)
+			}
+		} else if binding.Response.Status != "" ||
+			len(binding.Response.Success) > 0 ||
+			binding.Response.ErrorCode != "" ||
+			binding.Response.ErrorMessage != "" ||
+			binding.Response.RequestID != "" ||
+			binding.Response.Match.Capture != "" ||
+			len(binding.Response.Match.By) > 0 ||
+			len(binding.Response.Match.Fields) > 0 {
+			return fmt.Errorf("binding %q response items is required when response validation is configured", name)
 		}
 		if binding.Idempotency.Field == "" && binding.Idempotency.Prefix != "" {
 			return fmt.Errorf("binding %q idempotency prefix requires field", name)
@@ -1253,6 +1345,111 @@ func validateSchemaField(field SchemaField) error {
 		return fmt.Errorf("unsupported type %q", field.Type)
 	}
 	return nil
+}
+
+func bindingRequestCaptureFields(request map[string]any) (map[string]map[string]bool, error) {
+	captures := map[string]map[string]bool{}
+	var walkFields func(map[string]any, bool) error
+	var walkNode func(any, bool) error
+	walkFields = func(fields map[string]any, insideEach bool) error {
+		for _, node := range fields {
+			if err := walkNode(node, insideEach); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	walkNode = func(node any, insideEach bool) error {
+		typed, ok := node.(map[string]any)
+		if !ok {
+			return nil
+		}
+		if _, ok := typed["raw"].(string); ok {
+			if _, hasCapture := typed["capture"]; hasCapture {
+				return fmt.Errorf("capture is only supported on an each request node")
+			}
+			return nil
+		}
+		if _, ok := typed["from"].(string); ok {
+			if _, hasCapture := typed["capture"]; hasCapture {
+				return fmt.Errorf("capture is only supported on an each request node")
+			}
+			fields, _ := typed["fields"].(map[string]any)
+			return walkFields(fields, insideEach)
+		}
+		if _, hasEach := typed["each"]; hasEach {
+			if rawCapture, hasCapture := typed["capture"]; hasCapture {
+				if insideEach {
+					return fmt.Errorf("capture-bearing each request nodes cannot be nested")
+				}
+				name, fields, err := bindingRequestCapture(rawCapture)
+				if err != nil {
+					return err
+				}
+				if _, exists := captures[name]; exists {
+					return fmt.Errorf("capture %q is declared more than once", name)
+				}
+				captures[name] = fields
+			}
+			fields, _ := typed["fields"].(map[string]any)
+			return walkFields(fields, true)
+		}
+		if _, hasCapture := typed["capture"]; hasCapture {
+			return fmt.Errorf("capture is only supported on an each request node")
+		}
+		return walkFields(typed, insideEach)
+	}
+	if err := walkFields(request, false); err != nil {
+		return nil, err
+	}
+	return captures, nil
+}
+
+func validResponsePath(path string) bool {
+	if path == "$" {
+		return true
+	}
+	if strings.TrimSpace(path) != path || !strings.HasPrefix(path, "$.") {
+		return false
+	}
+	for _, part := range strings.Split(strings.TrimPrefix(path, "$."), ".") {
+		if part == "" || strings.ContainsAny(part, "[]") {
+			return false
+		}
+	}
+	return true
+}
+
+func bindingRequestCapture(raw any) (string, map[string]bool, error) {
+	switch capture := raw.(type) {
+	case string:
+		if strings.TrimSpace(capture) == "" {
+			return "", nil, fmt.Errorf("capture name must not be empty")
+		}
+		return capture, map[string]bool{}, nil
+	case map[string]any:
+		name, _ := capture["name"].(string)
+		if strings.TrimSpace(name) == "" {
+			return "", nil, fmt.Errorf("capture name must not be empty")
+		}
+		fields := map[string]bool{}
+		if rawFields, configured := capture["fields"]; configured {
+			fieldMappings, ok := rawFields.(map[string]any)
+			if !ok {
+				return "", nil, fmt.Errorf("capture %q fields must be an object", name)
+			}
+			for field, rawExpr := range fieldMappings {
+				expr, ok := rawExpr.(string)
+				if !ok || strings.TrimSpace(expr) == "" {
+					return "", nil, fmt.Errorf("capture %q field %q must be a non-empty expression", name, field)
+				}
+				fields[field] = true
+			}
+		}
+		return name, fields, nil
+	default:
+		return "", nil, fmt.Errorf("capture must be a name or object")
+	}
 }
 
 func validateRetry(retry TransitionRetry) error {

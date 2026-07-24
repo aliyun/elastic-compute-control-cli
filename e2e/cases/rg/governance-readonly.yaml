@@ -4,7 +4,7 @@ resource: rg/policy
 
 steps:
   - name: list custom policies
-    run: ecctl rg policy list --policy-type Custom
+    run: ecctl rg policy list --filter policy-type=Custom
     assert:
       - len($.policies) >= 0
 
@@ -19,8 +19,3 @@ steps:
     run: ecctl rg role list
     assert:
       - len($.roles) >= 0
-
-  - name: list resources
-    run: ecctl rg resource list --filter service=vpc
-    assert:
-      - len($.resources) >= 0

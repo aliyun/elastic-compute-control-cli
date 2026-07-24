@@ -56,18 +56,16 @@ ecctl ack nodepool update <id> [flags]
 Update nodepool
 
 - Kind: `mutation` · Risk: medium
-- Synchronous: waits for `active` (waiter `active_after_change`, timeout `600s`); use `--no-wait` to skip.
+- Synchronous: waits for `success` (waiter `task_succeeded`, timeout `3600s`); use `--no-wait` to skip.
 
 | API | When called | Purpose |
 |---|---|---|
 | `ModifyClusterNodePool` | When `--config` is specified. | Perform the resource operation. |
-| `DescribeClusterNodePoolDetail` | When `--config` is specified and `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
+| `DescribeTaskInfo` | When `--config` is specified and `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
 | `ScaleClusterNodePool` | When `--desired-size` is specified. | Perform the resource operation. |
-| `DescribeClusterNodePoolDetail` | When `--desired-size` is specified and `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
+| `DescribeTaskInfo` | When `--desired-size` is specified and `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
 | `ModifyNodePoolNodeConfig` | When `--with-node-config` is specified. | Perform the resource operation. |
-| `DescribeClusterNodePoolDetail` | When `--with-node-config` is specified and `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
-| `TagResources` | When `--tag` is specified. | Perform the resource operation. |
-| `UntagResources` | When `--untag` is specified. | Perform the resource operation. |
+| `DescribeTaskInfo` | When `--with-node-config` is specified and `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
 | `DescribeClusterNodePoolDetail` | When `--no-wait` is not specified. | Read the resource view. |
 
 | Parameter | Type | Required | Description |
@@ -77,8 +75,6 @@ Update nodepool
 | `--config` | object |  | nodepool request body as a JSON object or @file |
 | `--desired-size` | integer |  | desired node count for the nodepool |
 | `--node-config` | object |  | node-level configuration request body as a JSON object or @file |
-| `--tag` | key_value |  | Alibaba Cloud resource tag assignment key=value |
-| `--untag` | string_array |  | Alibaba Cloud resource tag keys to remove |
 | `--with-node-config` | boolean |  | route update to node-level configuration |
 
 ## delete
@@ -90,11 +86,12 @@ ecctl ack nodepool delete <id> [flags]
 Delete nodepool
 
 - Kind: `mutation` · Risk: high
-- Synchronous: waits for `absent` (waiter `absent_after_delete`, timeout `600s`); use `--no-wait` to skip.
+- Synchronous: waits for `success` (waiter `task_succeeded`, timeout `3600s`); use `--no-wait` to skip.
 
 | API | When called | Purpose |
 |---|---|---|
 | `DeleteClusterNodepool` | Every time the command runs. | Perform the resource operation. |
+| `DescribeTaskInfo` | When `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
 | `DescribeClusterNodePools` | When `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
 
 | Parameter | Type | Required | Description |
@@ -156,12 +153,12 @@ ecctl ack nodepool attach <id> [flags]
 Attach instances to nodepool
 
 - Kind: `mutation` · Risk: medium
-- Synchronous: waits for `active` (waiter `active_after_change`, timeout `600s`); use `--no-wait` to skip.
+- Synchronous: waits for `success` (waiter `task_succeeded`, timeout `3600s`); use `--no-wait` to skip.
 
 | API | When called | Purpose |
 |---|---|---|
 | `AttachInstancesToNodePool` | When `--print-script-only` is not specified. | Perform the resource operation. |
-| `DescribeClusterNodePoolDetail` | When `--print-script-only` is not specified and `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
+| `DescribeTaskInfo` | When `--print-script-only` is not specified and `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
 | `DescribeClusterAttachScripts` | When `--print-script-only` is specified. | Read the resource view. |
 | `DescribeClusterNodePoolDetail` | When `--no-wait` is not specified and `--print-script-only` is not specified. | Read the resource view. |
 
@@ -182,13 +179,13 @@ ecctl ack nodepool detach <id> [flags]
 Detach nodes from nodepool
 
 - Kind: `mutation` · Risk: medium
-- Synchronous: waits for `active` (waiter `active_after_change`, timeout `600s`); use `--no-wait` to skip.
+- Synchronous: waits for `success` (waiter `task_succeeded`, timeout `3600s`); use `--no-wait` to skip.
 
 | API | When called | Purpose |
 |---|---|---|
 | `RemoveNodePoolNodes` | Every time the command runs. | Perform the resource operation. |
-| `DescribeClusterNodePoolDetail` | When `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
-| `DescribeClusterNodePoolDetail` | When `--no-wait` is not specified. | Return the final resource view. (cached; no additional request) |
+| `DescribeTaskInfo` | When `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
+| `DescribeClusterNodePoolDetail` | When `--no-wait` is not specified. | Read the resource view. |
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -209,14 +206,14 @@ ecctl ack nodepool repair <id> [flags]
 Repair nodepool
 
 - Kind: `mutation` · Risk: medium
-- Synchronous: waits for `active` (waiter `active_after_change`, timeout `600s`); use `--no-wait` to skip.
+- Synchronous: waits for `success` (waiter `task_succeeded`, timeout `3600s`); use `--no-wait` to skip.
 
 | API | When called | Purpose |
 |---|---|---|
 | `RepairClusterNodePool` | When `--node` is specified or `--config` is specified or `--api-param` is specified. | Perform the resource operation. |
-| `DescribeClusterNodePoolDetail` | When (`--node` is specified or `--config` is specified or `--api-param` is specified) and `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
+| `DescribeTaskInfo` | When (`--node` is specified or `--config` is specified or `--api-param` is specified) and `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
 | `FixNodePoolVuls` | When `--vulnerabilities` is specified. | Perform the resource operation. |
-| `DescribeClusterNodePoolDetail` | When `--vulnerabilities` is specified and `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
+| `DescribeTaskInfo` | When `--vulnerabilities` is specified and `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
 | `DescribeClusterNodePoolDetail` | When `--no-wait` is not specified. | Read the resource view. |
 
 | Parameter | Type | Required | Description |
@@ -236,13 +233,13 @@ ecctl ack nodepool upgrade <id> [flags]
 Upgrade nodepool
 
 - Kind: `mutation` · Risk: medium
-- Synchronous: waits for `active` (waiter `active_after_change`, timeout `600s`); use `--no-wait` to skip.
+- Synchronous: waits for `success` (waiter `task_succeeded`, timeout `3600s`); use `--no-wait` to skip.
 
 | API | When called | Purpose |
 |---|---|---|
 | `UpgradeClusterNodepool` | Every time the command runs. | Perform the resource operation. |
-| `DescribeClusterNodePoolDetail` | When `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
-| `DescribeClusterNodePoolDetail` | When `--no-wait` is not specified. | Return the final resource view. (cached; no additional request) |
+| `DescribeTaskInfo` | When `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
+| `DescribeClusterNodePoolDetail` | When `--no-wait` is not specified. | Read the resource view. |
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

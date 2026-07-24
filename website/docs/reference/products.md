@@ -62,6 +62,30 @@ Manage Lingjun intelligent-computing and high-performance network resources thro
 | [cluster](./resources/lingjun/cluster.md) | Manage Lingjun cluster resources |
 | [vpd](./resources/lingjun/vpd.md) | Manage Lingjun VPD resources |
 
+## [RG](../category/rg)
+
+Manage resource group governance resources
+
+**5 resources**
+
+| Resource | Description |
+|---|---|
+| [group](./resources/rg/group.md) | Manage resource groups |
+| [policy](./resources/rg/policy.md) | Manage resource group policies |
+| [resource](./resources/rg/resource.md) | Manage resources across resource groups |
+| [role](./resources/rg/role.md) | Manage RAM roles |
+| [policy version](./resources/rg/policy-version.md) | Manage policy versions |
+
+## [TAG](../category/tag)
+
+Manage tag governance resources
+
+**1 resource**
+
+| Resource | Description |
+|---|---|
+| [resource](./resources/tag/resource.md) | Manage tags on cross-product resources |
+
 ## [VPC](../category/vpc)
 
 Manage Virtual Private Cloud (VPC) networking, including isolated VPCs and the vSwitches that carve them into zone-level subnets for IP address planning.

@@ -88,16 +88,17 @@ ecctl ack node attach [flags]
 将 ECS 实例直接加入 ACK 集群
 
 - 类型：`mutation` · 风险：medium
-- 同步：等待 `Ready`（waiter `ready_after_attach`，超时 `300s`）；用 `--no-wait` 跳过等待。
+- 同步：等待 `success`（waiter `attach_task_succeeded`，超时 `300s`）；用 `--no-wait` 跳过等待。
 
 | API | 调用时机 | 用途 |
 |---|---|---|
 | `AttachInstances` | 每次执行命令时 | 执行资源操作。 |
-| `DescribeClusterNodes` | 未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
-| `DescribeClusterNodes` | 未指定 `--no-wait` 时 | 返回最终资源视图。（复用等待结果，不额外请求） |
+| `DescribeTaskInfo` | 未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
+| `DescribeClusterNodes` | 未指定 `--no-wait` 时 | 读取资源视图。 |
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `--cluster` | string | ✓ | ACK 集群 ID |
 | `--instance` | string | ✓ | ACK 节点 ECS 实例 ID |
 | `--region` | string | ✓ | Alibaba Cloud region |
+| `--nodepool` | string |  | ACK 节点池 ID |

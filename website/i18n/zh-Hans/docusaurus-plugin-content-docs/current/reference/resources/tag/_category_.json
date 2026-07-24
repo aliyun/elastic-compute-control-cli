@@ -1,0 +1,9 @@
+{
+  "label": "TAG",
+  "position": 5,
+  "link": {
+    "type": "generated-index",
+    "title": "TAG 资源",
+    "description": "管理标签治理资源"
+  }
+}

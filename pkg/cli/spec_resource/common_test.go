@@ -14,6 +14,7 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
 	_ "github.com/aliyun/elastic-compute-control-cli/specs/ack"
 	_ "github.com/aliyun/elastic-compute-control-cli/specs/ecs"
+	_ "github.com/aliyun/elastic-compute-control-cli/specs/rg"
 	_ "github.com/aliyun/elastic-compute-control-cli/specs/tag"
 )
 

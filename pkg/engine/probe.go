@@ -18,6 +18,7 @@ type ProbeResult struct {
 	HasTotal  bool
 	NextToken string
 	RequestID string
+	Actions   []ecerrors.Action
 }
 
 const topLevelArrayResponseMarker = "__ecctl_top_level_array_response"
@@ -40,6 +41,7 @@ func (e *Executor) runProbe(ctx context.Context, name string, execCtx ExecutionC
 	probeCtx := ExecutionContext{
 		Input:    input,
 		Context:  cloneMap(execCtx.Context),
+		Current:  execCtx.Current,
 		Captures: execCtx.Captures,
 	}
 	request, _, err := ResolveResourceBindingRequest(e.spec, spec.Binding{Request: probe.Request}, probeCtx)
@@ -50,7 +52,9 @@ func (e *Executor) runProbe(ctx context.Context, name string, execCtx ExecutionC
 	if err != nil {
 		return ProbeResult{}, ecerrors.WithActions(err, []ecerrors.Action{ecerrors.ActionFromError(probe.API, err)})
 	}
-	return mapProbeResponse(e.spec, probe, response), nil
+	result := mapProbeResponse(e.spec, probe, response)
+	result.Actions = []ecerrors.Action{{RequestID: result.RequestID, ActionName: probe.API}}
+	return result, nil
 }
 
 func mapProbeResponse(resource spec.ResourceSpec, probe spec.Probe, response map[string]any) ProbeResult {

@@ -6,13 +6,13 @@ steps:
   - name: create
     run: >
       ecctl rg group create
-      --name {{.run_name}}-rg
+      --name {{.resource_prefix}}-rg
       --display-name {{.run_id}}-rg
       --tag ecctl-e2e=1 --tag run-id={{.run_id}}
     at: $.group
     expect:
       id: { type: string, prefix: rg- }
-      name: { eq: "{{.run_name}}-rg" }
+      name: { eq: "{{.resource_prefix}}-rg" }
       display_name: { eq: "{{.run_id}}-rg" }
     capture:
       group_id: id
@@ -23,18 +23,13 @@ steps:
     at: $.group
     expect:
       id: { eq: "{{.group_id}}" }
-      name: { eq: "{{.run_name}}-rg" }
+      name: { eq: "{{.resource_prefix}}-rg" }
       status: { oneof: [OK, Creating] }
 
   - name: list (find ours)
     run: ecctl rg group list --filter tag.ecctl-e2e=1
     assert:
       - len($.groups) >= 1
-
-  - name: list resources in group
-    run: ecctl rg resource list {{.group_id}}
-    assert:
-      - len($.resources) >= 0
 
   - name: update
     run: ecctl rg group update {{.group_id}} --display-name {{.run_id}}-rg2
@@ -45,6 +40,6 @@ steps:
 
   - name: delete
     run: ecctl rg group delete {{.group_id}}
-    at: $
-    expect:
-      deleted: true
+    assert:
+      - $.group.id == "{{.group_id}}"
+      - $.deleted == true || $.group.status == "PendingDelete"

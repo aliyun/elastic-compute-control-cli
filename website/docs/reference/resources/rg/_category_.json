@@ -1,0 +1,9 @@
+{
+  "label": "RG",
+  "position": 4,
+  "link": {
+    "type": "generated-index",
+    "title": "RG resources",
+    "description": "Manage resource group governance resources"
+  }
+}

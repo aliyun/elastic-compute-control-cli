@@ -48,13 +48,14 @@ ecctl lingjun vpd update <id> [flags]
 Update VPD
 
 - Kind: `mutation` · Risk: medium
+- Synchronous: waits for `matched` (waiter `update_converged`, timeout `300s`); use `--no-wait` to skip.
 
 | API | When called | Purpose |
 |---|---|---|
 | `UpdateVpd` | When `--name` is specified. | Perform the resource operation. |
 | `AssociateVpdCidrBlock` | When `--cidr` contains a value prefixed with `+`. | Perform the resource operation. |
 | `UnAssociateVpdCidrBlock` | When `--cidr` contains a value prefixed with `-`. | Perform the resource operation. |
-| `GetVpd` | When `--no-wait` is not specified. | Read the resource view. |
+| `GetVpd` | When `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

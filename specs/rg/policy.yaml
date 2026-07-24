@@ -316,10 +316,10 @@ operations:
         total: $result.total
         policies:
           value: $result.items
-          unless: $input.resource_group || $input.principal_type || $input.principal_name
+          unless: has(input.resource_group) || has(input.principal_type) || has(input.principal_name)
         attachments:
           value: $result.items
-          when: $input.resource_group || $input.principal_type || $input.principal_name
+          when: has(input.resource_group) || has(input.principal_type) || has(input.principal_name)
   attach:
     examples:
       - ecctl rg policy attach my-name --policy-type Custom --principal-type <principal-type> --principal-name <principal-name> --resource-group <rg-id>

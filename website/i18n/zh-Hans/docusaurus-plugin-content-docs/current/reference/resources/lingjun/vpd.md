@@ -48,13 +48,14 @@ ecctl lingjun vpd update <id> [flags]
 更新 VPD
 
 - 类型：`mutation` · 风险：medium
+- 同步：等待 `matched`（waiter `update_converged`，超时 `300s`）；用 `--no-wait` 跳过等待。
 
 | API | 调用时机 | 用途 |
 |---|---|---|
 | `UpdateVpd` | 指定 `--name` 时 | 执行资源操作。 |
 | `AssociateVpdCidrBlock` | `--cidr` 中包含以 `+` 为前缀的值时 | 执行资源操作。 |
 | `UnAssociateVpdCidrBlock` | `--cidr` 中包含以 `-` 为前缀的值时 | 执行资源操作。 |
-| `GetVpd` | 未指定 `--no-wait` 时 | 读取资源视图。 |
+| `GetVpd` | 未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|

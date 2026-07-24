@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -305,6 +306,242 @@ unexpected_field: true
 
 	if _, err := Load(raw); err == nil {
 		t.Fatal("Load succeeded with unknown field")
+	}
+}
+
+func TestLoadSupportsBindingResponseValidation(t *testing.T) {
+	raw := []byte(`
+schema_version: 2
+product: rg
+resource: resource
+kind: regional
+schema:
+  fields:
+    id:
+      type: string
+bindings:
+  move:
+    api: MoveResources
+    request:
+      Resources:
+        each: $.resources
+        capture:
+          name: moved_resources
+          fields:
+            resource_id: $.resource_id
+            resource_type: $.resource_type
+        fields:
+          ResourceId: $.resource_id
+          ResourceType: $.resource_type
+    response:
+      items: $.Responses
+      status: $.Status
+      success: [SUCCESS]
+      error_code: $.ErrorCode
+      error_message: $.ErrorMsg
+      request_id: $.RequestId
+      match:
+        capture: moved_resources
+        by: [resource_id, resource_type]
+        fields:
+          resource_id: $.ResourceId
+          resource_type: $.ResourceType
+operations:
+  update:
+    examples:
+      - ecctl rg resource update rg-target
+    workflow:
+      - binding: move
+`)
+
+	loaded, err := Load(raw)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := Validate(loaded); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	response := loaded.Bindings["move"].Response
+	if response.Items != "$.Responses" ||
+		response.Status != "$.Status" ||
+		len(response.Success) != 1 ||
+		response.Success[0] != "SUCCESS" ||
+		response.ErrorCode != "$.ErrorCode" ||
+		response.ErrorMessage != "$.ErrorMsg" ||
+		response.RequestID != "$.RequestId" ||
+		response.Match.Capture != "moved_resources" ||
+		len(response.Match.By) != 2 ||
+		response.Match.Fields["resource_id"] != "$.ResourceId" ||
+		response.Match.Fields["resource_type"] != "$.ResourceType" {
+		t.Fatalf("binding response = %#v", response)
+	}
+}
+
+func TestLoadRejectsBindingResponseMatchWithoutDeclaredCaptureFields(t *testing.T) {
+	tests := []struct {
+		name       string
+		request    string
+		matchField string
+		success    string
+		itemsPath  string
+		matchPath  string
+	}{
+		{
+			name:       "missing capture",
+			request:    "{}",
+			matchField: "resource_id",
+		},
+		{
+			name: "missing capture field",
+			request: `
+      Resources:
+        each: $.resources
+        capture:
+          name: moved_resources
+          fields:
+            resource_id: $.resource_id
+        fields:
+          ResourceId: $.resource_id`,
+			matchField: "resource_type",
+		},
+		{
+			name: "capture outside each node",
+			request: `
+      Resources:
+        capture:
+          name: moved_resources
+          fields:
+            resource_id: $.resource_id
+        fields:
+          ResourceId: $.resource_id`,
+			matchField: "resource_id",
+		},
+		{
+			name: "empty capture field expression",
+			request: `
+      Resources:
+        each: $.resources
+        capture:
+          name: moved_resources
+          fields:
+            resource_id: ""
+        fields:
+          ResourceId: $.resource_id`,
+			matchField: "resource_id",
+		},
+		{
+			name: "empty success token",
+			request: `
+      Resources:
+        each: $.resources
+        capture:
+          name: moved_resources
+          fields:
+            resource_id: $.resource_id
+        fields:
+          ResourceId: $.resource_id`,
+			matchField: "resource_id",
+			success:    " ",
+		},
+		{
+			name: "invalid response items path",
+			request: `
+      Resources:
+        each: $.resources
+        capture:
+          name: moved_resources
+          fields:
+            resource_id: $.resource_id
+        fields:
+          ResourceId: $.resource_id`,
+			matchField: "resource_id",
+			itemsPath:  "Responses",
+		},
+		{
+			name: "invalid response match path",
+			request: `
+      Resources:
+        each: $.resources
+        capture:
+          name: moved_resources
+          fields:
+            resource_id: $.resource_id
+        fields:
+          ResourceId: $.resource_id`,
+			matchField: "resource_id",
+			matchPath:  " ",
+		},
+		{
+			name: "capture-bearing nested each",
+			request: `
+      Groups:
+        each: $.groups
+        fields:
+          Resources:
+            each: $.resources
+            capture:
+              name: moved_resources
+              fields:
+                resource_id: $.resource_id
+            fields:
+              ResourceId: $.resource_id`,
+			matchField: "resource_id",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			success := tt.success
+			if success == "" {
+				success = "SUCCESS"
+			}
+			itemsPath := tt.itemsPath
+			if itemsPath == "" {
+				itemsPath = "$.Responses"
+			}
+			matchPath := tt.matchPath
+			if matchPath == "" {
+				matchPath = "$.ResourceId"
+			}
+			raw := []byte(fmt.Sprintf(`
+schema_version: 2
+product: rg
+resource: resource
+kind: regional
+schema:
+  fields:
+    id:
+      type: string
+bindings:
+  move:
+    api: MoveResources
+    request: %s
+    response:
+      items: %s
+      status: $.Status
+      success: ["%s"]
+      error_code: $.ErrorCode
+      error_message: $.ErrorMsg
+      match:
+        capture: moved_resources
+        by: [%s]
+        fields:
+          %s: "%s"
+operations:
+  update:
+    examples:
+      - ecctl rg resource update rg-target
+    workflow:
+      - binding: move
+`, tt.request, itemsPath, success, tt.matchField, tt.matchField, matchPath))
+
+			loaded, err := Load(raw)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if err := Validate(loaded); err == nil {
+				t.Fatal("Validate succeeded without a matching declared request capture field")
+			}
+		})
 	}
 }
 

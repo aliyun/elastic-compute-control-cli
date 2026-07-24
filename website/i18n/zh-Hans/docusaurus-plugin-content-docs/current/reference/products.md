@@ -62,6 +62,30 @@ description: "浏览 ecctl 支持的全部公开产品和资源。"
 | [cluster](./resources/lingjun/cluster.md) | 管理灵骏集群资源 |
 | [vpd](./resources/lingjun/vpd.md) | 管理灵骏网段资源 |
 
+## [RG](../category/rg)
+
+管理资源组治理资源
+
+**5 个资源**
+
+| 资源 | 描述 |
+|---|---|
+| [group](./resources/rg/group.md) | 管理资源组 |
+| [policy](./resources/rg/policy.md) | 管理权限策略 |
+| [resource](./resources/rg/resource.md) | 管理资源组中的资源 |
+| [role](./resources/rg/role.md) | 管理 RAM 角色 |
+| [policy version](./resources/rg/policy-version.md) | 管理权限策略版本 |
+
+## [TAG](../category/tag)
+
+管理标签治理资源
+
+**1 个资源**
+
+| 资源 | 描述 |
+|---|---|
+| [resource](./resources/tag/resource.md) | 管理跨产品资源标签 |
+
 ## [VPC](../category/vpc)
 
 管理专有网络 VPC，涵盖隔离的 VPC 网络及其交换机（vSwitch），用于按可用区划分子网与 IP 地址规划。

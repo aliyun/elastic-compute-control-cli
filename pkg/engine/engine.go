@@ -243,6 +243,7 @@ func (e *Executor) wait(ctx context.Context, req Request, name string, execCtx E
 	}
 
 	var last ProbeResult
+	var actions []ecerrors.Action
 	_, err = waiter.Wait(ctx, waiter.Options{
 		Target:        waitSpec.Target,
 		FailureStates: waitSpec.Failure.States,
@@ -250,13 +251,18 @@ func (e *Executor) wait(ctx context.Context, req Request, name string, execCtx E
 		Timeout:       scaledTimeout,
 		MaxAttempts:   maxAttempts(scaledTimeout, scaledInterval),
 		Probe: func(ctx context.Context) (waiter.Observation, error) {
-			probeResult, err := e.runProbe(ctx, waitSpec.Probe, execCtx, ids)
+			probeResult, err := e.runWaiterProbe(ctx, waitSpec, execCtx, ids)
+			actions = append(actions, probeResult.Actions...)
 			if err != nil {
+				actions = append(actions, actionsFromError(err, probeSpec.API)...)
 				if waitSpec.Target == "absent" && isNotFoundError(err) {
 					last = ProbeResult{}
 					return waiter.Observation{State: "absent", Value: last}, nil
 				}
-				return waiter.Observation{}, err
+				return waiter.Observation{
+					State: waiterState(waitSpec, probeSpec, probeResult, ids, execCtx),
+					Value: probeResult,
+				}, err
 			}
 			last = probeResult
 			return waiter.Observation{
@@ -266,9 +272,40 @@ func (e *Executor) wait(ctx context.Context, req Request, name string, execCtx E
 		},
 	})
 	if err != nil {
-		return ProbeResult{}, err
+		return last, ecerrors.WithActions(err, actions)
 	}
+	last.Actions = actions
 	return last, nil
+}
+
+func (e *Executor) runWaiterProbe(ctx context.Context, waitSpec spec.Waiter, execCtx ExecutionContext, ids []string) (ProbeResult, error) {
+	if !waitSpec.Match.ProbeEachCapture {
+		return e.runProbe(ctx, waitSpec.Probe, execCtx, ids)
+	}
+	capture, ok := execCtx.Captures[waitSpec.Match.Capture]
+	if !ok || len(capture.Items) == 0 {
+		return ProbeResult{}, nil
+	}
+	combined := ProbeResult{}
+	for _, item := range capture.Items {
+		itemCtx := withCurrent(execCtx, item)
+		result, err := e.runProbe(ctx, waitSpec.Probe, itemCtx, ids)
+		if err != nil {
+			return combined, err
+		}
+		combined.Items = append(combined.Items, result.Items...)
+		combined.Actions = append(combined.Actions, result.Actions...)
+		combined.Total += result.Total
+		combined.HasTotal = combined.HasTotal || result.HasTotal
+		if combined.RequestID == "" {
+			combined.RequestID = result.RequestID
+		}
+		if result.NextToken != "" {
+			combined.NextToken = result.NextToken
+		}
+		combined.Extra = mergeFields(combined.Extra, result.Extra)
+	}
+	return combined, nil
 }
 
 func isNotFoundError(err error) bool {
@@ -762,12 +799,17 @@ func recordAction(actions *[]ecerrors.Action, action ecerrors.Action) {
 	if action.ActionName == "" {
 		return
 	}
-	last := len(*actions) - 1
-	if last >= 0 && (*actions)[last].ActionName == action.ActionName {
-		(*actions)[last] = action
-		return
-	}
 	*actions = append(*actions, action)
+}
+
+func actionsFromError(err error, fallbackAction string) []ecerrors.Action {
+	var appErr *ecerrors.AppError
+	if stderrors.As(err, &appErr) {
+		if actions := appErr.Actions(); len(actions) > 0 {
+			return actions
+		}
+	}
+	return []ecerrors.Action{ecerrors.ActionFromError(fallbackAction, err)}
 }
 
 func appendAction(actions []ecerrors.Action, action ecerrors.Action) []ecerrors.Action {
