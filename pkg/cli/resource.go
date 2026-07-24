@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"sort"
 	"strconv"
@@ -1132,6 +1133,8 @@ func runResourceAction(cmd *cobra.Command, options *globalOptions, stdout io.Wri
 		return err
 	}
 	delete(input, fieldSelectorInputName)
+	// Factories may tune waiter timing for one execution; keep the catalog immutable.
+	resource.Waiters = maps.Clone(resource.Waiters)
 	callerFactory := resourceCallerFactoryFromContext(cmd.Context())
 	caller, err := callerFactory(config.ProfileName(options.profile, os.Getenv), config.ConfigPath(os.Getenv), resource, region, os.Getenv)
 	if err != nil {
