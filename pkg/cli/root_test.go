@@ -728,9 +728,14 @@ func TestOpenSourceCommandSurfaceHidesNonPublicResourcesOnlyInCLI(t *testing.T) 
 			hidden: []string{"eni", "node", "node-group", "vsc"},
 		},
 		{
-			name:   "root help hides undocumented products",
-			args:   []string{"--lang", "en", "--help"},
-			hidden: []string{"rg", "tag"},
+			name:   "rg help hides account-level resources",
+			args:   []string{"--lang", "en", "rg", "--help"},
+			hidden: []string{"admin-setting", "associated-transfer", "notification", "service-linked-role"},
+		},
+		{
+			name:   "tag help hides account-level resources",
+			args:   []string{"--lang", "en", "tag", "--help"},
+			hidden: []string{"associated-resource-rule", "policy"},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -758,6 +763,10 @@ func TestOpenSourceCommandSurfaceHidesNonPublicResourcesOnlyInCLI(t *testing.T) 
 		{name: "lingjun VPD becomes public", args: []string{"--lang", "en", "lingjun", "vpd", "--help"}, want: "VPD"},
 		{name: "ecs remains public", args: []string{"--lang", "en", "ecs", "instance", "--help"}, want: "instance"},
 		{name: "vpc remains public", args: []string{"--lang", "en", "vpc", "vswitch", "--help"}, want: "vswitch"},
+		{name: "resource group becomes public", args: []string{"--lang", "en", "rg", "group", "--help"}, want: "resource group"},
+		{name: "resource group membership becomes public", args: []string{"--lang", "en", "rg", "resource", "--help"}, want: "resource"},
+		{name: "policy version becomes public", args: []string{"--lang", "en", "rg", "policy", "version", "--help"}, want: "policy version"},
+		{name: "tag resource becomes public", args: []string{"--lang", "en", "tag", "resource", "--help"}, want: "tag"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			stdout, stderr, code := runCLI(tt.args...)
@@ -776,8 +785,10 @@ func TestOpenSourceCommandSurfaceHidesNonPublicResourcesOnlyInCLI(t *testing.T) 
 		{"--lang", "en", "lingjun", "node", "--help"},
 		{"--lang", "en", "lingjun", "node-group", "--help"},
 		{"--lang", "en", "lingjun", "ng", "--help"},
-		{"--lang", "en", "rg", "--help"},
-		{"--lang", "en", "tag", "--help"},
+		{"--lang", "en", "rg", "notification", "--help"},
+		{"--lang", "en", "rg", "service-linked-role", "--help"},
+		{"--lang", "en", "tag", "associated-resource-rule", "--help"},
+		{"--lang", "en", "tag", "policy", "--help"},
 	} {
 		stdout, stderr, code := runCLI(args...)
 		if code == 0 {
@@ -845,23 +856,46 @@ func TestOpenSourceCommandSurfaceHidesNonPublicResourcesOnlyInCLI(t *testing.T) 
 	}
 }
 
-func TestUndocumentedGovernanceProductsRemainHidden(t *testing.T) {
+func TestGovernanceProductsExposeSelectedPublicResources(t *testing.T) {
 	stdout, stderr, code := runCLI("--lang", "en", "schema", "--list")
 	if code != 0 {
 		t.Fatalf("schema --list exit %d stderr=%s stdout=%s", code, stderr, stdout)
 	}
 	products, _ := decodeObject(t, stdout)["products"].([]any)
+	var foundRG, foundTag bool
 	for _, item := range products {
 		product, _ := item.(map[string]any)
-		if product["name"] == "rg" || product["name"] == "tag" {
-			t.Fatalf("undocumented product leaked into public schema list: %s", stdout)
+		switch product["name"] {
+		case "rg":
+			foundRG = true
+		case "tag":
+			foundTag = true
 		}
 	}
+	if !foundRG || !foundTag {
+		t.Fatalf("public schema list missing governance products: %s", stdout)
+	}
 
-	for _, product := range []string{"rg", "tag"} {
-		stdout, stderr, code = runCLI("--lang", "en", product, "--help")
-		if code == 0 {
-			t.Fatalf("%s must remain hidden; stderr=%s stdout=%s", product, stderr, stdout)
+	for _, tt := range []struct {
+		product string
+		want    []string
+	}{
+		{product: "rg", want: []string{"group", "policy", "resource", "role", "version"}},
+		{product: "tag", want: []string{"resource"}},
+	} {
+		stdout, stderr, code = runCLI("--lang", "en", "schema", "--list", tt.product)
+		if code != 0 {
+			t.Fatalf("schema --list %s exit %d stderr=%s stdout=%s", tt.product, code, stderr, stdout)
+		}
+		resourceItems, _ := decodeObject(t, stdout)["resources"].([]any)
+		var got []string
+		for _, item := range resourceItems {
+			resource, _ := item.(map[string]any)
+			name, _ := resource["name"].(string)
+			got = append(got, name)
+		}
+		if !reflect.DeepEqual(got, tt.want) {
+			t.Fatalf("public %s resources = %#v, want %#v; stdout=%s", tt.product, got, tt.want, stdout)
 		}
 	}
 }
@@ -5420,7 +5454,7 @@ func TestRootHelpStillListsProductStubs(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("root help exit %d stderr=%s stdout=%s", code, stderr, stdout)
 	}
-	for _, want := range []string{"Cloud Product Commands:", "vpc", "ecs", "ack", "lingjun"} {
+	for _, want := range []string{"Cloud Product Commands:", "vpc", "ecs", "ack", "lingjun", "rg", "tag"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("root help missing %q:\n%s", want, stdout)
 		}
@@ -5512,10 +5546,10 @@ func TestExamplesAllListsAllTopics(t *testing.T) {
 
 func TestExamplesHideNonPublicTopics(t *testing.T) {
 	hiddenTopics := []string{
-		"rg",
-		"rg.group",
-		"tag",
-		"tag.resource",
+		"rg.notification",
+		"rg.service-linked-role",
+		"tag.associated-resource-rule",
+		"tag.policy",
 	}
 	for _, args := range [][]string{
 		{"--lang", "en", "examples"},

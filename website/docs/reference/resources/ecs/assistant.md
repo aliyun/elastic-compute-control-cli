@@ -31,7 +31,7 @@ Update Cloud Assistant service settings
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `--region` | string | ✓ | Alibaba Cloud region |
-| `--setting-types` | array |  | Cloud Assistant setting types to query (DescribeCloudAssistantSettings requires at least one) (default: `["InvocationDelivery","SessionManagerDelivery","AgentUpgradeConfig","SessionManagerConfig"]`) |
+| `--setting-type` | string | ✓ | Cloud Assistant setting type to update |
 
 ## get
 

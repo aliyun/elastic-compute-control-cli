@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
 
@@ -212,6 +213,18 @@ func TestRGPolicyListAttachmentsCallsListPolicyAttachments(t *testing.T) {
 	req := fake.calls[0].request
 	if req["ResourceGroupId"] != "rg-123" || req["PrincipalType"] != "IMSUser" || req["PrincipalName"] != "user1" {
 		t.Fatalf("ListPolicyAttachments request = %#v", req)
+	}
+	out := decodeObject(t, stdout)
+	attachments, _ := out["attachments"].([]any)
+	if out["total"] != float64(1) || len(attachments) != 1 {
+		t.Fatalf("unexpected attachment list output: %s", stdout)
+	}
+	if _, exists := out["policies"]; exists {
+		t.Fatalf("attachment query must not emit the policy-list field: %s", stdout)
+	}
+	first, _ := attachments[0].(map[string]any)
+	if first["policy_name"] != "my-policy" || first["resource_group"] != "rg-123" {
+		t.Fatalf("attachment = %#v; stdout=%s", first, stdout)
 	}
 }
 
@@ -457,6 +470,103 @@ func TestRGPolicyVersionDeleteCallsDeletePolicyVersion(t *testing.T) {
 	version, _ := decodeObject(t, stdout)["version"].(map[string]any)
 	if version == nil || version["version_id"] != "v2" {
 		t.Fatalf("delete output missing version_id: %s", stdout)
+	}
+}
+
+func TestRGPolicyVersionDeleteRestoresFallbackDefaultFirst(t *testing.T) {
+	t.Parallel()
+	fake := &fakeSpecCaller{responses: []map[string]any{
+		{"RequestId": "req-restore"},
+		{"RequestId": "req-delete"},
+	}}
+	runCLI := rgPolicyCaller(t, fake)
+
+	stdout, stderr, code := runCLI("rg", "policy", "version", "delete", "v2",
+		"--region", "cn-beijing",
+		"--policy-name", "my-policy",
+		"--fallback-default-version", "v1",
+	)
+	if code != 0 {
+		t.Fatalf("rg policy version safe delete exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if got := strings.Join(callNames(fake.calls), ","); got != "SetDefaultPolicyVersion,DeletePolicyVersion" {
+		t.Fatalf("calls = %#v", fake.calls)
+	}
+	if fake.calls[0].request["PolicyName"] != "my-policy" ||
+		fake.calls[0].request["VersionId"] != "v1" ||
+		fake.calls[1].request["VersionId"] != "v2" {
+		t.Fatalf("safe delete requests = %#v", fake.calls)
+	}
+}
+
+func TestRGPolicyVersionSafeDeleteDoesNotHideMissingFallback(t *testing.T) {
+	t.Parallel()
+	fake := &fakeSpecCaller{errors: []error{
+		ecerrors.NotFound("NotFound", "fallback version is missing", ecerrors.WithRequestID("req-fallback")),
+	}, responses: []map[string]any{{
+		"RequestId": "req-target",
+		"PolicyVersion": map[string]any{
+			"VersionId": "v2",
+		},
+	}}}
+	runCLI := rgPolicyCaller(t, fake)
+
+	stdout, _, code := runCLI("rg", "policy", "version", "delete", "v2",
+		"--region", "cn-beijing",
+		"--policy-name", "my-policy",
+		"--fallback-default-version", "v1",
+	)
+	if code != 2 {
+		t.Fatalf("safe delete missing fallback exit %d, want service failure 2; stdout=%s", code, stdout)
+	}
+	if got := strings.Join(callNames(fake.calls), ","); got != "SetDefaultPolicyVersion,GetPolicyVersion" {
+		t.Fatalf("calls = %#v, DeletePolicyVersion must not run after missing fallback", fake.calls)
+	}
+	if got := errorCode(t, stdout); got != "CleanupPrerequisiteNotFound" {
+		t.Fatalf("error.code = %q; stdout=%s", got, stdout)
+	}
+	actions, _ := decodeObject(t, stdout)["actions"].([]any)
+	if len(actions) != 2 {
+		t.Fatalf("safe delete target verification actions = %#v; stdout=%s", actions, stdout)
+	}
+}
+
+func TestRGPolicyVersionSafeDeleteReplayKeepsNotFoundWhenTargetIsAbsent(t *testing.T) {
+	t.Parallel()
+	fake := &fakeSpecCaller{errors: []error{
+		ecerrors.NotFound("NotFound", "parent policy is missing", ecerrors.WithRequestID("req-fallback")),
+		ecerrors.NotFound("NotFound", "target version is missing", ecerrors.WithRequestID("req-target")),
+	}}
+	runCLI := rgPolicyCaller(t, fake)
+
+	stdout, _, code := runCLI("rg", "policy", "version", "delete", "v2",
+		"--region", "cn-beijing",
+		"--policy-name", "my-policy",
+		"--fallback-default-version", "v1",
+	)
+	if code != 4 {
+		t.Fatalf("safe delete replay exit %d, want not found 4; stdout=%s", code, stdout)
+	}
+	if got := strings.Join(callNames(fake.calls), ","); got != "SetDefaultPolicyVersion,GetPolicyVersion" {
+		t.Fatalf("calls = %#v, replay must verify the target and skip DeletePolicyVersion", fake.calls)
+	}
+	if got := errorCode(t, stdout); got != "NotFound" {
+		t.Fatalf("error.code = %q; stdout=%s", got, stdout)
+	}
+}
+
+func TestRGPolicyVersionSafeDeleteRejectsFallbackTarget(t *testing.T) {
+	t.Parallel()
+	fake := &fakeSpecCaller{}
+	runCLI := rgPolicyCaller(t, fake)
+
+	stdout, _, code := runCLI("rg", "policy", "version", "delete", "v2",
+		"--region", "cn-beijing",
+		"--policy-name", "my-policy",
+		"--fallback-default-version", "v2",
+	)
+	if code != 1 || len(fake.calls) != 0 {
+		t.Fatalf("same fallback/target exit=%d calls=%#v stdout=%s", code, fake.calls, stdout)
 	}
 }
 

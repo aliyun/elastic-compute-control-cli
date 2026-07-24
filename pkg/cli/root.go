@@ -656,7 +656,7 @@ func publicCLIFilterEnabled(options *globalOptions) bool {
 
 func publicCLIProduct(product string) bool {
 	switch product {
-	case "ack", "ecs", "lingjun", "vpc":
+	case "ack", "ecs", "lingjun", "rg", "tag", "vpc":
 		return true
 	default:
 		return false

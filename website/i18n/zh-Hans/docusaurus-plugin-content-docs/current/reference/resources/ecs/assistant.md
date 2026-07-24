@@ -31,7 +31,7 @@ ecctl ecs assistant update [flags]
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `--region` | string | ✓ | Alibaba Cloud region |
-| `--setting-types` | array |  | 要查询的云助手配置类型（DescribeCloudAssistantSettings 必须至少指定一个）（默认：`["InvocationDelivery","SessionManagerDelivery","AgentUpgradeConfig","SessionManagerConfig"]`） |
+| `--setting-type` | string | ✓ | 要修改的云助手配置类型 |
 
 ## get
 

@@ -193,7 +193,8 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		if isDependencyViolation(err) {
 			return nil, ecerrors.Service("DependencyViolation", callerCloudErrorMessage(err), false, cloudErrorOptions(err)...)
 		}
-		return nil, ecerrors.Service("CloudAPIError", callerCloudErrorMessage(err), false, cloudErrorOptions(err)...)
+		retryable := isThrottling(err) || (isReadOperation(operation) && isTransientNetworkError(err))
+		return nil, ecerrors.Service("CloudAPIError", callerCloudErrorMessage(err), retryable, cloudErrorOptions(err)...)
 	}
 	return resp, nil
 }

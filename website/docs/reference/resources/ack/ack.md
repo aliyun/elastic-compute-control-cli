@@ -43,6 +43,7 @@ Create ACK cluster
 | `--service-cidr` | cidr |  | Service network CIDR |
 | `--snat-entry` | boolean |  | create an SNAT entry for cluster outbound access where ACK supports it |
 | `--tag` | key_value |  | tag assignment key=value |
+| `--version` | string |  | target Kubernetes version |
 | `--vpc` | string |  | VPC ID |
 | `--vswitch` | string_array |  | VSwitch IDs for cluster networking |
 | `--zone` | string_array |  | zone IDs for ACK CreateCluster zone_ids |
@@ -165,13 +166,14 @@ ecctl ack upgrade <id> [flags]
 Upgrade ACK cluster
 
 - Kind: `mutation` · Risk: medium
-- Synchronous: waits for `running` (waiter `running_after_upgrade`, timeout `3600s`); use `--no-wait` to skip.
+- Synchronous: waits for `success` (waiter `upgrade_task_succeeded`, timeout `3600s`); use `--no-wait` to skip.
 
 | API | When called | Purpose |
 |---|---|---|
 | `UpgradeCluster` | Every time the command runs. | Perform the resource operation. |
+| `DescribeTaskInfo` | When `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
 | `DescribeClusterDetail` | When `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
-| `DescribeClusterDetail` | When `--no-wait` is not specified. | Read the resource view. |
+| `DescribeClusterDetail` | When `--no-wait` is not specified. | Return the final resource view. (cached; no additional request) |
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

@@ -587,18 +587,18 @@ func TestOperationHookCallerFallsBackToCall(t *testing.T) {
 	}
 }
 
-func TestAppendActionCopiesAndCoalescesLastAction(t *testing.T) {
+func TestAppendActionCopiesAndPreservesEveryCall(t *testing.T) {
 	actions := []ecerrors.Action{{ActionName: "Create", RequestID: "req-1"}}
 
 	got := appendAction(actions, ecerrors.Action{ActionName: "Create", RequestID: "req-2"})
 	if actions[0].RequestID != "req-1" {
 		t.Fatalf("appendAction mutated original actions: %#v", actions)
 	}
-	if len(got) != 1 || got[0].RequestID != "req-2" {
+	if len(got) != 2 || got[0].RequestID != "req-1" || got[1].RequestID != "req-2" {
 		t.Fatalf("appendAction = %#v", got)
 	}
 	got = appendAction(got, ecerrors.Action{ActionName: "Describe", RequestID: "req-3"})
-	if len(got) != 2 || got[1].ActionName != "Describe" {
+	if len(got) != 3 || got[2].ActionName != "Describe" {
 		t.Fatalf("appendAction second append = %#v", got)
 	}
 }
@@ -612,6 +612,27 @@ func TestApplyAfterErrorBindingHooksRejectsUnknownHook(t *testing.T) {
 	}, map[string]any{}, raw)
 	if err == nil || !strings.Contains(err.Error(), "UnknownHook") {
 		t.Fatalf("err = %v, want UnknownHook", err)
+	}
+}
+
+func TestAfterErrorHookRequestRetainsFieldsRemovedByBeforeHook(t *testing.T) {
+	before := map[string]any{
+		"PolicyName":            "my-policy",
+		"VersionId":             "v1",
+		"DeleteTargetVersionId": "v2",
+	}
+	resolved := map[string]any{
+		"PolicyName": "my-policy",
+		"VersionId":  "v1",
+	}
+
+	got := afterErrorHookRequest(before, resolved)
+	if got["DeleteTargetVersionId"] != "v2" {
+		t.Fatalf("after-error request = %#v, want removed hook metadata restored", got)
+	}
+	got["VersionId"] = "mutated"
+	if resolved["VersionId"] != "v1" {
+		t.Fatalf("afterErrorHookRequest mutated resolved request: %#v", resolved)
 	}
 }
 

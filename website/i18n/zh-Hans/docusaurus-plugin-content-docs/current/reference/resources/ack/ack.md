@@ -43,6 +43,7 @@ ecctl ack create [flags]
 | `--service-cidr` | cidr |  | Service 网络 CIDR |
 | `--snat-entry` | boolean |  | 在 ACK 支持时创建用于集群出站访问的 SNAT 条目 |
 | `--tag` | key_value |  | 标签赋值 key=value |
+| `--version` | string |  | 目标 Kubernetes 版本 |
 | `--vpc` | string |  | VPC ID |
 | `--vswitch` | string_array |  | 集群网络使用的交换机 ID |
 | `--zone` | string_array |  | ACK CreateCluster zone_ids 使用的可用区 ID |
@@ -165,13 +166,14 @@ ecctl ack upgrade <id> [flags]
 升级 ACK 集群
 
 - 类型：`mutation` · 风险：medium
-- 同步：等待 `running`（waiter `running_after_upgrade`，超时 `3600s`）；用 `--no-wait` 跳过等待。
+- 同步：等待 `success`（waiter `upgrade_task_succeeded`，超时 `3600s`）；用 `--no-wait` 跳过等待。
 
 | API | 调用时机 | 用途 |
 |---|---|---|
 | `UpgradeCluster` | 每次执行命令时 | 执行资源操作。 |
+| `DescribeTaskInfo` | 未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
 | `DescribeClusterDetail` | 未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
-| `DescribeClusterDetail` | 未指定 `--no-wait` 时 | 读取资源视图。 |
+| `DescribeClusterDetail` | 未指定 `--no-wait` 时 | 返回最终资源视图。（复用等待结果，不额外请求） |
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|

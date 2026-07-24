@@ -1,0 +1,88 @@
+resource: rg/version
+serial: true
+
+steps:
+  - name: create policy prerequisite
+    run: >
+      ecctl rg policy create
+      --name {{.resource_prefix}}-version-policy
+      --policy-document
+      '{"Version":"1","Statement":[{"Action":["ecs:DescribeInstances"],"Effect":"Allow","Resource":"*"}]}'
+    at: $.policy
+    expect:
+      name: { eq: "{{.resource_prefix}}-version-policy" }
+    capture:
+      policy_name: name
+    teardown: ecctl rg policy delete {{.policy_name}}
+
+  - name: get policy prerequisite
+    run: ecctl rg policy get {{.policy_name}} --policy-type Custom
+    at: $.policy
+    expect:
+      name: { eq: "{{.policy_name}}" }
+      policy_type: { eq: Custom }
+      default_version: { type: string, prefix: v }
+    capture:
+      original_version_id: default_version
+
+  - name: create
+    run: >
+      ecctl rg policy version create
+      --policy-name {{.policy_name}}
+      --policy-document
+      '{"Version":"1","Statement":[{"Action":["ecs:DescribeInstances","ecs:DescribeDisks"],"Effect":"Allow","Resource":"*"}]}'
+    at: $.version
+    expect:
+      version_id: { type: string, prefix: v }
+      policy_name: { eq: "{{.policy_name}}" }
+    capture:
+      new_version_id: version_id
+    teardown: >
+      ecctl rg policy version delete {{.new_version_id}}
+      --policy-name {{.policy_name}}
+      --fallback-default-version {{.original_version_id}}
+
+  - name: get
+    run: >
+      ecctl rg policy version get {{.new_version_id}}
+      --policy-name {{.policy_name}}
+      --policy-type Custom
+    at: $.version
+    expect:
+      version_id: { eq: "{{.new_version_id}}" }
+      is_default_version: false
+
+  - name: list
+    run: >
+      ecctl rg policy version list
+      --policy-name {{.policy_name}}
+      --policy-type Custom
+    assert:
+      - len($.versions) >= 2
+
+  - name: update
+    run: >
+      ecctl rg policy version update {{.new_version_id}}
+      --policy-name {{.policy_name}}
+      --set-as-default
+    assert:
+      - $.version.default_version == "{{.new_version_id}}"
+
+  - name: delete
+    run: >
+      ecctl rg policy version delete {{.new_version_id}}
+      --policy-name {{.policy_name}}
+      --fallback-default-version {{.original_version_id}}
+    expect:
+      deleted: true
+
+  - name: verify fallback default
+    run: ecctl rg policy get {{.policy_name}} --policy-type Custom
+    at: $.policy
+    expect:
+      default_version: { eq: "{{.original_version_id}}" }
+
+  - name: delete policy prerequisite
+    run: ecctl rg policy delete {{.policy_name}}
+    expect:
+      deleted: true

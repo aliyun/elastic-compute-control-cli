@@ -122,15 +122,15 @@ probes:
   list:
     api: ListResources
     request:
-      ResourceGroupId: $.id
+      ResourceGroupId: $input.id
       Service: $.service
       Region: $.resource_region
       ResourceType: $.resource_type
       ResourceId: $.resource_id
-      PageNumber: $.page
-      PageSize: $.limit
+      PageNumber: $input.page
+      PageSize: $input.limit
       ApiParam:
-        raw: $.api_param
+        raw: $input.api_param
     response:
       items: $.Resources.Resource
       total: $.TotalCount
@@ -152,6 +152,7 @@ waiters:
     match:
       capture: moved_resources
       by: [resource_id, resource_type, service]
+      probe_each_capture: true
 
 bindings:
   move_resources:
@@ -165,6 +166,7 @@ bindings:
             resource_id: $.resource_id
             resource_type: $.resource_type
             service: $.service
+            resource_region: $.region_id
         each: $.resources
         fields:
           ResourceId: $.resource_id
@@ -173,6 +175,21 @@ bindings:
           RegionId: $.region_id
       ApiParam:
         raw: $.api_param
+    response:
+      items: $.Responses
+      status: $.Status
+      success: [SUCCESS]
+      error_code: $.ErrorCode
+      error_message: $.ErrorMsg
+      request_id: $.RequestId
+      match:
+        capture: moved_resources
+        by: [resource_id, resource_type, service, resource_region]
+        fields:
+          resource_id: $.ResourceId
+          resource_type: $.ResourceType
+          service: $.Service
+          resource_region: $.RegionId
     request_id_from: $.RequestId
     wait: resources_visible_after_move
 

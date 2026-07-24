@@ -1,0 +1,9 @@
+{
+  "label": "RG",
+  "position": 4,
+  "link": {
+    "type": "generated-index",
+    "title": "RG 资源",
+    "description": "管理资源组治理资源"
+  }
+}

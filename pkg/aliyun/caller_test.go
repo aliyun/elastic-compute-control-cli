@@ -1584,6 +1584,10 @@ func TestCallRawExhaustsThrottlingRetries(t *testing.T) {
 	if code := ecerrors.ActionFromError("", err).Code; !strings.Contains(strings.ToLower(code), "throttl") {
 		t.Fatalf("error code = %q, want a throttling code", code)
 	}
+	var appErr *ecerrors.AppError
+	if !errors.As(err, &appErr) || !appErr.Payload().Retryable {
+		t.Fatalf("error = %#v, want exhausted throttling to remain retryable by an outer waiter", err)
+	}
 	if len(fake.requests) != 4 {
 		t.Fatalf("attempts = %d, want 4 (retryMaxAttempts)", len(fake.requests))
 	}

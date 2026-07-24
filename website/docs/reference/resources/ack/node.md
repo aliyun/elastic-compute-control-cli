@@ -88,16 +88,17 @@ ecctl ack node attach [flags]
 Attach an ECS instance directly to an ACK cluster
 
 - Kind: `mutation` · Risk: medium
-- Synchronous: waits for `Ready` (waiter `ready_after_attach`, timeout `300s`); use `--no-wait` to skip.
+- Synchronous: waits for `success` (waiter `attach_task_succeeded`, timeout `300s`); use `--no-wait` to skip.
 
 | API | When called | Purpose |
 |---|---|---|
 | `AttachInstances` | Every time the command runs. | Perform the resource operation. |
-| `DescribeClusterNodes` | When `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
-| `DescribeClusterNodes` | When `--no-wait` is not specified. | Return the final resource view. (cached; no additional request) |
+| `DescribeTaskInfo` | When `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
+| `DescribeClusterNodes` | When `--no-wait` is not specified. | Read the resource view. |
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `--cluster` | string | ✓ | ACK cluster ID |
 | `--instance` | string | ✓ | ACK node ECS instance ID |
 | `--region` | string | ✓ | Alibaba Cloud region |
+| `--nodepool` | string |  | ACK node pool ID |

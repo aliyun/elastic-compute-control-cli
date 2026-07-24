@@ -78,6 +78,43 @@ func TestWaitReturnsProbeErrorAndObservation(t *testing.T) {
 	}
 }
 
+func TestWaitRetriesRetryableProbeError(t *testing.T) {
+	attempts := 0
+	got, err := Wait(context.Background(), Options{
+		Target:      "running",
+		MaxAttempts: 2,
+		Probe: func(context.Context) (Observation, error) {
+			attempts++
+			if attempts == 1 {
+				return Observation{State: "pending", Value: "partial"}, ecerrors.Service("Throttling", "slow down", true)
+			}
+			return Observation{State: "running", Value: "complete"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if attempts != 2 || got.State != "running" || got.Value != "complete" {
+		t.Fatalf("attempts=%d observation=%#v, want retry followed by target", attempts, got)
+	}
+}
+
+func TestWaitDoesNotRetryNonRetryableProbeError(t *testing.T) {
+	attempts := 0
+	wantErr := ecerrors.Service("InvalidParameter", "bad filter", false)
+	_, err := Wait(context.Background(), Options{
+		Target:      "running",
+		MaxAttempts: 2,
+		Probe: func(context.Context) (Observation, error) {
+			attempts++
+			return Observation{}, wantErr
+		},
+	})
+	if !stderrors.Is(err, wantErr) || attempts != 1 {
+		t.Fatalf("attempts=%d error=%v, want one non-retryable failure", attempts, err)
+	}
+}
+
 func TestWaitReturnsServiceFailureOnFailureState(t *testing.T) {
 	got, err := Wait(context.Background(), Options{
 		Target:        "running",

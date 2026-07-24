@@ -45,17 +45,21 @@ func Wait(ctx context.Context, options Options) (Observation, error) {
 
 		observed, err := options.Probe(ctx)
 		if err != nil {
-			return observed, err
-		}
-		last = observed
-		if observed.State == options.Target {
-			return observed, nil
-		}
-		if contains(options.FailureStates, observed.State) {
-			return observed, ecerrors.Service("WaitFailed", fmt.Sprintf("resource reached failure state %s", observed.State), false,
-				ecerrors.WithCurrentState(observed.State),
-				ecerrors.WithExpectedStates(options.Target),
-			)
+			if !isRetryable(err) || attempt == maxAttempts-1 {
+				return observed, err
+			}
+			last = observed
+		} else {
+			last = observed
+			if observed.State == options.Target {
+				return observed, nil
+			}
+			if contains(options.FailureStates, observed.State) {
+				return observed, ecerrors.Service("WaitFailed", fmt.Sprintf("resource reached failure state %s", observed.State), false,
+					ecerrors.WithCurrentState(observed.State),
+					ecerrors.WithExpectedStates(options.Target),
+				)
+			}
 		}
 		if options.Interval > 0 && attempt < maxAttempts-1 {
 			timer := time.NewTimer(options.Interval)
@@ -68,6 +72,11 @@ func Wait(ctx context.Context, options Options) (Observation, error) {
 		}
 	}
 	return last, timeoutError(options.Target, last)
+}
+
+func isRetryable(err error) bool {
+	appErr, ok := AsAppError(err)
+	return ok && appErr.Payload().Retryable
 }
 
 func AsAppError(err error) (*ecerrors.AppError, bool) {

@@ -499,6 +499,7 @@ func TestExecuteGetMissingReturnsNotFound(t *testing.T) {
 	spec := fakeVPCSpecForEngine(t)
 	caller := &fakeCaller{
 		responses: []map[string]any{{
+			"RequestId":  "req-missing",
 			"TotalCount": 0,
 			"Vpcs":       map[string]any{"Vpc": []any{}},
 		}},
@@ -512,6 +513,12 @@ func TestExecuteGetMissingReturnsNotFound(t *testing.T) {
 	})
 	if err == nil || err.Error() == "" {
 		t.Fatalf("expected not found error, got %v", err)
+	}
+	var appErr *ecerrors.AppError
+	if !errors.As(err, &appErr) || !reflect.DeepEqual(appErr.Actions(), []ecerrors.Action{{
+		RequestID: "req-missing", ActionName: "DescribeVpcAttribute",
+	}}) {
+		t.Fatalf("not found actions = %#v", err)
 	}
 }
 
@@ -553,6 +560,7 @@ func TestExecuteCreateRunsTransitionWaitAndReadBack(t *testing.T) {
 	}
 	if !reflect.DeepEqual(result.Actions, []ecerrors.Action{
 		{RequestID: "req-create", ActionName: "CreateVpc"},
+		{RequestID: "req-pending", ActionName: "DescribeVpcAttribute"},
 		{RequestID: "req-available", ActionName: "DescribeVpcAttribute"},
 	}) {
 		t.Fatalf("actions = %#v", result.Actions)
@@ -1533,6 +1541,8 @@ func TestExecuteCreateTreatsInitialAbsentAsTransient(t *testing.T) {
 	if !reflect.DeepEqual(result.Actions, []ecerrors.Action{
 		{RequestID: "req-create", ActionName: "CreateVpc"},
 		{ActionName: "DescribeVpcAttribute"},
+		{ActionName: "DescribeVpcAttribute"},
+		{ActionName: "DescribeVpcAttribute"},
 	}) {
 		t.Fatalf("actions = %#v", result.Actions)
 	}
@@ -1884,6 +1894,7 @@ func TestExecuteDeleteWaitsForAbsent(t *testing.T) {
 	}
 	if !reflect.DeepEqual(result.Actions, []ecerrors.Action{
 		{RequestID: "req-delete", ActionName: "DeleteVpc"},
+		{ActionName: "DescribeVpcs"},
 		{ActionName: "DescribeVpcs"},
 	}) {
 		t.Fatalf("actions = %#v", result.Actions)

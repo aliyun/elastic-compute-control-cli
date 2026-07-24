@@ -318,6 +318,13 @@ func publicCLIResource(product string, resource string) bool {
 		case "cluster", "vpd":
 			return true
 		}
+	case "rg":
+		switch resource {
+		case "group", "policy", "resource", "role", "version":
+			return true
+		}
+	case "tag":
+		return resource == "resource"
 	}
 	return false
 }
@@ -342,7 +349,7 @@ func publicCLICommandAllowed(args []string) bool {
 		return true
 	case "vpc":
 		return true
-	case "ack", "lingjun":
+	case "ack", "lingjun", "rg", "tag":
 		if len(positionals) == 1 {
 			return true
 		}
@@ -418,7 +425,7 @@ func publicCLIExample(example string) bool {
 	switch product {
 	case "ecs", "vpc":
 		return true
-	case "ack", "lingjun":
+	case "ack", "lingjun", "rg", "tag":
 		if len(positionals) < 2 {
 			return false
 		}
@@ -2348,6 +2355,16 @@ func outputConditionAllows(value map[string]any, ctx actionOutputContext) bool {
 }
 
 func outputConditionMatches(expr string, ctx actionOutputContext) bool {
+	if !strings.HasPrefix(strings.TrimSpace(expr), "$result.") {
+		matched, err := engine.ShouldRun(expr, nil, engine.ExecutionContext{
+			Input:    ctx.input,
+			Context:  map[string]any{"region": ctx.region},
+			Captures: ctx.result.Captures,
+		})
+		if err == nil {
+			return matched
+		}
+	}
 	resolved, ok := outputValue(expr, ctx)
 	if !ok {
 		return false

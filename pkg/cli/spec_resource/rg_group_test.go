@@ -287,6 +287,16 @@ func TestRGGroupUpdateAndDeleteUseResourceGroupAPIs(t *testing.T) {
 			{"RequestId": "req-update"},
 			fakeResourceGroupResponse("rg-123", "prod-rg", "Production 2"),
 			{"RequestId": "req-delete"},
+			{
+				"RequestId":  "req-pending-delete",
+				"TotalCount": 1,
+				"ResourceGroups": map[string]any{"ResourceGroup": []any{
+					map[string]any{
+						"Id":     "rg-123",
+						"Status": "PendingDelete",
+					},
+				}},
+			},
 		},
 	}
 	runCLI := withCaller(func(_ string, _ string, resource spec.ResourceSpec, _ string, _ func(string) string) (engine.Caller, error) {
@@ -311,7 +321,9 @@ func TestRGGroupUpdateAndDeleteUseResourceGroupAPIs(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("rg group delete exit %d stderr=%s stdout=%s", code, stderr, stdout)
 	}
-	if len(fake.calls) != 3 || fake.calls[2].operation != "DeleteResourceGroup" {
+	if len(fake.calls) != 4 ||
+		fake.calls[2].operation != "DeleteResourceGroup" ||
+		fake.calls[3].operation != "ListResourceGroups" {
 		t.Fatalf("delete calls = %#v", fake.calls)
 	}
 	if fake.calls[2].request["ResourceGroupId"] != "rg-123" {
@@ -320,6 +332,40 @@ func TestRGGroupUpdateAndDeleteUseResourceGroupAPIs(t *testing.T) {
 	group, _ := decodeObject(t, stdout)["group"].(map[string]any)
 	if group == nil || group["id"] != "rg-123" {
 		t.Fatalf("delete output missing group id: %s", stdout)
+	}
+	if group["status"] != "PendingDelete" || decodeObject(t, stdout)["deleted"] != false {
+		t.Fatalf("delete output must report accepted pending deletion, not terminal deletion: %s", stdout)
+	}
+}
+
+func TestRGGroupDeleteReportsTerminalAbsence(t *testing.T) {
+	t.Parallel()
+	fake := &fakeSpecCaller{responses: []map[string]any{
+		{"RequestId": "req-delete"},
+		{
+			"RequestId":      "req-list",
+			"TotalCount":     0,
+			"ResourceGroups": map[string]any{"ResourceGroup": []any{}},
+		},
+	}}
+	runCLI := withCaller(func(_ string, _ string, resource spec.ResourceSpec, _ string, _ func(string) string) (engine.Caller, error) {
+		if resource.Product != "rg" || resource.Resource != "group" {
+			t.Fatalf("resource = %s/%s, want rg/group", resource.Product, resource.Resource)
+		}
+		return fake, nil
+	})
+
+	stdout, stderr, code := runCLI("rg", "group", "delete", "rg-123", "--region", "cn-beijing")
+	if code != 0 {
+		t.Fatalf("rg group delete exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if got := strings.Join(callNames(fake.calls), ","); got != "DeleteResourceGroup,ListResourceGroups" {
+		t.Fatalf("calls = %#v", fake.calls)
+	}
+	output := decodeObject(t, stdout)
+	group, _ := output["group"].(map[string]any)
+	if output["deleted"] != true || group == nil || group["id"] != "rg-123" {
+		t.Fatalf("terminal delete output = %s", stdout)
 	}
 }
 

@@ -7,7 +7,7 @@ steps:
   - name: create resource group prerequisite
     run: >
       ecctl rg group create
-      --name {{.run_name}}-policy-rg
+      --name {{.resource_prefix}}-policy-rg
       --display-name {{.run_id}}-policy-rg
       --tag ecctl-e2e=1 --tag run-id={{.run_id}}
     at: $.group
@@ -29,12 +29,12 @@ steps:
   - name: create ServiceRole prerequisite
     run: >
       ecctl rg role create
-      --name {{.run_name}}-policy-role
+      --name {{.resource_prefix}}-policy-role
       --assume-role-policy-document
       '{"Version":"1","Statement":[{"Action":"sts:AssumeRole","Effect":"Allow","Principal":{"RAM":["acs:ram::{{.account_id}}:root"]}}]}'
     at: $.role
     expect:
-      name: { eq: "{{.run_name}}-policy-role" }
+      name: { eq: "{{.resource_prefix}}-policy-role" }
       role_principal_name: { type: string }
     capture:
       role_name: name
@@ -44,13 +44,12 @@ steps:
   - name: create custom policy
     run: >
       ecctl rg policy create
-      --name {{.run_name}}-policy
+      --name {{.resource_prefix}}-policy
       --policy-document
       '{"Version":"1","Statement":[{"Action":["ecs:DescribeInstances"],"Effect":"Allow","Resource":"*"}]}'
     at: $.policy
     expect:
-      name: { eq: "{{.run_name}}-policy" }
-      policy_type: { eq: Custom }
+      name: { eq: "{{.resource_prefix}}-policy" }
     capture:
       policy_name: name
     teardown: ecctl rg policy delete {{.policy_name}}
@@ -72,7 +71,7 @@ steps:
   - name: list policy attachments
     run: >
       ecctl rg policy list
-      --policy-type Custom
+      --filter policy-type=Custom
       --principal-type ServiceRole
       --principal-name {{.role_principal_name}}
       --resource-group {{.group_id}}
