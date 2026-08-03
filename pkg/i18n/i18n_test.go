@@ -68,6 +68,33 @@ func TestCloudAPIErrorWithActionsMessage(t *testing.T) {
 	}
 }
 
+func TestOSSUtilRuntimeErrorsAreLocalized(t *testing.T) {
+	en := NewLocalizer("en")
+	if got := en.ErrorSuggestion("OSSUtilUnavailable"); !strings.Contains(got, "aliyun ossutil version") {
+		t.Fatalf("English OSS runtime suggestion = %q", got)
+	}
+	zh := NewLocalizer("zh-CN")
+	payload := zh.ErrorPayload(ecerrorsPayload("OSSUtilVersionUnsupported", "fallback"), false)
+	if payload.Message != "OSS 调用运行环境版本不受支持" || !strings.Contains(payload.Suggestion, "aliyun ossutil version") {
+		t.Fatalf("Chinese OSS runtime payload = %#v", payload)
+	}
+	apiPayload := zh.ErrorPayload(ecerrorsPayload("OSSUtilAPIUnavailable", "fallback"), false)
+	if apiPayload.Message != "OSS 调用操作不可用" || apiPayload.Suggestion == "" {
+		t.Fatalf("Chinese OSS API payload = %#v", apiPayload)
+	}
+	parameterPayload := zh.ErrorPayload(ecerrorsPayload("UnsupportedOSSParameter", "fallback"), false)
+	if parameterPayload.Message != "OSS 调用不支持该参数" {
+		t.Fatalf("Chinese OSS parameter payload = %#v", parameterPayload)
+	}
+}
+
+func TestGenericUnsupportedParameterPreservesSpecificMessage(t *testing.T) {
+	payload := NewLocalizer("zh-CN").ErrorPayload(ecerrorsPayload("UnsupportedParameter", "specific non-OSS parameter message"), false)
+	if payload.Message != "specific non-OSS parameter message" {
+		t.Fatalf("generic UnsupportedParameter message = %q", payload.Message)
+	}
+}
+
 func TestNotFoundMessagePreservesResourceContext(t *testing.T) {
 	if got := NewLocalizer("en").NotFoundMessage("vsw-123 not found"); got != "vsw-123 not found" {
 		t.Fatalf("English not found message = %q", got)

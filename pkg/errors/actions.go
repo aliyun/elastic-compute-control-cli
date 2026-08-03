@@ -64,9 +64,9 @@ func ParseCloudError(raw string) (code string, message string, requestID string)
 		}
 		value = strings.TrimSpace(value)
 		switch strings.ToLower(strings.TrimSpace(key)) {
-		case "errorcode", "code":
+		case "errorcode", "error code", "code":
 			code = value
-		case "message":
+		case "error message", "message":
 			message = value
 		case "requestid", "request id":
 			requestID = value

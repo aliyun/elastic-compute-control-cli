@@ -122,6 +122,9 @@ func apiCallerFactoryFromContext(ctx context.Context) APICallerFactory {
 }
 
 func defaultAPICallerFactory(profileName, configPath, product, region string, getenv func(string) string) (engine.Caller, error) {
+	if strings.EqualFold(strings.TrimSpace(product), "oss") {
+		return aliyun.NewOSSUtilCaller(profileName, configPath, region, getenv)
+	}
 	return aliyun.NewOpenAPICaller(profileName, configPath, product, region, getenv)
 }
 

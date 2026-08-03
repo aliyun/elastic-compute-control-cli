@@ -55,10 +55,15 @@ func OpenAPIProducts(lang string) ([]OpenAPIProduct, error) {
 	legacy := legacyOpenAPIProducts(lang)
 	content, err := readOpenAPINewMetadata(metadataLang, "/products.json")
 	if err != nil {
-		if products := openAPIProductMapValues(legacy); len(products) > 0 {
+		products := withoutOpenAPIProduct(openAPIProductMapValues(legacy), ossUtilProductCode)
+		products = append(products, ossUtilProduct(lang))
+		if len(products) > 1 {
+			sort.SliceStable(products, func(i, j int) bool {
+				return strings.ToLower(products[i].Code) < strings.ToLower(products[j].Code)
+			})
 			return products, nil
 		}
-		return nil, err
+		return products, nil
 	}
 	var set openAPINewProductSet
 	if err := json.Unmarshal(content, &set); err != nil {
@@ -82,7 +87,23 @@ func OpenAPIProducts(lang string) ([]OpenAPIProduct, error) {
 	for _, product := range openAPIProductMapValues(legacy) {
 		products = append(products, product)
 	}
+	products = withoutOpenAPIProduct(products, ossUtilProductCode)
+	products = append(products, ossUtilProduct(lang))
+	sort.SliceStable(products, func(i, j int) bool {
+		return strings.ToLower(products[i].Code) < strings.ToLower(products[j].Code)
+	})
 	return products, nil
+}
+
+func withoutOpenAPIProduct(products []OpenAPIProduct, code string) []OpenAPIProduct {
+	out := make([]OpenAPIProduct, 0, len(products))
+	for _, product := range products {
+		if strings.EqualFold(product.Code, code) {
+			continue
+		}
+		out = append(out, product)
+	}
+	return out
 }
 
 func OpenAPIProductByCode(code string, lang string) (OpenAPIProduct, bool) {
@@ -100,6 +121,9 @@ func OpenAPIProductByCode(code string, lang string) (OpenAPIProduct, bool) {
 }
 
 func OpenAPIOperationSummaryFor(lang string, productCode string, operation string) (OpenAPIOperationSummary, bool) {
+	if strings.EqualFold(strings.TrimSpace(productCode), ossUtilProductCode) {
+		return ossUtilOperationSummary(lang, operation)
+	}
 	api, err := readOpenAPINewAPI(openAPIMetadataLanguage(lang), productCode, operation)
 	if err != nil || api == nil {
 		return OpenAPIOperationSummary{}, false
@@ -112,6 +136,9 @@ func OpenAPIOperationSummaryFor(lang string, productCode string, operation strin
 }
 
 func OpenAPIOperationDetailFor(lang string, product OpenAPIProduct, operation string) (OpenAPIOperationDetail, bool) {
+	if strings.EqualFold(strings.TrimSpace(product.Code), ossUtilProductCode) {
+		return ossUtilOperationDetail(operation)
+	}
 	detail, err := readOpenAPINewAPIDetail(openAPIMetadataLanguage(lang), product.Code, operation)
 	if err != nil || detail == nil {
 		return legacyOpenAPIOperationDetail(lang, product, operation)

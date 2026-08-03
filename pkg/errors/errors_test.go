@@ -234,3 +234,11 @@ func TestParseCloudErrorFallsBackToRawMessage(t *testing.T) {
 		t.Fatalf("ParseCloudError = (%q, %q, %q)", code, message, requestID)
 	}
 }
+
+func TestParseCloudErrorAcceptsOSSUtilLabels(t *testing.T) {
+	code, message, requestID := ParseCloudError("Error Code: NoSuchBucket\nError Message: bucket does not exist\nRequest ID: req-oss")
+
+	if code != "NoSuchBucket" || message != "bucket does not exist" || requestID != "req-oss" {
+		t.Fatalf("ParseCloudError = (%q, %q, %q)", code, message, requestID)
+	}
+}
