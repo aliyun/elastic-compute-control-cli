@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/aliyun/elastic-compute-control-cli/pkg/aliyun"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/schema"
@@ -120,6 +121,12 @@ type fakeAPICaller struct {
 	request     map[string]any
 	passthrough []string
 	response    map[string]any
+}
+
+type callOnlyAPICaller struct{}
+
+func (*callOnlyAPICaller) Call(_ context.Context, _ string, _ map[string]any) (map[string]any, error) {
+	return map[string]any{}, nil
 }
 
 func (f *fakeAPICaller) Call(_ context.Context, operation string, request map[string]any) (map[string]any, error) {
@@ -1277,6 +1284,142 @@ func TestCallSchemaDescribesOpenAPIOperation(t *testing.T) {
 	}
 	if description, _ := dryRun["description"].(string); !strings.Contains(description, "dry run") {
 		t.Fatalf("DryRun description = %q", description)
+	}
+}
+
+func TestCallOSSBucketMetadataSurface(t *testing.T) {
+	stdout, stderr, code := runCLI("--lang", "en", "call", "--list", "oss")
+	if code != 0 || stderr != "" {
+		t.Fatalf("call --list oss exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	list := decodeObject(t, stdout)
+	if list["product"] != "oss" || list["count"] != float64(5) || list["total"] != float64(5) {
+		t.Fatalf("OSS operation list metadata = %#v", list)
+	}
+	items, _ := list["apis"].([]any)
+	gotNames := make([]string, 0, len(items))
+	for _, raw := range items {
+		item, _ := raw.(map[string]any)
+		gotNames = append(gotNames, fmt.Sprint(item["name"]))
+	}
+	wantNames := []string{"DeleteBucket", "GetBucketAcl", "GetBucketInfo", "ListBuckets", "PutBucket"}
+	if !reflect.DeepEqual(gotNames, wantNames) {
+		t.Fatalf("OSS operation names = %#v, want %#v", gotNames, wantNames)
+	}
+
+	stdout, stderr, code = runCLI("--lang", "en", "call", "--schema", "oss", "PutBucket")
+	if code != 0 || stderr != "" {
+		t.Fatalf("call --schema oss PutBucket exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	schema := decodeObject(t, stdout)
+	if schema["product"] != "oss" || schema["operation"] != "PutBucket" {
+		t.Fatalf("PutBucket schema metadata = %#v", schema)
+	}
+	parameters, _ := schema["parameters"].([]any)
+	bucket := findCallParameter(parameters, "Bucket")
+	if bucket == nil || bucket["required"] != true || bucket["type"] != "String" {
+		t.Fatalf("PutBucket Bucket parameter = %#v; stdout=%s", bucket, stdout)
+	}
+	configuration := findCallParameter(parameters, "CreateBucketConfiguration")
+	if configuration == nil || configuration["type"] != "Object" || configuration["required"] != false {
+		t.Fatalf("PutBucket configuration parameter = %#v; stdout=%s", configuration, stdout)
+	}
+
+	stdout, stderr, code = runCLI("--lang", "en", "call", "--schema", "oss", "PutBucket", "--generate-request")
+	if code != 0 || stderr != "" {
+		t.Fatalf("generate PutBucket request exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	template := decodeObject(t, stdout)
+	if !reflect.DeepEqual(template, map[string]any{"Bucket": "<Bucket>"}) {
+		t.Fatalf("PutBucket request template = %#v", template)
+	}
+
+	products, directive := completeCLI(t, "call", "os")
+	if directive != fmt.Sprintf(":%d", cobra.ShellCompDirectiveNoFileComp) || !containsCompletion(products, "oss") {
+		t.Fatalf("OSS product completion = %#v directive=%s", products, directive)
+	}
+	operations, directive := completeCLI(t, "call", "oss", "GetBucket")
+	if directive != fmt.Sprintf(":%d", cobra.ShellCompDirectiveNoFileComp) || !containsCompletion(operations, "GetBucketAcl") || !containsCompletion(operations, "GetBucketInfo") {
+		t.Fatalf("OSS operation completion = %#v directive=%s", operations, directive)
+	}
+}
+
+func TestCallOSSUsesCommonRequestProfileRegionAndPassthrough(t *testing.T) {
+	var gotProduct, gotProfile, gotRegion string
+	fake := &fakeAPICaller{response: map[string]any{"RequestId": "req-oss"}}
+	factory := func(profileName, configPath, product, region string, getenv func(string) string) (engine.Caller, error) {
+		gotProduct = product
+		gotProfile = profileName
+		gotRegion = region
+		return fake, nil
+	}
+	stdout, stderr, code := runCLIWithAPI(factory,
+		"--lang", "en",
+		"call", "oss", "PutBucket",
+		"--profile", "prod",
+		"--region", "cn-hangzhou",
+		"--Bucket", "ecctl-test-bucket",
+		"--ACL", "private",
+		"--endpoint", "oss-cn-hangzhou.aliyuncs.com",
+		"--retry-count", "2",
+	)
+	if code != 0 || stderr != "" {
+		t.Fatalf("call oss PutBucket exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if gotProduct != "oss" || gotProfile != "prod" || gotRegion != "cn-hangzhou" {
+		t.Fatalf("factory product=%q profile=%q region=%q", gotProduct, gotProfile, gotRegion)
+	}
+	if !reflect.DeepEqual(fake.request, map[string]any{"Bucket": "ecctl-test-bucket", "ACL": "private"}) {
+		t.Fatalf("request = %#v", fake.request)
+	}
+	wantPassthrough := []string{"--endpoint", "oss-cn-hangzhou.aliyuncs.com", "--retry-count", "2"}
+	if !reflect.DeepEqual(fake.passthrough, wantPassthrough) {
+		t.Fatalf("passthrough = %#v, want %#v", fake.passthrough, wantPassthrough)
+	}
+	out := decodeObject(t, stdout)
+	if out["product"] != "oss" || out["operation"] != "PutBucket" || out["region"] != "cn-hangzhou" {
+		t.Fatalf("call envelope = %#v", out)
+	}
+}
+
+func TestCallNonOSSPassthroughErrorKeepsSpecificChineseMessage(t *testing.T) {
+	factory := func(profileName, configPath, product, region string, getenv func(string) string) (engine.Caller, error) {
+		return &callOnlyAPICaller{}, nil
+	}
+	stdout, stderr, code := runCLIWithAPI(factory,
+		"--lang", "zh-CN",
+		"--region", "cn-hangzhou",
+		"call", "ecs", "DescribeInstances",
+		"--endpoint", "ecs.cn-hangzhou.aliyuncs.com",
+	)
+	if code != 1 || stderr != "" {
+		t.Fatalf("non-OSS passthrough exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	errObj := errorObject(t, stdout)
+	if errObj["code"] != "UnsupportedParameter" || !strings.Contains(fmt.Sprint(errObj["message"]), "built-in OpenAPI caller") {
+		t.Fatalf("non-OSS passthrough error = %#v", errObj)
+	}
+}
+
+func TestDefaultAPICallerFactoryRoutesOSSToOSSUtil(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	raw := `{"current":"prod","profiles":[{"name":"prod","region_id":"cn-hangzhou","access_key_id":"test-ak","access_key_secret":"test-secret"}]}`
+	if err := os.WriteFile(configPath, []byte(raw), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	missingAliyunConfig := filepath.Join(t.TempDir(), "missing-aliyun-config.json")
+	getenv := func(name string) string {
+		if name == "ECCTL_ALIYUN_CONFIG_PATH" {
+			return missingAliyunConfig
+		}
+		return ""
+	}
+	caller, err := defaultAPICallerFactory("prod", configPath, "oss", "cn-hangzhou", getenv)
+	if err != nil {
+		t.Fatalf("defaultAPICallerFactory: %v", err)
+	}
+	if _, ok := caller.(*aliyun.OSSUtilCaller); !ok {
+		t.Fatalf("OSS caller type = %T, want *aliyun.OSSUtilCaller", caller)
 	}
 }
 
