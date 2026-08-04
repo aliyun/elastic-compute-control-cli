@@ -1287,13 +1287,13 @@ func TestCallSchemaDescribesOpenAPIOperation(t *testing.T) {
 	}
 }
 
-func TestCallOSSBucketMetadataSurface(t *testing.T) {
+func TestCallOSSMetadataSurface(t *testing.T) {
 	stdout, stderr, code := runCLI("--lang", "en", "call", "--list", "oss")
 	if code != 0 || stderr != "" {
 		t.Fatalf("call --list oss exit %d stderr=%s stdout=%s", code, stderr, stdout)
 	}
 	list := decodeObject(t, stdout)
-	if list["product"] != "oss" || list["count"] != float64(5) || list["total"] != float64(5) {
+	if list["product"] != "oss" || list["count"] != float64(7) || list["total"] != float64(7) {
 		t.Fatalf("OSS operation list metadata = %#v", list)
 	}
 	items, _ := list["apis"].([]any)
@@ -1302,7 +1302,7 @@ func TestCallOSSBucketMetadataSurface(t *testing.T) {
 		item, _ := raw.(map[string]any)
 		gotNames = append(gotNames, fmt.Sprint(item["name"]))
 	}
-	wantNames := []string{"DeleteBucket", "GetBucketAcl", "GetBucketInfo", "ListBuckets", "PutBucket"}
+	wantNames := []string{"DeleteBucket", "DeleteObject", "GetBucketAcl", "GetBucketInfo", "ListBuckets", "ListObjects", "PutBucket"}
 	if !reflect.DeepEqual(gotNames, wantNames) {
 		t.Fatalf("OSS operation names = %#v, want %#v", gotNames, wantNames)
 	}
@@ -1334,6 +1334,58 @@ func TestCallOSSBucketMetadataSurface(t *testing.T) {
 		t.Fatalf("PutBucket request template = %#v", template)
 	}
 
+	stdout, stderr, code = runCLI("--lang", "en", "call", "--schema", "oss", "ListObjects")
+	if code != 0 || stderr != "" {
+		t.Fatalf("call --schema oss ListObjects exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	schema = decodeObject(t, stdout)
+	parameters, _ = schema["parameters"].([]any)
+	bucket = findCallParameter(parameters, "Bucket")
+	if bucket == nil || bucket["required"] != true || bucket["type"] != "String" {
+		t.Fatalf("ListObjects Bucket parameter = %#v; stdout=%s", bucket, stdout)
+	}
+	fetchOwner := findCallParameter(parameters, "FetchOwner")
+	if fetchOwner == nil || fetchOwner["type"] != "Boolean" || fetchOwner["required"] != false || fetchOwner["position"] != "Query" {
+		t.Fatalf("ListObjects FetchOwner parameter = %#v; stdout=%s", fetchOwner, stdout)
+	}
+	maxKeys := findCallParameter(parameters, "MaxKeys")
+	if maxKeys == nil || maxKeys["type"] != "Integer" {
+		t.Fatalf("ListObjects MaxKeys parameter = %#v; stdout=%s", maxKeys, stdout)
+	}
+
+	stdout, stderr, code = runCLI("--lang", "en", "call", "--schema", "oss", "ListObjects", "--generate-request")
+	if code != 0 || stderr != "" {
+		t.Fatalf("generate ListObjects request exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	template = decodeObject(t, stdout)
+	if !reflect.DeepEqual(template, map[string]any{"Bucket": "<Bucket>"}) {
+		t.Fatalf("ListObjects request template = %#v", template)
+	}
+
+	stdout, stderr, code = runCLI("--lang", "en", "call", "--schema", "oss", "DeleteObject")
+	if code != 0 || stderr != "" {
+		t.Fatalf("call --schema oss DeleteObject exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	schema = decodeObject(t, stdout)
+	parameters, _ = schema["parameters"].([]any)
+	key := findCallParameter(parameters, "Key")
+	if key == nil || key["required"] != true || key["type"] != "String" {
+		t.Fatalf("DeleteObject Key parameter = %#v; stdout=%s", key, stdout)
+	}
+	bypass := findCallParameter(parameters, "BypassGovernanceRetention")
+	if bypass == nil || bypass["type"] != "Boolean" || bypass["required"] != false || bypass["position"] != "Header" {
+		t.Fatalf("DeleteObject BypassGovernanceRetention parameter = %#v; stdout=%s", bypass, stdout)
+	}
+
+	stdout, stderr, code = runCLI("--lang", "en", "call", "--schema", "oss", "DeleteObject", "--generate-request")
+	if code != 0 || stderr != "" {
+		t.Fatalf("generate DeleteObject request exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	template = decodeObject(t, stdout)
+	if !reflect.DeepEqual(template, map[string]any{"Bucket": "<Bucket>", "Key": "<Key>"}) {
+		t.Fatalf("DeleteObject request template = %#v", template)
+	}
+
 	products, directive := completeCLI(t, "call", "os")
 	if directive != fmt.Sprintf(":%d", cobra.ShellCompDirectiveNoFileComp) || !containsCompletion(products, "oss") {
 		t.Fatalf("OSS product completion = %#v directive=%s", products, directive)
@@ -1341,6 +1393,14 @@ func TestCallOSSBucketMetadataSurface(t *testing.T) {
 	operations, directive := completeCLI(t, "call", "oss", "GetBucket")
 	if directive != fmt.Sprintf(":%d", cobra.ShellCompDirectiveNoFileComp) || !containsCompletion(operations, "GetBucketAcl") || !containsCompletion(operations, "GetBucketInfo") {
 		t.Fatalf("OSS operation completion = %#v directive=%s", operations, directive)
+	}
+	operations, directive = completeCLI(t, "call", "oss", "ListObject")
+	if directive != fmt.Sprintf(":%d", cobra.ShellCompDirectiveNoFileComp) || !containsCompletion(operations, "ListObjects") {
+		t.Fatalf("OSS ListObjects completion = %#v directive=%s", operations, directive)
+	}
+	operations, directive = completeCLI(t, "call", "oss", "DeleteObject")
+	if directive != fmt.Sprintf(":%d", cobra.ShellCompDirectiveNoFileComp) || !containsCompletion(operations, "DeleteObject") {
+		t.Fatalf("OSS DeleteObject completion = %#v directive=%s", operations, directive)
 	}
 }
 
@@ -1379,6 +1439,54 @@ func TestCallOSSUsesCommonRequestProfileRegionAndPassthrough(t *testing.T) {
 	out := decodeObject(t, stdout)
 	if out["product"] != "oss" || out["operation"] != "PutBucket" || out["region"] != "cn-hangzhou" {
 		t.Fatalf("call envelope = %#v", out)
+	}
+}
+
+func TestCallOSSObjectParametersUseCommonFlagParsing(t *testing.T) {
+	fake := &fakeAPICaller{response: map[string]any{"RequestId": "req-oss-list"}}
+	factory := func(profileName, configPath, product, region string, getenv func(string) string) (engine.Caller, error) {
+		return fake, nil
+	}
+	stdout, stderr, code := runCLIWithAPI(factory,
+		"--lang", "en",
+		"--region", "cn-hangzhou",
+		"call", "oss", "ListObjects",
+		"--Bucket", "bucket",
+		"--FetchOwner",
+		"--MaxKeys", "10",
+	)
+	if code != 0 || stderr != "" {
+		t.Fatalf("call oss ListObjects exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	want := map[string]any{"Bucket": "bucket", "FetchOwner": true, "MaxKeys": float64(10)}
+	if fake.operation != "ListObjects" || !reflect.DeepEqual(fake.request, want) {
+		t.Fatalf("operation=%q request=%#v, want request=%#v", fake.operation, fake.request, want)
+	}
+}
+
+func TestCallOSSRejectsMissingStringParameterValueBeforeCallingAPI(t *testing.T) {
+	factoryCalled := false
+	factory := func(profileName, configPath, product, region string, getenv func(string) string) (engine.Caller, error) {
+		factoryCalled = true
+		return &fakeAPICaller{}, nil
+	}
+	stdout, stderr, code := runCLIWithAPI(factory,
+		"--lang", "en",
+		"--region", "cn-hangzhou",
+		"call", "oss", "DeleteObject",
+		"--Bucket", "bucket",
+		"--Key",
+		"--BypassGovernanceRetention",
+	)
+	if code == 0 || stderr != "" {
+		t.Fatalf("missing DeleteObject Key value exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if factoryCalled {
+		t.Fatal("API caller factory should not be called when DeleteObject Key has no value")
+	}
+	errObj := errorObject(t, stdout)
+	if errObj["code"] != "InvalidParameter" || errObj["field"] != "request" {
+		t.Fatalf("missing DeleteObject Key error = %#v; stdout=%s", errObj, stdout)
 	}
 }
 

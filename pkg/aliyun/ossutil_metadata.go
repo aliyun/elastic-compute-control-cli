@@ -70,6 +70,37 @@ var ossUtilOperations = map[string]ossUtilOperationMetadata{
 			ossUtilParameter("Tagging", "tagging", "The bucket tag filter.", "Query", "String", false),
 		},
 	},
+	"ListObjects": {
+		command: "list-objects-v2",
+		summary: map[string]string{
+			"en": "List objects in an OSS bucket.",
+			"zh": "列举 OSS Bucket 中的对象。",
+		},
+		parameters: []ossUtilParameterMetadata{
+			ossUtilParameter("Bucket", "bucket", "The name of the bucket.", "Path", "String", true),
+			ossUtilParameter("ContinuationToken", "continuation-token", "The token from which the listing continues.", "Query", "String", false),
+			ossUtilParameter("Delimiter", "delimiter", "The character used to group object names.", "Query", "String", false),
+			ossUtilParameter("EncodingType", "encoding-type", "The encoding type of object names in the response.", "Query", "String", false),
+			ossUtilParameter("FetchOwner", "fetch-owner", "Whether to include object owner information in the response.", "Query", "Boolean", false),
+			ossUtilParameter("MaxKeys", "max-keys", "The maximum number of objects to return.", "Query", "Integer", false),
+			ossUtilParameter("Prefix", "prefix", "The prefix that object names must contain.", "Query", "String", false),
+			ossUtilParameter("StartAfter", "start-after", "The object name after which the listing starts.", "Query", "String", false),
+		},
+	},
+	"DeleteObject": {
+		command:  "delete-object",
+		mutation: true,
+		summary: map[string]string{
+			"en": "Delete an object from an OSS bucket.",
+			"zh": "删除 OSS Bucket 中的对象。",
+		},
+		parameters: []ossUtilParameterMetadata{
+			ossUtilParameter("Bucket", "bucket", "The name of the bucket.", "Path", "String", true),
+			ossUtilParameter("Key", "key", "The name of the object.", "Path", "String", true),
+			ossUtilParameter("VersionId", "version-id", "The version ID of the object to delete.", "Query", "String", false),
+			ossUtilParameter("BypassGovernanceRetention", "bypass-governance-retention", "Whether to bypass governance retention for the object.", "Header", "Boolean", false),
+		},
+	},
 	"DeleteBucket": {
 		command:  "delete-bucket",
 		mutation: true,
