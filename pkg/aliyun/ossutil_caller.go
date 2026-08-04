@@ -157,6 +157,22 @@ func (c *OSSUtilCaller) commandArgs(operation string, request map[string]any, pa
 	args := []string{"--auto-plugin-install", "false", "ossutil", "api", metadata.command}
 	for _, parameter := range metadata.parameters {
 		value, exists := request[parameter.Name]
+		if strings.EqualFold(parameter.Type, "Boolean") {
+			if !exists {
+				if parameter.Required {
+					return nil, ossUtilOperationMetadata{}, ecerrors.Client("MissingParameter", "required parameter is missing: --"+parameter.Name, ecerrors.WithField(parameter.Name))
+				}
+				continue
+			}
+			enabled, ok := value.(bool)
+			if !ok {
+				return nil, ossUtilOperationMetadata{}, ecerrors.Client("InvalidParameter", fmt.Sprintf("%s is invalid", parameter.Name), ecerrors.WithField(parameter.Name))
+			}
+			if enabled {
+				args = append(args, "--"+parameter.flag)
+			}
+			continue
+		}
 		encoded, err := cliParamValue(value)
 		if err != nil {
 			return nil, ossUtilOperationMetadata{}, ecerrors.Client("InvalidParameter", fmt.Sprintf("%s is invalid", parameter.Name), ecerrors.WithField(parameter.Name))

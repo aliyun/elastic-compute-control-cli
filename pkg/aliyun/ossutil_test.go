@@ -45,12 +45,12 @@ func (r *fakeOSSUtilRunner) Run(_ context.Context, name string, args []string, e
 	return result.stdout, result.stderr, result.err
 }
 
-func TestOSSUtilMetadataDefinesBucketSurface(t *testing.T) {
+func TestOSSUtilMetadataDefinesCallSurface(t *testing.T) {
 	product, ok := OpenAPIProductByCode("OSS", "en")
 	if !ok {
 		t.Fatal("OSS product metadata is missing")
 	}
-	wantOperations := []string{"DeleteBucket", "GetBucketAcl", "GetBucketInfo", "ListBuckets", "PutBucket"}
+	wantOperations := []string{"DeleteBucket", "DeleteObject", "GetBucketAcl", "GetBucketInfo", "ListBuckets", "ListObjects", "PutBucket"}
 	if !reflect.DeepEqual(product.APINames, wantOperations) {
 		t.Fatalf("OSS operations = %#v, want %#v", product.APINames, wantOperations)
 	}
@@ -67,6 +67,23 @@ func TestOSSUtilMetadataDefinesBucketSurface(t *testing.T) {
 	}
 	if config := detail.FindParameter("CreateBucketConfiguration"); config == nil || config.Type != "Object" {
 		t.Fatalf("CreateBucketConfiguration parameter = %#v", config)
+	}
+	listDetail, ok := OpenAPIOperationDetailFor("en", product, "ListObjects")
+	if !ok {
+		t.Fatal("ListObjects detail is missing")
+	}
+	if fetchOwner := listDetail.FindParameter("FetchOwner"); fetchOwner == nil || fetchOwner.Type != "Boolean" || fetchOwner.Required {
+		t.Fatalf("FetchOwner parameter = %#v", fetchOwner)
+	}
+	deleteDetail, ok := OpenAPIOperationDetailFor("en", product, "DeleteObject")
+	if !ok {
+		t.Fatal("DeleteObject detail is missing")
+	}
+	if key := deleteDetail.FindParameter("Key"); key == nil || !key.Required || key.Type != "String" {
+		t.Fatalf("Key parameter = %#v", key)
+	}
+	if bypass := deleteDetail.FindParameter("BypassGovernanceRetention"); bypass == nil || bypass.Type != "Boolean" || bypass.Position != "Header" {
+		t.Fatalf("BypassGovernanceRetention parameter = %#v", bypass)
 	}
 	summary, ok := OpenAPIOperationSummaryFor("zh-CN", "oss", "GetBucketAcl")
 	if !ok || !strings.Contains(summary.Summary, "判断") {
@@ -183,14 +200,17 @@ func TestOSSUtilCallerRejectsUnsupportedRequestAndPassthrough(t *testing.T) {
 	}
 }
 
-func TestOSSUtilCallerRequiresBucket(t *testing.T) {
+func TestOSSUtilCallerRequiresObjectIdentifiers(t *testing.T) {
 	caller := newTestOSSUtilCaller(t, &fakeOSSUtilRunner{}, "cn-hangzhou")
 	if _, _, err := caller.commandArgs("GetBucketInfo", nil, nil); appErrorCode(err) != "MissingParameter" {
 		t.Fatalf("missing Bucket error = %v", err)
 	}
+	if _, _, err := caller.commandArgs("DeleteObject", map[string]any{"Bucket": "bucket"}, nil); appErrorCode(err) != "MissingParameter" {
+		t.Fatalf("missing Key error = %v", err)
+	}
 }
 
-func TestOSSUtilCallerMapsEveryBucketOperation(t *testing.T) {
+func TestOSSUtilCallerMapsEveryOperation(t *testing.T) {
 	caller := newTestOSSUtilCaller(t, &fakeOSSUtilRunner{}, "cn-hangzhou")
 	tests := []struct {
 		operation string
@@ -208,6 +228,20 @@ func TestOSSUtilCallerMapsEveryBucketOperation(t *testing.T) {
 			"--resource-group-id", "rg-1", "--tag-key", "key", "--tag-value", "value", "--tagging", `"key":"value"`,
 		}},
 		{operation: "DeleteBucket", request: map[string]any{"Bucket": "bucket"}, want: []string{"--auto-plugin-install", "false", "ossutil", "api", "delete-bucket", "--bucket", "bucket"}},
+		{operation: "ListObjects", request: map[string]any{
+			"Bucket": "bucket", "ContinuationToken": "token", "Delimiter": "/", "EncodingType": "url",
+			"FetchOwner": true, "MaxKeys": 10, "Prefix": "pre", "StartAfter": "start",
+		}, want: []string{
+			"--auto-plugin-install", "false", "ossutil", "api", "list-objects-v2", "--bucket", "bucket",
+			"--continuation-token", "token", "--delimiter", "/", "--encoding-type", "url", "--fetch-owner",
+			"--max-keys", "10", "--prefix", "pre", "--start-after", "start",
+		}},
+		{operation: "DeleteObject", request: map[string]any{
+			"Bucket": "bucket", "Key": "dir/object.txt", "VersionId": "version-1", "BypassGovernanceRetention": true,
+		}, want: []string{
+			"--auto-plugin-install", "false", "ossutil", "api", "delete-object", "--bucket", "bucket",
+			"--key", "dir/object.txt", "--version-id", "version-1", "--bypass-governance-retention",
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.operation, func(t *testing.T) {
@@ -220,6 +254,51 @@ func TestOSSUtilCallerMapsEveryBucketOperation(t *testing.T) {
 				t.Fatalf("args = %#v, want %#v", args, want)
 			}
 		})
+	}
+}
+
+func TestOSSUtilCallerMapsBooleanParametersAsSwitches(t *testing.T) {
+	caller := newTestOSSUtilCaller(t, &fakeOSSUtilRunner{}, "cn-hangzhou")
+	tests := []struct {
+		operation string
+		request   map[string]any
+		flag      string
+	}{
+		{operation: "ListObjects", request: map[string]any{"Bucket": "bucket", "FetchOwner": false}, flag: "--fetch-owner"},
+		{operation: "DeleteObject", request: map[string]any{"Bucket": "bucket", "Key": "object", "BypassGovernanceRetention": false}, flag: "--bypass-governance-retention"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.operation, func(t *testing.T) {
+			args, _, err := caller.commandArgs(tt.operation, tt.request, nil)
+			if err != nil {
+				t.Fatalf("commandArgs: %v", err)
+			}
+			if strings.Contains(strings.Join(args, " "), tt.flag) {
+				t.Fatalf("false boolean emitted %s: %#v", tt.flag, args)
+			}
+		})
+	}
+	if _, _, err := caller.commandArgs("ListObjects", map[string]any{"Bucket": "bucket", "FetchOwner": "true"}, nil); appErrorCode(err) != "InvalidParameter" {
+		t.Fatalf("string FetchOwner error = %v", err)
+	}
+}
+
+func TestOSSUtilCallerAcceptsEmptyDeleteObjectResponse(t *testing.T) {
+	runner := &fakeOSSUtilRunner{results: []ossUtilRunnerResult{
+		{stdout: []byte("2.3.0\n")},
+		{stdout: []byte("DeleteObject help\n")},
+		{},
+	}}
+	caller := newTestOSSUtilCaller(t, runner, "cn-hangzhou")
+	response, err := caller.Call(context.Background(), "DeleteObject", map[string]any{
+		"Bucket": "bucket",
+		"Key":    "object",
+	})
+	if err != nil {
+		t.Fatalf("DeleteObject: %v", err)
+	}
+	if len(response) != 0 {
+		t.Fatalf("DeleteObject response = %#v, want empty object", response)
 	}
 }
 

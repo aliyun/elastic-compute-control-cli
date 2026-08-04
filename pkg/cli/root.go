@@ -1128,6 +1128,8 @@ func normalizeAPICallParameterFlags(args []string) []string {
 	out := make([]string, 0, len(args))
 	out = append(out, args[:callIndex+1]...)
 	positionals := 0
+	product := ""
+	operation := ""
 	for i := callIndex + 1; i < len(args); i++ {
 		arg := args[i]
 		if positionals < 2 {
@@ -1148,6 +1150,11 @@ func normalizeAPICallParameterFlags(args []string) []string {
 			}
 			if arg == "--" || strings.HasPrefix(arg, "-") {
 				continue
+			}
+			if positionals == 0 {
+				product = arg
+			} else {
+				operation = arg
 			}
 			positionals++
 			continue
@@ -1186,15 +1193,36 @@ func normalizeAPICallParameterFlags(args []string) []string {
 			continue
 		}
 		if !hasValue {
-			value = "true"
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
 				value = args[i]
+			} else if parameterType, known := apiCallParameterType(product, operation, name); known && !apiCallBooleanParameterType(parameterType) {
+				out = append(out, "--api-param", name)
+				continue
+			} else {
+				value = "true"
 			}
 		}
 		out = append(out, "--api-param", name+"="+value)
 	}
 	return out
+}
+
+func apiCallParameterType(product, operation, name string) (string, bool) {
+	schema, err := apiOperationSchemaFor("en", product, operation)
+	if err != nil {
+		return "", false
+	}
+	for _, parameter := range schema.Parameters {
+		if parameter.Name == name {
+			return parameter.Type, true
+		}
+	}
+	return "", false
+}
+
+func apiCallBooleanParameterType(parameterType string) bool {
+	return strings.EqualFold(parameterType, "Boolean") || strings.EqualFold(parameterType, "Bool")
 }
 
 func appendAPICommandArg(out []string, arg string) []string {
