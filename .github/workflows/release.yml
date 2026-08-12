@@ -537,6 +537,7 @@ jobs:
     environment: release
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - name: Checkout release tooling
         uses: actions/checkout@v4
@@ -801,7 +802,7 @@ jobs:
           echo "OSS mirror did not become complete within 90 minutes." >&2
           exit 1
 
-      - name: Publish verified Homebrew Cask
+      - name: Publish verified Homebrew Cask through pull request
         if: ${{ !contains(needs.validate.outputs.version, '-') }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -812,44 +813,64 @@ jobs:
         run: |
           set -euo pipefail
           cask_file=release-cask/ecctl.rb
-          current_json=$(mktemp)
-          current_cask=$(mktemp)
+          cask_branch="automation/homebrew-${RELEASE_VERSION}"
           readback=$(mktemp)
-          trap 'rm -f "${current_json}" "${current_cask}" "${readback}"' EXIT
+          trap 'rm -f "${readback}"' EXIT
 
-          set +e
-          current_error=$(gh api "repos/${GITHUB_REPOSITORY}/contents/Casks/ecctl.rb?ref=main" 2>&1 > "${current_json}")
-          current_status=$?
-          set -e
-          put_args=(-X PUT -f "message=chore: update Homebrew Cask for ${RELEASE_TAG}" -f branch=main)
-          if [[ ${current_status} -eq 0 ]]; then
-            jq -er '.content' "${current_json}" | base64 --decode > "${current_cask}"
-            if cmp -s "${current_cask}" "${cask_file}"; then
+          cd tooling
+          git fetch origin "refs/heads/main:refs/remotes/origin/main"
+          if git ls-remote --exit-code --heads origin "refs/heads/${cask_branch}" >/dev/null; then
+            git fetch origin "refs/heads/${cask_branch}:refs/remotes/origin/${cask_branch}"
+          fi
+          git checkout -B "${cask_branch}" origin/main
+
+          if [[ -f Casks/ecctl.rb ]]; then
+            if cmp -s Casks/ecctl.rb "${GITHUB_WORKSPACE}/${cask_file}"; then
               echo "Homebrew Cask ${RELEASE_VERSION} is already published."
               exit 0
             fi
-            current_version=$(sed -n 's/^[[:space:]]*version "\([^"]*\)"[[:space:]]*$/\1/p' "${current_cask}")
+            current_version=$(sed -n 's/^[[:space:]]*version "\([^"]*\)"[[:space:]]*$/\1/p' Casks/ecctl.rb)
             if [[ "${RELEASE_STATE}" == immutable && "${current_version}" == "${RELEASE_VERSION}" ]]; then
               echo "Repairing same-version Homebrew Cask from the immutable release."
             else
-            go -C tooling run ./cmd/releaseprep \
+              go run ./cmd/releaseprep \
                 --check-homebrew-version \
                 --release-tag "${RELEASE_TAG}" \
-                --cask "${current_cask}"
+                --cask "${GITHUB_WORKSPACE}/tooling/Casks/ecctl.rb"
             fi
-            put_args+=(-f "sha=$(jq -er '.sha' "${current_json}")")
-          elif [[ "${current_error}" != *"HTTP 404"* ]]; then
-            echo "Could not read the current Homebrew Cask." >&2
-            echo "${current_error}" >&2
+          fi
+
+          mkdir -p Casks
+          cp "${GITHUB_WORKSPACE}/${cask_file}" Casks/ecctl.rb
+          git diff --check
+          git add Casks/ecctl.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: update Homebrew Cask for ${RELEASE_TAG}"
+          cask_commit=$(git rev-parse HEAD)
+          git push --force-with-lease origin "HEAD:refs/heads/${cask_branch}"
+
+          pr_number=$(gh pr list --repo "${GITHUB_REPOSITORY}" \
+            --base main --head "${cask_branch}" --state open \
+            --json number --jq '.[0].number // empty')
+          if [[ -z "${pr_number}" ]]; then
+            pr_url=$(gh pr create --repo "${GITHUB_REPOSITORY}" \
+              --base main --head "${cask_branch}" \
+              --title "chore: update Homebrew Cask for ${RELEASE_TAG}" \
+              --body "Publish the verified Homebrew Cask from immutable Release ${RELEASE_TAG}.")
+            pr_number=${pr_url##*/}
+          fi
+          gh pr merge "${pr_number}" --repo "${GITHUB_REPOSITORY}" \
+            --squash --delete-branch --match-head-commit "${cask_commit}"
+          pr_state=$(gh pr view "${pr_number}" --repo "${GITHUB_REPOSITORY}" --json state --jq '.state')
+          if [[ "${pr_state}" != MERGED ]]; then
+            echo "Homebrew Cask pull request #${pr_number} was not merged." >&2
             exit 1
           fi
 
-          content=$(base64 < "${cask_file}" | tr -d '\n')
-          gh api "repos/${GITHUB_REPOSITORY}/contents/Casks/ecctl.rb" \
-            "${put_args[@]}" -f "content=${content}" >/dev/null
           gh api "repos/${GITHUB_REPOSITORY}/contents/Casks/ecctl.rb?ref=main" \
             --jq '.content' | base64 --decode > "${readback}"
-          cmp -s "${cask_file}" "${readback}" || {
+          cmp -s "${GITHUB_WORKSPACE}/${cask_file}" "${readback}" || {
             echo "Published Homebrew Cask readback does not match prepared content." >&2
             exit 1
           }

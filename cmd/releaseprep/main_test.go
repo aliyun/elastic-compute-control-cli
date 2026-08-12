@@ -331,6 +331,42 @@ func TestReleaseConfigurationBuildsCompleteDraftBeforePublishing(t *testing.T) {
 	}
 }
 
+func TestReleasePublishesHomebrewCaskThroughPullRequest(t *testing.T) {
+	root := filepath.Join("..", "..")
+	raw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(raw)
+	notifyStart := strings.Index(workflow, "  notify:")
+	if notifyStart < 0 {
+		t.Fatal("release workflow has no notify job")
+	}
+	notifyJob := workflow[notifyStart:]
+	for _, required := range []string{
+		"pull-requests: write",
+		`cask_branch="automation/homebrew-${RELEASE_VERSION}"`,
+		"gh pr create",
+		"gh pr merge",
+		`--match-head-commit "${cask_commit}"`,
+		`git checkout -B "${cask_branch}" origin/main`,
+		`--cask "${GITHUB_WORKSPACE}/tooling/Casks/ecctl.rb"`,
+		"Published Homebrew Cask readback does not match prepared content.",
+	} {
+		if !strings.Contains(notifyJob, required) {
+			t.Fatalf("release Homebrew pull-request publishing is missing %q", required)
+		}
+	}
+	if strings.Contains(notifyJob, `-f branch=main`) {
+		t.Fatal("release workflow still writes the Homebrew Cask directly to protected main")
+	}
+	checkoutIndex := strings.Index(notifyJob, `git checkout -B "${cask_branch}" origin/main`)
+	validationIndex := strings.Index(notifyJob, `--cask "${GITHUB_WORKSPACE}/tooling/Casks/ecctl.rb"`)
+	if checkoutIndex < 0 || validationIndex < 0 || checkoutIndex > validationIndex {
+		t.Fatal("release workflow does not validate the Cask from the fetched main baseline")
+	}
+}
+
 func TestCheckTelemetryConfigUsesSharedStrictValidatorWithoutLeakingValues(t *testing.T) {
 	encode := func(value string) string {
 		value = strings.ReplaceAll(value, "example.com", "tracing-cn-hangzhou.arms.aliyuncs.com")
