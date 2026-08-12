@@ -124,7 +124,28 @@ func TestReleaseWorkflowManualNewReleaseUsesPublishedTagsBaseline(t *testing.T) 
 	}
 }
 
-func TestReleaseAssetValidatorRejectsInvalidExtra(t *testing.T) {
+func TestReleaseWorkflowFindsDraftByReleaseAPIURL(t *testing.T) {
+	workflowPath := filepath.Join("..", "..", ".github", "workflows", "release.yml")
+	raw, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(raw)
+	for _, required := range []string{
+		`gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json apiUrl --jq '.apiUrl'`,
+		`gh api "${release_api}" > "${release_file}"`,
+		`gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" > "${readback_file}"`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("draft Release readback is missing %q", required)
+		}
+	}
+	if count := strings.Count(workflow, `gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json apiUrl --jq '.apiUrl'`); count != 2 {
+		t.Fatalf("release workflow has %d draft-capable Release lookups, want 2", count)
+	}
+}
+
+func TestReleaseAssetValidatorAcceptsPublishedAndDraftURLsAndRejectsInvalidAssets(t *testing.T) {
 	jqPath, err := exec.LookPath("jq")
 	if err != nil {
 		t.Skip("jq is required to execute the release workflow validator fixture")
@@ -160,6 +181,7 @@ func TestReleaseAssetValidatorRejectsInvalidExtra(t *testing.T) {
 		"draft":      false,
 		"immutable":  true,
 		"prerelease": false,
+		"html_url":   "https://github.com/" + repository + "/releases/tag/" + tag,
 		"assets":     assets,
 	}
 	validator := filepath.Join("..", "..", ".github", "scripts", "validate-release.jq")
@@ -168,11 +190,12 @@ func TestReleaseAssetValidatorRejectsInvalidExtra(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, required := range []string{
-		`(.assets | length) == (expected_assets | length)`,
-		`[.assets[].name]`,
-		`all(.assets[];`,
-		`.digest | test("^sha256:[0-9a-f]{64}$")`,
-		`https://github.com/\($repository)/releases/download/\($tag)/`,
+		`($release.assets | length) == (expected_assets | length)`,
+		`[$release.assets[].name]`,
+		`all($release.assets[]; . as $asset |`,
+		`$asset.digest | test("^sha256:[0-9a-f]{64}$")`,
+		`$release.html_url | startswith("https://github.com/\($repository)/releases/tag/untagged-")`,
+		`$asset.browser_download_url == (($release.html_url | sub("/releases/tag/"; "/releases/download/")) + "/" + $asset.name)`,
 	} {
 		if !strings.Contains(string(validatorRaw), required) {
 			t.Fatalf("Release validator is missing %q", required)
@@ -189,8 +212,8 @@ func TestReleaseAssetValidatorRejectsInvalidExtra(t *testing.T) {
 			"--arg", "tag", tag,
 			"--arg", "version", version,
 			"--arg", "repository", repository,
-			"--argjson", "draft", "false",
-			"--argjson", "immutable", "true",
+			"--argjson", "draft", fmt.Sprint(release["draft"]),
+			"--argjson", "immutable", fmt.Sprint(release["immutable"]),
 			"-f", validator,
 		)
 		cmd.Stdin = strings.NewReader(string(fixture))
@@ -200,6 +223,29 @@ func TestReleaseAssetValidatorRejectsInvalidExtra(t *testing.T) {
 	if err := runValidator(); err != nil {
 		t.Fatalf("valid immutable Release fixture rejected: %v", err)
 	}
+
+	draftURL := "https://github.com/" + repository + "/releases/tag/untagged-0123456789abcdef"
+	release["draft"] = true
+	release["immutable"] = false
+	release["html_url"] = draftURL
+	for _, asset := range assets {
+		name := asset["name"].(string)
+		asset["browser_download_url"] = strings.Replace(draftURL, "/releases/tag/", "/releases/download/", 1) + "/" + name
+	}
+	if err := runValidator(); err != nil {
+		t.Fatalf("valid draft Release fixture rejected: %v", err)
+	}
+
+	assets[0]["browser_download_url"] = "https://github.com/attacker/example/releases/download/untagged-0123456789abcdef/checksums.txt"
+	if err := runValidator(); err == nil {
+		t.Fatal("draft Release fixture with a cross-repository asset URL was accepted")
+	}
+	assets[0]["browser_download_url"] = strings.Replace(draftURL, "/releases/tag/", "/releases/download/", 1) + "/wrong/checksums.txt"
+	if err := runValidator(); err == nil {
+		t.Fatal("draft Release fixture with an invalid asset path was accepted")
+	}
+	assets[0]["browser_download_url"] = strings.Replace(draftURL, "/releases/tag/", "/releases/download/", 1) + "/checksums.txt"
+
 	assets = append(assets, map[string]any{
 		"name":                 "poisoned-extra.txt",
 		"state":                "open",
