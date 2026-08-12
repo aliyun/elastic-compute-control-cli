@@ -12,7 +12,7 @@ description:
   zh-CN: 管理集群巡检配置
 examples:
   - ecctl ack inspect config get --cluster <cluster-id>
-  - ecctl ack inspect config update --cluster <cluster-id> --enabled --schedule daily
+  - ecctl ack inspect config update --cluster <cluster-id> --enabled --recurrence 'FREQ=DAILY;BYHOUR=10;BYMINUTE=15'
 
 identity:
   field: cluster
@@ -32,22 +32,16 @@ schema:
       description:
         en: enable periodic inspection
         zh-CN: 启用周期性巡检
-    schedule:
+    recurrence:
       type: string
       description:
-        en: inspection schedule
-        zh-CN: 巡检周期
-    scope:
-      type: string
+        en: RFC5545 daily recurrence rule with BYHOUR and BYMINUTE
+        zh-CN: 包含 BYHOUR 和 BYMINUTE 的 RFC5545 每日巡检规则
+    disabled_check_items:
+      type: string_array
       description:
-        en: inspection scope
-        zh-CN: 巡检范围
-    config:
-      type: string
-      input_style: json|@file
-      description:
-        en: raw inspection config JSON or @file
-        zh-CN: 原始巡检配置 JSON 或 @file
+        en: inspection check item names to disable
+        zh-CN: 要禁用的巡检项名称
 
 controls:
   api_param:
@@ -61,47 +55,50 @@ probes:
   detail:
     api: GetClusterInspectConfig
     request:
-      cluster_id: $.cluster
+      clusterId: $.cluster
       ApiParam:
         raw: $.api_param
     response:
       item: $
       request_id: $.requestId
-      id: $.cluster_id
       fields:
-        cluster_id: $.cluster_id
         enabled: $.enabled
-        schedule: $.schedule
-        scope: $.scope
-        config: $.config
+        recurrence: $.recurrence
+        disabled_check_items: $.disabledCheckItems
+
+waiters:
+  config_present:
+    probe: detail
+    target: present
+    interval: 1s
+    timeout: 60s
 
 bindings:
   create_config:
     api: CreateClusterInspectConfig
     request:
-      cluster_id: $.cluster
+      clusterId: $.cluster
       body.enabled: $.enabled
-      body.schedule: $.schedule
-      body.scope: $.scope
-      body.config: $.config
+      body.recurrence: $.recurrence
+      body.disabledCheckItems: $.disabled_check_items
       ApiParam:
         raw: $.api_param
     request_id_from: $.requestId
+    wait: config_present
   update_config:
     api: UpdateClusterInspectConfig
     request:
-      cluster_id: $.cluster
+      clusterId: $.cluster
       body.enabled: $.enabled
-      body.schedule: $.schedule
-      body.scope: $.scope
-      body.config: $.config
+      body.recurrence: $.recurrence
+      body.disabledCheckItems: $.disabled_check_items
       ApiParam:
         raw: $.api_param
     request_id_from: $.requestId
   delete_config:
     api: DeleteClusterInspectConfig
     request:
-      cluster_id: $.cluster
+      clusterId: $.cluster
       ApiParam:
         raw: $.api_param
     request_id_from: $.requestId
@@ -118,19 +115,23 @@ operations:
         - cluster:
             required: true
         - enabled
-        - schedule
-        - scope
-        - config
+        - recurrence:
+            required: true
+        - disabled_check_items
       controls:
         - api_param
     workflow:
       - probe: detail
         as: existing
+        not_found: empty
       - binding: create_config
         unless: has(context.existing)
       - binding: update_config
         when: has(context.existing)
       - probe: detail
+      - emit:
+          fields:
+            cluster: $input.cluster
   delete:
     examples:
       - ecctl ack inspect config delete --cluster <cluster-id>
@@ -148,7 +149,7 @@ operations:
       - emit:
           deleted: true
           fields:
-            cluster: $.cluster
+            cluster: $input.cluster
   get:
     aliases: [show, describe]
     description:
@@ -162,3 +163,6 @@ operations:
         - api_param
     workflow:
       - probe: detail
+      - emit:
+          fields:
+            cluster: $input.cluster

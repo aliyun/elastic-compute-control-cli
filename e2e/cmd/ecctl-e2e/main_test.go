@@ -12,6 +12,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/coverage"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/fixtureconfig"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/prereqcheck"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
 func TestCoverageRegistryCheckAndSummary(t *testing.T) {
@@ -104,6 +107,34 @@ func TestCoverageRegistryInitRequiresPublicCapabilities(t *testing.T) {
 	}
 }
 
+func TestCoverageCommandFailsWhenAResourceHasNoCase(t *testing.T) {
+	_, specs, cases := writeCLIFixture(t)
+	mustWriteFile(t, filepath.Join(specs, "disk.yaml"), `
+product: ecs
+resource: disk
+operations:
+  list: {}
+`)
+
+	cmd := coverageCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"--specs", specs,
+		"--cases", cases,
+		"--fail-on-resource-gap",
+	})
+	err := cmd.Execute()
+	var ee *exitError
+	if !errors.As(err, &ee) || ee.code != exitTestsFailed {
+		t.Fatalf("expected exitTestsFailed, got %T %[1]v", err)
+	}
+	if !strings.Contains(out.String(), "RESOURCE GAP  ecs/disk") {
+		t.Fatalf("expected resource gap in output, got:\n%s", out.String())
+	}
+}
+
 func TestCapabilityFilterRequiresSurfaceMarker(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "capabilities.json")
 	if err := os.WriteFile(path, []byte(`{"products":[{"product":"ecs","resources":[]}]}`), 0o644); err != nil {
@@ -166,6 +197,78 @@ steps:
 	}
 	if !strings.Contains(out.String(), "public.yaml") || strings.Contains(out.String(), "full.yaml") {
 		t.Fatalf("surface selection output = %q", out.String())
+	}
+}
+
+func TestRunCollectOnlyJSONIncludesFixtureDependencyClosure(t *testing.T) {
+	root := t.TempDir()
+	cases := filepath.Join(root, "cases")
+	stack := filepath.Join(root, "fixtures", "stack.yaml")
+	mustMkdirAll(t, filepath.Join(cases, "ack"))
+	mustMkdirAll(t, filepath.Dir(stack))
+	mustWriteFile(t, filepath.Join(cases, "ack", "diagnosis.yaml"), `
+surface: full
+resource: ack/diagnosis
+execution: dag
+covers:
+  - ack/check-item
+needs:
+  - ack_diagnosis_node
+steps:
+  - name: create
+    needs: [ack_diagnosis_node]
+    requires_prerequisites: [ack.auto_repair_policy]
+    locks: ["ack-cluster:c"]
+    run: ecctl ack diagnosis create --cluster c --type node --target n
+`)
+	mustWriteFile(t, stack, `
+provision:
+  - id: cluster
+    resource: ack/ack
+    lifetime: run
+    run: ecctl ack create --name c
+  - id: ack_diagnosis_node
+    resource: ack/node
+    lifetime: run
+    needs: [cluster]
+    run: ecctl ack node add --cluster c --instances i
+`)
+
+	cmd := runCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"--cases", cases,
+		"--stack", stack,
+		"--surface", "full",
+		"--collect-only",
+		"--output", "json",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("collect fixture dependencies: %v\n%s", err, out.String())
+	}
+	got := out.String()
+	for _, want := range []string{
+		`"covers": [`,
+		`"ack/check-item"`,
+		`"direct_needs": [`,
+		`"ack_diagnosis_node"`,
+		`"id": "cluster"`,
+		`"resource": "ack/ack"`,
+		`"id": "ack_diagnosis_node"`,
+		`"resource": "ack/node"`,
+		`"mode": "create"`,
+		`"lifetime": "run"`,
+		`"execution": "dag"`,
+		`"requires_prerequisites": [`,
+		`"ack.auto_repair_policy"`,
+		`"locks": [`,
+		`"ack-cluster:c"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("collect output missing %q:\n%s", want, got)
+		}
 	}
 }
 
@@ -409,30 +512,14 @@ func TestRunSkipsCasesWithUnavailableProbedPrerequisites(t *testing.T) {
 	fake := filepath.Join(root, "ecctl")
 	logPath := filepath.Join(root, "calls.log")
 	reports := filepath.Join(root, "reports")
-	mustMkdirAll(t, filepath.Join(cases, "ack"))
 	mustMkdirAll(t, filepath.Join(cases, "ecs"))
 	mustMkdirAll(t, filepath.Join(cases, "lingjun"))
-	mustWriteFile(t, filepath.Join(cases, "ack", "kubeconfig.yaml"), `
-resource: ack/kubeconfig
-requires_prerequisites: [ack.root_account]
-steps:
-  - name: update
-    run: ecctl ack kubeconfig update --cluster c-test --user-id 2000 --expire-time 1
-`)
-	mustWriteFile(t, filepath.Join(cases, "ecs", "image.yaml"), `
-resource: ecs/image
-requires_prerequisites: [ecs.image]
-steps:
-  - name: list
-    run: ecctl ecs image list
-`)
-	mustWriteFile(t, filepath.Join(cases, "lingjun", "node.yaml"), `
-resource: lingjun/node
-requires_params: [lingjun.hpn_zone]
+	mustWriteFile(t, filepath.Join(cases, "lingjun", "cluster.yaml"), `
+resource: lingjun/cluster
 requires_prerequisites: [lingjun.cluster]
 steps:
   - name: list
-    run: ecctl lingjun node list --free --filter hpn-zone={{.params.lingjun.hpn_zone}}
+    run: ecctl lingjun cluster list
 `)
 	mustWriteFile(t, filepath.Join(cases, "ecs", "instance.yaml"), `
 resource: ecs/instance
@@ -447,9 +534,6 @@ regions:
   candidates:
     - id: cn-hangzhou
       prerequisites:
-        ack.root_account: {}
-        ecs.image:
-          oss_bucket: missing-bucket
         lingjun.cluster:
           node_group_ids: [ng-a, ng-b]
 paths:
@@ -459,10 +543,8 @@ paths:
 	mustWriteFile(t, fake, `#!/bin/sh
 echo "$*" >> "$FAKE_LOG"
 case "$*" in
-  "capabilities"*) printf '%s' '{"surface":"public","products":[{"product":"ack","resources":[{"name":"kubeconfig","actions":["update"]}]},{"product":"ecs","resources":[{"name":"image","actions":["list"]},{"name":"instance","actions":["list"]}]},{"product":"lingjun","resources":[{"name":"node","actions":["list"]}]}]}' ;;
-  *"sts GetCallerIdentity"*) printf '%s' '{"response":{"IdentityType":"RAMUser","UserId":"2000"}}' ;;
-  *"resourcecenter GetResourceConfiguration"*) printf '%s' '{"error":{"code":"NotExists.Resource","message":"bucket does not exist"}}'; exit 1 ;;
-  *"lingjun node list"*) printf '%s' '{"nodes":[{"node_group":"ng-a","hpn_zone":"hpn-a","zone":"cn-hangzhou-b","machine_type":"lingjun.g1xlarge"}]}' ;;
+  "capabilities"*) printf '%s' '{"surface":"public","products":[{"product":"ecs","resources":[{"name":"image","actions":["list"]},{"name":"instance","actions":["list"]}]},{"product":"lingjun","resources":[{"name":"cluster","actions":["list"]}]}]}' ;;
+  *"ListFreeNodes"*) printf '%s' '{"response":{"Nodes":[{"NodeGroupId":"ng-a","HpnZone":"hpn-a","ZoneId":"cn-hangzhou-b","MachineType":"lingjun.g1xlarge"}]}}' ;;
   *"ecs instance list"*) printf '%s' '{"instances":[]}' ;;
   *) printf '%s' '{"error":{"code":"UnexpectedCommand","message":"unexpected command"}}'; exit 1 ;;
 esac
@@ -478,23 +560,54 @@ esac
 		t.Fatalf("run with unavailable optional prerequisites: %v", err)
 	}
 	log := string(mustReadFile(t, logPath))
-	if strings.Contains(log, "ack kubeconfig update") {
-		t.Fatalf("root-account-dependent case ran with RAM user credentials:\n%s", log)
-	}
-	if strings.Contains(log, "ecs image list") {
-		t.Fatalf("OSS-dependent case ran after the bucket probe failed:\n%s", log)
-	}
-	if count := strings.Count(log, "lingjun node list"); count != 1 {
-		t.Fatalf("Lingjun node list count = %d, want only the preflight query:\n%s", count, log)
+	if count := strings.Count(log, "ListFreeNodes"); count != 1 {
+		t.Fatalf("Lingjun free-node query count = %d, want only the preflight query:\n%s", count, log)
 	}
 	if !strings.Contains(log, "ecs instance list") {
 		t.Fatalf("unrelated case did not run:\n%s", log)
 	}
 	reportData := string(mustReadFile(t, filepath.Join(reports, "e2e-report.json")))
-	if !strings.Contains(reportData, `"passed": 1`) || !strings.Contains(reportData, `"skipped": 3`) ||
-		!strings.Contains(reportData, "ack.root_account") || !strings.Contains(reportData, "ecs.image") ||
+	if !strings.Contains(reportData, `"passed": 1`) || !strings.Contains(reportData, `"skipped": 1`) ||
 		!strings.Contains(reportData, "lingjun.cluster") {
 		t.Fatalf("report does not describe prerequisite skips: %s", reportData)
+	}
+}
+
+func TestPreflightIncludesDeclarativePrerequisites(t *testing.T) {
+	suites := []*scenario.Suite{{
+		RequiresPrerequisites: []string{
+			prereqcheck.ACKAutoRepairPolicy,
+			prereqcheck.RGNotificationDisabled,
+			"future.bundle",
+		},
+	}}
+	required := probedPrerequisites(suites)
+	if !required[prereqcheck.ACKAutoRepairPolicy] || !required[prereqcheck.RGNotificationDisabled] {
+		t.Fatalf("declarative prerequisites missing from preflight: %#v", required)
+	}
+	if required["future.bundle"] {
+		t.Fatalf("unowned prerequisites unexpectedly added to preflight: %#v", required)
+	}
+}
+
+func TestRunDoesNotExposeDeprecatedBillingOptInFlag(t *testing.T) {
+	if flag := runCmd().Flags().Lookup("allow-billing-mutations"); flag != nil {
+		t.Fatalf("deprecated billing opt-in flag is still registered: %s", flag.Name)
+	}
+}
+
+func TestPartitionSkipsDeclarativePrerequisiteRemovedByPreflight(t *testing.T) {
+	suite := &scenario.Suite{
+		Path:                  "cases/rg/notification-lifecycle.yaml",
+		RequiresPrerequisites: []string{prereqcheck.RGNotificationDisabled},
+	}
+	profiles := []fixtureconfig.RegionProfile{{ID: "cn-hangzhou"}}
+	runnable, skipped := partitionUnavailablePrerequisiteSuites(
+		[]*scenario.Suite{suite}, profiles, "cn-hangzhou",
+	)
+	if len(runnable) != 0 || len(skipped) != 1 ||
+		!strings.Contains(skipped[0].Reason, prereqcheck.RGNotificationDisabled) {
+		t.Fatalf("runnable=%#v skipped=%#v, want declarative case skipped", runnable, skipped)
 	}
 }
 
@@ -504,13 +617,13 @@ func TestRunTreatsPrerequisiteProbePermissionErrorAsFatal(t *testing.T) {
 	config := filepath.Join(root, "e2e.yaml")
 	fake := filepath.Join(root, "ecctl")
 	logPath := filepath.Join(root, "calls.log")
-	mustMkdirAll(t, filepath.Join(cases, "ecs"))
-	mustWriteFile(t, filepath.Join(cases, "ecs", "image.yaml"), `
-resource: ecs/image
-requires_prerequisites: [ecs.image]
+	mustMkdirAll(t, filepath.Join(cases, "lingjun"))
+	mustWriteFile(t, filepath.Join(cases, "lingjun", "cluster.yaml"), `
+resource: lingjun/cluster
+requires_prerequisites: [lingjun.cluster]
 steps:
   - name: list
-    run: ecctl ecs image list
+    run: ecctl lingjun cluster list
 `)
 	mustWriteFile(t, config, `
 version: 2
@@ -518,15 +631,15 @@ regions:
   candidates:
     - id: cn-hangzhou
       prerequisites:
-        ecs.image:
-          oss_bucket: bucket-e2e
+        lingjun.cluster:
+          node_group_ids: [ng-a, ng-b]
 paths:
   cases: `+cases+`
 `)
 	mustWriteFile(t, fake, `#!/bin/sh
 echo "$*" >> "$FAKE_LOG"
 if [ "$1" = "capabilities" ]; then
-  printf '%s' '{"surface":"public","products":[{"product":"ecs","resources":[{"name":"image","actions":["list"]}]}]}'
+  printf '%s' '{"surface":"public","products":[{"product":"lingjun","resources":[{"name":"cluster","actions":["list"]}]}]}'
   exit 0
 fi
 printf '%s' '{"error":{"code":"NoPermission","message":"not authorized"}}'
@@ -543,188 +656,8 @@ exit 1
 	if err == nil || !strings.Contains(err.Error(), "NoPermission") {
 		t.Fatalf("err = %v, want fatal prerequisite permission error", err)
 	}
-	if log := string(mustReadFile(t, logPath)); strings.Contains(log, "ecs image list") {
+	if log := string(mustReadFile(t, logPath)); strings.Count(log, "ListFreeNodes") > 1 {
 		t.Fatalf("case ran after fatal prerequisite probe error:\n%s", log)
-	}
-}
-
-func TestRunUsesConfiguredInstanceIDToScheduleRenewal(t *testing.T) {
-	root := t.TempDir()
-	cases := filepath.Join(root, "cases")
-	config := filepath.Join(root, "e2e.yaml")
-	fake := filepath.Join(root, "ecctl")
-	logPath := filepath.Join(root, "calls.log")
-	mustMkdirAll(t, filepath.Join(cases, "ecs"))
-	mustWriteFile(t, filepath.Join(cases, "ecs", "instance-renew.yaml"), `
-resource: ecs/instance
-requires_prerequisites: [ecs.instance_renew]
-steps:
-  - name: get target
-    run: ecctl ecs instance get {{.prerequisites.ecs.instance_renew.instance_id}}
-    at: $.instance
-    expect:
-      id: { eq: "{{.prerequisites.ecs.instance_renew.instance_id}}" }
-  - name: renew
-    run: ecctl ecs instance renew {{.prerequisites.ecs.instance_renew.instance_id}} --period 1 --period-unit Month
-`)
-	mustWriteFile(t, config, `
-version: 2
-regions:
-  candidates:
-    - id: cn-no-renewal-target
-      prerequisites:
-        ecs.instance_renew: {}
-    - id: cn-hangzhou
-      prerequisites:
-        ecs.instance_renew:
-          instance_id: i-renew
-paths:
-  cases: `+cases+`
-`)
-	mustWriteFile(t, fake, `#!/bin/sh
-echo "$*" >> "$FAKE_LOG"
-if [ "$1" = "capabilities" ]; then
-  printf '%s' '{"surface":"public","products":[{"product":"ecs","resources":[{"name":"instance","actions":["get","renew"]}]}]}'
-else
-  printf '%s' '{"instance":{"id":"i-renew","charge_type":"PrePaid","expired_time":"2027-01-01T00:00Z"}}'
-fi
-`)
-	if err := os.Chmod(fake, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("FAKE_LOG", logPath)
-
-	cmd := runCmd()
-	if flag := cmd.Flags().Lookup("allow-billing-mutations"); flag != nil {
-		t.Fatalf("deprecated billing opt-in flag is still registered: %s", flag.Name)
-	}
-	cmd.SetArgs([]string{"--config", config, "--ecctl-bin", fake, "--report-dir", filepath.Join(root, "reports"), "--label", "renew-configured"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("run with configured renewal target: %v", err)
-	}
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if count := strings.Count(string(data), "ecs instance renew i-renew --period 1 --period-unit Month"); count != 1 {
-		t.Fatalf("renew command count = %d, want 1:\n%s", count, data)
-	}
-	if strings.Contains(string(data), "--region cn-no-renewal-target") {
-		t.Fatalf("profile without a configured instance ID was selected:\n%s", data)
-	}
-}
-
-func TestRunSkipsRenewalWithoutConfiguredInstanceID(t *testing.T) {
-	root := t.TempDir()
-	cases := filepath.Join(root, "cases")
-	config := filepath.Join(root, "e2e.yaml")
-	fake := filepath.Join(root, "ecctl")
-	logPath := filepath.Join(root, "calls.log")
-	reports := filepath.Join(root, "reports")
-	mustMkdirAll(t, filepath.Join(cases, "ecs"))
-	mustWriteFile(t, filepath.Join(cases, "ecs", "instance-renew.yaml"), `
-resource: ecs/instance
-requires_prerequisites: [ecs.instance_renew]
-steps:
-  - name: get target
-    run: ecctl ecs instance get {{.prerequisites.ecs.instance_renew.instance_id}}
-  - name: renew
-    run: ecctl ecs instance renew {{.prerequisites.ecs.instance_renew.instance_id}} --period 1 --period-unit Month
-`)
-	mustWriteFile(t, config, `
-version: 2
-regions:
-  candidates:
-    - id: cn-hangzhou
-      prerequisites:
-        ecs.instance_renew: {}
-paths:
-  cases: `+cases+`
-`)
-	mustWriteFile(t, fake, `#!/bin/sh
-echo "$*" >> "$FAKE_LOG"
-exit 1
-`)
-	if err := os.Chmod(fake, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("FAKE_LOG", logPath)
-
-	cmd := runCmd()
-	cmd.SetArgs([]string{"--config", config, "--ecctl-bin", fake, "--report-dir", reports, "--label", "renew-not-configured"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("run without renewal target: %v", err)
-	}
-	if data, err := os.ReadFile(logPath); err == nil && strings.TrimSpace(string(data)) != "" {
-		t.Fatalf("renewal case called ecctl without a configured instance ID: %s", data)
-	} else if err != nil && !os.IsNotExist(err) {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(filepath.Join(reports, "e2e-report.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), `"status": "skipped"`) || !strings.Contains(string(data), "ecs.instance_renew.instance_id is not configured") {
-		t.Fatalf("missing configuration skip is not visible in report: %s", data)
-	}
-}
-
-func TestRunDoesNotRenewWhenConfiguredInstanceCannotBeQueried(t *testing.T) {
-	root := t.TempDir()
-	cases := filepath.Join(root, "cases")
-	config := filepath.Join(root, "e2e.yaml")
-	fake := filepath.Join(root, "ecctl")
-	logPath := filepath.Join(root, "calls.log")
-	mustMkdirAll(t, filepath.Join(cases, "ecs"))
-	mustWriteFile(t, filepath.Join(cases, "ecs", "instance-renew.yaml"), `
-resource: ecs/instance
-requires_prerequisites: [ecs.instance_renew]
-steps:
-  - name: get target
-    run: ecctl ecs instance get {{.prerequisites.ecs.instance_renew.instance_id}}
-    at: $.instance
-    expect:
-      id: { eq: "{{.prerequisites.ecs.instance_renew.instance_id}}" }
-      charge_type: { eq: PrePaid }
-  - name: renew
-    run: ecctl ecs instance renew {{.prerequisites.ecs.instance_renew.instance_id}} --period 1 --period-unit Month
-`)
-	mustWriteFile(t, config, `
-version: 2
-regions:
-  candidates:
-    - id: cn-hangzhou
-      prerequisites:
-        ecs.instance_renew:
-          instance_id: i-missing
-paths:
-  cases: `+cases+`
-`)
-	mustWriteFile(t, fake, `#!/bin/sh
-echo "$*" >> "$FAKE_LOG"
-if [ "$1" = "capabilities" ]; then
-  printf '%s' '{"surface":"public","products":[{"product":"ecs","resources":[{"name":"instance","actions":["get","renew"]}]}]}'
-  exit 0
-fi
-printf '%s' '{"error":{"code":"InvalidInstanceId.NotFound","message":"instance not found"}}'
-exit 1
-`)
-	if err := os.Chmod(fake, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("FAKE_LOG", logPath)
-
-	cmd := runCmd()
-	cmd.SetArgs([]string{"--config", config, "--ecctl-bin", fake, "--label", "renew-not-queryable"})
-	if err := cmd.Execute(); err == nil {
-		t.Fatal("run unexpectedly succeeded when the configured instance was not queryable")
-	}
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "ecs instance renew") {
-		t.Fatalf("renew ran after the target query failed:\n%s", data)
 	}
 }
 

@@ -18,9 +18,17 @@ type Fixture struct {
 	Provision []ProvisionStep   `yaml:"provision"`
 }
 
+const (
+	FixtureLifetimeExecution = "execution"
+	FixtureLifetimeRun       = "run"
+)
+
 // ProvisionStep creates one shared-stack resource.
 type ProvisionStep struct {
 	ID                    string            `yaml:"id"`
+	Resource              string            `yaml:"resource"`
+	Mode                  string            `yaml:"mode"`
+	Lifetime              string            `yaml:"lifetime"`
 	Needs                 []string          `yaml:"needs"`
 	RequiresParams        []string          `yaml:"requires_params"`
 	RequiresPrerequisites []string          `yaml:"requires_prerequisites"`
@@ -28,6 +36,25 @@ type ProvisionStep struct {
 	At                    string            `yaml:"at"`
 	Capture               map[string]string `yaml:"capture"`
 	Teardown              string            `yaml:"teardown"`
+}
+
+// FixtureDependency is the stable, inspectable identity of one fixture node.
+// Resource is canonical product/resource metadata; Mode distinguishes a cloud
+// resource created by the fixture from a read-only inventory lookup.
+type FixtureDependency struct {
+	ID       string   `json:"id"`
+	Resource string   `json:"resource"`
+	Mode     string   `json:"mode"`
+	Lifetime string   `json:"lifetime"`
+	Needs    []string `json:"needs,omitempty"`
+}
+
+// SuiteFixtureDependencies exposes both the case's direct needs and the full
+// transitive fixture closure in provisioning order.
+type SuiteFixtureDependencies struct {
+	Direct   []string            `json:"direct"`
+	Steps    map[string][]string `json:"steps,omitempty"`
+	Fixtures []FixtureDependency `json:"fixtures"`
 }
 
 func loadFixture(path string) (*Fixture, error) {
@@ -49,6 +76,39 @@ func loadFixture(path string) (*Fixture, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	f.Provision = ordered
+	byID := make(map[string]ProvisionStep, len(f.Provision))
+	for i := range f.Provision {
+		if strings.TrimSpace(f.Provision[i].Resource) == "" {
+			return nil, fmt.Errorf("%s: provision step %q is missing resource metadata", path, f.Provision[i].ID)
+		}
+		if f.Provision[i].Mode == "" {
+			f.Provision[i].Mode = "create"
+		}
+		switch f.Provision[i].Mode {
+		case "create", "lookup":
+		default:
+			return nil, fmt.Errorf("%s: provision step %q has unsupported mode %q", path, f.Provision[i].ID, f.Provision[i].Mode)
+		}
+		if f.Provision[i].Lifetime == "" {
+			f.Provision[i].Lifetime = FixtureLifetimeExecution
+		}
+		switch f.Provision[i].Lifetime {
+		case FixtureLifetimeExecution, FixtureLifetimeRun:
+		default:
+			return nil, fmt.Errorf("%s: provision step %q has unsupported lifetime %q", path, f.Provision[i].ID, f.Provision[i].Lifetime)
+		}
+		byID[f.Provision[i].ID] = f.Provision[i]
+	}
+	for _, step := range f.Provision {
+		if step.Lifetime != FixtureLifetimeRun {
+			continue
+		}
+		for _, dependency := range step.Needs {
+			if byID[dependency].Lifetime != FixtureLifetimeRun {
+				return nil, fmt.Errorf("%s: run lifetime provision step %q depends on execution lifetime step %q", path, step.ID, dependency)
+			}
+		}
+	}
 	return &f, nil
 }
 
@@ -121,6 +181,19 @@ func (f *Fixture) prerequisiteRequirements() []string {
 	return requirements
 }
 
+func splitFixtureLifetimes(fixture *Fixture) (execution, run *Fixture) {
+	execution = &Fixture{Tags: fixture.Tags}
+	run = &Fixture{Tags: fixture.Tags}
+	for _, step := range fixture.Provision {
+		if step.Lifetime == FixtureLifetimeRun {
+			run.Provision = append(run.Provision, step)
+		} else {
+			execution.Provision = append(execution.Provision, step)
+		}
+	}
+	return execution, run
+}
+
 // StackPrerequisitesBySuite resolves each selected suite's stack closure and
 // returns the primary-region prerequisite bundles needed by that closure.
 func StackPrerequisitesBySuite(path string, suites []*scenario.Suite) (map[string][]string, error) {
@@ -140,6 +213,41 @@ func StackPrerequisitesBySuite(path string, suites []*scenario.Suite) (map[strin
 	return result, nil
 }
 
+// StackOptionalPrerequisitesBySuite returns prerequisite bundles used only by
+// step-level fixture needs. They influence assignment preference but do not
+// make the entire case unschedulable.
+func StackOptionalPrerequisitesBySuite(path string, suites []*scenario.Suite) (map[string][]string, error) {
+	fixture, err := loadFixture(path)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string][]string, len(suites))
+	for _, suite := range suites {
+		hard, err := fixture.plan(suite.Needs)
+		if err != nil {
+			return nil, fmt.Errorf("plan shared stack for %s: %w", suite.Path, err)
+		}
+		hardRequirements := map[string]bool{}
+		for _, requirement := range (&Fixture{Provision: hard}).prerequisiteRequirements() {
+			hardRequirements[requirement] = true
+		}
+		stepNeeds := make([]string, 0)
+		for _, step := range suite.Steps {
+			stepNeeds = append(stepNeeds, step.Needs...)
+		}
+		optional, err := fixture.plan(stepNeeds)
+		if err != nil {
+			return nil, fmt.Errorf("plan step shared stack for %s: %w", suite.Path, err)
+		}
+		for _, requirement := range (&Fixture{Provision: optional}).prerequisiteRequirements() {
+			if !hardRequirements[requirement] {
+				result[suite.Path] = append(result[suite.Path], requirement)
+			}
+		}
+	}
+	return result, nil
+}
+
 // StackStepsForSuites returns the shared-stack closure needed by the selected
 // suites. Callers use it for preflight checks that must cover provision and
 // teardown commands before any cloud mutation starts.
@@ -151,7 +259,11 @@ func StackStepsForSuites(path string, suites []*scenario.Suite) ([]ProvisionStep
 	seen := map[string]bool{}
 	requested := make([]string, 0)
 	for _, suite := range suites {
-		for _, need := range suite.Needs {
+		needs := append([]string(nil), suite.Needs...)
+		for _, step := range suite.Steps {
+			needs = append(needs, step.Needs...)
+		}
+		for _, need := range needs {
 			if seen[need] {
 				continue
 			}
@@ -160,6 +272,54 @@ func StackStepsForSuites(path string, suites []*scenario.Suite) ([]ProvisionStep
 		}
 	}
 	return fixture.plan(requested)
+}
+
+// StackDependenciesBySuite expands every suite's direct needs into the
+// topologically ordered fixture closure used by an actual run.
+func StackDependenciesBySuite(path string, suites []*scenario.Suite) (map[string]SuiteFixtureDependencies, error) {
+	result := make(map[string]SuiteFixtureDependencies, len(suites))
+	if strings.TrimSpace(path) == "" {
+		for _, suite := range suites {
+			stepDirect := make(map[string][]string, len(suite.Steps))
+			for _, step := range suite.Steps {
+				stepDirect[step.Name] = append([]string(nil), step.Needs...)
+			}
+			result[suite.Path] = SuiteFixtureDependencies{Direct: append([]string(nil), suite.Needs...), Steps: stepDirect}
+		}
+		return result, nil
+	}
+	fixture, err := loadFixture(path)
+	if err != nil {
+		return nil, err
+	}
+	for _, suite := range suites {
+		requested := append([]string(nil), suite.Needs...)
+		stepDirect := make(map[string][]string, len(suite.Steps))
+		for _, step := range suite.Steps {
+			stepDirect[step.Name] = append([]string(nil), step.Needs...)
+			requested = append(requested, step.Needs...)
+		}
+		planned, err := fixture.plan(requested)
+		if err != nil {
+			return nil, fmt.Errorf("plan shared stack for %s: %w", suite.Path, err)
+		}
+		dependencies := make([]FixtureDependency, 0, len(planned))
+		for _, step := range planned {
+			dependencies = append(dependencies, FixtureDependency{
+				ID:       step.ID,
+				Resource: step.Resource,
+				Mode:     step.Mode,
+				Lifetime: step.Lifetime,
+				Needs:    append([]string(nil), step.Needs...),
+			})
+		}
+		result[suite.Path] = SuiteFixtureDependencies{
+			Direct:   append([]string(nil), suite.Needs...),
+			Steps:    stepDirect,
+			Fixtures: dependencies,
+		}
+	}
+	return result, nil
 }
 
 // topoSort orders provision steps so each step's needs precede it.

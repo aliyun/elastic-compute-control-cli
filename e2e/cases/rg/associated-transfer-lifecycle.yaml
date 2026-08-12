@@ -1,0 +1,50 @@
+# Complete ResourceManager associated transfer lifecycle.
+resource: rg/associated-transfer
+serial: true
+
+steps:
+  # This is account-global state, so capture the complete original setting and
+  # restore it after exercising every write operation.
+  - name: list original setting
+    run: ecctl rg associated-transfer list
+    expect:
+      $.associated_transfer_settings: { type: array, min_len: 1 }
+    at: $.associated_transfer_settings[0]
+    capture:
+      original_status: status
+      original_enable_existing_resources_transfer: enable_existing_resources_transfer
+
+  - name: disable
+    run: ecctl rg associated-transfer disable
+    at: $.associated_transfer_setting
+    expect:
+      status: { eq: Disable }
+    teardown: >
+      ecctl rg associated-transfer update
+      --status {{.original_status}}
+      --enable-existing-resources-transfer {{.original_enable_existing_resources_transfer}}
+
+  - name: enable
+    run: ecctl rg associated-transfer enable
+    at: $.associated_transfer_setting
+    expect:
+      status: { eq: Enable }
+
+  - name: update
+    run: >
+      ecctl rg associated-transfer update
+      --status Enable
+      --enable-existing-resources-transfer false
+    at: $.associated_transfer_setting
+    expect:
+      status: { eq: Enable }
+      enable_existing_resources_transfer: { oneof: ["false", false] }
+
+  - name: restore original setting
+    run: >
+      ecctl rg associated-transfer update
+      --status {{.original_status}}
+      --enable-existing-resources-transfer {{.original_enable_existing_resources_transfer}}
+    at: $.associated_transfer_setting
+    expect:
+      status: { eq: "{{.original_status}}" }

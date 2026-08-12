@@ -12,19 +12,34 @@ description: "浏览 ecctl 支持的全部公开产品和资源。"
 
 ## [ACK](../category/ack)
 
-管理容器服务 Kubernetes 版（ACK）集群的完整生命周期，涵盖节点池、组件（Addon）、kubeconfig 访问、版本升级、诊断巡检与巡检报告以及告警规则。
+管理容器服务 Kubernetes 版（ACK）集群的完整生命周期，涵盖节点池、组件（Addon）、kubeconfig 访问、版本升级、集群检查与巡检报告以及告警规则。
 
-**7 个资源**
+**22 个资源**
 
 | 资源 | 描述 |
 |---|---|
 | [ack](./resources/ack/ack.md) | 管理 ACK 集群 |
+| [addon](./resources/ack/addon.md) | 管理 ACK 集群组件 |
+| [alert](./resources/ack/alert.md) | 管理 ACK 报警规则状态及联系人组绑定 |
+| [audit](./resources/ack/audit.md) | 管理 ACK 集群 API Server 审计日志 |
+| [check](./resources/ack/check.md) | 管理 ACK 集群检查报告 |
+| [inspect config](./resources/ack/inspect-config.md) | 管理集群巡检配置 |
+| [audit control-plane-log](./resources/ack/audit-control-plane-log.md) | 管理 ACK 托管集群控制面组件日志 |
+| [event](./resources/ack/event.md) | 查询 ACK 控制面事件 |
+| [inspect](./resources/ack/inspect.md) | 管理 ACK 集群巡检配置和报告 |
+| [policy instance](./resources/ack/policy-instance.md) | 管理集群中的 ACK 策略实例 |
 | [kubeconfig](./resources/ack/kubeconfig.md) | 管理 ACK KubeConfig 凭证 |
 | [node](./resources/ack/node.md) | 管理 ACK 集群节点 |
 | [nodepool](./resources/ack/nodepool.md) | 管理 ACK 节点池资源 |
 | [permission](./resources/ack/permission.md) | 管理 ACK RAM 用户和角色权限 |
+| [policy](./resources/ack/policy.md) | 管理 ACK 策略库条目 |
 | [region](./resources/ack/region.md) | 查询 ACK 支持的地域 |
+| [inspect report](./resources/ack/inspect-report.md) | 触发和查询巡检报告 |
+| [task](./resources/ack/task.md) | 查询和控制 ACK 异步任务 |
+| [template](./resources/ack/template.md) | 管理 ACK 编排模板 |
+| [trigger](./resources/ack/trigger.md) | 管理 ACK 应用重新部署触发器 |
 | [version](./resources/ack/version.md) | 查询 ACK Kubernetes 版本元数据 |
+| [vuls](./resources/ack/vuls.md) | 管理 ACK 漏洞扫描和漏洞视图 |
 
 ## [ECS](../category/ecs)
 
@@ -53,37 +68,47 @@ description: "浏览 ecctl 支持的全部公开产品和资源。"
 
 ## [LINGJUN](../category/lingjun)
 
-通过公开的集群和 VPD 命令管理灵骏智算及高性能网络资源。
+管理灵骏集群、节点组及高性能网络资源。
 
-**2 个资源**
+**6 个资源**
 
 | 资源 | 描述 |
 |---|---|
 | [cluster](./resources/lingjun/cluster.md) | 管理灵骏集群资源 |
+| [eni](./resources/lingjun/eni.md) | 管理灵骏弹性网卡 |
+| [er](./resources/lingjun/er.md) | 管理灵骏 HUB（Enterprise Router）资源 |
+| [node-group](./resources/lingjun/node-group.md) | 管理灵骏节点组资源 |
+| [subnet](./resources/lingjun/subnet.md) | 管理灵骏子网资源 |
 | [vpd](./resources/lingjun/vpd.md) | 管理灵骏网段资源 |
 
 ## [RG](../category/rg)
 
 管理资源组治理资源
 
-**5 个资源**
+**9 个资源**
 
 | 资源 | 描述 |
 |---|---|
+| [admin-setting](./resources/rg/admin-setting.md) | 管理资源组管理员设置 |
+| [associated-transfer](./resources/rg/associated-transfer.md) | 管理关联资源随转组设置 |
 | [group](./resources/rg/group.md) | 管理资源组 |
+| [notification](./resources/rg/notification.md) | 管理资源组事件通知 |
 | [policy](./resources/rg/policy.md) | 管理权限策略 |
 | [resource](./resources/rg/resource.md) | 管理资源组中的资源 |
 | [role](./resources/rg/role.md) | 管理 RAM 角色 |
+| [service-linked-role](./resources/rg/service-linked-role.md) | 管理服务关联角色 |
 | [policy version](./resources/rg/policy-version.md) | 管理权限策略版本 |
 
 ## [TAG](../category/tag)
 
 管理标签治理资源
 
-**1 个资源**
+**3 个资源**
 
 | 资源 | 描述 |
 |---|---|
+| [associated-resource-rule](./resources/tag/associated-resource-rule.md) | 管理关联资源标签规则 |
+| [policy](./resources/tag/policy.md) | 管理标签策略 |
 | [resource](./resources/tag/resource.md) | 管理跨产品资源标签 |
 
 ## [VPC](../category/vpc)

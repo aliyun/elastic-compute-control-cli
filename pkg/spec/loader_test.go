@@ -599,6 +599,46 @@ operations:
 	}
 }
 
+func TestLoadSupportsWaiterStateOnlyMatch(t *testing.T) {
+	loaded, err := Load([]byte(`
+schema_version: 2
+product: demo
+resource: task
+kind: regional
+schema:
+  fields:
+    id:
+      type: string
+probes:
+  status:
+    api: DescribeTask
+    request:
+      TaskId: $context.task_id
+    response:
+      item: $
+      state: $.Status
+waiters:
+  succeeded:
+    probe: status
+    target: Succeeded
+    match:
+      state_only: true
+operations:
+  get:
+    call:
+      probe: status
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := Validate(loaded); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if !loaded.Waiters["succeeded"].Match.StateOnly {
+		t.Fatal("state_only = false, want true")
+	}
+}
+
 func TestLoadSupportsWaiterPendingFields(t *testing.T) {
 	raw := []byte(`
 schema_version: 2
@@ -1576,7 +1616,8 @@ func TestLoadECSInstanceResourceLifecycleSpec(t *testing.T) {
 	if deleteBinding.API != "DeleteInstance" {
 		t.Fatalf("delete binding = %#v", deleteBinding)
 	}
-	if deleteBinding.Retry.Policy != "initializing_grace" || len(deleteBinding.Retry.Errors) != 1 || deleteBinding.Retry.Errors[0] != "IncorrectInstanceStatus" {
+	if deleteBinding.Retry.Policy != "initializing_grace" || !hasString(deleteBinding.Retry.Errors, "IncorrectInstanceStatus") ||
+		!hasString(deleteBinding.Retry.Errors, "The specified instance status does not support this operation") {
 		t.Fatalf("delete retry = %#v", deleteBinding.Retry)
 	}
 	if deleteBinding.Retry.InitialInterval != "5s" || deleteBinding.Retry.MaxInterval != "10s" || deleteBinding.Retry.Timeout != "120s" {
@@ -2339,6 +2380,16 @@ func TestValidateReportsReferenceErrors(t *testing.T) {
 		{name: "waiter target", mutate: func(spec *ResourceSpec) {
 			spec.Waiters["ready"] = Waiter{Probe: "lookup"}
 		}, want: `waiter "ready" target is required`},
+		{name: "waiter state-only matcher conflict", mutate: func(spec *ResourceSpec) {
+			spec.Waiters["ready"] = Waiter{
+				Probe:  "lookup",
+				Target: "Available",
+				Match: WaiterMatch{
+					StateOnly: true,
+					Fields:    map[string]string{"name": "$.name"},
+				},
+			}
+		}, want: `waiter "ready" match state_only cannot be combined with other matchers`},
 		{name: "binding api", mutate: func(spec *ResourceSpec) {
 			spec.Bindings["create"] = Binding{Request: map[string]any{}}
 		}, want: `binding "create" api is required`},

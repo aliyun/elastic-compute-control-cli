@@ -12,19 +12,34 @@ Select a product to browse its reference, or open a resource directly.
 
 ## [ACK](../category/ack)
 
-Manage Container Service for Kubernetes (ACK) clusters across their full lifecycle, including node pools, addons, kubeconfig access, version upgrades, diagnostics and inspection reports, and alert rules.
+Manage Container Service for Kubernetes (ACK) clusters across their full lifecycle, including node pools, addons, kubeconfig access, version upgrades, cluster checks and inspection reports, and alert rules.
 
-**7 resources**
+**22 resources**
 
 | Resource | Description |
 |---|---|
 | [ack](./resources/ack/ack.md) | Manage ACK clusters |
+| [addon](./resources/ack/addon.md) | Manage ACK cluster addons |
+| [alert](./resources/ack/alert.md) | Manage ACK alert rule state and contact-group bindings |
+| [audit](./resources/ack/audit.md) | Manage ACK cluster API Server audit log |
+| [check](./resources/ack/check.md) | Manage ACK cluster check reports |
+| [inspect config](./resources/ack/inspect-config.md) | Manage cluster inspection config |
+| [audit control-plane-log](./resources/ack/audit-control-plane-log.md) | Manage ACK managed cluster control plane component logs |
+| [event](./resources/ack/event.md) | Query ACK control-plane events |
+| [inspect](./resources/ack/inspect.md) | Manage ACK cluster inspection configs and reports |
+| [policy instance](./resources/ack/policy-instance.md) | Manage ACK policy instances in a cluster |
 | [kubeconfig](./resources/ack/kubeconfig.md) | Manage ACK kubeconfig credentials |
 | [node](./resources/ack/node.md) | Manage ACK cluster nodes |
 | [nodepool](./resources/ack/nodepool.md) | Manage ACK nodepool resources |
 | [permission](./resources/ack/permission.md) | Manage ACK RAM user and role permissions |
+| [policy](./resources/ack/policy.md) | Manage ACK policy catalog entries |
 | [region](./resources/ack/region.md) | Query ACK-supported regions |
+| [inspect report](./resources/ack/inspect-report.md) | Trigger and query inspection reports |
+| [task](./resources/ack/task.md) | Query and control ACK asynchronous tasks |
+| [template](./resources/ack/template.md) | Manage ACK orchestration templates |
+| [trigger](./resources/ack/trigger.md) | Manage ACK application redeploy triggers |
 | [version](./resources/ack/version.md) | Query ACK Kubernetes version metadata |
+| [vuls](./resources/ack/vuls.md) | Manage ACK vulnerability scans and vulnerability views |
 
 ## [ECS](../category/ecs)
 
@@ -53,37 +68,47 @@ Manage Elastic Compute Service (ECS) resources, including instances, block stora
 
 ## [LINGJUN](../category/lingjun)
 
-Manage Lingjun intelligent-computing and high-performance network resources through public cluster and VPD commands.
+Manage Lingjun clusters, node groups, and high-performance network resources.
 
-**2 resources**
+**6 resources**
 
 | Resource | Description |
 |---|---|
 | [cluster](./resources/lingjun/cluster.md) | Manage Lingjun cluster resources |
+| [eni](./resources/lingjun/eni.md) | Manage Lingjun elastic network interfaces |
+| [er](./resources/lingjun/er.md) | Manage Lingjun Enterprise Router (HUB) resources |
+| [node-group](./resources/lingjun/node-group.md) | Manage Lingjun node group resources |
+| [subnet](./resources/lingjun/subnet.md) | Manage Lingjun subnet resources |
 | [vpd](./resources/lingjun/vpd.md) | Manage Lingjun VPD resources |
 
 ## [RG](../category/rg)
 
 Manage resource group governance resources
 
-**5 resources**
+**9 resources**
 
 | Resource | Description |
 |---|---|
+| [admin-setting](./resources/rg/admin-setting.md) | Manage resource group administrator settings |
+| [associated-transfer](./resources/rg/associated-transfer.md) | Manage associated resource follow transfer group settings |
 | [group](./resources/rg/group.md) | Manage resource groups |
+| [notification](./resources/rg/notification.md) | Manage resource group event notifications |
 | [policy](./resources/rg/policy.md) | Manage resource group policies |
 | [resource](./resources/rg/resource.md) | Manage resources across resource groups |
 | [role](./resources/rg/role.md) | Manage RAM roles |
+| [service-linked-role](./resources/rg/service-linked-role.md) | Manage service-linked roles |
 | [policy version](./resources/rg/policy-version.md) | Manage policy versions |
 
 ## [TAG](../category/tag)
 
 Manage tag governance resources
 
-**1 resource**
+**3 resources**
 
 | Resource | Description |
 |---|---|
+| [associated-resource-rule](./resources/tag/associated-resource-rule.md) | Manage associated resource tag rules |
+| [policy](./resources/tag/policy.md) | Manage tag policies |
 | [resource](./resources/tag/resource.md) | Manage tags on cross-product resources |
 
 ## [VPC](../category/vpc)

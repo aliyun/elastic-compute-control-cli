@@ -578,6 +578,9 @@ func newSchemaCommand(options *globalOptions, stdout io.Writer) *cobra.Command {
 				command, ok := schema.CommandForLanguageMode(name, options.lang, mode)
 				if !ok {
 					if surface, found := schema.ResourceForLanguageName(name, options.lang); found {
+						if publicCLIFilterEnabled(options) {
+							surface = publicCLIResourceSurface(surface.Product, surface)
+						}
 						return writeSchemaOutput(options, stdout, surface)
 					}
 					return ecerrors.Client("UnknownSchema", "schema command is not supported")
@@ -593,6 +596,9 @@ func newSchemaCommand(options *globalOptions, stdout io.Writer) *cobra.Command {
 					return writeSchemaOutput(options, stdout, command)
 				}
 				if surface, ok := schema.ResourceForLanguageName(args[0], options.lang); ok {
+					if publicCLIFilterEnabled(options) {
+						surface = publicCLIResourceSurface(surface.Product, surface)
+					}
 					return writeSchemaOutput(options, stdout, surface)
 				}
 				return ecerrors.Client("UnknownSchema", "schema command is not supported")
@@ -688,15 +694,29 @@ func publicCLIProductSurface(surface schema.ProductSurface) schema.ProductSurfac
 	resources := make([]schema.ResourceSurface, 0, len(surface.Resources))
 	for _, resource := range surface.Resources {
 		if publicCLIResource(surface.Product, resource.Name) {
-			resources = append(resources, resource)
+			resources = append(resources, publicCLIResourceSurface(surface.Product, resource))
 		}
 	}
 	surface.Resources = resources
 	return surface
 }
 
+func publicCLIResourceSurface(product string, surface schema.ResourceSurface) schema.ResourceSurface {
+	actions := make([]string, 0, len(surface.Actions))
+	for _, action := range surface.Actions {
+		if publicCLIResourceAction(product, surface.Name, action) {
+			actions = append(actions, action)
+		}
+	}
+	surface.Actions = actions
+	return surface
+}
+
 func publicCLICommandSchema(name string) bool {
 	parts := strings.Split(name, ".")
+	if len(parts) == 3 && !publicCLIResourceAction(parts[0], parts[1], parts[2]) {
+		return false
+	}
 	switch len(parts) {
 	case 1:
 		return publicCLIProduct(parts[0])
@@ -1424,7 +1444,7 @@ func apiCallAliyunCLILongFlags() map[string]bool {
 		"bearer-token-header-key", "secure", "force", "version", "header", "body",
 		"body-file", "pager", "accept", "output", "waiter", "dryrun", "quiet",
 		"yes", "cli-query", "roa", "method", "user-agent", "cli-ai-mode",
-		"no-cli-ai-mode", "help",
+		"no-cli-ai-mode", "help", "parallel", "part-size",
 	} {
 		flags[name] = true
 	}
@@ -1444,6 +1464,7 @@ func apiCallAliyunCLIValueFlags() map[string]bool {
 		"auto-plugin-install", "auto-plugin-install-enable-pre", "bearer-token",
 		"bearer-token-header-key", "version", "header", "body", "body-file",
 		"accept", "output", "waiter", "cli-query", "method", "user-agent",
+		"parallel", "part-size",
 	} {
 		flags[name] = true
 	}

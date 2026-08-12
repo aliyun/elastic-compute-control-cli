@@ -1,0 +1,29 @@
+# ACK inspection config lifecycle.
+resource: ack/config
+needs: [ack_shared_cluster]
+serial: true
+
+steps:
+  - name: create inspection configuration
+    run: >
+      ecctl ack inspect config update
+      --cluster {{.stack.ack_shared_cluster}}
+      --enabled=true
+      --recurrence 'FREQ=DAILY;BYHOUR=10;BYMINUTE=15'
+    at: $.config
+    expect:
+      cluster: { eq: "{{.stack.ack_shared_cluster}}" }
+      enabled: { eq: true }
+    teardown: ecctl ack inspect config delete --cluster {{.stack.ack_shared_cluster}}
+
+  - name: get inspection configuration
+    run: ecctl ack inspect config get --cluster {{.stack.ack_shared_cluster}}
+    at: $.config
+    expect:
+      cluster: { eq: "{{.stack.ack_shared_cluster}}" }
+      enabled: { eq: true }
+
+  - name: delete inspection configuration
+    run: ecctl ack inspect config delete --cluster {{.stack.ack_shared_cluster}}
+    expect:
+      $.deleted: { eq: true }

@@ -18,7 +18,7 @@ func TestLingjunENICreateMapsRequestAndReadback(t *testing.T) {
 					"NodeId":                    "e01-cn-test",
 				},
 			},
-			fakeLingjunENIGetResponse("leni-123", "Available"),
+			fakeLingjunENIGetResponse("leni-123", "Unattached"),
 		},
 	}
 	runCLI := withCaller(func(_ string, _ string, resource spec.ResourceSpec, region string, _ func(string) string) (engine.Caller, error) {
@@ -34,8 +34,8 @@ func TestLingjunENICreateMapsRequestAndReadback(t *testing.T) {
 	stdout, stderr, code := runCLI(
 		"lingjun", "eni", "create",
 		"--region", "cn-wulanchabu",
-		"--subnet", "subnet-123",
-		"--vpd", "vpd-123",
+		"--subnet", "vsw-123",
+		"--vpd", "vpc-123",
 		"--zone", "cn-wulanchabu-b",
 		"--security-group", "sg-123",
 		"--description", "training eni",
@@ -51,8 +51,8 @@ func TestLingjunENICreateMapsRequestAndReadback(t *testing.T) {
 	createReq := fake.calls[0].request
 	want := map[string]any{
 		"RegionId":        "cn-wulanchabu",
-		"VSwitchId":       "subnet-123",
-		"VpcId":           "vpd-123",
+		"VSwitchId":       "vsw-123",
+		"VpcId":           "vpc-123",
 		"ZoneId":          "cn-wulanchabu-b",
 		"SecurityGroupId": "sg-123",
 		"Description":     "training eni",
@@ -72,7 +72,7 @@ func TestLingjunENICreateMapsRequestAndReadback(t *testing.T) {
 		t.Fatalf("GetElasticNetworkInterface request = %#v", fake.calls[1].request)
 	}
 	eni, _ := decodeObject(t, stdout)["eni"].(map[string]any)
-	if eni == nil || eni["id"] != "leni-123" || eni["status"] != "Available" || eni["subnet"] != "subnet-123" || eni["vpd"] != "vpd-123" {
+	if eni == nil || eni["id"] != "leni-123" || eni["status"] != "Unattached" || eni["subnet"] != "vsw-123" || eni["vpd"] != "vpc-123" {
 		t.Fatalf("unexpected output: %s", stdout)
 	}
 }
@@ -344,8 +344,8 @@ func fakeLingjunENIGetResponse(id string, status string) map[string]any {
 		"RequestId": "req-get",
 		"Content": map[string]any{
 			"ElasticNetworkInterfaceId": id,
-			"VpcId":                     "vpd-123",
-			"VSwitchId":                 "subnet-123",
+			"VpcId":                     "vpc-123",
+			"VSwitchId":                 "vsw-123",
 			"ZoneId":                    "cn-wulanchabu-b",
 			"NodeId":                    "e01-cn-test",
 			"Ip":                        "10.0.0.5",

@@ -1,0 +1,60 @@
+# Complete tag policy lifecycle.
+resource: tag/policy
+timeout: 30m
+serial: true
+
+steps:
+  - name: create
+    run: >
+      ecctl tag policy create
+      --name {{.resource_prefix}}-tag-policy
+      --description "ecctl E2E tag policy {{.run_id}}"
+      --content '{"tags":{}}'
+      --user-type USER
+    at: $.policy
+    expect:
+      id: { type: string, min_len: 1 }
+      name: { eq: "{{.resource_prefix}}-tag-policy" }
+    capture:
+      tag_policy_id: id
+    teardown: ecctl tag policy delete {{.tag_policy_id}}
+
+  - name: get
+    run: ecctl tag policy get {{.tag_policy_id}}
+    at: $.policy
+    expect:
+      name: { eq: "{{.resource_prefix}}-tag-policy" }
+      content: { eq: '{"tags":{}}' }
+
+  - name: list
+    run: ecctl tag policy list --filter id={{.tag_policy_id}} --fields id,name,user_type --limit 10
+    assert:
+      - len($.policies) >= 1
+
+  - name: update
+    run: >
+      ecctl tag policy update {{.tag_policy_id}}
+      --name {{.resource_prefix}}-tag-policy-updated
+      --description "ecctl E2E tag policy updated {{.run_id}}"
+    at: $.policy
+    expect:
+      id: { eq: "{{.tag_policy_id}}" }
+      name: { eq: "{{.resource_prefix}}-tag-policy-updated" }
+
+  - name: attach
+    run: ecctl tag policy attach {{.tag_policy_id}}
+    at: $.policy
+    expect:
+      id: { eq: "{{.tag_policy_id}}" }
+      name: { eq: "{{.resource_prefix}}-tag-policy-updated" }
+    teardown: ecctl tag policy detach {{.tag_policy_id}}
+
+  - name: detach
+    run: ecctl tag policy detach {{.tag_policy_id}}
+    expect:
+      $.actions: { type: array, min_len: 2 }
+
+  - name: delete
+    run: ecctl tag policy delete {{.tag_policy_id}}
+    expect:
+      $.deleted: { eq: true }

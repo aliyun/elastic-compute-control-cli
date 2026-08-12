@@ -51,6 +51,16 @@ schema:
       description:
         en: cluster edition or specification; common values include ack.standard, ack.pro.small, ack.pro.xlarge, ack.pro.2xlarge, ack.pro.4xlarge
         zh-CN: 集群版本规格；常见值包括 ack.standard、ack.pro.small、ack.pro.xlarge、ack.pro.2xlarge、ack.pro.4xlarge
+    auto_mode:
+      type: boolean
+      description:
+        en: enable ACK Auto Mode; requires an ACK managed Pro cluster
+        zh-CN: 启用 ACK Auto Mode；需要 ACK 托管版 Pro 集群
+    deletion_protection:
+      type: boolean
+      description:
+        en: enable cluster deletion protection
+        zh-CN: 启用集群删除保护
     profile:
       type: string
       description:
@@ -77,6 +87,11 @@ schema:
       description:
         en: VSwitch IDs for cluster networking
         zh-CN: 集群网络使用的交换机 ID
+    pod_vswitch:
+      type: string_array
+      description:
+        en: VSwitch IDs used to allocate Terway pod IP addresses
+        zh-CN: 用于分配 Terway Pod IP 地址的交换机 ID
     zone:
       type: string_array
       description:
@@ -372,6 +387,8 @@ waiters:
   upgrade_task_succeeded:
     probe: task
     target: success
+    match:
+      state_only: true
     interval: 2s
     timeout: 3600s
     failure:
@@ -394,9 +411,13 @@ bindings:
         cluster_type: $.type
         kubernetes_version: $.version
         cluster_spec: $.edition
+        auto_mode:
+          enable: $.auto_mode
+        deletion_protection: $.deletion_protection
         profile: $.profile
         vpcid: $.vpc
         vswitch_ids: $list($.vswitch)
+        pod_vswitch_ids: $list($.pod_vswitch)
         zone_ids: $list($.zone)
         container_cidr: $.pod_cidr
         service_cidr: $.service_cidr
@@ -499,6 +520,7 @@ operations:
   create:
     examples:
       - ecctl ack create --name my-name --type <type> --version <kubernetes-version> --edition ack.pro.small
+      - ecctl ack create --name my-auto --type ManagedKubernetes --edition ack.pro.small --auto-mode
       - ecctl ack create --name my-name --type <type> --tag env=prod
       - ecctl --profile prod ack create --profile Default --name my-name --type <type>
     description:
@@ -512,9 +534,12 @@ operations:
             required: true
         - version
         - edition
+        - auto_mode
+        - deletion_protection
         - profile
         - vpc
         - vswitch
+        - pod_vswitch
         - zone
         - pod_cidr
         - service_cidr
@@ -728,3 +753,4 @@ operations:
             id: $input.id
             version: $input.version
             region: $context.region
+            task_id: $context.task_id

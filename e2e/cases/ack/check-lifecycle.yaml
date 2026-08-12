@@ -1,0 +1,35 @@
+# Complete ACK cluster check lifecycle.
+resource: ack/check
+needs: [ack_shared_cluster]
+timeout: 30m
+serial: true
+
+steps:
+  - name: create
+    run: >
+      ecctl ack check create
+      --cluster {{.stack.ack_shared_cluster}}
+      --type ClusterMigrate
+      --timeout 15m
+    at: $.check
+    expect:
+      id: { type: string, min_len: 1 }
+      type: { eq: ClusterMigrate }
+    capture:
+      check_id: id
+
+  - name: get
+    run: ecctl ack check get {{.check_id}} --cluster {{.stack.ack_shared_cluster}}
+    at: $.check
+    expect:
+      id: { eq: "{{.check_id}}" }
+      type: { eq: ClusterMigrate }
+
+  - name: list
+    run: >
+      ecctl ack check list
+      --cluster {{.stack.ack_shared_cluster}}
+      --filter type=ClusterMigrate
+      --limit 10
+    assert:
+      - len($.checks) >= 1

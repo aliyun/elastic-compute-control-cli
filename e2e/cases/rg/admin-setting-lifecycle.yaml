@@ -1,0 +1,27 @@
+# Complete ResourceManager administrator setting lifecycle.
+resource: rg/admin-setting
+serial: true
+
+steps:
+  - name: get original administrator setting
+    run: ecctl rg admin-setting get
+    at: $.admin_setting
+    expect:
+      creator_as_admin: { type: bool }
+    capture:
+      original_creator_as_admin: creator_as_admin
+
+  - name: disable creator administrator
+    run: ecctl rg admin-setting update --creator-as-admin=false
+    at: $.admin_setting
+    expect:
+      creator_as_admin: { eq: false }
+    teardown: >
+      ecctl call ResourceManager UpdateResourceGroupAdminSetting
+      --CreatorAsAdmin {{.original_creator_as_admin}}
+
+  - name: enable creator administrator
+    run: ecctl rg admin-setting update --creator-as-admin=true
+    at: $.admin_setting
+    expect:
+      creator_as_admin: { eq: true }

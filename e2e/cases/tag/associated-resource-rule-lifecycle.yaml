@@ -1,0 +1,60 @@
+# Complete associated resource rule lifecycle.
+#
+# SettingName is a provider-defined rule identifier, not an arbitrary name.
+# The rule name is unique per account and region, so the case clears any
+# existing rule first (tolerating NotFound) and then exercises the full
+# lifecycle from a clean slate.
+#
+# Create and delete for this rule are served by the Hangzhou endpoint only.
+# Other regions reject them with a 400 that the runner classifies as a
+# region-unavailable failure, so the case starts at the first candidate and
+# falls back until a supporting region is reached.
+resource: tag/associated-resource-rule
+serial: true
+
+steps:
+  - name: clear existing rule
+    run: >
+      ecctl tag associated-resource-rule delete
+      rule:AttachDisk-DetachDisk-TagInstance:Ecs-Instance:Ecs-Disk
+    not_found_ok: true
+
+  - name: create
+    run: >
+      ecctl tag associated-resource-rule create
+      --setting-name rule:AttachDisk-DetachDisk-TagInstance:Ecs-Instance:Ecs-Disk
+      --status Enable
+      --existing-status Disable
+      --tag-keys ecctl-e2e,run-id
+    at: $.associated_resource_rule
+    expect:
+      setting_name: { eq: "rule:AttachDisk-DetachDisk-TagInstance:Ecs-Instance:Ecs-Disk" }
+      status: { eq: Enable }
+    teardown: >
+      ecctl tag associated-resource-rule delete
+      rule:AttachDisk-DetachDisk-TagInstance:Ecs-Instance:Ecs-Disk
+
+  - name: list
+    run: >
+      ecctl tag associated-resource-rule list
+      rule:AttachDisk-DetachDisk-TagInstance:Ecs-Instance:Ecs-Disk
+      --limit 10
+    assert:
+      - len($.associated_resource_rules) >= 1
+
+  - name: update
+    run: >
+      ecctl tag associated-resource-rule update
+      rule:AttachDisk-DetachDisk-TagInstance:Ecs-Instance:Ecs-Disk
+      --status Disable
+    at: $.associated_resource_rule
+    expect:
+      setting_name: { eq: "rule:AttachDisk-DetachDisk-TagInstance:Ecs-Instance:Ecs-Disk" }
+      status: { eq: Disable }
+
+  - name: delete
+    run: >
+      ecctl tag associated-resource-rule delete
+      rule:AttachDisk-DetachDisk-TagInstance:Ecs-Instance:Ecs-Disk
+    expect:
+      $.deleted: { eq: true }

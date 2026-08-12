@@ -4,6 +4,6 @@
   "link": {
     "type": "generated-index",
     "title": "LINGJUN resources",
-    "description": "Manage Lingjun intelligent-computing and high-performance network resources through public cluster and VPD commands."
+    "description": "Manage Lingjun clusters, node groups, and high-performance network resources."
   }
 }

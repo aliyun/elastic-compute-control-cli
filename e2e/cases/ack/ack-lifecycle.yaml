@@ -1,6 +1,12 @@
-# ACK cluster lifecycle backed by the primary region's dedicated E2E network.
+# Destructive ACK lifecycle. The cluster owns all irreversible ACK, nodepool,
+# and task mutations, then deletion provides the reset boundary.
 resource: ack/ack
-requires_params: [ack.cluster_type, ack.version, ack.edition, ack.profile, ack.zone]
+covers: [ack/nodepool, ack/task]
+requires_params: [ack.cluster_type, ack.version, ack.upgrade_version, ack.edition, ack.profile, ack.zone, ack.instance_type, ack.system_disk_category, ack.runtime, ack.runtime_version]
+parameter_constraints:
+  ecs:
+    min_eni_quantity: 2
+    min_eni_private_ip_address_quantity: 6
 needs: [vpc, vswitch]
 timeout: 2h
 serial: true
@@ -9,7 +15,7 @@ steps:
   - name: create
     run: >
       ecctl ack create
-      --name {{.resource_prefix}}-ack-crud
+      --name {{.resource_prefix}}-ack-lifecycle
       --type {{.params.ack.cluster_type}}
       --version {{.params.ack.version}}
       --edition {{.params.ack.edition}}
@@ -17,15 +23,15 @@ steps:
       --vpc {{.stack.vpc}}
       --vswitch {{.stack.vswitch}}
       --zone {{.params.ack.zone}}
-      --pod-cidr 172.20.0.0/16
-      --service-cidr 172.21.0.0/20
+      --pod-cidr 172.24.0.0/16
+      --service-cidr 172.25.0.0/20
       --snat-entry
       --tag ecctl-e2e=1 --tag run-id={{.run_id}}
       --timeout 30m
     at: $.cluster
     expect:
       id: { type: string, prefix: c }
-      name: { eq: "{{.resource_prefix}}-ack-crud" }
+      name: { eq: "{{.resource_prefix}}-ack-lifecycle" }
       status: { oneof: [running, Running] }
       version: { eq: "{{.params.ack.version}}" }
     capture:
@@ -37,20 +43,213 @@ steps:
     at: $.cluster
     expect:
       id: { eq: "{{.cluster_id}}" }
-      name: { eq: "{{.resource_prefix}}-ack-crud" }
+      name: { eq: "{{.resource_prefix}}-ack-lifecycle" }
       version: { eq: "{{.params.ack.version}}" }
 
   - name: list
-    run: ecctl ack list --filter name={{.resource_prefix}}-ack-crud --limit 10
+    run: ecctl ack list --filter name={{.resource_prefix}}-ack-lifecycle --limit 10
     assert:
       - len($.clusters) >= 1
 
   - name: update
-    run: ecctl ack update {{.cluster_id}} --name {{.resource_prefix}}-ack-crud-updated --tag validation=e2e --timeout 30m
+    run: ecctl ack update {{.cluster_id}} --name {{.resource_prefix}}-ack-lifecycle-updated --tag validation=e2e --timeout 30m
     at: $.cluster
     expect:
       id: { eq: "{{.cluster_id}}" }
-      name: { eq: "{{.resource_prefix}}-ack-crud-updated" }
+      name: { eq: "{{.resource_prefix}}-ack-lifecycle-updated" }
+
+  - name: create main nodepool
+    run: >
+      ecctl ack nodepool create
+      --cluster {{.cluster_id}}
+      --name {{.resource_prefix}}-ack-main
+      --desired-size 1
+      --instance-type {{.params.ack.instance_type}}
+      --vswitch {{.stack.vswitch}}
+      --runtime {{.params.ack.runtime}}
+      --runtime-version {{.params.ack.runtime_version}}
+      --system-disk-category {{.params.ack.system_disk_category}}
+      --system-disk-size 40
+      --timeout 30m
+    at: $.nodepool
+    expect:
+      id: { type: string, min_len: 1 }
+    capture:
+      main_nodepool_id: id
+    teardown: ecctl ack nodepool delete {{.main_nodepool_id}} --cluster {{.cluster_id}} --force --timeout 30m
+
+  - name: create task nodepool
+    run: >
+      ecctl ack nodepool create
+      --cluster {{.cluster_id}}
+      --name {{.resource_prefix}}-ack-task
+      --desired-size 2
+      --instance-type {{.params.ack.instance_type}}
+      --vswitch {{.stack.vswitch}}
+      --runtime {{.params.ack.runtime}}
+      --runtime-version {{.params.ack.runtime_version}}
+      --system-disk-category {{.params.ack.system_disk_category}}
+      --system-disk-size 40
+      --timeout 30m
+    at: $.nodepool
+    expect:
+      id: { type: string, min_len: 1 }
+    capture:
+      task_nodepool_id: id
+    teardown: ecctl ack nodepool delete {{.task_nodepool_id}} --cluster {{.cluster_id}} --force --timeout 30m
+
+  - name: get nodepool
+    run: ecctl ack nodepool get {{.main_nodepool_id}} --cluster {{.cluster_id}}
+    at: $.nodepool
+    expect:
+      id: { eq: "{{.main_nodepool_id}}" }
+
+  - name: list nodepools
+    run: ecctl ack nodepool list --cluster {{.cluster_id}}
+    assert:
+      - len($.nodepools) >= 2
+
+  - name: update nodepool
+    run: >
+      ecctl ack nodepool update {{.main_nodepool_id}}
+      --cluster {{.cluster_id}}
+      --config '{"nodepool_info":{"name":"{{.resource_prefix}}-ack-main-updated"}}'
+      --timeout 30m
+    at: $.nodepool
+    expect:
+      id: { eq: "{{.main_nodepool_id}}" }
+      name: { eq: "{{.resource_prefix}}-ack-main-updated" }
+
+  - name: get detachable worker
+    run: ecctl ack node list --cluster {{.cluster_id}} --nodepool {{.main_nodepool_id}} --limit 100
+    at: $.nodes[0]
+    expect:
+      id: { type: string, prefix: i- }
+    capture:
+      attach_instance_id: id
+
+  - name: detach node
+    run: >
+      ecctl ack nodepool detach {{.main_nodepool_id}}
+      --cluster {{.cluster_id}}
+      --instance {{.attach_instance_id}}
+      --timeout 30m
+    at: $.nodepool
+    expect:
+      id: { eq: "{{.main_nodepool_id}}" }
+    teardown: ecctl ecs instance delete {{.attach_instance_id}} --force
+
+  - name: attach node
+    run: >
+      ecctl ack nodepool attach {{.main_nodepool_id}}
+      --cluster {{.cluster_id}}
+      --instance {{.attach_instance_id}}
+      --timeout 30m
+    at: $.nodepool
+    expect:
+      id: { eq: "{{.main_nodepool_id}}" }
+
+  - name: get attached node
+    run: ecctl ack node get {{.attach_instance_id}} --cluster {{.cluster_id}}
+    at: $.node
+    expect:
+      id: { eq: "{{.attach_instance_id}}" }
+      node_name: { type: string, min_len: 1 }
+    capture:
+      attached_node_name: node_name
+
+  - name: repair nodepool
+    run: >
+      ecctl ack nodepool repair {{.main_nodepool_id}}
+      --cluster {{.cluster_id}}
+      --node {{.attached_node_name}}
+      --timeout 60m
+    at: $.nodepool
+    expect:
+      id: { eq: "{{.main_nodepool_id}}" }
+
+  - name: upgrade cluster control plane
+    run: ecctl ack upgrade {{.cluster_id}} --version {{.params.ack.upgrade_version}} --master-only --timeout 60m
+    at: $.cluster
+    expect:
+      id: { eq: "{{.cluster_id}}" }
+      version: { eq: "{{.params.ack.upgrade_version}}" }
+
+  - name: upgrade main nodepool
+    run: >
+      ecctl ack nodepool upgrade {{.main_nodepool_id}}
+      --cluster {{.cluster_id}}
+      --config '{"kubernetes_version":"{{.params.ack.upgrade_version}}","runtime":{"name":"{{.params.ack.runtime}}","version":"{{.params.ack.runtime_version}}"},"rolling_policy":{"max_parallelism":1,"pause_policy":"NotPause","batch_interval":0}}'
+      --timeout 60m
+    at: $.nodepool
+    expect:
+      id: { eq: "{{.main_nodepool_id}}" }
+
+  - name: get upgraded worker
+    run: ecctl ack node list --cluster {{.cluster_id}} --nodepool {{.main_nodepool_id}} --limit 100
+    at: $.nodes[0]
+    expect:
+      id: { type: string, prefix: i- }
+    capture:
+      upgraded_node_id: id
+
+  - name: release upgraded worker
+    run: ecctl ack node delete {{.upgraded_node_id}} --cluster {{.cluster_id}} --release --timeout 30m
+    expect:
+      $.deleted: { eq: true }
+
+  - name: start task nodepool upgrade
+    run: >
+      ecctl ack nodepool upgrade {{.task_nodepool_id}}
+      --cluster {{.cluster_id}}
+      --config '{"kubernetes_version":"{{.params.ack.upgrade_version}}","runtime":{"name":"{{.params.ack.runtime}}","version":"{{.params.ack.runtime_version}}"},"rolling_policy":{"max_parallelism":1,"pause_policy":"NotPause","batch_interval":0}}'
+      --no-wait
+    at: $.nodepool
+    expect:
+      id: { eq: "{{.task_nodepool_id}}" }
+      task_id: { type: string, min_len: 1 }
+    capture:
+      nodepool_upgrade_task_id: task_id
+    teardown: ecctl ack task cancel {{.nodepool_upgrade_task_id}}
+
+  - name: get task
+    run: ecctl ack task get {{.nodepool_upgrade_task_id}} --cluster {{.cluster_id}}
+    at: $.task
+    expect:
+      id: { eq: "{{.nodepool_upgrade_task_id}}" }
+
+  - name: list tasks
+    run: ecctl ack task list --cluster {{.cluster_id}} --limit 10
+    assert:
+      - len($.tasks) >= 1
+
+  - name: pause task
+    run: ecctl ack task pause {{.nodepool_upgrade_task_id}}
+    at: $.task
+    expect:
+      id: { eq: "{{.nodepool_upgrade_task_id}}" }
+
+  - name: resume task
+    run: ecctl ack task resume {{.nodepool_upgrade_task_id}}
+    at: $.task
+    expect:
+      id: { eq: "{{.nodepool_upgrade_task_id}}" }
+
+  - name: cancel task
+    run: ecctl ack task cancel {{.nodepool_upgrade_task_id}}
+    at: $.task
+    expect:
+      id: { eq: "{{.nodepool_upgrade_task_id}}" }
+
+  - name: delete task nodepool
+    run: ecctl ack nodepool delete {{.task_nodepool_id}} --cluster {{.cluster_id}} --force --timeout 30m
+    expect:
+      $.deleted: { eq: true }
+
+  - name: delete main nodepool
+    run: ecctl ack nodepool delete {{.main_nodepool_id}} --cluster {{.cluster_id}} --force --timeout 30m
+    expect:
+      $.deleted: { eq: true }
 
   - name: delete
     run: ecctl ack delete {{.cluster_id}} --force --timeout 30m

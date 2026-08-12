@@ -11,6 +11,11 @@
 resource: ecs/snapshot
 requires_params: [ecs.instance_type]
 needs: [vpc, vswitch, security_group, image]
+region_requirements:
+  destination:
+    distinct_from: primary
+timeout: 60m
+serial: true
 
 steps:
   # --- private prerequisite: host instance + its system disk ---
@@ -94,6 +99,23 @@ steps:
       name: { eq: "{{.run_name}}-snap-renamed" }
     capture:
       hi_name: name
+
+  - name: copy
+    run: >
+      ecctl ecs snapshot copy {{.snapshot_id}}
+      --destination-region {{.regions.destination.id}}
+      --destination-name {{.run_name}}-snapshot-copy
+      --destination-description ecctl-e2e-snapshot-copy-{{.run_id}}
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 60m
+    at: $.snapshot
+    expect:
+      id: { type: string, prefix: s- }
+      destination_region: { eq: "{{.regions.destination.id}}" }
+    capture:
+      copied_snapshot_id: id
+    teardown: ecctl ecs snapshot delete {{.copied_snapshot_id}} --force
+    teardown_region: destination
 
   - name: delete
     run: ecctl ecs snapshot delete {{.snapshot_id}} --force

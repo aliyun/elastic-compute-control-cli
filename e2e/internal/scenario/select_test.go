@@ -59,6 +59,24 @@ func TestSelectNodeIDTruncates(t *testing.T) {
 	}
 }
 
+func TestSelectDAGNodeIncludesOnlyAncestors(t *testing.T) {
+	suite := &Suite{
+		Path: "cases/ecs/instance-lifecycle.yaml", Resource: "ecs/instance", Execution: ExecutionDAG,
+		Steps: []Step{
+			{Name: "independent"},
+			{Name: "create"},
+			{Name: "get", DependsOn: []string{"create"}},
+		},
+	}
+	got, err := Select([]*Suite{suite}, Selection{Targets: []string{suite.Path + "::get"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || len(got[0].Steps) != 2 || got[0].Steps[0].Name != "create" || got[0].Steps[1].Name != "get" {
+		t.Fatalf("selected DAG steps = %+v", got)
+	}
+}
+
 func TestSelectNodeIDUnknownStep(t *testing.T) {
 	_, err := Select(suites(), Selection{Targets: []string{"cases/vpc/vpc-lifecycle.yaml::nope"}})
 	if err == nil {
@@ -109,6 +127,14 @@ func TestSelectSurface(t *testing.T) {
 	if len(got) != 1 || got[0].Resource != "ecs/instance" {
 		t.Fatalf("public selection = %+v, want only ecs/instance", paths(got))
 	}
+
+	got, err = Select(all, Selection{Surface: SurfaceFull})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("full selection = %+v, want public and full cases", paths(got))
+	}
 }
 
 func TestSelectRejectsUnknownSurface(t *testing.T) {
@@ -132,5 +158,25 @@ func TestSelectSurfaceConstrainsTargets(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("public target selection leaked full case: %+v", paths(got))
+	}
+}
+
+func TestSelectFullSurfacePreservesTargetAndKeywordFilters(t *testing.T) {
+	all := []*Suite{
+		{Surface: SurfacePublic, Resource: "ecs/instance", Path: "cases/ecs/instance.yaml", Steps: []Step{{Name: "list"}}},
+		{Surface: SurfacePublic, Resource: "vpc/vpc", Path: "cases/vpc/vpc.yaml", Steps: []Step{{Name: "list"}}},
+		{Surface: SurfaceFull, Resource: "ecs/assistant", Path: "cases/ecs/assistant.yaml", Steps: []Step{{Name: "list"}}},
+	}
+
+	got, err := Select(all, Selection{
+		Surface: SurfaceFull,
+		Targets: []string{"cases/ecs"},
+		Keyword: "assistant or instance",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Resource != "ecs/instance" || got[1].Resource != "ecs/assistant" {
+		t.Fatalf("full filtered selection = %+v", paths(got))
 	}
 }

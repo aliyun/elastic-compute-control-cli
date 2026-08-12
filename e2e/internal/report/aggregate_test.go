@@ -11,14 +11,14 @@ func TestAggregateKeepsExecutionRegionMappingsOnCases(t *testing.T) {
 	start := time.Now()
 	run := Aggregate("run-1", "public", "ecctl", []Execution{
 		{
-			ID: "execution-01", Signature: "primary=[ecs.image]",
+			ID: "execution-01", Signature: "primary=[test.optional]",
 			Regions:   map[string]string{"primary": "cn-hangzhou"},
 			Attempts:  []ExecutionAttempt{{Regions: map[string]string{"primary": "cn-hangzhou"}, Status: "pass"}},
 			StartedAt: start, FinishedAt: start.Add(time.Second), Parameters: map[string]any{"ecs": map[string]any{"zone": "cn-hangzhou-b"}},
 			Cases: []Case{{Name: "image", Resource: "ecs/image", Status: StatusPass}},
 		},
 		{
-			ID: "execution-02", Signature: "primary=[ecs.image];destination=[ecs.image]!=primary",
+			ID: "execution-02", Signature: "primary=[test.optional];destination=[test.optional]!=primary",
 			Regions:   map[string]string{"primary": "cn-hangzhou", "destination": "cn-zhangjiakou"},
 			Attempts:  []ExecutionAttempt{{Regions: map[string]string{"primary": "cn-hangzhou", "destination": "cn-zhangjiakou"}, Status: "fail"}},
 			StartedAt: start.Add(time.Second), FinishedAt: start.Add(2 * time.Second),

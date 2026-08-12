@@ -42,6 +42,16 @@ schema:
       description:
         en: role description
         zh-CN: 角色描述
+    role_id:
+      type: string
+      description:
+        en: provider role ID
+        zh-CN: 云服务角色 ID
+    arn:
+      type: string
+      description:
+        en: role ARN
+        zh-CN: 角色 ARN
 
 controls:
   api_param:
@@ -68,6 +78,8 @@ waiters:
   deleted_after_delete:
     probe: deletion_status
     target: SUCCEEDED
+    match:
+      state_only: true
     interval: 2s
     timeout: 300s
     failure:
@@ -82,6 +94,7 @@ bindings:
       Description: $.description
       ApiParam:
         raw: $.api_param
+    id_from: $.Role.RoleName
     request_id_from: $.RequestId
   delete_role:
     api: DeleteServiceLinkedRole
@@ -112,7 +125,10 @@ operations:
       - binding: create_role
       - emit:
           fields:
+            name: $context.id
             service_name: $input.service_name
+            custom_suffix: $input.custom_suffix
+            description: $input.description
   delete:
     examples:
       - ecctl rg service-linked-role delete my-name

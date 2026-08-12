@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"sort"
 	"strings"
 
@@ -93,6 +94,57 @@ func ValidateSuites(suites []*scenario.Suite, caps Capabilities) []Issue {
 	return issues
 }
 
+// ValidateCommandParsers asks the selected ecctl binary to parse every
+// spec-driven command with --help. This is offline: Cobra validates the command
+// tree, flag names, and flag value types without invoking a cloud API. Raw
+// `ecctl call` commands are intentionally excluded because their API parameter
+// flags are discovered dynamically rather than declared by the CLI parser.
+func ValidateCommandParsers(ctx context.Context, bin string, suites []*scenario.Suite) []Issue {
+	var issues []Issue
+	for _, suite := range suites {
+		for _, step := range suite.Steps {
+			for _, command := range []struct {
+				label string
+				run   string
+			}{
+				{label: step.Name, run: step.Run},
+				{label: step.Name + " teardown", run: step.Teardown},
+			} {
+				if strings.TrimSpace(command.run) == "" {
+					continue
+				}
+				tokens, err := shlex.Split(command.run)
+				if err != nil || len(tokens) == 0 || tokens[0] != "ecctl" {
+					continue // ValidateSuites reports malformed commands.
+				}
+				positionals := commandPositionals(tokens[1:])
+				if len(positionals) == 0 || positionals[0] == "call" {
+					continue
+				}
+				args := append(append([]string(nil), tokens[1:]...), "--help")
+				out, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
+				if err == nil {
+					continue
+				}
+				message := strings.TrimSpace(string(out))
+				if message == "" {
+					message = err.Error()
+				}
+				if len(message) > 500 {
+					message = message[:500] + "..."
+				}
+				issues = append(issues, Issue{
+					Path:    suite.Path,
+					Step:    command.label,
+					Code:    "invalid_cli_command",
+					Message: message,
+				})
+			}
+		}
+	}
+	return issues
+}
+
 func indexCapabilities(caps Capabilities) resourceActions {
 	index := resourceActions{}
 	for _, product := range caps.Products {
@@ -138,6 +190,7 @@ func commandCapability(command string, index resourceActions) (resource, action,
 	// example `ack diagnosis check-item list`. A resource sharing its product
 	// name (for example `ack list`) is the default when no resource token is
 	// present.
+	matchedResource := ""
 	for _, name := range resourceNames {
 		if name == product {
 			continue
@@ -149,8 +202,14 @@ func commandCapability(command string, index resourceActions) (resource, action,
 			if verb := firstAction(positionals[i+1:], resources[name]); verb != "" {
 				return product + "/" + name, verb, "", nil
 			}
-			return "", "", "unsupported_action", fmt.Errorf("action after resource %q is not exposed by selected binary", name)
+			if matchedResource == "" {
+				matchedResource = name
+			}
+			break
 		}
+	}
+	if matchedResource != "" {
+		return "", "", "unsupported_action", fmt.Errorf("action after resource %q is not exposed by selected binary", matchedResource)
 	}
 	if actions, ok := resources[product]; ok {
 		if verb := firstAction(positionals[1:], actions); verb != "" {

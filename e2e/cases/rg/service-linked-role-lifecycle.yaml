@@ -1,0 +1,31 @@
+# ECS Archiving rejects deletion while any region still uses Cloud Assistant
+# record delivery, so the provider remains the dependency safety gate. Keep the
+# exact service and role names in this case instead of account-local config.
+resource: rg/service-linked-role
+serial: true
+
+steps:
+  - name: delete existing role if present
+    run: >
+      ecctl rg service-linked-role delete
+      AliyunServiceRoleForECSArchiving
+    not_found_ok: true
+
+  - name: create
+    run: >
+      ecctl rg service-linked-role create
+      --service-name archiving.ecs.aliyuncs.com
+    at: $.role
+    expect:
+      name: { eq: AliyunServiceRoleForECSArchiving }
+      service_name: { eq: archiving.ecs.aliyuncs.com }
+    teardown: >
+      ecctl rg service-linked-role delete
+      AliyunServiceRoleForECSArchiving
+
+  - name: delete
+    run: >
+      ecctl rg service-linked-role delete
+      AliyunServiceRoleForECSArchiving
+    expect:
+      $.deleted: { eq: true }

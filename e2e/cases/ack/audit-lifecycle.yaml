@@ -1,0 +1,22 @@
+# Audit lifecycle on the disposable shared cluster.
+resource: ack/audit
+needs: [ack_shared_cluster]
+serial: true
+
+steps:
+  - name: keep audit logging disabled
+    run: >
+      ecctl ack audit update
+      --cluster {{.stack.ack_shared_cluster}}
+      --enabled=false
+    at: $.audit
+    expect:
+      cluster: { eq: "{{.stack.ack_shared_cluster}}" }
+      enabled: { eq: false }
+
+  - name: get audit configuration
+    run: ecctl ack audit get --cluster {{.stack.ack_shared_cluster}}
+    at: $.audit
+    expect:
+      cluster: { eq: "{{.stack.ack_shared_cluster}}" }
+      enabled: { type: bool }

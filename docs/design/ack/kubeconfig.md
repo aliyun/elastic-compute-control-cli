@@ -8,7 +8,7 @@
 
 本文件只描述 `ecctl ack kubeconfig` 的 interface 级命令设计：每个操作命令对应哪些 ACK API，不展开完整 flag、参数结构和输出结构；仅在多 API 分流时标明必要的特殊开关。
 
-设计目标：覆盖 KubeConfig 的签发、状态查询、过期时间更新和吊销。`kubeconfig` 是 Agent 进入 Kubernetes 资源面的跳板：拿到 kubeconfig 后由 `kubectl` 操作 Pod、Deployment、Service 等原生资源。具体约束如下：
+设计目标：覆盖 KubeConfig 的签发、状态查询和吊销。`kubeconfig` 是 Agent 进入 Kubernetes 资源面的跳板：拿到 kubeconfig 后由 `kubectl` 操作 Pod、Deployment、Service 等原生资源。具体约束如下：
 
 - `create` 统一承载签发动作：不带 `--user-id` 为当前调用方签发（自助），带 `--user-id` 为指定子账号或 RAM 角色代签发（主账号场景）。不再独立设计 `kubeconfig issue` 子命令——签发就是创建凭证，应该用 `create` 而非自定义动词，与 cli-design-rules"action 词表固定"规则对齐。
 - `create` 输出 kubeconfig 原文到 stdout，可直接重定向到 `~/.kube/config` 或写入 `KUBECONFIG` 指向的文件，无需额外解析。
@@ -25,14 +25,6 @@
 - 指定 `--user-id` 时调用 [DescribeSubaccountK8sClusterUserConfig](https://help.aliyun.com/zh/ack/ack-managed-and-ack-dedicated/developer-reference/api-cs-2015-12-15-describesubaccountk8sclusteruserconfig)：主账号为指定子账号或 RAM 角色代签发 kubeconfig。
 
 注意事项：`create` 表达"创建 kubeconfig 凭证"，自助签发与代签发共用同一动词，仅通过 `--user-id` 是否指定分流到两个底层 API，不独立设计 `kubeconfig issue`。两种模式 stdout 输出格式一致，可直接重定向给 `kubectl`，CLI 不做额外解析或落盘。重复 `create` 会覆盖签发新的凭证；如需先吊销旧凭证再签发，先调用 `revoke` 再 `create`。
-
-## `ecctl ack kubeconfig update`
-
-调用 API：
-
-- [UpdateK8sClusterUserConfigExpire](https://help.aliyun.com/zh/ack/ack-managed-and-ack-dedicated/developer-reference/api-cs-2015-12-15-updatek8sclusteruserconfigexpire)：更新 kubeconfig 自定义过期时间。
-
-注意事项：`update` 仅承载 kubeconfig 过期时间的调整。kubeconfig 没有名称、描述等其他可变属性，因此不做多 API 分流。
 
 ## `ecctl ack kubeconfig get`
 
@@ -58,3 +50,7 @@
 - [RevokeK8sClusterKubeConfig](https://help.aliyun.com/zh/ack/ack-managed-and-ack-dedicated/developer-reference/api-cs-2015-12-15-revokek8sclusterkubeconfig)：吊销当前用户在指定集群的 kubeconfig。
 
 注意事项：`revoke` 是凭证吊销动作（使已颁发的 kubeconfig 失效），不删除任何 ACK 资源对象，因此独立成领域动作而不归入 `delete`。吊销后再次执行 `create` 会重新签发新的 kubeconfig。
+
+## 暂不进入主命令面的 API
+
+- [UpdateK8sClusterUserConfigExpire](https://help.aliyun.com/zh/ack/ack-managed-and-ack-dedicated/developer-reference/api-cs-2015-12-15-updatek8sclusteruserconfigexpire)：该接口要求主账号修改指定子账号的凭证有效期，当前 public `kubeconfig` 资源不支持 `update`；需要时通过 `ecctl call cs UpdateK8sClusterUserConfigExpire` 兜底。

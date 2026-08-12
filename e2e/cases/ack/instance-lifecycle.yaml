@@ -1,0 +1,61 @@
+# Complete ACK policy instance lifecycle (canonical resource ack/instance).
+resource: ack/instance
+needs: [ack_policy_template_controller]
+serial: true
+
+steps:
+  - name: create
+    run: >
+      ecctl ack policy instance create ACKAllowedRepos
+      --cluster {{.stack.ack_shared_cluster}}
+      --action warn
+      --namespaces '["default"]'
+      --parameters '{"repos":["registry.cn-hangzhou.aliyuncs.com/acs/"]}'
+    at: $.instance
+    expect:
+      instance_name: { type: string, min_len: 1 }
+      policy_name: { eq: ACKAllowedRepos }
+      action: { eq: warn }
+    capture:
+      policy_instance_name: instance_name
+    teardown: >
+      ecctl ack policy instance delete ACKAllowedRepos
+      --cluster {{.stack.ack_shared_cluster}}
+      --instance-name {{.policy_instance_name}}
+
+  - name: get
+    run: >
+      ecctl ack policy instance get ACKAllowedRepos
+      --cluster {{.stack.ack_shared_cluster}}
+      --instance-name {{.policy_instance_name}}
+    at: $.instance
+    expect:
+      policy_name: { eq: ACKAllowedRepos }
+
+  - name: list
+    run: >
+      ecctl ack policy instance list
+      --cluster {{.stack.ack_shared_cluster}}
+      --policy-name ACKAllowedRepos
+    assert:
+      - len($.instances) >= 1
+
+  - name: update
+    run: >
+      ecctl ack policy instance update ACKAllowedRepos
+      --cluster {{.stack.ack_shared_cluster}}
+      --instance-name {{.policy_instance_name}}
+      --action warn
+      --namespaces '["default","kube-system"]'
+      --parameters '{"repos":["registry.cn-hangzhou.aliyuncs.com/acs/","docker.io/"]}'
+    at: $.instance
+    expect:
+      policy_name: { eq: ACKAllowedRepos }
+
+  - name: delete
+    run: >
+      ecctl ack policy instance delete ACKAllowedRepos
+      --cluster {{.stack.ack_shared_cluster}}
+      --instance-name {{.policy_instance_name}}
+    expect:
+      $.deleted: { eq: true }

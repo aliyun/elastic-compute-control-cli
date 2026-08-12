@@ -133,6 +133,7 @@ bindings:
     request:
       cluster_id: $.cluster
       body:
+        cluster_id: $.cluster
         project_id: $.project
         action: $.action
         type: $.type
@@ -140,6 +141,7 @@ bindings:
         raw: $.api_param
     require_all:
       - request: cluster_id
+      - request: body.cluster_id
       - request: body.project_id
       - request: body.action
     id_from: $.id

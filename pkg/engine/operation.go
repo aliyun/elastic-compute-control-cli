@@ -110,7 +110,12 @@ func (e *Executor) executeOperationWorkflow(ctx context.Context, req Request, op
 			usedCache := cached != nil && cached.name == step.Probe && equalStrings(cached.ids, ids)
 			probeResult, err := e.workflowProbe(ctx, step.Probe, execCtx, ids, cached)
 			if err != nil {
-				return Result{}, ecerrors.WithActions(err, append(result.Actions, actionsFromError(err, e.spec.Probes[step.Probe].API)...))
+				if step.NotFound == "empty" && isNotFoundError(err) {
+					probeResult = ProbeResult{Actions: actionsFromError(err, e.spec.Probes[step.Probe].API)}
+					usedCache = false
+				} else {
+					return Result{}, ecerrors.WithActions(err, append(result.Actions, actionsFromError(err, e.spec.Probes[step.Probe].API)...))
+				}
 			}
 			if step.NotFound == "error" && len(probeResult.Items) == 0 {
 				err := ecerrors.NotFound("NotFound", e.spec.Resource+" not found")

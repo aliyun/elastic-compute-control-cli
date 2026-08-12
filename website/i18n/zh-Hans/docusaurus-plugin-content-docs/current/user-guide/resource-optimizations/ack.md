@@ -316,29 +316,9 @@ ecctl ack kubeconfig create \
 
 省略 `--user-id` 时，ecctl 改用 `DescribeClusterUserKubeconfig`。
 
-### 修改有效期或吊销访问
+### 吊销访问
 
-ACK 使用一个 API 修改子账号 kubeconfig 的有效期，使用另一个 API 吊销当前集群的
-kubeconfig。ecctl 将它们定义为明确的资源动作。
-
-阿里云 CLI：
-
-```bash
-aliyun cs UpdateK8sClusterUserConfigExpire \
-  --ClusterId c-bp1234567890example \
-  --body '{"expire_hour":24,"user":"1234567890"}'
-```
-
-ecctl:
-
-```bash
-ecctl ack kubeconfig update \
-  --cluster c-bp1234567890example \
-  --user-id 1234567890 \
-  --expire-time 24
-```
-
-吊销访问使用下面这组命令：
+KubeConfig 有效期更新暂不进入 public 资源命令面。吊销访问使用下面这组命令：
 
 阿里云 CLI：
 

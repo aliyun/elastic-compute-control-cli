@@ -1,0 +1,33 @@
+# Complete ResourceManager notification setting lifecycle.
+resource: rg/notification
+execution: dag
+serial: true
+
+steps:
+  # The read is always safe. Preflight admits the mutation branch only when the
+  # original state is disabled, so the final step restores the account setting.
+  - name: get original notification setting
+    locks: ["rg-notification:global"]
+    run: ecctl rg notification get
+    at: $.notification_setting
+    expect:
+      status: { type: bool }
+
+  - name: enable
+    depends_on: [get original notification setting]
+    requires_prerequisites: [rg.notification_disabled]
+    locks: ["rg-notification:global"]
+    run: ecctl rg notification enable
+    at: $.notification_setting
+    expect:
+      status: { eq: true }
+    teardown: ecctl rg notification disable
+
+  - name: disable
+    depends_on: [enable]
+    requires_prerequisites: [rg.notification_disabled]
+    locks: ["rg-notification:global"]
+    run: ecctl rg notification disable
+    at: $.notification_setting
+    expect:
+      status: { eq: false }

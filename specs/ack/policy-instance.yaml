@@ -121,9 +121,10 @@ bindings:
     request:
       cluster_id: $.cluster
       policy_name: $.policy_name
-      action: $.action
-      namespaces: $.namespaces
-      parameters: $.parameters
+      body:
+        action: $.action
+        namespaces: $.namespaces
+        parameters: $.parameters
     id_from: $.instances
     request_id_from: $.request_id
   modify_policy_instance:
@@ -131,14 +132,15 @@ bindings:
     request:
       cluster_id: $.cluster
       policy_name: $.policy_name
-      instance_name: $.instance_name
-      action: $.action
-      namespaces: $.namespaces
-      parameters: $.parameters
+      body:
+        instance_name: $.instance_name
+        action: $.action
+        namespaces: $.namespaces
+        parameters: $.parameters
     require_any:
-      - request: action
-      - request: namespaces
-      - request: parameters
+      - request: body.action
+      - request: body.namespaces
+      - request: body.parameters
     request_id_from: $.request_id
   delete_policy_instance:
     api: DeletePolicyInstance
@@ -168,10 +170,20 @@ operations:
         - parameters
     workflow:
       - binding: deploy_policy_instance
-      - probe: status
+      - probe: list
         ids:
-          - $input.policy_name
+          - $context.id
         as: final
+    output:
+      fields:
+        actions: $result.actions
+        instance:
+          instance_name: $result.id
+          policy_name: $input.policy_name
+          cluster: $input.cluster
+          action: $input.action
+          namespaces: $input.namespaces
+          parameters: $input.parameters
   update:
     examples:
       - ecctl ack policy instance update <policy-name> --cluster <cluster-id>
@@ -191,9 +203,9 @@ operations:
         - parameters
     workflow:
       - binding: modify_policy_instance
-      - probe: status
+      - probe: list
         ids:
-          - $input.policy_name
+          - $input.instance_name
         as: final
   delete:
     examples:
@@ -222,8 +234,8 @@ operations:
   get:
     aliases: [show, describe]
     description:
-      en: Get ACK policy instance status
-      zh-CN: 获取 ACK 策略实例状态
+      en: Get an ACK policy instance
+      zh-CN: 获取 ACK 策略实例
     input:
       fields:
         - policy_name:
@@ -231,10 +243,9 @@ operations:
             positional: true
         - cluster:
             required: true
+        - instance_name
     workflow:
-      - probe: status
-        ids:
-          - $input.policy_name
+      - probe: list
         not_found: error
   list:
     examples:

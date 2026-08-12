@@ -1,0 +1,16 @@
+# ACK policy lifecycle; the resource exposes get/list only.
+resource: ack/policy
+
+steps:
+  - name: list policies
+    run: ecctl ack policy list
+    expect:
+      $.policies: { type: array }
+
+  - name: get policy
+    # DescribePolicies can return an empty catalog for the account even though
+    # the documented ACKAllowedRepos detail endpoint is available.
+    run: ecctl ack policy get ACKAllowedRepos
+    at: $.policy
+    expect:
+      name: { eq: ACKAllowedRepos }

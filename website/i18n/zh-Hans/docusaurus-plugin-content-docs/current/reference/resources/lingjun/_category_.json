@@ -4,6 +4,6 @@
   "link": {
     "type": "generated-index",
     "title": "LINGJUN 资源",
-    "description": "通过公开的集群和 VPD 命令管理灵骏智算及高性能网络资源。"
+    "description": "管理灵骏集群、节点组及高性能网络资源。"
   }
 }

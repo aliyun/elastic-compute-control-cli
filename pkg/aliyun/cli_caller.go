@@ -195,7 +195,7 @@ func requestBodyWithoutMetadata(request map[string]any, bodyKeys map[string]bool
 		}
 		return body, nil
 	}
-	body, err := flatOpenAPIBody(request, bodyKeys)
+	body, err := flatOpenAPIBody(request, bodyKeys, "body")
 	if err != nil || isEmptyOpenAPIBody(body) {
 		return nil, err
 	}

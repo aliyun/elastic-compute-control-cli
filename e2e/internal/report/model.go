@@ -101,16 +101,20 @@ type Case struct {
 
 // Step is one command's result.
 type Step struct {
-	Name       string  `json:"name"`
-	Command    string  `json:"command"` // rendered, copy-pasteable
-	WantExit   int     `json:"want_exit"`
-	Exit       int     `json:"exit"`
-	DurationMs int64   `json:"duration_ms"`
-	Status     string  `json:"status"`
-	Stdout     string  `json:"stdout,omitempty"` // full ecctl output
-	Stderr     string  `json:"stderr,omitempty"`
-	Checks     []Check `json:"checks,omitempty"`
-	Error      string  `json:"error,omitempty"`
+	Name                  string   `json:"name"`
+	DependsOn             []string `json:"depends_on,omitempty"`
+	DirectNeeds           []string `json:"direct_needs,omitempty"`
+	RequiresPrerequisites []string `json:"requires_prerequisites,omitempty"`
+	Locks                 []string `json:"locks,omitempty"`
+	Command               string   `json:"command"` // rendered, copy-pasteable
+	WantExit              int      `json:"want_exit"`
+	Exit                  int      `json:"exit"`
+	DurationMs            int64    `json:"duration_ms"`
+	Status                string   `json:"status"`
+	Stdout                string   `json:"stdout,omitempty"` // full ecctl output
+	Stderr                string   `json:"stderr,omitempty"`
+	Checks                []Check  `json:"checks,omitempty"`
+	Error                 string   `json:"error,omitempty"`
 }
 
 // Check is one matcher/assert outcome.

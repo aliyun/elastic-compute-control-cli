@@ -1,0 +1,30 @@
+# Complete ACK inspection report lifecycle.
+resource: ack/report
+needs: [ack_shared_cluster]
+timeout: 30m
+serial: true
+
+steps:
+  - name: create
+    run: >
+      ecctl ack inspect report create
+      --cluster {{.stack.ack_shared_cluster}}
+      --timeout 15m
+    at: $.report
+    expect:
+      report_id: { type: string, min_len: 1 }
+    capture:
+      inspect_report_id: report_id
+
+  - name: get
+    run: >
+      ecctl ack inspect report get {{.inspect_report_id}}
+      --cluster {{.stack.ack_shared_cluster}}
+    at: $.report
+    expect:
+      report_id: { eq: "{{.inspect_report_id}}" }
+
+  - name: list
+    run: ecctl ack inspect report list --cluster {{.stack.ack_shared_cluster}} --limit 10
+    assert:
+      - len($.reports) >= 1

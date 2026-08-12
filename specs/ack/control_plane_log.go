@@ -15,6 +15,6 @@ func disableControlPlaneLogComponents(_ context.Context, _ spechooks.OperationCa
 	for key, value := range request {
 		resolved[key] = value
 	}
-	resolved["components"] = []string{}
+	resolved["body.components"] = []string{}
 	return resolved, nil
 }

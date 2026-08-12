@@ -253,6 +253,39 @@ func TestLingjunVccCreateNoWaitSkipsReadback(t *testing.T) {
 	}
 }
 
+func TestLingjunVccUpdateNameAcceptsRequestIDOnlyResponseAndReadsBack(t *testing.T) {
+	t.Parallel()
+	fake := &fakeSpecCaller{responses: []map[string]any{
+		{"RequestId": "req-update"},
+		fakeLingjunVccResponse("vcc-123", "train-vcc-renamed"),
+	}}
+	runCLI := catalogCaller(t, "lingjun", "vcc", fake)
+
+	stdout, stderr, code := runCLI(
+		"lingjun", "vcc", "update", "vcc-123",
+		"--region", "cn-wulanchabu",
+		"--name", "train-vcc-renamed",
+	)
+	if code != 0 {
+		t.Fatalf("lingjun vcc update name exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	operations := []string{}
+	for _, call := range fake.calls {
+		operations = append(operations, call.operation)
+	}
+	wantOps := []string{"UpdateVcc", "GetVcc"}
+	if strings.Join(operations, ",") != strings.Join(wantOps, ",") {
+		t.Fatalf("operations = %#v", operations)
+	}
+	if fake.calls[0].request["VccId"] != "vcc-123" || fake.calls[0].request["VccName"] != "train-vcc-renamed" {
+		t.Fatalf("UpdateVcc request = %#v", fake.calls[0].request)
+	}
+	vcc, _ := decodeObject(t, stdout)["vcc"].(map[string]any)
+	if vcc == nil || vcc["id"] != "vcc-123" || vcc["name"] != "train-vcc-renamed" {
+		t.Fatalf("unexpected update output: %s", stdout)
+	}
+}
+
 func TestLingjunVccUpdateRoutesRouteAndGrantApis(t *testing.T) {
 	t.Parallel()
 	fake := &fakeSpecCaller{responses: []map[string]any{

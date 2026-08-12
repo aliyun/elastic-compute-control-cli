@@ -8,6 +8,7 @@ import (
 	"github.com/google/shlex"
 
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/vars"
 )
 
 var allowedNonSweepableReasons = map[string]bool{
@@ -33,6 +34,12 @@ var commandVerbs = map[string]bool{
 	"start":     true,
 	"stop":      true,
 	"update":    true,
+}
+
+var canonicalResourceAliases = map[string]string{
+	"ack/inspect-report":  "ack/report",
+	"ack/policy-instance": "ack/instance",
+	"rg/policy-version":   "rg/version",
 }
 
 type CheckOptions struct {
@@ -73,6 +80,7 @@ func CheckConfig(opt CheckOptions) (*CheckReport, error) {
 			sweepByResource[resource] = kind
 		}
 	}
+	validateSweepDependencies(rep, cfg.Kinds)
 	nonSweepable := map[string]NonSweepableKind{}
 	for _, entry := range cfg.NonSweepable {
 		if resource := validateNonSweepable(rep, entry); resource != "" {
@@ -87,11 +95,13 @@ func CheckConfig(opt CheckOptions) (*CheckReport, error) {
 				continue
 			}
 			rep.LiveCreates++
-			if strings.TrimSpace(st.Teardown) == "" {
+			exemption, exempt := nonSweepable[resource]
+			providerOwnsLifetime := exempt && (exemption.Reason == "provider-no-delete" || exemption.Reason == "shared-fixture-only")
+			if strings.TrimSpace(st.Teardown) == "" && !providerOwnsLifetime {
 				rep.add(suite.Path, st.Name, resource, "missing_teardown", "create step requires teardown")
 			}
 			if _, ok := sweepByResource[resource]; !ok {
-				if _, exempt := nonSweepable[resource]; !exempt {
+				if !exempt {
 					rep.add(suite.Path, st.Name, resource, "missing_sweep_kind", "created resource has no matching sweep kind or non-sweepable reason")
 				}
 			}
@@ -127,6 +137,7 @@ func validateSweepKind(rep *CheckReport, kind Kind) string {
 	if strings.TrimSpace(kind.Delete) == "" || !strings.Contains(kind.Delete, "{{.id}}") {
 		rep.add("", "", kind.Name, "missing_delete_command", "sweep delete command must reference {{.id}}")
 	}
+	validateDeleteTemplate(rep, kind)
 
 	explicit := strings.TrimSpace(kind.Resource)
 	inferred, verb := commandResourceVerb(kind.List)
@@ -145,6 +156,61 @@ func validateSweepKind(rep *CheckReport, kind Kind) string {
 		rep.add("", "", kind.Name, "missing_resource", "sweep kind must declare resource or use a parseable list command")
 	}
 	return resource
+}
+
+func validateDeleteTemplate(rep *CheckReport, kind Kind) {
+	if strings.TrimSpace(kind.Delete) == "" {
+		return
+	}
+	data := map[string]any{"id": "resource-id"}
+	for name, path := range kind.DeleteFields {
+		if strings.TrimSpace(name) == "" || name == "id" {
+			rep.add("", "", kind.Name, "invalid_delete_field", fmt.Sprintf("delete field name %q is empty or reserved", name))
+			continue
+		}
+		if strings.TrimSpace(path) == "" {
+			rep.add("", "", kind.Name, "invalid_delete_field", fmt.Sprintf("delete field %q requires an item path", name))
+			continue
+		}
+		data[name] = "value"
+	}
+	if _, err := vars.Render(kind.Delete, data); err != nil {
+		rep.add("", "", kind.Name, "invalid_delete_template", fmt.Sprintf("sweep delete template references an unmapped field: %v", err))
+	}
+}
+
+func validateSweepDependencies(rep *CheckReport, kinds []Kind) {
+	positions := make(map[string]int, len(kinds))
+	for i, kind := range kinds {
+		name := strings.TrimSpace(kind.Name)
+		if name == "" {
+			continue
+		}
+		if _, exists := positions[name]; exists {
+			rep.add("", "", name, "duplicate_sweep_kind", "sweep kind names must be unique")
+			continue
+		}
+		positions[name] = i
+	}
+	for i, kind := range kinds {
+		seen := map[string]bool{}
+		for _, rawProvider := range kind.DependsOn {
+			provider := strings.TrimSpace(rawProvider)
+			if provider == "" || seen[provider] {
+				rep.add("", "", kind.Name, "invalid_dependency", "depends_on entries must be non-empty and unique")
+				continue
+			}
+			seen[provider] = true
+			providerIndex, ok := positions[provider]
+			if !ok {
+				rep.add("", "", kind.Name, "invalid_dependency", fmt.Sprintf("depends_on provider %q is not a configured sweep kind", provider))
+				continue
+			}
+			if providerIndex <= i {
+				rep.add("", "", kind.Name, "invalid_dependency_order", fmt.Sprintf("consumer %q must be listed before provider %q", kind.Name, provider))
+			}
+		}
+	}
 }
 
 func validateNonSweepable(rep *CheckReport, entry NonSweepableKind) string {
@@ -186,11 +252,18 @@ func commandResourceVerb(run string) (resource, verb string) {
 			continue
 		}
 		if i == 1 {
-			return product + "/" + product, pos[i]
+			return canonicalSweepResource(product + "/" + product), pos[i]
 		}
-		return product + "/" + strings.Join(pos[1:i], "-"), pos[i]
+		return canonicalSweepResource(product + "/" + strings.Join(pos[1:i], "-")), pos[i]
 	}
 	return "", ""
+}
+
+func canonicalSweepResource(resource string) string {
+	if canonical, ok := canonicalResourceAliases[resource]; ok {
+		return canonical
+	}
+	return resource
 }
 
 func (r *CheckReport) add(path, step, resource, code, msg string) {

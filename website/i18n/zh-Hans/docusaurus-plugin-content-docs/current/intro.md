@@ -6,7 +6,7 @@ description: ecctl 是什么、覆盖什么，以及从哪里开始。
 
 # 概览
 
-`ecctl` 是一个面向阿里云计算、容器和网络资源的 Agent-first 命令行控制器。它为资源操作提供一致的命令形态：
+`ecctl` 是一个面向阿里云计算、容器、网络和治理资源的 Agent-first 命令行控制器。它为资源操作提供一致的命令形态：
 
 ```bash
 ecctl <product> <resource> <action> [args] [flags]
@@ -14,7 +14,7 @@ ecctl <product> <resource> <action> [args] [flags]
 
 每个已建模命令都提供结构化的命令规格——必填参数、风险等级、dry-run、幂等和 waiter——Agent 或脚本可在执行前读取。输出默认 JSON，错误结构化，因此 Agent 和脚本以同样的方式读取结果与失败。该模型见 [核心概念](./user-guide/concepts.md)。
 
-当前公开命令面覆盖 ACK、ECS、VPC 和灵骏资源。执行云操作前，先使用 `schema` 查看命令契约：
+公开命令面从当前资源 specs 生成。在[产品](./reference/products.md)和[资源覆盖](./reference/resource-coverage.md)中查看准确的产品与资源列表；执行云操作前，先使用 `schema` 查看命令契约：
 
 ```bash
 ecctl schema --list

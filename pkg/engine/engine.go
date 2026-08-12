@@ -259,6 +259,10 @@ func (e *Executor) wait(ctx context.Context, req Request, name string, execCtx E
 					last = ProbeResult{}
 					return waiter.Observation{State: "absent", Value: last}, nil
 				}
+				if waitSpec.Target == "present" && isNotFoundError(err) {
+					last = ProbeResult{}
+					return waiter.Observation{State: "", Value: last}, nil
+				}
 				return waiter.Observation{
 					State: waiterState(waitSpec, probeSpec, probeResult, ids, execCtx),
 					Value: probeResult,
@@ -273,6 +277,19 @@ func (e *Executor) wait(ctx context.Context, req Request, name string, execCtx E
 	})
 	if err != nil {
 		return last, ecerrors.WithActions(err, actions)
+	}
+	if len(ids) > 0 && waitSpec.Target != "absent" {
+		matched := make([]map[string]any, 0, len(last.Items))
+		for _, item := range last.Items {
+			if containsString(ids, stringFromMap(item, "id")) {
+				matched = append(matched, item)
+			}
+		}
+		if len(matched) > 0 {
+			last.Items = matched
+			last.Total = len(matched)
+			last.HasTotal = true
+		}
 	}
 	last.Actions = actions
 	return last, nil
@@ -541,6 +558,36 @@ func waiterState(waitSpec spec.Waiter, probe spec.Probe, result ProbeResult, ids
 		}
 		return ""
 	}
+	if waitSpec.Match.StateOnly {
+		if len(result.Items) == 0 {
+			return ""
+		}
+		allTarget := true
+		nextState := ""
+		for _, item := range result.Items {
+			state := stringFromMap(item, "status")
+			for _, pending := range waitSpec.Pending {
+				value := stringFromMap(item, pending.Field)
+				if value != "" && containsStringFold(pending.Values, value) {
+					state = value
+					break
+				}
+			}
+			if containsStringFold(waitSpec.Failure.States, state) {
+				return state
+			}
+			if !strings.EqualFold(state, waitSpec.Target) {
+				allTarget = false
+				if nextState == "" {
+					nextState = state
+				}
+			}
+		}
+		if allTarget {
+			return waitSpec.Target
+		}
+		return nextState
+	}
 	if len(ids) > 0 {
 		switch waitSpec.Target {
 		case "present":
@@ -554,6 +601,19 @@ func waiterState(waitSpec spec.Waiter, probe spec.Probe, result ProbeResult, ids
 			}
 			return ""
 		}
+		for _, item := range result.Items {
+			if !containsString(ids, stringFromMap(item, "id")) {
+				continue
+			}
+			for _, pending := range waitSpec.Pending {
+				value := stringFromMap(item, pending.Field)
+				if value != "" && containsString(pending.Values, value) {
+					return value
+				}
+			}
+			return stringFromMap(item, "status")
+		}
+		return ""
 	}
 	if waitSpec.Target == "present" && len(result.Items) > 0 {
 		return "present"
@@ -712,6 +772,15 @@ func probeResultHasAnyID(result ProbeResult, ids []string) bool {
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func containsStringFold(values []string, target string) bool {
+	for _, value := range values {
+		if strings.EqualFold(value, target) {
 			return true
 		}
 	}

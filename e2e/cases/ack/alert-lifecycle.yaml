@@ -1,0 +1,30 @@
+# Alert lifecycle. The shared cluster is disposable, so changing its built-in alert ruleset
+# cannot alter a pre-existing cluster.
+resource: ack/alert
+needs: [ack_shared_cluster]
+serial: true
+
+steps:
+  - name: disable cluster ruleset
+    run: >
+      ecctl ack alert update
+      --cluster {{.stack.ack_shared_cluster}}
+      --ruleset-id ack-cluster
+      --enabled=false
+    at: $.alert
+    expect:
+      cluster: { eq: "{{.stack.ack_shared_cluster}}" }
+      ruleset_id: { eq: ack-cluster }
+      enabled: { eq: false }
+
+  - name: restore cluster ruleset
+    run: >
+      ecctl ack alert update
+      --cluster {{.stack.ack_shared_cluster}}
+      --ruleset-id ack-cluster
+      --enabled=true
+    at: $.alert
+    expect:
+      cluster: { eq: "{{.stack.ack_shared_cluster}}" }
+      ruleset_id: { eq: ack-cluster }
+      enabled: { eq: true }

@@ -23,8 +23,8 @@ regions:
   candidates:
     - id: cn-hangzhou
       prerequisites:
-        ecs.image:
-          oss_bucket: e2e-images
+        test.optional:
+          resource_id: test-resource
         lingjun.cluster:
           node_group_ids: [ng-a, ng-b]
     - id: cn-zhangjiakou
@@ -44,14 +44,14 @@ paths:
 	if got := config.Regions.Candidates; len(got) != 2 || got[0].ID != "cn-hangzhou" || got[1].ID != "cn-zhangjiakou" {
 		t.Fatalf("regions = %#v", got)
 	}
-	prerequisites, err := config.Regions.Candidates[0].ResolvePrerequisites([]string{"ecs.image", "lingjun.cluster"})
+	prerequisites, err := config.Regions.Candidates[0].ResolvePrerequisites([]string{"test.optional", "lingjun.cluster"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ecs := prerequisites["ecs"].(map[string]any)
-	image := ecs["image"].(map[string]any)
-	if got := image["oss_bucket"]; got != "e2e-images" {
-		t.Fatalf("oss bucket = %#v", got)
+	testValues := prerequisites["test"].(map[string]any)
+	optional := testValues["optional"].(map[string]any)
+	if got := optional["resource_id"]; got != "test-resource" {
+		t.Fatalf("optional resource = %#v", got)
 	}
 	lingjun := prerequisites["lingjun"].(map[string]any)
 	if got := lingjun["cluster"].(map[string]any)["node_group_ids"]; len(got.([]any)) != 2 {
@@ -76,7 +76,7 @@ regions:
   candidates:
     - id: cn-hangzhou
 values:
-  ecs.image.oss_bucket:
+  test.optional.id:
     env: E2E_OSS_BUCKET
 `)
 
@@ -121,7 +121,7 @@ regions:
   candidates:
     - id: cn-hangzhou
       prerequisites:
-        ecs.instance_renew: {}
+        test.optional: {}
         future.bundle:
           future_field: value
 `)
@@ -130,21 +130,21 @@ regions:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !config.Regions.Candidates[0].HasPrerequisites([]string{"ecs.instance_renew", "future.bundle"}) {
+	if !config.Regions.Candidates[0].HasPrerequisites([]string{"test.optional", "future.bundle"}) {
 		t.Fatal("declared bundles should be routable without field-schema validation")
 	}
 }
 
 func TestRegionProfileResolvePrerequisitesRejectsMissingBundle(t *testing.T) {
 	profile := RegionProfile{ID: "cn-hangzhou", Prerequisites: map[string]map[string]any{
-		"ecs.image": {"oss_bucket": "e2e-images"},
+		"future.bundle": {"id": "future-id"},
 	}}
 
-	_, err := profile.ResolvePrerequisites([]string{"ecs.instance_renew"})
+	_, err := profile.ResolvePrerequisites([]string{"test.optional"})
 	if err == nil {
 		t.Fatal("expected missing prerequisite bundle error")
 	}
-	if !strings.Contains(err.Error(), `region "cn-hangzhou" does not declare prerequisite bundle "ecs.instance_renew"`) {
+	if !strings.Contains(err.Error(), `region "cn-hangzhou" does not declare prerequisite bundle "test.optional"`) {
 		t.Fatalf("error = %q", err)
 	}
 }

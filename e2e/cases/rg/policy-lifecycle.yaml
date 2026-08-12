@@ -54,6 +54,13 @@ steps:
       policy_name: name
     teardown: ecctl rg policy delete {{.policy_name}}
 
+  - name: get custom policy
+    run: ecctl rg policy get {{.policy_name}} --policy-type Custom
+    at: $.policy
+    expect:
+      name: { eq: "{{.policy_name}}" }
+      policy_type: { eq: Custom }
+
   - name: attach policy to ServiceRole
     run: >
       ecctl rg policy attach {{.policy_name}}
@@ -98,5 +105,6 @@ steps:
 
   - name: delete resource group
     run: ecctl rg group delete {{.group_id}}
-    expect:
-      deleted: true
+    assert:
+      - $.group.id == "{{.group_id}}"
+      - $.deleted == true || $.group.status == "PendingDelete"

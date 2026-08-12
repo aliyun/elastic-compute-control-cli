@@ -4,6 +4,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"strings"
 	"time"
 
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
@@ -51,7 +52,7 @@ func Wait(ctx context.Context, options Options) (Observation, error) {
 			last = observed
 		} else {
 			last = observed
-			if observed.State == options.Target {
+			if strings.EqualFold(observed.State, options.Target) {
 				return observed, nil
 			}
 			if contains(options.FailureStates, observed.State) {
@@ -103,7 +104,7 @@ func timeoutError(target string, last Observation) *ecerrors.AppError {
 
 func contains(values []string, target string) bool {
 	for _, value := range values {
-		if value == target {
+		if strings.EqualFold(value, target) {
 			return true
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,7 +16,10 @@ import (
 	"time"
 
 	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalfile"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
+	runnerpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/runner"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
 func TestReplayJournalRunsTeardownsInReverseOrder(t *testing.T) {
@@ -53,6 +57,393 @@ func TestReplayJournalRunsTeardownsInReverseOrder(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(calls)); got != "t thing delete second\nt thing delete first" {
 		t.Fatalf("calls = %q", got)
+	}
+	var remaining []report.Resource
+	data, err = os.ReadFile(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &remaining); err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("successful legacy replay retained entries: %s", data)
+	}
+}
+
+func TestReplayJournalRunsControlledAssociatedTransferRestore(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a bash script")
+	}
+	dir := t.TempDir()
+	journal := filepath.Join(dir, "cleanup-journal.json")
+	data, err := json.Marshal(report.CleanupJournal{
+		Version: 2,
+		Entries: []report.Resource{{
+			Scope:    "case",
+			Teardown: "ecctl rg associated-transfer update --status Disable --enable-existing-resources-transfer false",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(journal, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(dir, "calls.log")
+	fake := filepath.Join(dir, "ecctl")
+	if err := os.WriteFile(fake, []byte("#!/usr/bin/env bash\necho \"$*\" >> \"$FAKE_LOG\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_LOG", log)
+	res, err := ReplayJournal(context.Background(), journal, execpkg.Config{Bin: fake})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Deleted != 1 || res.Errors != 0 {
+		t.Fatalf("result = %+v", res)
+	}
+	calls, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.TrimSpace(string(calls)), "rg associated-transfer update --status Disable --enable-existing-resources-transfer false"; got != want {
+		t.Fatalf("call = %q, want %q", got, want)
+	}
+	data, err = os.ReadFile(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var completed report.CleanupJournal
+	if err := json.Unmarshal(data, &completed); err != nil {
+		t.Fatal(err)
+	}
+	if len(completed.Entries) != 0 {
+		t.Fatalf("successful restore replay retained entries: %s", data)
+	}
+	if _, err := ReplayJournal(context.Background(), journal, execpkg.Config{Bin: fake}); err != nil {
+		t.Fatal(err)
+	}
+	calls, err = os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(strings.TrimSpace(string(calls)), "associated-transfer update"); got != 1 {
+		t.Fatalf("restore replay count = %d, want one-shot journal; calls=%s", got, calls)
+	}
+}
+
+func TestReplayJournalDoesNotLoseConcurrentRunnerRegistration(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a bash script")
+	}
+	for _, legacy := range []bool{false, true} {
+		for _, replayFails := range []bool{false, true} {
+			name := "versioned"
+			if legacy {
+				name = "legacy"
+			}
+			if replayFails {
+				name += "-failed-old-entry"
+			}
+			t.Run(name, func(t *testing.T) {
+				if replayFails {
+					t.Setenv("REPLAY_FAIL", "1")
+				}
+				dir := t.TempDir()
+				journalPath := filepath.Join(dir, "cleanup-journal.json")
+				oldEntry := report.Resource{Scope: "old", Teardown: "ecctl t thing delete old"}
+				var initial any = report.CleanupJournal{
+					Version: 2, RunID: "test", Surface: "public", Entries: []report.Resource{oldEntry},
+				}
+				if legacy {
+					initial = []report.Resource{oldEntry}
+				}
+				data, err := json.Marshal(initial)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(journalPath, data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+
+				fake := filepath.Join(dir, "ecctl")
+				if err := os.WriteFile(fake, []byte(`#!/usr/bin/env bash
+if [[ "$*" == *"thing create"* ]]; then
+  : > "$WRITER_STARTED"
+  echo '{"resource":{"id":"new"}}'
+else
+  echo '{}'
+  if [[ "$REPLAY_FAIL" == "1" ]]; then
+    exit 1
+  fi
+fi
+`), 0o755); err != nil {
+					t.Fatal(err)
+				}
+
+				replayRead := make(chan struct{})
+				resumeReplay := make(chan struct{})
+				releaseReplay := sync.OnceFunc(func() { close(resumeReplay) })
+				defer releaseReplay()
+				previousHook := replayJournalAfterRead
+				replayJournalAfterRead = func(string) {
+					close(replayRead)
+					<-resumeReplay
+				}
+				defer func() { replayJournalAfterRead = previousHook }()
+
+				replayDone := make(chan error, 1)
+				go func() {
+					_, err := ReplayJournal(context.Background(), journalPath, execpkg.Config{Bin: fake})
+					replayDone <- err
+				}()
+				<-replayRead
+
+				writerDone := make(chan error, 1)
+				writerStarted := filepath.Join(dir, "writer-started")
+				go func() {
+					run, err := runnerpkg.Run(context.Background(), runnerpkg.Options{
+						CleanupJournal: journalPath,
+						RunName:        "test",
+						RunID:          "test",
+						Surface:        "public",
+						EcctlBin:       fake,
+						StepTimeout:    30 * time.Second,
+						Keep:           true,
+						Env:            []string{"WRITER_STARTED=" + writerStarted},
+						Suites: []*scenario.Suite{{
+							Surface: scenario.SurfacePublic, Resource: "t/thing", Path: "concurrent-writer.yaml",
+							Steps: []scenario.Step{{
+								Name: "create", Run: "ecctl t thing create", At: "$.resource",
+								Capture: map[string]string{"id": "id"}, Teardown: "ecctl t thing delete {{.id}}",
+							}},
+						}},
+					})
+					if err == nil && run.Failed() {
+						err = fmt.Errorf("runner failed: %+v", run.Cases)
+					}
+					writerDone <- err
+				}()
+				waitForFile(t, writerStarted, 10*time.Second)
+
+				select {
+				case err := <-writerDone:
+					if err != nil {
+						t.Fatal(err)
+					}
+				case <-time.After(time.Second):
+					releaseReplay()
+					if err := <-replayDone; err != nil {
+						t.Fatal(err)
+					}
+					if err := <-writerDone; err != nil {
+						t.Fatal(err)
+					}
+					t.Fatal("runner journal registration blocked behind replay work")
+				}
+				releaseReplay()
+				if err := <-replayDone; err != nil {
+					t.Fatal(err)
+				}
+
+				data, err = os.ReadFile(journalPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var journal report.CleanupJournal
+				if err := json.Unmarshal(data, &journal); err != nil {
+					t.Fatalf("final journal is not versioned: %v\n%s", err, data)
+				}
+				wantTeardowns := []string{"ecctl t thing delete new"}
+				if replayFails {
+					wantTeardowns = []string{"ecctl t thing delete old", "ecctl t thing delete new"}
+				}
+				if got := journalTeardowns(journal.Entries); !slices.Equal(got, wantTeardowns) {
+					t.Fatalf("final journal teardowns = %q, want %q: %s", got, wantTeardowns, data)
+				}
+			})
+		}
+	}
+}
+
+func journalTeardowns(entries []report.Resource) []string {
+	result := make([]string, len(entries))
+	for i, entry := range entries {
+		result[i] = entry.Teardown
+	}
+	return result
+}
+
+func TestReplayJournalLockWaitHonorsContext(t *testing.T) {
+	dir := t.TempDir()
+	journalPath := filepath.Join(dir, "cleanup-journal.json")
+	data, err := json.Marshal(report.CleanupJournal{Version: 2, Entries: []report.Resource{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(journalPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	replayRead := make(chan struct{})
+	resumeReplay := make(chan struct{})
+	releaseReplay := sync.OnceFunc(func() { close(resumeReplay) })
+	defer releaseReplay()
+	previousHook := replayJournalAfterRead
+	var hookCalls atomic.Int32
+	replayJournalAfterRead = func(string) {
+		if hookCalls.Add(1) == 1 {
+			close(replayRead)
+			<-resumeReplay
+		}
+	}
+	defer func() { replayJournalAfterRead = previousHook }()
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := ReplayJournal(context.Background(), journalPath, execpkg.Config{})
+		firstDone <- err
+	}()
+	<-replayRead
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := ReplayJournal(ctx, journalPath, execpkg.Config{})
+		secondDone <- err
+	}()
+	select {
+	case err := <-secondDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("second replay error = %v, want context canceled", err)
+		}
+	case <-time.After(time.Second):
+		releaseReplay()
+		if err := <-firstDone; err != nil {
+			t.Fatal(err)
+		}
+		if err := <-secondDone; err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+		t.Fatal("canceled replay remained blocked waiting for the journal lock")
+	}
+
+	releaseReplay()
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReplayJournalConsumesSuccessAfterCallerCancellation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a bash script")
+	}
+	dir := t.TempDir()
+	journalPath := filepath.Join(dir, "cleanup-journal.json")
+	data, err := json.Marshal(report.CleanupJournal{
+		Version: 2,
+		Entries: []report.Resource{{Scope: "case", Teardown: "ecctl t thing delete old"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(journalPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake := filepath.Join(dir, "ecctl")
+	if err := os.WriteFile(fake, []byte("#!/usr/bin/env bash\necho '{}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	transactionHeld := make(chan struct{})
+	releaseTransaction := make(chan struct{})
+	release := sync.OnceFunc(func() { close(releaseTransaction) })
+	defer release()
+	holderDone := make(chan error, 1)
+	successfulDelete := make(chan struct{})
+	resumeReplay := make(chan struct{})
+	previousHook := replayJournalAfterSuccess
+	replayJournalAfterSuccess = func(path string) {
+		go func() {
+			holderDone <- journalfile.WithLock(context.Background(), path, func() error {
+				close(transactionHeld)
+				<-releaseTransaction
+				return nil
+			})
+		}()
+		<-transactionHeld
+		close(successfulDelete)
+		<-resumeReplay
+	}
+	defer func() { replayJournalAfterSuccess = previousHook }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	type replayOutcome struct {
+		result *Result
+		err    error
+	}
+	replayDone := make(chan replayOutcome, 1)
+	go func() {
+		result, err := ReplayJournal(ctx, journalPath, execpkg.Config{Bin: fake})
+		replayDone <- replayOutcome{result: result, err: err}
+	}()
+	<-successfulDelete
+	cancel()
+	close(resumeReplay)
+
+	select {
+	case outcome := <-replayDone:
+		release()
+		if holderErr := <-holderDone; holderErr != nil {
+			t.Fatal(holderErr)
+		}
+		t.Fatalf("replay returned before committing successful deletion: result=%+v err=%v", outcome.result, outcome.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+	if holderErr := <-holderDone; holderErr != nil {
+		t.Fatal(holderErr)
+	}
+	outcome := <-replayDone
+	if outcome.err != nil {
+		t.Fatal(outcome.err)
+	}
+	if outcome.result.Deleted != 1 || outcome.result.Errors != 0 {
+		t.Fatalf("result = %+v, want one successful deletion", outcome.result)
+	}
+
+	data, err = os.ReadFile(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var journal report.CleanupJournal
+	if err := json.Unmarshal(data, &journal); err != nil {
+		t.Fatal(err)
+	}
+	if len(journal.Entries) != 0 {
+		t.Fatalf("successful deletion remained in journal after cancellation: %s", data)
+	}
+}
+
+func waitForFile(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for %s", path)
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -319,6 +710,39 @@ func TestRunDeletesDoesNotRetryNonTransient(t *testing.T) {
 	}
 }
 
+func TestRenderDeleteCommandUsesOnlyExplicitItemFields(t *testing.T) {
+	kind := Kind{
+		Name:         "lingjun-subnet",
+		Delete:       "ecctl lingjun subnet delete {{.id}} --vpd {{.vpd}} --zone {{.zone}}",
+		DeleteFields: map[string]string{"vpd": "vpd", "zone": "zone"},
+	}
+	item := map[string]any{
+		"id": "subnet-1", "vpd": "vpd-1", "zone": "cn-test-a",
+		"secret": "must-not-be-exposed",
+	}
+
+	got, err := renderDeleteCommand(kind, item, "subnet-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "ecctl lingjun subnet delete subnet-1 --vpd vpd-1 --zone cn-test-a"; got != want {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+}
+
+func TestRenderDeleteCommandRejectsMissingMappedItemField(t *testing.T) {
+	kind := Kind{
+		Name:         "lingjun-subnet",
+		Delete:       "ecctl lingjun subnet delete {{.id}} --vpd {{.vpd}} --zone {{.zone}}",
+		DeleteFields: map[string]string{"vpd": "vpd", "zone": "zone"},
+	}
+	item := map[string]any{"id": "subnet-1", "vpd": "vpd-1"}
+
+	if _, err := renderDeleteCommand(kind, item, "subnet-1"); err == nil || !strings.Contains(err.Error(), "zone") {
+		t.Fatalf("error = %v, want missing zone before delete execution", err)
+	}
+}
+
 func TestCheckConfigAcceptsLiveCreateWithTeardownAndSweepKind(t *testing.T) {
 	root, cases, config := writeSweepCheckFixture(t, sweepCheckCase(true), sweepCheckConfig(true))
 
@@ -377,6 +801,12 @@ func TestCheckConfigRejectsCleanupProblems(t *testing.T) {
 			config: strings.ReplaceAll(sweepCheckConfig(true), "    delete: \"ecctl ecs instance delete {{.id}} --force\"\n", ""),
 			code:   "missing_delete_command",
 		},
+		{
+			name:   "unmapped delete template field",
+			caseY:  sweepCheckCase(true),
+			config: strings.ReplaceAll(sweepCheckConfig(true), " --force\"", " --zone {{.zone}} --force\""),
+			code:   "invalid_delete_template",
+		},
 	}
 
 	for _, tt := range tests {
@@ -393,6 +823,43 @@ func TestCheckConfigRejectsCleanupProblems(t *testing.T) {
 	}
 }
 
+func TestCheckConfigValidatesConsumerBeforeProviderOrder(t *testing.T) {
+	consumer := sweepCheckConfig(true)
+	consumer = strings.Replace(consumer, "    delete:", "    depends_on: [ecs-sg]\n    delete:", 1)
+	provider := `  - name: ecs-sg
+    resource: ecs/sg
+    list: ecctl ecs sg list --filter tag.ecctl-e2e=1
+    items_path: $.security_groups
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    delete: "ecctl ecs sg delete {{.id}}"
+`
+
+	t.Run("valid", func(t *testing.T) {
+		_, cases, config := writeSweepCheckFixture(t, sweepCheckCase(true), consumer+provider)
+		rep, err := CheckConfig(CheckOptions{CasesDir: cases, ConfigFile: config})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hasSweepCheckCode(rep, "invalid_dependency_order") {
+			t.Fatalf("consumer before provider should be valid: %+v", rep.Errors)
+		}
+	})
+
+	t.Run("drift", func(t *testing.T) {
+		configY := "kinds:\n" + provider + strings.TrimPrefix(consumer, "kinds:\n")
+		_, cases, config := writeSweepCheckFixture(t, sweepCheckCase(true), configY)
+		rep, err := CheckConfig(CheckOptions{CasesDir: cases, ConfigFile: config})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !hasSweepCheckCode(rep, "invalid_dependency_order") {
+			t.Fatalf("provider-before-consumer drift should fail: %+v", rep.Errors)
+		}
+	})
+}
+
 func TestCheckConfigAcceptsAllowedNonSweepableReason(t *testing.T) {
 	_, cases, config := writeSweepCheckFixture(t, sweepCheckCase(true), sweepCheckNonSweepableConfig("provider-no-delete"))
 
@@ -402,6 +869,42 @@ func TestCheckConfigAcceptsAllowedNonSweepableReason(t *testing.T) {
 	}
 	if rep.Invalid != 0 || len(rep.Errors) != 0 {
 		t.Fatalf("expected valid non-sweepable cleanup coverage, got %+v", rep.Errors)
+	}
+}
+
+func TestCheckConfigAllowsProviderOwnedCreateWithoutTeardown(t *testing.T) {
+	_, cases, config := writeSweepCheckFixture(t, sweepCheckCase(false), sweepCheckNonSweepableConfig("provider-no-delete"))
+
+	rep, err := CheckConfig(CheckOptions{CasesDir: cases, ConfigFile: config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Invalid != 0 || len(rep.Errors) != 0 {
+		t.Fatalf("provider-owned create without a delete API should not require teardown: %+v", rep.Errors)
+	}
+}
+
+func TestCheckConfigUsesCanonicalResourceForNestedACKCommands(t *testing.T) {
+	caseY := `
+resource: ack/instance
+steps:
+  - name: create
+    run: ecctl ack policy-instance create --cluster c-test --policy-name p
+    teardown: ecctl ack policy-instance delete i-test --cluster c-test
+`
+	configY := sweepCheckConfig(false) + `non_sweepable:
+  - resource: ack/instance
+    reason: provider-limitation
+    review_after: 2026-10-06
+`
+	_, cases, config := writeSweepCheckFixture(t, caseY, configY)
+
+	rep, err := CheckConfig(CheckOptions{CasesDir: cases, ConfigFile: config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Invalid != 0 || len(rep.Errors) != 0 {
+		t.Fatalf("nested ACK command should resolve to its canonical resource: %+v", rep.Errors)
 	}
 }
 

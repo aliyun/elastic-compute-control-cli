@@ -13,10 +13,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/shlex"
 	"gopkg.in/yaml.v3"
 
 	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalcmd"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalfile"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/jsonq"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/vars"
@@ -29,12 +30,21 @@ const defaultConcurrency = 20
 // Transient delete-failure retry: a freshly emptied network resource can report
 // DependencyViolation until its ENIs finish releasing (seconds to ~a minute).
 const (
-	sweepDeleteRetries = 4
-	sweepRetryInterval = 15 * time.Second
+	sweepDeleteRetries         = 4
+	sweepRetryInterval         = 15 * time.Second
+	replayJournalCommitTimeout = 30 * time.Second
 )
 
 // sweepRetrySleep is a package var so tests can stub out the backoff.
 var sweepRetrySleep = time.Sleep
+
+// replayJournalAfterRead is a test synchronization point for deterministic
+// writer/replayer interleavings. Production keeps the no-op default.
+var replayJournalAfterRead = func(string) {}
+
+// replayJournalAfterSuccess is a test synchronization point for the narrow
+// window between a successful external command and its journal commit.
+var replayJournalAfterSuccess = func(string) {}
 
 // isTransientSweepFailure reports whether a failed delete is worth retrying:
 // dependency-still-releasing or throttling. Both clear on their own shortly.
@@ -51,14 +61,16 @@ type Config struct {
 
 // Kind is one sweepable resource type.
 type Kind struct {
-	Name         string `yaml:"name"`
-	Resource     string `yaml:"resource"`      // optional checker metadata: product/resource
-	List         string `yaml:"list"`          // full ecctl list command (tag-filtered)
-	ItemsPath    string `yaml:"items_path"`    // jsonpath to the array of items
-	IDField      string `yaml:"id_field"`      // relative path within an item
-	RunIDField   string `yaml:"runid_field"`   // optional
-	CreatedField string `yaml:"created_field"` // optional; RFC3339 or Aliyun minute-precision
-	Delete       string `yaml:"delete"`        // template with {{.id}}
+	Name         string            `yaml:"name"`
+	Resource     string            `yaml:"resource"`      // optional checker metadata: product/resource
+	List         string            `yaml:"list"`          // full ecctl list command (tag-filtered)
+	ItemsPath    string            `yaml:"items_path"`    // jsonpath to the array of items
+	IDField      string            `yaml:"id_field"`      // relative path within an item
+	RunIDField   string            `yaml:"runid_field"`   // optional
+	CreatedField string            `yaml:"created_field"` // optional; RFC3339 or Aliyun minute-precision
+	DeleteFields map[string]string `yaml:"delete_fields"` // template field -> relative item path
+	DependsOn    []string          `yaml:"depends_on"`    // providers that must be deleted after this kind
+	Delete       string            `yaml:"delete"`        // template with {{.id}} and explicit delete_fields
 }
 
 // NonSweepableKind documents a live-created resource that has an explicit,
@@ -113,25 +125,48 @@ func ReplayJournal(ctx context.Context, path string, cfg execpkg.Config) (*Resul
 // Raw []Resource journals from older runners remain readable, but new journals
 // always carry metadata and are never replayed against conflicting options.
 func ReplayJournalWithOptions(ctx context.Context, path string, opt ReplayOptions) (*Result, error) {
+	var result *Result
+	err := journalfile.WithReplayLock(ctx, path, func() error {
+		var journal report.CleanupJournal
+		err := journalfile.WithLock(ctx, path, func() error {
+			var err error
+			journal, _, err = readReplayJournal(path)
+			if err != nil {
+				return err
+			}
+			return validateJournalIdentity(journal, &opt)
+		})
+		if err != nil {
+			return err
+		}
+		replayJournalAfterRead(path)
+		result, err = replayJournalEntries(ctx, path, opt, journal.Entries)
+		return err
+	})
+	return result, err
+}
+
+func readReplayJournal(path string) (report.CleanupJournal, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return report.CleanupJournal{}, false, err
 	}
 	var journal report.CleanupJournal
-	if strings.HasPrefix(strings.TrimSpace(string(data)), "[") {
+	legacy := strings.HasPrefix(strings.TrimSpace(string(data)), "[")
+	if legacy {
 		if err := json.Unmarshal(data, &journal.Entries); err != nil {
-			return nil, fmt.Errorf("cleanup journal %s: %w", path, err)
+			return report.CleanupJournal{}, false, fmt.Errorf("cleanup journal %s: %w", path, err)
 		}
 	} else if err := json.Unmarshal(data, &journal); err != nil {
-		return nil, fmt.Errorf("cleanup journal %s: %w", path, err)
+		return report.CleanupJournal{}, false, fmt.Errorf("cleanup journal %s: %w", path, err)
 	}
-	if err := validateJournalIdentity(journal, &opt); err != nil {
-		return nil, err
-	}
-	manifest := journal.Entries
+	return journal, legacy, nil
+}
+
+func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, entries []report.Resource) (*Result, error) {
 	result := &Result{}
-	for i := len(manifest) - 1; i >= 0; i-- {
-		entry := manifest[i]
+	for i := len(entries) - 1; i >= 0; i-- {
+		entry := entries[i]
 		if strings.TrimSpace(entry.Teardown) == "" {
 			continue
 		}
@@ -147,8 +182,60 @@ func ReplayJournalWithOptions(ctx context.Context, path string, opt ReplayOption
 			continue
 		}
 		result.Deleted++
+		replayJournalAfterSuccess(path)
+		commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), replayJournalCommitTimeout)
+		err := consumeReplayJournalEntry(commitCtx, path, opt, entry)
+		cancel()
+		if err != nil {
+			return result, fmt.Errorf("rewrite cleanup journal %s after replay: %w", path, err)
+		}
 	}
 	return result, nil
+}
+
+func consumeReplayJournalEntry(ctx context.Context, path string, opt ReplayOptions, completed report.Resource) error {
+	return journalfile.WithLock(ctx, path, func() error {
+		journal, legacy, err := readReplayJournal(path)
+		if err != nil {
+			return err
+		}
+		currentOpt := opt
+		if err := validateJournalIdentity(journal, &currentOpt); err != nil {
+			return err
+		}
+		index := -1
+		for i := len(journal.Entries) - 1; i >= 0; i-- {
+			if journal.Entries[i] == completed {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			return nil
+		}
+		pending := append([]report.Resource(nil), journal.Entries...)
+		pending = append(pending[:index], pending[index+1:]...)
+		return rewriteReplayJournal(path, journal, pending, legacy)
+	})
+}
+
+func rewriteReplayJournal(path string, journal report.CleanupJournal, pending []report.Resource, legacy bool) error {
+	var value any
+	if legacy {
+		value = pending
+	} else {
+		journal.Entries = pending
+		value = journal
+	}
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func validateJournalIdentity(journal report.CleanupJournal, opt *ReplayOptions) error {
@@ -177,25 +264,7 @@ func validateJournalIdentity(journal report.CleanupJournal, opt *ReplayOptions) 
 }
 
 func validateJournalTeardown(command string) error {
-	tokens, err := shlex.Split(command)
-	if err != nil {
-		return err
-	}
-	if len(tokens) < 2 || tokens[0] != "ecctl" {
-		return fmt.Errorf("teardown must be an ecctl command")
-	}
-	if tokens[1] == "call" {
-		return fmt.Errorf("teardown cannot use raw API calls")
-	}
-	for _, token := range tokens[1:] {
-		if strings.HasPrefix(token, "-") {
-			break
-		}
-		if token == "delete" {
-			return nil
-		}
-	}
-	return fmt.Errorf("teardown must be a delete command")
+	return journalcmd.ValidateDelete(command)
 }
 
 // Sweep lists every configured kind and deletes the orphans.
@@ -246,7 +315,7 @@ func Sweep(ctx context.Context, opt Options) (*Result, error) {
 				opt.Logf("%s %s: keep (%s)", k.Name, id, reason)
 				continue
 			}
-			cmd, err := vars.Render(k.Delete, map[string]any{"id": id})
+			cmd, err := renderDeleteCommand(k, item, id)
 			if err != nil {
 				res.Errors++
 				res.Details = append(res.Details, fmt.Sprintf("%s %s: render delete command failed: %v", k.Name, id, err))
@@ -270,6 +339,18 @@ func Sweep(ctx context.Context, opt Options) (*Result, error) {
 		})
 	}
 	return res, nil
+}
+
+func renderDeleteCommand(kind Kind, item any, id string) (string, error) {
+	data := map[string]any{"id": id}
+	for name, path := range kind.DeleteFields {
+		value, ok := stringAt(item, path)
+		if !ok {
+			return "", fmt.Errorf("delete field %q path %q is missing or not a string", name, path)
+		}
+		data[name] = value
+	}
+	return vars.Render(kind.Delete, data)
 }
 
 // deleteTask is one orphan selected for deletion.

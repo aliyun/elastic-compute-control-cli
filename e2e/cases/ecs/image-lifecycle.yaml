@@ -1,13 +1,31 @@
 # ECS custom image lifecycle. It creates a host instance and waits for ECS image
 # creation/deletion.
 resource: ecs/image
+execution: dag
 requires_params: [ecs.instance_type]
-needs: [vpc, vswitch, security_group, image]
-timeout: 45m
+region_requirements:
+  destination:
+    distinct_from: primary
+timeout: 120m
 serial: true
 
 steps:
+  - name: create OSS bucket
+    locks: ["oss-bucket:{{.oss_bucket_name}}"]
+    run: >
+      ecctl call oss PutBucket
+      --Bucket {{.oss_bucket_name}}
+      --ACL private
+      --region {{.region}}
+    expect:
+      $.product: oss
+      $.operation: PutBucket
+      $.region: { eq: "{{.region}}" }
+    teardown: ecctl call oss DeleteBucket --Bucket {{.oss_bucket_name}} --region {{.region}}
+
   - name: prereq create host instance
+    needs: [vpc, vswitch, security_group, image]
+    locks: ["ecs-instance:{{.run_name}}-img-host"]
     run: >
       ecctl ecs instance create
       --type {{.params.ecs.instance_type}}
@@ -25,6 +43,8 @@ steps:
     teardown: ecctl ecs instance delete {{.instance_id}} --force
 
   - name: create
+    depends_on: [prereq create host instance]
+    locks: ["ecs-image:{{.run_name}}-base"]
     run: >
       ecctl ecs image create
       --instance {{.instance_id}}
@@ -40,23 +60,213 @@ steps:
     teardown: ecctl ecs image delete {{.image_id}} --force
 
   - name: get
+    depends_on: [create]
+    locks: ["ecs-image:{{.run_name}}-base"]
     run: ecctl ecs image get {{.image_id}}
     at: $.image
     expect:
       id: { eq: "{{.image_id}}" }
 
   - name: list
+    depends_on: [create]
+    locks: ["ecs-image:{{.run_name}}-base"]
     run: ecctl ecs image list --filter name={{.run_name}}-image
     assert:
       - len($.images) >= 1
 
   - name: update
+    depends_on: [create]
+    locks: ["ecs-image:{{.run_name}}-base"]
     run: ecctl ecs image update {{.image_id}} --description ecctl-e2e-image-updated-{{.run_id}}
     at: $.image
     expect:
       id: { eq: "{{.image_id}}" }
 
+  - name: copy
+    depends_on: [update]
+    locks: ["ecs-image:{{.run_name}}-base"]
+    run: >
+      ecctl ecs image copy {{.image_id}}
+      --destination-region {{.regions.destination.id}}
+      --destination-name {{.run_name}}-image-copy
+      --destination-description ecctl-e2e-image-copy-{{.run_id}}
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 60m
+    at: $.image
+    expect:
+      id: { type: string, prefix: m- }
+      destination_region: { eq: "{{.regions.destination.id}}" }
+    capture:
+      copied_image_id: id
+    teardown: ecctl ecs image delete {{.copied_image_id}} --force
+    teardown_region: destination
+
+  # Export uses a separate source image so it does not race the ordinary
+  # lifecycle's explicit delete.
+  - name: prereq create export host instance
+    needs: [vpc, vswitch, security_group, image]
+    locks: ["ecs-instance:{{.run_name}}-export-host"]
+    run: >
+      ecctl ecs instance create
+      --type {{.params.ecs.instance_type}}
+      --image {{.stack.image}}
+      --sg {{.stack.security_group}}
+      --vswitch {{.stack.vswitch}}
+      --name {{.run_name}}-export-host
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.instance
+    expect:
+      id: { type: string, prefix: i- }
+      status: Running
+    capture:
+      export_instance_id: id
+    teardown: ecctl ecs instance delete {{.export_instance_id}} --force
+
+  - name: create export source image
+    depends_on: [prereq create export host instance]
+    locks: ["ecs-image:{{.run_name}}-export"]
+    run: >
+      ecctl ecs image create
+      --instance {{.export_instance_id}}
+      --name {{.run_name}}-export-image
+      --description ecctl-e2e-export-image-{{.run_id}}
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.image
+    expect:
+      id: { type: string, prefix: m- }
+      name: { eq: "{{.run_name}}-export-image" }
+    capture:
+      export_image_id: id
+    teardown: ecctl ecs image delete {{.export_image_id}} --force
+
+  - name: export
+    depends_on: [create export source image, create OSS bucket]
+    locks: ["ecs-image:{{.run_name}}-export", "oss-bucket:{{.oss_bucket_name}}"]
+    run: >
+      ecctl ecs image export {{.export_image_id}}
+      --oss-bucket {{.oss_bucket_name}}
+      --oss-prefix {{.oss_export_prefix}}
+      --image-format QCOW2
+      --timeout 60m
+    at: $.image
+    expect:
+      task_id: { type: string, min_len: 1 }
+      image: { eq: "{{.export_image_id}}" }
+
+  - name: list exported object
+    depends_on: [export]
+    locks: ["oss-bucket:{{.oss_bucket_name}}"]
+    run: >
+      ecctl call oss ListObjects
+      --Bucket {{.oss_bucket_name}}
+      --Prefix {{.oss_export_prefix}}
+      --MaxKeys 2
+      --region {{.region}}
+    expect:
+      $.product: oss
+      $.operation: ListObjects
+      $.response.KeyCount: "1"
+    capture:
+      export_object_key: $.response.Contents.Key
+    teardown: ecctl call oss DeleteObject --Bucket {{.oss_bucket_name}} --Key {{.export_object_key}} --region {{.region}}
+
+  - name: download exported archive
+    depends_on: [list exported object]
+    locks: ["oss-bucket:{{.oss_bucket_name}}"]
+    run: >
+      ecctl call oss GetObject
+      --Bucket {{.oss_bucket_name}}
+      --Key {{.export_object_key}}
+      --File {{.work_dir}}/export.qcow2
+      --parallel 16
+      --part-size 64Mi
+      --region {{.region}}
+    at: $.response
+    expect:
+      Bucket: { eq: "{{.oss_bucket_name}}" }
+      Key: { eq: "{{.export_object_key}}" }
+      File: { eq: "{{.work_dir}}/export.qcow2" }
+    capture:
+      import_file: File
+
+  - name: upload import object
+    depends_on: [download exported archive]
+    locks: ["oss-bucket:{{.oss_bucket_name}}"]
+    run: >
+      ecctl call oss PutObject
+      --Bucket {{.oss_bucket_name}}
+      --Key {{.oss_export_prefix}}import.qcow2
+      --File {{.import_file}}
+      --parallel 16
+      --part-size 64Mi
+      --region {{.region}}
+    at: $.response
+    expect:
+      Bucket: { eq: "{{.oss_bucket_name}}" }
+      Key: { eq: "{{.oss_export_prefix}}import.qcow2" }
+      File: { eq: "{{.import_file}}" }
+    teardown: ecctl call oss DeleteObject --Bucket {{.oss_bucket_name}} --Key {{.oss_export_prefix}}import.qcow2 --region {{.region}}
+
+  - name: delete export source image
+    depends_on: [export]
+    locks: ["ecs-image:{{.run_name}}-export"]
+    run: ecctl ecs image delete {{.export_image_id}} --force
+    at: $.image
+    expect:
+      id: { eq: "{{.export_image_id}}" }
+      $.deleted: { eq: true }
+
+  - name: import
+    depends_on: [upload import object]
+    locks: ["ecs-image:{{.run_name}}-import"]
+    run: >
+      ecctl ecs image import
+      --name {{.run_name}}-import-image
+      --description ecctl-e2e-import-image-{{.run_id}}
+      --disk-device-mapping 'oss_bucket={{.oss_bucket_name}},oss_object={{.oss_export_prefix}}import.qcow2,format=QCOW2,disk_type=system'
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 60m
+    at: $.image
+    expect:
+      id: { type: string, prefix: m- }
+      name: { eq: "{{.run_name}}-import-image" }
+    capture:
+      imported_image_id: id
+    teardown: ecctl ecs image delete {{.imported_image_id}} --force
+
+  - name: delete imported image
+    depends_on: [import]
+    locks: ["ecs-image:{{.run_name}}-import"]
+    run: ecctl ecs image delete {{.imported_image_id}} --force
+    at: $.image
+    expect:
+      id: { eq: "{{.imported_image_id}}" }
+      $.deleted: { eq: true }
+
+  - name: delete import object
+    depends_on: [delete imported image]
+    locks: ["oss-bucket:{{.oss_bucket_name}}"]
+    run: ecctl call oss DeleteObject --Bucket {{.oss_bucket_name}} --Key {{.oss_export_prefix}}import.qcow2 --region {{.region}}
+    expect:
+      $.operation: DeleteObject
+
+  - name: delete exported object
+    depends_on: [upload import object]
+    locks: ["oss-bucket:{{.oss_bucket_name}}"]
+    run: ecctl call oss DeleteObject --Bucket {{.oss_bucket_name}} --Key {{.export_object_key}} --region {{.region}}
+    expect:
+      $.operation: DeleteObject
+
+  - name: delete OSS bucket
+    depends_on: [delete import object, delete exported object]
+    locks: ["oss-bucket:{{.oss_bucket_name}}"]
+    run: ecctl call oss DeleteBucket --Bucket {{.oss_bucket_name}} --region {{.region}}
+    expect:
+      $.operation: DeleteBucket
+
   - name: delete
+    depends_on: [get, list, copy]
+    locks: ["ecs-image:{{.run_name}}-base"]
     run: ecctl ecs image delete {{.image_id}} --force
     at: $.image
     expect:

@@ -26,6 +26,31 @@ func TestCheckAcceptsValidCaseSet(t *testing.T) {
 	}
 }
 
+func TestCheckRejectsMultipleCasesForOneResource(t *testing.T) {
+	_, cases, inputs, coveragePath := writeLintFixture(t, validCaseYAML(), validCoverageYAML("cases/ecs/instance.yaml"))
+	mustWrite(t, filepath.Join(cases, "ecs", "instance-readonly.yaml"), `
+resource: ecs/instance
+steps:
+  - name: list
+    run: ecctl ecs instance list
+`)
+
+	rep, err := Check(Options{
+		CasesDir:     cases,
+		InputsDir:    inputs,
+		CoveragePath: coveragePath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasLintCode(rep, "duplicate_resource_case") {
+		t.Fatalf("expected duplicate_resource_case, got %+v", rep.Errors)
+	}
+	if !hasLintCode(rep, "readonly_case_name") {
+		t.Fatalf("expected readonly_case_name, got %+v", rep.Errors)
+	}
+}
+
 func TestCheckAcceptsNestedParentResourceCommand(t *testing.T) {
 	root := t.TempDir()
 	cases := filepath.Join(root, "cases")
@@ -127,6 +152,145 @@ steps:
 `,
 			resource: "ack/nodepool",
 		},
+		{
+			name: "ack template create has no e2e tag input",
+			caseBody: `
+resource: ack/template
+steps:
+  - name: create
+    run: ecctl ack template create --name t --content '{}'
+    capture:
+      template_id: id
+    teardown: ecctl ack template delete {{.template_id}}
+`,
+			resource: "ack/template",
+		},
+		{
+			name: "ack diagnosis is owned by the disposable cluster fixture",
+			caseBody: `
+resource: ack/diagnosis
+needs:
+  - ack_diagnosis_node
+steps:
+  - name: create
+    run: ecctl ack diagnosis create --cluster c --type service --target '{"namespace":"kube-system","name":"kubelet"}'
+`,
+			resource: "ack/diagnosis",
+		},
+		{
+			name: "ack addon is untaggable and explicitly uninstalled",
+			caseBody: `
+resource: ack/addon
+steps:
+  - name: create
+    run: ecctl ack addon create gatekeeper --cluster c --version v1
+    teardown: ecctl ack addon delete gatekeeper --cluster c
+`,
+			resource: "ack/addon",
+		},
+		{
+			name: "ack check is immutable cluster-owned history",
+			caseBody: `
+resource: ack/check
+steps:
+  - name: create
+    run: ecctl ack check create --cluster c --type ClusterUpgrade
+`,
+			resource: "ack/check",
+		},
+		{
+			name: "ack report is immutable cluster-owned history",
+			caseBody: `
+resource: ack/report
+steps:
+  - name: create
+    run: ecctl ack inspect report create --cluster c
+`,
+			resource: "ack/report",
+		},
+		{
+			name: "ack vulnerability scan is immutable cluster-owned history",
+			caseBody: `
+resource: ack/vuls
+steps:
+  - name: create
+    run: ecctl ack vuls create --cluster c
+`,
+			resource: "ack/vuls",
+		},
+		{
+			name: "lingjun network test is immutable task history",
+			caseBody: `
+resource: lingjun/net-test
+steps:
+  - name: create
+    run: ecctl lingjun net-test create --type DelayTest --nodes n1 --nodes n2
+`,
+			resource: "lingjun/net-test",
+		},
+		{
+			name: "tag policy has no tag input and explicit teardown",
+			caseBody: `
+resource: tag/policy
+steps:
+  - name: create
+    run: ecctl tag policy create --name p --content '{}'
+    capture:
+      policy_id: id
+    teardown: ecctl tag policy delete {{.policy_id}}
+`,
+			resource: "tag/policy",
+		},
+		{
+			name: "ack trigger has no tag input",
+			caseBody: `
+resource: ack/trigger
+steps:
+  - name: create
+    run: ecctl ack trigger create --cluster c --project default/p
+    capture:
+      trigger_id: id
+    teardown: ecctl ack trigger delete {{.trigger_id}} --cluster c
+`,
+			resource: "ack/trigger",
+		},
+		{
+			name: "ack auto repair policy has no tag input",
+			caseBody: `
+resource: ack/auto-repair-policy
+steps:
+  - name: create
+    run: ecctl ack auto-repair-policy create --cluster c --nodepool p
+    teardown: ecctl ack auto-repair-policy delete --cluster c --nodepool p
+`,
+			resource: "ack/auto-repair-policy",
+		},
+		{
+			name: "lingjun node group has no tag input",
+			caseBody: `
+resource: lingjun/node-group
+steps:
+  - name: create
+    run: ecctl lingjun node-group create --cluster c --name n
+    capture:
+      node_group_id: id
+    teardown: ecctl lingjun node-group delete {{.node_group_id}}
+`,
+			resource: "lingjun/node-group",
+		},
+		{
+			name: "resource group service linked role has no tag input",
+			caseBody: `
+resource: rg/service-linked-role
+steps:
+  - name: create
+    run: ecctl rg service-linked-role create --service-name service --custom-suffix suffix
+    capture:
+      role_name: id
+    teardown: ecctl rg service-linked-role delete {{.role_name}}
+`,
+			resource: "rg/service-linked-role",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -147,7 +311,18 @@ resources:
           time: "2026-07-15T00:00:00Z"
           reason: not-run
 `)
-			rep, err := Check(Options{CasesDir: cases, InputsDir: inputs, CoveragePath: coveragePath})
+			opts := Options{CasesDir: cases, InputsDir: inputs, CoveragePath: coveragePath}
+			if tt.resource == "ack/diagnosis" {
+				stackPath := filepath.Join(filepath.Dir(cases), "fixtures", "stack.yaml")
+				mustWrite(t, stackPath, `
+provision:
+  - id: ack_diagnosis_node
+    resource: ack/node
+    run: ecctl ack node add --cluster c --instances i
+`)
+				opts.StackFile = stackPath
+			}
+			rep, err := Check(opts)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -194,14 +369,14 @@ resources:
 func TestCheckAcceptsDeclaredRegionalPrerequisiteReferences(t *testing.T) {
 	_, cases, inputs, coveragePath := writeLintFixture(t, `
 resource: ecs/instance
-requires_prerequisites: [ecs.instance_renew]
+requires_prerequisites: [test.optional]
 region_requirements:
   destination:
-    requires_prerequisites: [ecs.image]
+    requires_prerequisites: [test.destination]
     distinct_from: primary
 steps:
   - name: get
-    run: ecctl ecs instance get {{.prerequisites.ecs.instance_renew.instance_id}} --destination-region {{.regions.destination.id}} --token {{.regions.destination.prerequisites.ecs.image.token}}
+    run: ecctl ecs instance get {{.prerequisites.test.optional.instance_id}} --destination-region {{.regions.destination.id}} --token {{.regions.destination.prerequisites.test.destination.token}}
 `, `
 version: 3
 resources:
@@ -230,7 +405,7 @@ func TestCheckRejectsUndeclaredPrerequisiteTemplateReference(t *testing.T) {
 resource: ecs/instance
 steps:
   - name: get
-    run: ecctl ecs instance get {{.prerequisites.ecs.instance_renew.instance_id}}
+    run: ecctl ecs instance get {{.prerequisites.test.optional.instance_id}}
 `, `
 version: 3
 resources:
@@ -677,6 +852,49 @@ resources:
 
 func replace(s, old, new string) string {
 	return strings.ReplaceAll(s, old, new)
+}
+
+func TestCheckDAGRestrictsCapturesAndStackNeedsToOperationAncestors(t *testing.T) {
+	root := t.TempDir()
+	cases := filepath.Join(root, "cases")
+	mustMkdir(t, cases)
+	mustWrite(t, filepath.Join(cases, "dag.yaml"), `
+resource: ecs/region
+execution: dag
+steps:
+  - name: producer
+    needs: [fixture_a]
+    run: ecctl ecs region list
+    capture: { captured_id: "$.regions[0].id" }
+  - name: sibling
+    needs: [fixture_a]
+    run: ecctl ecs region list --filter id={{.captured_id}} --filter fixture={{.stack.fixture_b}}
+    locks: ["region:{{.captured_id}}"]
+`)
+	stack := filepath.Join(root, "stack.yaml")
+	mustWrite(t, stack, `
+provision:
+  - id: fixture_a
+    resource: ecs/region
+    mode: lookup
+    run: ecctl ecs region list
+    capture: { fixture_a: "$.regions[0].id" }
+  - id: fixture_b
+    resource: ecs/region
+    mode: lookup
+    run: ecctl ecs region list
+    capture: { fixture_b: "$.regions[0].id" }
+`)
+	report, err := Check(Options{CasesDir: cases, InputsDir: filepath.Join(root, "inputs"), StackFile: stack})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasLintCode(report, "undefined_var") {
+		t.Fatalf("errors = %#v, want sibling capture rejection", report.Errors)
+	}
+	if !hasLintCode(report, "missing_stack_need") {
+		t.Fatalf("errors = %#v, want step fixture closure rejection", report.Errors)
+	}
 }
 
 func hasLintCode(rep *Report, code string) bool {

@@ -36,8 +36,11 @@ Create ACK cluster
 | `--region` | string | ✓ | Alibaba Cloud region |
 | `--type` | string | ✓ | cluster type |
 | `--api-server-public` | boolean |  | expose the API server through a public endpoint |
+| `--auto-mode` | boolean |  | enable ACK Auto Mode; requires an ACK managed Pro cluster |
+| `--deletion-protection` | boolean |  | enable cluster deletion protection |
 | `--edition` | string |  | cluster edition or specification; common values include ack.standard, ack.pro.small, ack.pro.xlarge, ack.pro.2xlarge, ack.pro.4xlarge |
 | `--pod-cidr` | cidr |  | Pod network CIDR; sent to ACK CreateCluster as container_cidr |
+| `--pod-vswitch` | string_array |  | VSwitch IDs used to allocate Terway pod IP addresses |
 | `--profile` | string |  | ACK cluster scenario profile. To use both config and ACK profiles, put the config profile before the resource command, for example ecctl --profile prod ack create --profile Serverless. |
 | `--resource-group` | string |  | resource group ID |
 | `--service-cidr` | cidr |  | Service network CIDR |

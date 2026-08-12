@@ -161,6 +161,91 @@ func TestExecuteOperationCallReturnsNotFoundForEmptyRequiredProbe(t *testing.T) 
 	}
 }
 
+func TestExecuteWorkflowCanTreatProviderNotFoundAsEmptyProbe(t *testing.T) {
+	resource, err := spec.Load([]byte(`
+schema_version: 2
+product: example
+resource: config
+kind: regional
+identity:
+  field: id
+  output_root:
+    one: config
+    many: configs
+schema:
+  fields:
+    id:
+      type: string
+probes:
+  detail:
+    api: GetConfig
+    response:
+      item: $
+      id: $.id
+      fields:
+        id: $.id
+waiters:
+  config_present:
+    probe: detail
+    target: present
+    interval: 1ms
+    timeout: 50ms
+bindings:
+  create:
+    api: CreateConfig
+    wait: config_present
+operations:
+  update:
+    input:
+      fields:
+        - id:
+            required: true
+    workflow:
+      - probe: detail
+        as: existing
+        not_found: empty
+      - binding: create
+        unless: has(context.existing)
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &fakeCaller{
+		errors: []error{
+			ecerrors.NotFound("NotFound", "config does not exist"),
+			nil,
+			ecerrors.NotFound("NotFound", "config is not visible yet"),
+			nil,
+		},
+		responses: []map[string]any{
+			{"request_id": "req-create"},
+			{"id": "config-1"},
+		},
+	}
+
+	result, err := NewExecutor(resource, caller).Execute(context.Background(), Request{
+		Action: "update",
+		Input:  map[string]any{"id": "config-1"},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(caller.calls) != 4 ||
+		caller.calls[0].operation != "GetConfig" ||
+		caller.calls[1].operation != "CreateConfig" ||
+		caller.calls[2].operation != "GetConfig" ||
+		caller.calls[3].operation != "GetConfig" {
+		t.Fatalf("calls = %#v", caller.calls)
+	}
+	if len(result.Actions) != 4 ||
+		result.Actions[0].ActionName != "GetConfig" ||
+		result.Actions[1].ActionName != "CreateConfig" ||
+		result.Actions[2].ActionName != "GetConfig" ||
+		result.Actions[3].ActionName != "GetConfig" {
+		t.Fatalf("actions = %#v", result.Actions)
+	}
+}
+
 func TestExecuteWorkflowCarriesProbeExtraFields(t *testing.T) {
 	loaded, err := spec.Load([]byte(`
 schema_version: 2

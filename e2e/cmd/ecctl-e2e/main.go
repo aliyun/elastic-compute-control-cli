@@ -108,7 +108,8 @@ func runCmd() *cobra.Command {
 		parallel                       int
 		stepTimeout                    time.Duration
 		keep, dryRun, exitZero         bool
-		collectOnly, quiet, verbose    bool
+		collectOnly, validateBinary    bool
+		quiet, verbose                 bool
 	)
 	cmd := &cobra.Command{
 		Use:   "run [TARGET...]",
@@ -164,7 +165,14 @@ func runCmd() *cobra.Command {
 			}
 
 			if collectOnly {
-				if err := printCollected(cmd.OutOrStdout(), suites, output, quiet, verbose); err != nil {
+				if validateBinary && len(suites) > 0 {
+					ctx, cancel := signalContext()
+					defer cancel()
+					if err := validateSelectedBinary(ctx, ecctlBin, surface, stackFile, suites, true); err != nil {
+						return err
+					}
+				}
+				if err := printCollected(cmd.OutOrStdout(), suites, stackFile, output, quiet, verbose); err != nil {
 					return err
 				}
 				if len(suites) == 0 {
@@ -177,40 +185,15 @@ func runCmd() *cobra.Command {
 			}
 			ctx, cancel := signalContext()
 			defer cancel()
-			regionProfiles, renewalConfigured := maskUnconfiguredRenewalPrerequisites(regionProfiles)
 			primaryRegion := ""
 			if cmd.Flags().Changed("region") {
 				primaryRegion = region
-				renewalConfigured = hasConfiguredRenewalTarget(regionProfiles, primaryRegion)
 			}
-			var renewalSkippedSuites []*scenario.Suite
-			suites, renewalSkippedSuites = partitionRenewalSuites(suites, renewalConfigured)
 			var unavailablePrerequisiteSuites []prerequisiteSkippedSuite
 			prerequisiteResult := prereqcheck.Result{Profiles: regionProfiles}
 			if len(suites) > 0 && !dryRun {
-				caps, err := surfacepkg.LoadFromBinary(ctx, ecctlBin)
-				if err != nil {
-					return fmt.Errorf("load %s capabilities from %s: %w", surface, ecctlBin, err)
-				}
-				if caps.Surface != surface {
-					return fmt.Errorf("selected binary %s reports surface %q, want %q", ecctlBin, caps.Surface, surface)
-				}
-				surfaceSuites := append([]*scenario.Suite(nil), suites...)
-				if stackFile != "" {
-					stackSteps, err := runner.StackStepsForSuites(stackFile, suites)
-					if err != nil {
-						return fmt.Errorf("plan shared stack surface: %w", err)
-					}
-					stackSuite := &scenario.Suite{Path: stackFile}
-					for _, step := range stackSteps {
-						stackSuite.Steps = append(stackSuite.Steps, scenario.Step{
-							Name: step.ID, Run: step.Run, Teardown: step.Teardown,
-						})
-					}
-					surfaceSuites = append(surfaceSuites, stackSuite)
-				}
-				if issues := surfacepkg.ValidateSuites(surfaceSuites, caps); len(issues) > 0 {
-					return fmt.Errorf("selected binary cannot run %s cases: %s %s: %s", surface, issues[0].Path, issues[0].Code, issues[0].Message)
+				if err := validateSelectedBinary(ctx, ecctlBin, surface, stackFile, suites, validateBinary); err != nil {
+					return err
 				}
 				required := probedPrerequisites(suites)
 				if len(required) > 0 {
@@ -233,15 +216,20 @@ func runCmd() *cobra.Command {
 			var executionUnits []runplan.ExecutionUnit
 			if len(suites) > 0 {
 				stackPrerequisites := map[string][]string{}
+				optionalStackPrerequisites := map[string][]string{}
 				if stackFile != "" {
 					stackPrerequisites, err = runner.StackPrerequisitesBySuite(stackFile, suites)
 					if err != nil {
 						return fmt.Errorf("plan regional prerequisites: %w", err)
 					}
+					optionalStackPrerequisites, err = runner.StackOptionalPrerequisitesBySuite(stackFile, suites)
+					if err != nil {
+						return fmt.Errorf("plan optional regional prerequisites: %w", err)
+					}
 				}
 				executionUnits, err = runplan.Build(runplan.Request{
 					Suites: suites, Profiles: regionProfiles, PrimaryRegion: primaryRegion,
-					StackPrerequisites: stackPrerequisites,
+					StackPrerequisites: stackPrerequisites, OptionalStackPrerequisites: optionalStackPrerequisites,
 				})
 				if err != nil {
 					return fmt.Errorf("plan E2E executions: %w", err)
@@ -252,13 +240,11 @@ func runCmd() *cobra.Command {
 				label = defaultLabel()
 			}
 			executions := make([]report.Execution, 0, len(executionUnits)+2)
-			if len(renewalSkippedSuites) > 0 {
-				executions = append(executions, renewalNotConfiguredExecution(renewalSkippedSuites))
-				logf("skipped %d instance renewal case(s); no selected region profile configures ecs.instance_renew.instance_id", len(renewalSkippedSuites))
-			}
 			if len(unavailablePrerequisiteSuites) > 0 {
 				executions = append(executions, unavailablePrerequisiteExecution(unavailablePrerequisiteSuites))
 			}
+			session := runner.NewSession()
+			defer session.Close()
 			var firstExecutionErr error
 			for _, unit := range executionUnits {
 				if ctx.Err() != nil {
@@ -306,6 +292,7 @@ func runCmd() *cobra.Command {
 						Suites:             unit.Suites,
 						Logf:               logf,
 						PreResolvedLingjun: preResolvedLingjun,
+						Session:            session,
 					}
 					unitRun, runErr := runner.Run(ctx, opt)
 					retry, reason := regionselect.Classify(unitRun, runErr)
@@ -315,6 +302,12 @@ func runCmd() *cobra.Command {
 					}
 					attempts = append(attempts, report.ExecutionAttempt{Regions: regionMapping, Status: status, Reason: reason})
 					if retry && !keep && attemptIndex+1 < len(unit.Assignments) {
+						if cleanupFailures := session.Discard(surface, ecctlBin, regionMapping[runplan.PrimaryRole]); len(cleanupFailures) > 0 {
+							finalUnitRun = unitRun
+							finalUnitErr = fmt.Errorf("cleanup failed before region fallback: %s", strings.Join(cleanupFailures, "; "))
+							finalRegions = regionMapping
+							break
+						}
 						next := assignmentRegions(unit.Assignments[attemptIndex+1])
 						logf("%s assignment %s unavailable; retrying with %s: %s", unit.ID, formatRegionMapping(regionMapping), formatRegionMapping(next), reason)
 						continue
@@ -337,6 +330,17 @@ func runCmd() *cobra.Command {
 					}
 				}
 				executions = append(executions, execution)
+			}
+			if cleanupFailures := session.Close(); len(cleanupFailures) > 0 {
+				now := time.Now()
+				executions = append(executions, report.Execution{
+					ID: "run-fixture-cleanup", Signature: "lifetime=run", StartedAt: now, FinishedAt: now,
+					Error: strings.Join(cleanupFailures, "; "),
+					Cases: []report.Case{{
+						Name: "(run fixture cleanup)", Resource: "stack", Status: report.StatusFail,
+						Error: strings.Join(cleanupFailures, "; "),
+					}},
+				})
 			}
 			finalRun := report.Aggregate(label, surface, ecctlBin, executions)
 			// Always emit the report, even when a unit errored or cases failed.
@@ -377,12 +381,13 @@ func runCmd() *cobra.Command {
 	f.StringVar(&ecctlBin, "ecctl-bin", "ecctl", "ecctl binary to invoke")
 	f.StringVarP(&keyword, "keyword", "k", "", "only run cases matching this expression (e.g. \"vpc or eni\")")
 	f.StringVar(&surface, "surface", string(scenario.SurfacePublic), "case command surface: public|full")
-	f.IntVar(&parallel, "concurrency", 20, "max cases to run concurrently")
+	f.IntVar(&parallel, "concurrency", 20, "max operation commands to run concurrently")
 	f.DurationVar(&stepTimeout, "step-timeout", 10*time.Minute, "default per-step timeout")
 	f.BoolVar(&keep, "keep", false, "do not tear down created resources (debug)")
 	f.BoolVar(&dryRun, "dry-run", false, "render commands without calling the cloud")
 	f.BoolVar(&exitZero, "exit-zero", false, "always exit 0 even on failures (nightly)")
 	f.BoolVar(&collectOnly, "collect-only", false, "list selected cases without running them (also validates)")
+	f.BoolVar(&validateBinary, "validate-binary", false, "validate selected commands against --ecctl-bin offline before running or collecting")
 	f.StringVarP(&output, "output", "o", "text", "output format: text|json")
 	f.BoolVarP(&quiet, "quiet", "q", false, "terse output (with --collect-only: one path per line)")
 	f.BoolVarP(&verbose, "verbose", "v", false, "verbose output (with --collect-only: list step node ids)")
@@ -390,7 +395,38 @@ func runCmd() *cobra.Command {
 	return cmd
 }
 
-const renewalPrerequisite = "ecs.instance_renew"
+func validateSelectedBinary(ctx context.Context, ecctlBin, selectedSurface, stackFile string, suites []*scenario.Suite, validateParsers bool) error {
+	caps, err := surfacepkg.LoadFromBinary(ctx, ecctlBin)
+	if err != nil {
+		return fmt.Errorf("load %s capabilities from %s: %w", selectedSurface, ecctlBin, err)
+	}
+	if caps.Surface != selectedSurface {
+		return fmt.Errorf("selected binary %s reports surface %q, want %q", ecctlBin, caps.Surface, selectedSurface)
+	}
+	surfaceSuites := append([]*scenario.Suite(nil), suites...)
+	if stackFile != "" {
+		stackSteps, err := runner.StackStepsForSuites(stackFile, suites)
+		if err != nil {
+			return fmt.Errorf("plan shared stack surface: %w", err)
+		}
+		stackSuite := &scenario.Suite{Path: stackFile}
+		for _, step := range stackSteps {
+			stackSuite.Steps = append(stackSuite.Steps, scenario.Step{
+				Name: step.ID, Run: step.Run, Teardown: step.Teardown,
+			})
+		}
+		surfaceSuites = append(surfaceSuites, stackSuite)
+	}
+	if issues := surfacepkg.ValidateSuites(surfaceSuites, caps); len(issues) > 0 {
+		return fmt.Errorf("selected binary cannot run %s cases: %s %s: %s", selectedSurface, issues[0].Path, issues[0].Code, issues[0].Message)
+	}
+	if validateParsers {
+		if issues := surfacepkg.ValidateCommandParsers(ctx, ecctlBin, surfaceSuites); len(issues) > 0 {
+			return fmt.Errorf("selected binary cannot parse %s cases: %s %s: %s", selectedSurface, issues[0].Path, issues[0].Code, issues[0].Message)
+		}
+	}
+	return nil
+}
 
 type prerequisiteSkippedSuite struct {
 	Suite  *scenario.Suite
@@ -401,8 +437,15 @@ func probedPrerequisites(suites []*scenario.Suite) map[string]bool {
 	required := map[string]bool{}
 	for _, suite := range suites {
 		for _, prerequisite := range suite.RequiresPrerequisites {
-			if prerequisite == prereqcheck.ACKRootAccount || prerequisite == prereqcheck.ECSImage || prerequisite == prereqcheck.LingjunCluster {
+			if prereqcheck.RequiresValidation(prerequisite) {
 				required[prerequisite] = true
+			}
+		}
+		for _, step := range suite.Steps {
+			for _, prerequisite := range step.RequiresPrerequisites {
+				if prereqcheck.RequiresValidation(prerequisite) {
+					required[prerequisite] = true
+				}
 			}
 		}
 	}
@@ -413,7 +456,7 @@ func partitionUnavailablePrerequisiteSuites(suites []*scenario.Suite, profiles [
 	for _, suite := range suites {
 		var required []string
 		for _, prerequisite := range suite.RequiresPrerequisites {
-			if prerequisite == prereqcheck.ACKRootAccount || prerequisite == prereqcheck.ECSImage || prerequisite == prereqcheck.LingjunCluster {
+			if prereqcheck.RequiresValidation(prerequisite) {
 				required = append(required, prerequisite)
 			}
 		}
@@ -459,88 +502,17 @@ func unavailablePrerequisiteExecution(suites []prerequisiteSkippedSuite) report.
 	return execution
 }
 
-func partitionRenewalSuites(suites []*scenario.Suite, configured bool) (runnable, skipped []*scenario.Suite) {
-	for _, suite := range suites {
-		if !configured && requiresPrerequisite(suite, renewalPrerequisite) {
-			skipped = append(skipped, suite)
-			continue
-		}
-		runnable = append(runnable, suite)
-	}
-	return runnable, skipped
-}
-
-func requiresPrerequisite(suite *scenario.Suite, prerequisite string) bool {
-	for _, required := range suite.RequiresPrerequisites {
-		if required == prerequisite {
-			return true
-		}
-	}
-	return false
-}
-
-// maskUnconfiguredRenewalPrerequisites keeps the region-profile loader
-// schema-free while ensuring an empty renewal bundle cannot be scheduled. The
-// first get step in the case remains the live queryability gate before renew.
-func maskUnconfiguredRenewalPrerequisites(profiles []fixtureconfig.RegionProfile) ([]fixtureconfig.RegionProfile, bool) {
-	masked := append([]fixtureconfig.RegionProfile(nil), profiles...)
-	configured := false
-	for i, profile := range masked {
-		bundle, declared := profile.Prerequisites[renewalPrerequisite]
-		instanceID, valid := bundle["instance_id"].(string)
-		if declared && valid && strings.TrimSpace(instanceID) != "" {
-			configured = true
-			continue
-		}
-		if !declared {
-			continue
-		}
-		prerequisites := make(map[string]map[string]any, len(profile.Prerequisites))
-		for name, value := range profile.Prerequisites {
-			if name != renewalPrerequisite {
-				prerequisites[name] = value
-			}
-		}
-		masked[i].Prerequisites = prerequisites
-	}
-	return masked, configured
-}
-
-func hasConfiguredRenewalTarget(profiles []fixtureconfig.RegionProfile, region string) bool {
-	for _, profile := range profiles {
-		if profile.ID == region && profile.HasPrerequisites([]string{renewalPrerequisite}) {
-			return true
-		}
-	}
-	return false
-}
-
-func renewalNotConfiguredExecution(suites []*scenario.Suite) report.Execution {
-	now := time.Now()
-	execution := report.Execution{
-		ID:         "configured-instance-renewal",
-		Signature:  "prerequisite=ecs.instance_renew",
-		StartedAt:  now,
-		FinishedAt: now,
-	}
-	for _, suite := range suites {
-		name := strings.TrimSuffix(filepath.Base(suite.Path), filepath.Ext(suite.Path))
-		if name == "" {
-			name = suite.Resource
-		}
-		execution.Cases = append(execution.Cases, report.Case{
-			Name: name, Resource: suite.Resource, Path: suite.Path, Status: report.StatusSkipped,
-			Error: "ecs.instance_renew.instance_id is not configured for the selected region profiles",
-		})
-	}
-	return execution
-}
-
 func resolveRunnerRegions(unit runplan.ExecutionUnit, assignment runplan.Assignment) (map[string]runner.Region, map[string]string, error) {
 	regions := make(map[string]runner.Region, len(assignment.Regions))
 	mapping := make(map[string]string, len(assignment.Regions))
 	for role, profile := range assignment.Regions {
-		prerequisites, err := profile.ResolvePrerequisites(unit.Requirements[role])
+		requirements := append([]string(nil), unit.Requirements[role]...)
+		for _, optional := range unit.Optional[role] {
+			if profile.HasPrerequisites([]string{optional}) {
+				requirements = append(requirements, optional)
+			}
+		}
+		prerequisites, err := profile.ResolvePrerequisites(requirements)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -600,20 +572,44 @@ func cleanupJournalForAttempt(base, reportDir, label, executionID string, execut
 // printCollected renders the selected cases for --collect-only. With -o json it
 // emits a machine-readable array; otherwise text: -q is one path per line, -v
 // also lists step node ids.
-func printCollected(w io.Writer, suites []*scenario.Suite, output string, quiet, verbose bool) error {
+func printCollected(w io.Writer, suites []*scenario.Suite, stackFile, output string, quiet, verbose bool) error {
+	dependencies, err := runner.StackDependenciesBySuite(stackFile, suites)
+	if err != nil {
+		return fmt.Errorf("resolve fixture dependencies: %w", err)
+	}
 	if output == "json" {
+		type stepJSON struct {
+			Name                  string   `json:"name"`
+			DependsOn             []string `json:"depends_on,omitempty"`
+			DirectNeeds           []string `json:"direct_needs,omitempty"`
+			RequiresPrerequisites []string `json:"requires_prerequisites,omitempty"`
+			Locks                 []string `json:"locks,omitempty"`
+		}
 		type caseJSON struct {
-			Resource string   `json:"resource"`
-			Path     string   `json:"path"`
-			Steps    []string `json:"steps"`
+			Resource    string                     `json:"resource"`
+			Covers      []string                   `json:"covers,omitempty"`
+			Path        string                     `json:"path"`
+			Execution   scenario.ExecutionMode     `json:"execution"`
+			Steps       []stepJSON                 `json:"steps"`
+			DirectNeeds []string                   `json:"direct_needs,omitempty"`
+			Fixtures    []runner.FixtureDependency `json:"fixtures,omitempty"`
 		}
 		out := make([]caseJSON, len(suites))
 		for i, s := range suites {
-			steps := make([]string, len(s.Steps))
+			steps := make([]stepJSON, len(s.Steps))
 			for j, st := range s.Steps {
-				steps[j] = st.Name
+				steps[j] = stepJSON{
+					Name: st.Name, DependsOn: append([]string(nil), st.DependsOn...),
+					DirectNeeds:           append([]string(nil), st.Needs...),
+					RequiresPrerequisites: append([]string(nil), st.RequiresPrerequisites...),
+					Locks:                 append([]string(nil), st.Locks...),
+				}
 			}
-			out[i] = caseJSON{Resource: s.Resource, Path: s.Path, Steps: steps}
+			dependency := dependencies[s.Path]
+			out[i] = caseJSON{
+				Resource: s.Resource, Covers: append([]string(nil), s.Covers...), Path: s.Path, Steps: steps,
+				Execution: s.Execution, DirectNeeds: dependency.Direct, Fixtures: dependency.Fixtures,
+			}
 		}
 		b, err := json.MarshalIndent(out, "", "  ")
 		if err != nil {
@@ -631,8 +627,33 @@ func printCollected(w io.Writer, suites []*scenario.Suite, output string, quiet,
 	for _, s := range suites {
 		fmt.Fprintf(w, "%-24s %2d steps  %s\n", s.Resource, len(s.Steps), s.Path)
 		if verbose {
+			if dependency := dependencies[s.Path]; len(dependency.Fixtures) > 0 {
+				fmt.Fprintln(w, "    fixtures:")
+				for _, fixture := range dependency.Fixtures {
+					direct := ""
+					for _, need := range dependency.Direct {
+						if need == fixture.ID {
+							direct = " direct"
+							break
+						}
+					}
+					fmt.Fprintf(w, "      %s (%s, %s, lifetime=%s%s)\n", fixture.ID, fixture.Resource, fixture.Mode, fixture.Lifetime, direct)
+				}
+			}
 			for _, st := range s.Steps {
 				fmt.Fprintf(w, "    %s::%s\n", s.Path, st.Name)
+				if len(st.DependsOn) > 0 {
+					fmt.Fprintf(w, "      depends_on: %s\n", strings.Join(st.DependsOn, ", "))
+				}
+				if len(st.Needs) > 0 {
+					fmt.Fprintf(w, "      needs: %s\n", strings.Join(st.Needs, ", "))
+				}
+				if len(st.RequiresPrerequisites) > 0 {
+					fmt.Fprintf(w, "      requires_prerequisites: %s\n", strings.Join(st.RequiresPrerequisites, ", "))
+				}
+				if len(st.Locks) > 0 {
+					fmt.Fprintf(w, "      locks: %s\n", strings.Join(st.Locks, ", "))
+				}
 			}
 		}
 	}
@@ -852,24 +873,42 @@ func sweepCheckCmd() *cobra.Command {
 }
 
 func coverageCmd() *cobra.Command {
-	var specsDir, casesDir, output string
-	var failOnGap bool
+	var specsDir, casesDir, output, ecctlBin, capabilitiesPath, surface string
+	var failOnGap, failOnResourceGap bool
 	cmd := &cobra.Command{
 		Use:   "coverage",
 		Short: "Report ecctl capabilities (spec operations) with no E2E case",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			rep, err := coverage.Analyze(specsDir, casesDir)
+			selection, err := loadCapabilitySelection(capabilitiesPath, ecctlBin, surface)
+			if err != nil {
+				return err
+			}
+			var rep *coverage.Report
+			if selection == nil {
+				rep, err = coverage.Analyze(specsDir, casesDir)
+			} else {
+				rep, err = coverage.AnalyzeForCapabilities(specsDir, casesDir, selection.Filter)
+			}
 			if err != nil {
 				return err
 			}
 			if output == "json" {
 				b, _ := json.MarshalIndent(rep, "", "  ")
-				fmt.Println(string(b))
+				fmt.Fprintln(cmd.OutOrStdout(), string(b))
 			} else {
-				fmt.Printf("coverage: %d/%d capabilities covered, %d gaps\n", rep.Covered, rep.Declared, len(rep.Gaps))
-				for _, g := range rep.Gaps {
-					fmt.Printf("  GAP  %s %s\n", g.Resource, g.Verb)
+				fmt.Fprintf(cmd.OutOrStdout(),
+					"coverage: %d/%d capabilities covered, %d gaps; %d/%d resources covered, %d resource gaps\n",
+					rep.Covered, rep.Declared, len(rep.Gaps),
+					rep.CoveredResources, rep.DeclaredResources, len(rep.ResourceGaps))
+				for _, resource := range rep.ResourceGaps {
+					fmt.Fprintf(cmd.OutOrStdout(), "  RESOURCE GAP  %s\n", resource)
 				}
+				for _, g := range rep.Gaps {
+					fmt.Fprintf(cmd.OutOrStdout(), "  GAP  %s %s\n", g.Resource, g.Verb)
+				}
+			}
+			if failOnResourceGap && len(rep.ResourceGaps) > 0 {
+				return &exitError{code: exitTestsFailed, msg: fmt.Sprintf("%d resources have no E2E case", len(rep.ResourceGaps))}
 			}
 			if failOnGap && len(rep.Gaps) > 0 {
 				return &exitError{code: exitTestsFailed, msg: fmt.Sprintf("%d uncovered capabilities", len(rep.Gaps))}
@@ -881,7 +920,11 @@ func coverageCmd() *cobra.Command {
 	f.StringVar(&specsDir, "specs", "../specs", "ecctl specs directory")
 	f.StringVar(&casesDir, "cases", "cases", "E2E cases directory")
 	f.StringVarP(&output, "output", "o", "text", "output format: text|json")
+	f.StringVar(&ecctlBin, "ecctl-bin", "", "ecctl binary whose capabilities define the selected surface")
+	f.StringVar(&capabilitiesPath, "capabilities", "", "capabilities JSON file used to filter coverage")
+	f.StringVar(&surface, "surface", string(scenario.SurfacePublic), "capability surface: public|full")
 	f.BoolVar(&failOnGap, "fail-on-gap", false, "exit non-zero if any capability is uncovered")
+	f.BoolVar(&failOnResourceGap, "fail-on-resource-gap", false, "exit non-zero if any implemented resource has no E2E case")
 	cmd.AddCommand(coverageRegistryCmd())
 	return cmd
 }

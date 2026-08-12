@@ -1285,3 +1285,22 @@ func TestOutputResourceActionPayloadEmptyItemsAndCapabilityCombo(t *testing.T) {
 		t.Fatalf("explicit-output payload missing ecctl_capabilities_used; payload=%#v", payload)
 	}
 }
+
+func TestResourceEffectiveRegion(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		fixed  string
+		region string
+		want   string
+	}{
+		{name: "no fixed region keeps user region", fixed: "", region: "cn-shanghai", want: "cn-shanghai"},
+		{name: "fixed region overrides user region", fixed: "cn-hangzhou", region: "cn-shanghai", want: "cn-hangzhou"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resource := spec.ResourceSpec{FixedRegion: tt.fixed}
+			if got := resourceEffectiveRegion(resource, tt.region); got != tt.want {
+				t.Fatalf("resourceEffectiveRegion = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

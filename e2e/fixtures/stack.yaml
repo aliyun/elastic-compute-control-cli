@@ -7,6 +7,8 @@ tags:
 
 provision:
   - id: vpc
+    resource: vpc/vpc
+    lifetime: run
     run: ecctl vpc create --name {{.resource_prefix}}-vpc --cidr 10.0.0.0/16 --tag ecctl-e2e=1 --tag run-id={{.run_id}}
     at: $.vpc
     capture:
@@ -14,6 +16,8 @@ provision:
     teardown: ecctl vpc delete {{.vpc}}
 
   - id: vswitch
+    resource: vpc/vswitch
+    lifetime: run
     needs: [vpc]
     requires_params: [ecs.zone]
     run: ecctl vpc vswitch create --vpc {{.vpc}} --zone {{.params.ecs.zone}} --cidr 10.0.1.0/24 --name {{.resource_prefix}}-vsw --tag ecctl-e2e=1 --tag run-id={{.run_id}}
@@ -23,6 +27,8 @@ provision:
     teardown: ecctl vpc vswitch delete {{.vswitch}}
 
   - id: security_group
+    resource: ecs/sg
+    lifetime: run
     needs: [vpc]
     run: ecctl ecs sg create --vpc {{.vpc}} --name {{.resource_prefix}}-sg --tag ecctl-e2e=1 --tag run-id={{.run_id}}
     at: $.security_group
@@ -31,6 +37,9 @@ provision:
     teardown: ecctl ecs sg delete {{.security_group}}
 
   - id: image
+    resource: ecs/image
+    mode: lookup
+    lifetime: run
     requires_params: [ecs.image_id]
     # Resolve the image once before provisioning, then use that
     # concrete ID for every dependent create. This keeps image selection and
@@ -42,21 +51,25 @@ provision:
     # image is read-only; no teardown
 
   - id: ack_shared_cluster
+    resource: ack/ack
+    lifetime: run
     needs: [vpc, vswitch]
-    requires_params: [ack.cluster_type, ack.version, ack.edition, ack.profile, ack.zone]
+    requires_params: [ack.version, ack.profile, ack.zone]
     run: >
       ecctl ack create
       --name {{.resource_prefix}}-ack-shared
-      --type {{.params.ack.cluster_type}}
+      --type ManagedKubernetes
       --version {{.params.ack.version}}
-      --edition {{.params.ack.edition}}
+      --edition ack.pro.small
+      --auto-mode
       --profile {{.params.ack.profile}}
       --vpc {{.vpc}}
       --vswitch {{.vswitch}}
+      --pod-vswitch {{.vswitch}}
       --zone {{.params.ack.zone}}
-      --pod-cidr 172.22.0.0/16
       --service-cidr 172.23.0.0/20
       --snat-entry
+      --deletion-protection=false
       --tag ecctl-e2e=1 --tag run-id={{.run_id}}
       --timeout 30m
     at: $.cluster
@@ -65,13 +78,15 @@ provision:
     teardown: ecctl ack delete {{.ack_shared_cluster}} --force --timeout 30m
 
   - id: ack_shared_nodepool
+    resource: ack/nodepool
+    lifetime: run
     needs: [ack_shared_cluster, vswitch]
     requires_params: [ack.instance_type, ack.system_disk_category, ack.runtime, ack.runtime_version]
     run: >
       ecctl ack nodepool create
       --cluster {{.ack_shared_cluster}}
       --name {{.resource_prefix}}-ack-shared-pool
-      --desired-size 0
+      --desired-size 1
       --instance-type {{.params.ack.instance_type}}
       --vswitch {{.vswitch}}
       --runtime {{.params.ack.runtime}}
@@ -86,7 +101,73 @@ provision:
       ack_node_security_group: scaling_group.security_group_id
     teardown: ecctl ack nodepool delete {{.ack_shared_nodepool}} --cluster {{.ack_shared_cluster}} --force --timeout 30m
 
+  - id: ack_policy_gatekeeper_catalog
+    resource: ack/addon
+    mode: lookup
+    lifetime: run
+    needs: [ack_shared_cluster]
+    requires_params: [ack.version, ack.profile]
+    run: >
+      ecctl ack addon get managed-gatekeeper
+      --catalog
+      --cluster {{.ack_shared_cluster}}
+      --cluster-type ManagedKubernetes
+      --cluster-version {{.params.ack.version}}
+      --cluster-spec ack.pro.small
+      --cluster-profile {{.params.ack.profile}}
+    at: $.addon
+    capture:
+      ack_policy_gatekeeper_version: version
+
+  - id: ack_policy_template_controller_catalog
+    resource: ack/addon
+    mode: lookup
+    lifetime: run
+    needs: [ack_shared_cluster]
+    requires_params: [ack.version, ack.profile]
+    run: >
+      ecctl ack addon get managed-policy-template-controller
+      --catalog
+      --cluster {{.ack_shared_cluster}}
+      --cluster-type ManagedKubernetes
+      --cluster-version {{.params.ack.version}}
+      --cluster-spec ack.pro.small
+      --cluster-profile {{.params.ack.profile}}
+    at: $.addon
+    capture:
+      ack_policy_template_controller_version: version
+
+  - id: ack_policy_gatekeeper
+    resource: ack/addon
+    lifetime: run
+    needs: [ack_policy_gatekeeper_catalog]
+    run: >
+      ecctl ack addon create managed-gatekeeper
+      --cluster {{.ack_shared_cluster}}
+      --version {{.ack_policy_gatekeeper_version}}
+      --timeout 15m
+    at: $.addon
+    capture:
+      ack_policy_gatekeeper: name
+    teardown: ecctl ack addon delete {{.ack_policy_gatekeeper}} --cluster {{.ack_shared_cluster}} --timeout 15m
+
+  - id: ack_policy_template_controller
+    resource: ack/addon
+    lifetime: run
+    needs: [ack_policy_gatekeeper, ack_policy_template_controller_catalog]
+    run: >
+      ecctl ack addon create managed-policy-template-controller
+      --cluster {{.ack_shared_cluster}}
+      --version {{.ack_policy_template_controller_version}}
+      --timeout 15m
+    at: $.addon
+    capture:
+      ack_policy_template_controller: name
+    teardown: ecctl ack addon delete {{.ack_policy_template_controller}} --cluster {{.ack_shared_cluster}} --timeout 15m
+
   - id: ack_test_instance
+    resource: ecs/instance
+    lifetime: run
     needs: [vswitch, image, ack_shared_nodepool]
     requires_params: [ack.instance_type, ack.system_disk_category]
     run: >
@@ -105,7 +186,46 @@ provision:
       ack_test_instance: id
     teardown: ecctl ecs instance delete {{.ack_test_instance}} --force
 
+  - id: ack_diagnosis_instance
+    resource: ecs/instance
+    lifetime: run
+    needs: [vswitch, image, ack_shared_nodepool]
+    requires_params: [ack.instance_type, ack.system_disk_category]
+    run: >
+      ecctl ecs instance create
+      --type {{.params.ack.instance_type}}
+      --image {{.image}}
+      --sg {{.ack_node_security_group}}
+      --ram-role {{.ack_worker_role}}
+      --vswitch {{.vswitch}}
+      --system-disk '{"category":"{{.params.ack.system_disk_category}}","size":40}'
+      --name {{.resource_prefix}}-ack-diagnosis-node
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 30m
+    at: $.instance
+    capture:
+      ack_diagnosis_instance: id
+    teardown: ecctl ecs instance delete {{.ack_diagnosis_instance}} --force
+
+  - id: ack_diagnosis_node
+    resource: ack/node
+    lifetime: run
+    needs: [ack_shared_cluster, ack_shared_nodepool, ack_diagnosis_instance]
+    run: >
+      ecctl ack node attach
+      --cluster {{.ack_shared_cluster}}
+      --nodepool {{.ack_shared_nodepool}}
+      --instance {{.ack_diagnosis_instance}}
+      --timeout 30m
+    at: $.node
+    capture:
+      ack_diagnosis_node_id: id
+      ack_diagnosis_node_name: node_name
+    teardown: ecctl ack node delete {{.ack_diagnosis_instance}} --cluster {{.ack_shared_cluster}} --timeout 30m
+
   - id: ack_test_user
+    resource: ram/user
+    lifetime: run
     run: >
       ecctl --region cn-hangzhou call ram CreateUser
       --request '{"UserName":"{{.resource_prefix}}-ack-user","DisplayName":"ecctl E2E ACK access user"}'
@@ -114,3 +234,122 @@ provision:
       ack_test_user_id: UserId
       ack_test_user_name: UserName
     teardown: ecctl --region cn-hangzhou call ram DeleteUser --request '{"UserName":"{{.ack_test_user_name}}"}'
+
+  - id: lingjun_vpd
+    resource: lingjun/vpd
+    run: >
+      ecctl lingjun vpd create
+      --name {{.resource_prefix}}-lingjun-shared-vpd
+      --cidr 10.120.0.0/16
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.vpd
+    capture:
+      lingjun_vpd: id
+    teardown: ecctl lingjun vpd delete {{.lingjun_vpd}}
+
+  - id: lingjun_subnet
+    resource: lingjun/subnet
+    needs: [lingjun_vpd]
+    requires_prerequisites: [lingjun.network]
+    run: >
+      ecctl lingjun subnet create
+      --vpd {{.lingjun_vpd}}
+      --zone {{.prerequisites.lingjun.network.zone}}
+      --cidr 10.120.1.0/24
+      --name {{.resource_prefix}}-lingjun-shared-subnet
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 20m
+    at: $.subnet
+    capture:
+      lingjun_subnet: id
+    teardown: >
+      ecctl lingjun subnet delete {{.lingjun_subnet}}
+      --vpd {{.lingjun_vpd}}
+      --zone {{.prerequisites.lingjun.network.zone}}
+      --timeout 20m
+
+  - id: lingjun_eni
+    resource: lingjun/eni
+    needs: [vswitch, security_group]
+    requires_params: [ecs.zone]
+    run: >
+      ecctl lingjun eni create
+      --vpd {{.vpc}}
+      --subnet {{.vswitch}}
+      --zone {{.params.ecs.zone}}
+      --security-group {{.security_group}}
+      --description "ecctl E2E shared ENI {{.run_id}}"
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 15m
+    at: $.eni
+    capture:
+      lingjun_eni: id
+    teardown: ecctl lingjun eni delete {{.lingjun_eni}} --timeout 15m
+
+  - id: lingjun_cluster_network_vswitch
+    resource: vpc/vswitch
+    lifetime: run
+    needs: [vpc]
+    requires_prerequisites: [lingjun.cluster_network]
+    run: >
+      ecctl vpc vswitch create
+      --vpc {{.vpc}}
+      --zone {{.prerequisites.lingjun.cluster_network.zone}}
+      --cidr 10.0.2.0/24
+      --name {{.resource_prefix}}-lingjun-vsw
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.vswitch
+    capture:
+      lingjun_cluster_network_vswitch: id
+    teardown: ecctl vpc vswitch delete {{.lingjun_cluster_network_vswitch}}
+
+  - id: lingjun_cluster_network_eni
+    resource: lingjun/eni
+    lifetime: run
+    needs: [vpc, lingjun_cluster_network_vswitch, security_group]
+    requires_prerequisites: [lingjun.cluster_network]
+    run: >
+      ecctl lingjun eni create
+      --vpd {{.vpc}}
+      --subnet {{.lingjun_cluster_network_vswitch}}
+      --zone {{.prerequisites.lingjun.cluster_network.zone}}
+      --security-group {{.security_group}}
+      --description "ecctl E2E cluster network ENI {{.run_id}}"
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 15m
+    at: $.eni
+    capture:
+      lingjun_cluster_network_eni: id
+    teardown: ecctl lingjun eni delete {{.lingjun_cluster_network_eni}} --timeout 15m
+
+  - id: lingjun_node_group_keypair
+    resource: ecs/keypair
+    run: >
+      ecctl ecs keypair create
+      --name {{.resource_prefix}}-lingjun-ng
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.keypair
+    capture:
+      lingjun_node_group_keypair: id
+    teardown: ecctl ecs keypair delete {{.lingjun_node_group_keypair}}
+
+  - id: lingjun_node_group_cluster
+    resource: lingjun/cluster
+    needs: [lingjun_node_group_keypair, vpc, security_group, lingjun_cluster_network_vswitch, lingjun_cluster_network_eni]
+    requires_prerequisites: [lingjun.cluster_network]
+    run: >
+      ecctl lingjun cluster create
+      --name {{.resource_prefix}}-lingjun-ng-parent
+      --description "ecctl E2E node group parent {{.run_id}}"
+      --cluster-type Lite
+      --hpn-zone {{.prerequisites.lingjun.cluster_network.hpn_zone}}
+      --resource-group {{.prerequisites.lingjun.cluster_network.resource_group_id}}
+      --networks '{"VpdInfo":{"VpdId":"{{.vpc}}","VpdSubnets":["{{.lingjun_cluster_network_vswitch}}"]},"SecurityGroupId":"{{.security_group}}","VSwitchZoneId":"{{.prerequisites.lingjun.cluster_network.zone}}","VpcId":"{{.vpc}}","VSwitchId":"{{.lingjun_cluster_network_vswitch}}","TailIpVersion":"IPv4"}'
+      --nimiz-vswitches '["{{.lingjun_cluster_network_vswitch}}"]'
+      --node-groups '[{"NodeGroupName":"{{.resource_prefix}}-bootstrap","NodeGroupDescription":"ecctl E2E bootstrap {{.run_id}}","ZoneId":"{{.prerequisites.lingjun.cluster_network.zone}}","MachineType":"{{.prerequisites.lingjun.cluster_network.machine_type}}","ImageId":"{{.prerequisites.lingjun.cluster_network.image_id}}","KeyPairName":"{{.lingjun_node_group_keypair}}","FileSystemMountEnabled":false,"VirtualGpuEnabled":false,"SystemDisk":{"Category":"cloud_essd","Size":180,"PerformanceLevel":"PL1"}}]'
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 30m
+    at: $.cluster
+    capture:
+      lingjun_node_group_cluster: id
+    teardown: ecctl lingjun cluster delete {{.lingjun_node_group_cluster}} --timeout 30m

@@ -15,10 +15,11 @@ const PrimaryRole = "primary"
 
 // Request is the complete input needed to plan a run before cloud access.
 type Request struct {
-	Suites             []*scenario.Suite
-	Profiles           []fixtureconfig.RegionProfile
-	PrimaryRegion      string
-	StackPrerequisites map[string][]string // case path -> selected stack bundle requirements
+	Suites                     []*scenario.Suite
+	Profiles                   []fixtureconfig.RegionProfile
+	PrimaryRegion              string
+	StackPrerequisites         map[string][]string // case path -> suite-level stack bundle requirements
+	OptionalStackPrerequisites map[string][]string // case path -> step-level stack bundle requirements
 }
 
 // ExecutionUnit groups cases that have the same region-role requirement
@@ -28,6 +29,7 @@ type ExecutionUnit struct {
 	Signature    string
 	Suites       []*scenario.Suite
 	Requirements map[string][]string
+	Optional     map[string][]string
 	DistinctFrom map[string]string
 	Assignments  []Assignment
 }
@@ -56,6 +58,9 @@ func Build(request Request) ([]ExecutionUnit, error) {
 				request.StackPrerequisites[suite.Path]...,
 			)),
 		}
+		optional := map[string][]string{
+			PrimaryRole: optionalPrimaryRequirements(suite, request.OptionalStackPrerequisites[suite.Path], requirements[PrimaryRole]),
+		}
 		distinct := map[string]string{}
 		for role, requirement := range suite.RegionRequirements {
 			requirements[role] = uniqueSorted(requirement.RequiresPrerequisites)
@@ -69,6 +74,7 @@ func Build(request Request) ([]ExecutionUnit, error) {
 		}
 		if index, ok := unitIndex[signature]; ok {
 			units[index].Suites = append(units[index].Suites, suite)
+			units[index].Optional[PrimaryRole] = uniqueSorted(append(units[index].Optional[PrimaryRole], optional[PrimaryRole]...))
 			continue
 		}
 		unitIndex[signature] = len(units)
@@ -76,6 +82,7 @@ func Build(request Request) ([]ExecutionUnit, error) {
 			Signature:    signature,
 			Suites:       []*scenario.Suite{suite},
 			Requirements: requirements,
+			Optional:     optional,
 			DistinctFrom: distinct,
 		})
 	}
@@ -92,6 +99,24 @@ func Build(request Request) ([]ExecutionUnit, error) {
 		}
 	}
 	return units, nil
+}
+
+func optionalPrimaryRequirements(suite *scenario.Suite, stack, hard []string) []string {
+	values := append([]string(nil), stack...)
+	for _, step := range suite.Steps {
+		values = append(values, step.RequiresPrerequisites...)
+	}
+	hardSet := map[string]bool{}
+	for _, requirement := range hard {
+		hardSet[requirement] = true
+	}
+	optional := make([]string, 0, len(values))
+	for _, requirement := range uniqueSorted(values) {
+		if !hardSet[requirement] {
+			optional = append(optional, requirement)
+		}
+	}
+	return optional
 }
 
 func dynamicCapabilitySignature(suite *scenario.Suite) string {
@@ -159,7 +184,26 @@ func buildAssignments(unit ExecutionUnit, profiles []fixtureconfig.RegionProfile
 		}
 	}
 	visit(0)
+	sort.SliceStable(assignments, func(i, j int) bool {
+		return optionalAssignmentScore(assignments[i], unit.Optional) > optionalAssignmentScore(assignments[j], unit.Optional)
+	})
 	return assignments
+}
+
+func optionalAssignmentScore(assignment Assignment, optional map[string][]string) int {
+	score := 0
+	for role, requirements := range optional {
+		profile, ok := assignment.Regions[role]
+		if !ok {
+			continue
+		}
+		for _, requirement := range requirements {
+			if profile.HasPrerequisites([]string{requirement}) {
+				score++
+			}
+		}
+	}
+	return score
 }
 
 func violatesDistinct(role string, profile fixtureconfig.RegionProfile, selected map[string]fixtureconfig.RegionProfile, distinct map[string]string) bool {

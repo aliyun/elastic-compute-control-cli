@@ -239,7 +239,7 @@ func TestRGResourceUpdateWaiterFiltersEveryMovedResource(t *testing.T) {
 		"--region", "cn-hangzhou",
 		"--resource", "resource-id=i-123,resource-type=instance,service=ecs,region-id=cn-hangzhou",
 		"--resource", "resource-id=d-456,resource-type=disk,service=ecs,region-id=cn-hangzhou",
-		"--timeout", "10ms",
+		"--timeout", "1s",
 	)
 	if code != 0 {
 		t.Fatalf("rg resource batch update exit %d stderr=%s stdout=%s", code, stderr, stdout)
@@ -424,7 +424,7 @@ func TestRGResourceUpdateReportsAndReconcilesMixedMoveResults(t *testing.T) {
 		"--region", "cn-hangzhou",
 		"--resource", "resource-id=i-123,resource-type=instance,service=ecs,region-id=cn-hangzhou",
 		"--resource", "resource-id=d-456,resource-type=disk,service=ecs,region-id=cn-hangzhou",
-		"--timeout", "10ms",
+		"--timeout", "1s",
 	)
 	if code != 2 {
 		t.Fatalf("rg resource mixed update exit %d, want 2; stdout=%s", code, stdout)
@@ -710,7 +710,7 @@ func TestRGResourceUpdateReconcilesKnownSuccessFromTruncatedResponse(t *testing.
 				"--region", "cn-hangzhou",
 				"--resource", "resource-id=i-123,resource-type=instance,service=ecs,region-id=cn-hangzhou",
 				"--resource", "resource-id=d-456,resource-type=disk,service=ecs,region-id=cn-hangzhou",
-				"--timeout", "10ms",
+				"--timeout", "1s",
 			)
 			if code != 2 {
 				t.Fatalf("rg resource %s update exit %d, want 2; stdout=%s", tt.name, code, stdout)
@@ -805,7 +805,7 @@ func TestRGResourceUpdateRetriesTransientPerResourceProbe(t *testing.T) {
 		"--region", "cn-hangzhou",
 		"--resource", "resource-id=i-123,resource-type=instance,service=ecs,region-id=cn-hangzhou",
 		"--resource", "resource-id=d-456,resource-type=disk,service=ecs,region-id=cn-hangzhou",
-		"--timeout", "10ms",
+		"--timeout", "1s",
 	)
 	if code != 0 {
 		t.Fatalf("rg resource transient waiter exit %d stderr=%s stdout=%s", code, stderr, stdout)

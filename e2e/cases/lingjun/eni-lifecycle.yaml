@@ -1,0 +1,63 @@
+# Complete Lingjun ENI lifecycle.
+resource: lingjun/eni
+execution: dag
+requires_params: [ecs.zone]
+timeout: 45m
+serial: true
+
+steps:
+  # EFLO CreateElasticNetworkInterface consumes a cloud VPC/vSwitch tuple.
+  # The tuple is fixture-owned; the ENI itself is created and deleted here.
+  - name: create
+    needs: [vswitch, security_group]
+    locks: ["lingjun-eni:{{.run_name}}-base"]
+    run: >
+      ecctl lingjun eni create
+      --vpd {{.stack.vpc}}
+      --subnet {{.stack.vswitch}}
+      --zone {{.params.ecs.zone}}
+      --security-group {{.stack.security_group}}
+      --description "ecctl E2E ENI {{.run_id}}"
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 15m
+    at: $.eni
+    expect:
+      id: { type: string, min_len: 1 }
+      vpd: { eq: "{{.stack.vpc}}" }
+      subnet: { eq: "{{.stack.vswitch}}" }
+    capture:
+      lingjun_eni_id: id
+    teardown: ecctl lingjun eni delete {{.lingjun_eni_id}} --timeout 15m
+
+  - name: get
+    depends_on: [create]
+    locks: ["lingjun-eni:{{.run_name}}-base"]
+    run: ecctl lingjun eni get {{.lingjun_eni_id}} --with-ips
+    at: $.eni
+    expect:
+      id: { eq: "{{.lingjun_eni_id}}" }
+
+  - name: list
+    depends_on: [create]
+    locks: ["lingjun-eni:{{.run_name}}-base"]
+    run: ecctl lingjun eni list --filter id={{.lingjun_eni_id}} --limit 10
+    assert:
+      - len($.enis) >= 1
+
+  - name: update
+    depends_on: [create]
+    locks: ["lingjun-eni:{{.run_name}}-base"]
+    run: >
+      ecctl lingjun eni update {{.lingjun_eni_id}}
+      --description "ecctl E2E ENI updated {{.run_id}}"
+    at: $.eni
+    expect:
+      id: { eq: "{{.lingjun_eni_id}}" }
+      description: { eq: "ecctl E2E ENI updated {{.run_id}}" }
+
+  - name: delete
+    depends_on: [get, list, update]
+    locks: ["lingjun-eni:{{.run_name}}-base"]
+    run: ecctl lingjun eni delete {{.lingjun_eni_id}} --timeout 15m
+    expect:
+      $.deleted: { eq: true }

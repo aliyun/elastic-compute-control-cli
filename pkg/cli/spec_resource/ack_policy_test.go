@@ -87,20 +87,20 @@ func TestAckPolicyInstanceCRUDAndListRouteToInstanceAPIs(t *testing.T) {
 	t.Parallel()
 	fake := &fakeSpecCaller{responses: []map[string]any{
 		{"request_id": "req-deploy", "instances": []any{"allowed-repos-1"}},
-		{"request_id": "req-status-create", "policy_instances": []any{
-			map[string]any{"policy_name": "ACKAllowedRepos", "policy_instances_count": float64(1), "policy_severity": "high"},
+		{"request_id": "req-list-create", "instances": []any{
+			map[string]any{"instance_name": "allowed-repos-1", "policy_name": "ACKAllowedRepos", "policy_action": "warn"},
 		}},
 		{"request_id": "req-modify", "instances": []any{"allowed-repos-1"}},
-		{"request_id": "req-status-update", "policy_instances": []any{
-			map[string]any{"policy_name": "ACKAllowedRepos", "policy_instances_count": float64(1), "policy_severity": "high"},
+		{"request_id": "req-list-update", "instances": []any{
+			map[string]any{"instance_name": "allowed-repos-1", "policy_name": "ACKAllowedRepos", "policy_action": "deny"},
 		}},
 		{"request_id": "req-delete", "instances": []any{"allowed-repos-1"}},
 		{"request_id": "req-list-after-delete", "instances": []any{}},
 		{"request_id": "req-list", "instances": []any{
 			map[string]any{"instance_name": "allowed-repos-1", "policy_name": "ACKAllowedRepos", "policy_action": "deny"},
 		}},
-		{"request_id": "req-status-get", "policy_instances": []any{
-			map[string]any{"policy_name": "ACKAllowedRepos", "policy_instances_count": float64(1), "policy_severity": "high"},
+		{"request_id": "req-instance-get", "instances": []any{
+			map[string]any{"instance_name": "allowed-repos-1", "policy_name": "ACKAllowedRepos", "policy_action": "deny"},
 		}},
 	}}
 	runCLI := ackPolicyCaller(t, fake)
@@ -114,6 +114,12 @@ func TestAckPolicyInstanceCRUDAndListRouteToInstanceAPIs(t *testing.T) {
 	)
 	if code != 0 {
 		t.Fatalf("ack policy instance create exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	created, _ := decodeObject(t, stdout)["instance"].(map[string]any)
+	if created["instance_name"] != "allowed-repos-1" ||
+		created["policy_name"] != "ACKAllowedRepos" ||
+		created["action"] != "warn" {
+		t.Fatalf("created policy instance = %#v", created)
 	}
 
 	stdout, stderr, code = runCLI("ack", "policy", "instance", "update", "ACKAllowedRepos",
@@ -148,24 +154,25 @@ func TestAckPolicyInstanceCRUDAndListRouteToInstanceAPIs(t *testing.T) {
 	stdout, stderr, code = runCLI("ack", "policy", "instance", "get", "ACKAllowedRepos",
 		"--region", "cn-shanghai",
 		"--cluster", "c-123",
+		"--instance-name", "allowed-repos-1",
 	)
 	if code != 0 {
 		t.Fatalf("ack policy instance get exit %d stderr=%s stdout=%s", code, stderr, stdout)
 	}
 
-	wantCalls := "DeployPolicyInstance,DescribePolicyInstancesStatus,ModifyPolicyInstance,DescribePolicyInstancesStatus,DeletePolicyInstance,DescribePolicyInstances,DescribePolicyInstances,DescribePolicyInstancesStatus"
+	wantCalls := "DeployPolicyInstance,DescribePolicyInstances,ModifyPolicyInstance,DescribePolicyInstances,DeletePolicyInstance,DescribePolicyInstances,DescribePolicyInstances,DescribePolicyInstances"
 	if got := callNames(fake.calls); strings.Join(got, ",") != wantCalls {
 		t.Fatalf("calls = %#v", fake.calls)
 	}
 	createReq := fake.calls[0].request
-	if createReq["cluster_id"] != "c-123" || createReq["policy_name"] != "ACKAllowedRepos" || createReq["action"] != "warn" {
+	if createReq["cluster_id"] != "c-123" || createReq["policy_name"] != "ACKAllowedRepos" || createReq["body.action"] != "warn" {
 		t.Fatalf("DeployPolicyInstance request = %#v", createReq)
 	}
-	parameters, _ := createReq["parameters"].(map[string]any)
+	parameters, _ := createReq["body.parameters"].(map[string]any)
 	if _, ok := parameters["restrictedNamespaces"].([]any); !ok {
-		t.Fatalf("DeployPolicyInstance parameters = %#v", createReq["parameters"])
+		t.Fatalf("DeployPolicyInstance parameters = %#v", createReq["body.parameters"])
 	}
-	if fake.calls[2].request["instance_name"] != "allowed-repos-1" || fake.calls[2].request["action"] != "deny" {
+	if fake.calls[2].request["body.instance_name"] != "allowed-repos-1" || fake.calls[2].request["body.action"] != "deny" {
 		t.Fatalf("ModifyPolicyInstance request = %#v", fake.calls[2].request)
 	}
 	if fake.calls[4].request["instance_name"] != "allowed-repos-1" {
@@ -173,6 +180,9 @@ func TestAckPolicyInstanceCRUDAndListRouteToInstanceAPIs(t *testing.T) {
 	}
 	if fake.calls[6].request["cluster_id"] != "c-123" || fake.calls[6].request["policy_name"] != "ACKAllowedRepos" {
 		t.Fatalf("DescribePolicyInstances request = %#v", fake.calls[6].request)
+	}
+	if fake.calls[7].request["policy_name"] != "ACKAllowedRepos" || fake.calls[7].request["instance_name"] != "allowed-repos-1" {
+		t.Fatalf("DescribePolicyInstances get request = %#v", fake.calls[7].request)
 	}
 }
 

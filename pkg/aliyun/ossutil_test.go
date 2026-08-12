@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -50,7 +51,7 @@ func TestOSSUtilMetadataDefinesCallSurface(t *testing.T) {
 	if !ok {
 		t.Fatal("OSS product metadata is missing")
 	}
-	wantOperations := []string{"DeleteBucket", "DeleteObject", "GetBucketAcl", "GetBucketInfo", "ListBuckets", "ListObjects", "PutBucket"}
+	wantOperations := []string{"DeleteBucket", "DeleteObject", "GetBucketAcl", "GetBucketInfo", "GetObject", "ListBuckets", "ListObjects", "PutBucket", "PutObject"}
 	if !reflect.DeepEqual(product.APINames, wantOperations) {
 		t.Fatalf("OSS operations = %#v, want %#v", product.APINames, wantOperations)
 	}
@@ -84,6 +85,23 @@ func TestOSSUtilMetadataDefinesCallSurface(t *testing.T) {
 	}
 	if bypass := deleteDetail.FindParameter("BypassGovernanceRetention"); bypass == nil || bypass.Type != "Boolean" || bypass.Position != "Header" {
 		t.Fatalf("BypassGovernanceRetention parameter = %#v", bypass)
+	}
+	getObject, ok := OpenAPIOperationDetailFor("en", product, "GetObject")
+	if !ok {
+		t.Fatal("GetObject detail is missing")
+	}
+	if file := getObject.FindParameter("File"); file == nil || !file.Required || file.Position != "Local" {
+		t.Fatalf("GetObject File parameter = %#v", file)
+	}
+	if force := getObject.FindParameter("Force"); force == nil || force.Required || force.Type != "Boolean" || force.Position != "Local" {
+		t.Fatalf("GetObject Force parameter = %#v", force)
+	}
+	putObject, ok := OpenAPIOperationDetailFor("en", product, "PutObject")
+	if !ok {
+		t.Fatal("PutObject detail is missing")
+	}
+	if force := putObject.FindParameter("Force"); force == nil || force.Required || force.Type != "Boolean" || force.Position != "Local" {
+		t.Fatalf("PutObject Force parameter = %#v", force)
 	}
 	summary, ok := OpenAPIOperationSummaryFor("zh-CN", "oss", "GetBucketAcl")
 	if !ok || !strings.Contains(summary.Summary, "判断") {
@@ -208,6 +226,9 @@ func TestOSSUtilCallerRequiresObjectIdentifiers(t *testing.T) {
 	if _, _, err := caller.commandArgs("DeleteObject", map[string]any{"Bucket": "bucket"}, nil); appErrorCode(err) != "MissingParameter" {
 		t.Fatalf("missing Key error = %v", err)
 	}
+	if _, _, err := caller.commandArgs("GetObject", map[string]any{"Bucket": "bucket", "Key": "object"}, nil); appErrorCode(err) != "MissingParameter" {
+		t.Fatalf("missing download File error = %v", err)
+	}
 }
 
 func TestOSSUtilCallerMapsEveryOperation(t *testing.T) {
@@ -242,6 +263,16 @@ func TestOSSUtilCallerMapsEveryOperation(t *testing.T) {
 			"--auto-plugin-install", "false", "ossutil", "api", "delete-object", "--bucket", "bucket",
 			"--key", "dir/object.txt", "--version-id", "version-1", "--bypass-governance-retention",
 		}},
+		{operation: "GetObject", request: map[string]any{
+			"Bucket": "bucket", "Key": "dir/export.raw.tar.gz", "File": "/tmp/export.raw.tar.gz",
+		}, want: []string{
+			"--auto-plugin-install", "false", "ossutil", "cp", "oss://bucket/dir/export.raw.tar.gz", "/tmp/export.raw.tar.gz", "--no-progress",
+		}},
+		{operation: "PutObject", request: map[string]any{
+			"Bucket": "bucket", "Key": "dir/import.raw", "File": "/tmp/import.raw",
+		}, want: []string{
+			"--auto-plugin-install", "false", "ossutil", "cp", "/tmp/import.raw", "oss://bucket/dir/import.raw", "--no-progress",
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.operation, func(t *testing.T) {
@@ -249,9 +280,90 @@ func TestOSSUtilCallerMapsEveryOperation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("commandArgs: %v", err)
 			}
-			want := append(append([]string(nil), tt.want...), "--region", "cn-hangzhou", "--output-format", "json")
+			want := append(append([]string(nil), tt.want...), "--region", "cn-hangzhou")
+			if tt.operation != "GetObject" && tt.operation != "PutObject" {
+				want = append(want, "--output-format", "json")
+			}
 			if !reflect.DeepEqual(args, want) {
 				t.Fatalf("args = %#v, want %#v", args, want)
+			}
+		})
+	}
+}
+
+func TestOSSUtilCallerReturnsStructuredTransferResult(t *testing.T) {
+	runner := &fakeOSSUtilRunner{results: []ossUtilRunnerResult{
+		{stdout: []byte("2.3.0\n")},
+		{stdout: []byte("cp help\n")},
+		{stdout: []byte("download succeeded\n")},
+	}}
+	caller := newTestOSSUtilCaller(t, runner, "cn-hangzhou")
+	response, err := caller.Call(context.Background(), "GetObject", map[string]any{
+		"Bucket": "bucket", "Key": "export.raw.tar.gz", "File": "/tmp/export.raw.tar.gz",
+	})
+	if err != nil {
+		t.Fatalf("GetObject: %v", err)
+	}
+	want := map[string]any{"Bucket": "bucket", "Key": "export.raw.tar.gz", "File": "/tmp/export.raw.tar.gz"}
+	if !reflect.DeepEqual(response, want) {
+		t.Fatalf("GetObject response = %#v, want %#v", response, want)
+	}
+	if got := runner.calls[1].args; !reflect.DeepEqual(got, []string{"cp", "--help"}) {
+		t.Fatalf("transfer help args = %#v", got)
+	}
+}
+
+func TestOSSUtilCallerForwardsTransferParallelism(t *testing.T) {
+	caller := newTestOSSUtilCaller(t, &fakeOSSUtilRunner{}, "cn-hangzhou")
+	args, _, err := caller.commandArgs("PutObject", map[string]any{
+		"Bucket": "bucket", "Key": "import.qcow2", "File": "/tmp/import.qcow2",
+	}, []string{"--parallel", "16", "--part-size", "64Mi"})
+	if err != nil {
+		t.Fatalf("commandArgs: %v", err)
+	}
+	wantSuffix := []string{"--parallel", "16", "--part-size", "64Mi", "--region", "cn-hangzhou"}
+	if !reflect.DeepEqual(args[len(args)-len(wantSuffix):], wantSuffix) {
+		t.Fatalf("args suffix = %#v, want %#v", args, wantSuffix)
+	}
+	if _, _, err := caller.commandArgs("ListObjects", map[string]any{"Bucket": "bucket"}, []string{"--parallel", "16"}); appErrorCode(err) != "UnsupportedOSSParameter" {
+		t.Fatalf("non-transfer parallel error = %v", err)
+	}
+}
+
+func TestOSSUtilCallerRequiresExplicitForceForTransfers(t *testing.T) {
+	caller := newTestOSSUtilCaller(t, &fakeOSSUtilRunner{}, "cn-hangzhou")
+	for _, operation := range []string{"GetObject", "PutObject"} {
+		t.Run(operation, func(t *testing.T) {
+			base := map[string]any{"Bucket": "bucket", "Key": "object", "File": "/tmp/object"}
+			args, _, err := caller.commandArgs(operation, base, nil)
+			if err != nil {
+				t.Fatalf("default commandArgs: %v", err)
+			}
+			if slices.Contains(args, "--force") {
+				t.Fatalf("default args contain --force: %#v", args)
+			}
+
+			forced := map[string]any{"Bucket": "bucket", "Key": "object", "File": "/tmp/object", "Force": true}
+			args, _, err = caller.commandArgs(operation, forced, nil)
+			if err != nil {
+				t.Fatalf("forced commandArgs: %v", err)
+			}
+			if !slices.Contains(args, "--force") {
+				t.Fatalf("forced args missing --force: %#v", args)
+			}
+
+			unforced := map[string]any{"Bucket": "bucket", "Key": "object", "File": "/tmp/object", "Force": false}
+			args, _, err = caller.commandArgs(operation, unforced, nil)
+			if err != nil {
+				t.Fatalf("false Force commandArgs: %v", err)
+			}
+			if slices.Contains(args, "--force") {
+				t.Fatalf("false Force args contain --force: %#v", args)
+			}
+
+			invalid := map[string]any{"Bucket": "bucket", "Key": "object", "File": "/tmp/object", "Force": "true"}
+			if _, _, err := caller.commandArgs(operation, invalid, nil); appErrorCode(err) != "InvalidParameter" {
+				t.Fatalf("string Force error = %v", err)
 			}
 		})
 	}

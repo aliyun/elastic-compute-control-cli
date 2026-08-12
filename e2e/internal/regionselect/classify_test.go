@@ -56,6 +56,16 @@ func TestClassifyRetriesOnlyRegionUnavailableFailures(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "endpoint-restricted operation",
+			err:  errors.New(`{"error":{"code":"400, Only Hangzhou endpoint supports create & delete operation. request id: 019FDA40-E0EA-5F4C-A6B4-2CA74B871A4D"}}`),
+			want: true,
+		},
+		{
+			name: "endpoint-restricted with permission failure",
+			err:  errors.New("400, Only Hangzhou endpoint supports create & delete operation; AccessDenied"),
+			want: false,
+		},
+		{
 			name: "permission failure",
 			run:  &report.Run{Cases: []report.Case{{Status: report.StatusError, Error: `{"error":{"code":"AccessDenied"}}`}}},
 			want: false,

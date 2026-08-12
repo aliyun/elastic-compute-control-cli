@@ -15,13 +15,13 @@ func TestACKClusterDefaultResourceHelp(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"ack", "create", "--help"}, []string{"Create ACK cluster", "--name string", "--type string", "--profile string", "--vswitch strings", "--tag stringArray", "--no-wait", "--timeout duration"}},
+		{[]string{"ack", "create", "--help"}, []string{"Create ACK cluster", "--name string", "--type string", "--profile string", "--auto-mode", "--deletion-protection", "--vswitch strings", "--pod-vswitch strings", "--tag stringArray", "--no-wait", "--timeout duration"}},
 		{[]string{"ack", "get", "--help"}, []string{"Get ACK cluster", "--with-resources", "--with-tags", "--with-policy-governance"}},
 		{[]string{"ack", "list", "--help"}, []string{"List ACK clusters", "--cross-account", "--filter", "--limit int"}},
 		{[]string{"ack", "update", "--help"}, []string{"Update ACK cluster", "--api-server-eip-id string", "--to-edition string", "--tag stringArray", "--remove-tag strings", "--tag-replace stringArray"}},
 		{[]string{"ack", "delete", "--help"}, []string{"Delete ACK cluster", "--force", "--no-wait", "--timeout duration"}},
 		{[]string{"ack", "upgrade", "--help"}, []string{"Upgrade ACK cluster", "--version string", "--no-wait", "--timeout duration"}},
-		{[]string{"ack", "cluster", "create", "--help"}, []string{"Create ACK cluster", "--name string", "--type string", "--profile string", "--vswitch strings", "--tag stringArray", "--no-wait", "--timeout duration"}},
+		{[]string{"ack", "cluster", "create", "--help"}, []string{"Create ACK cluster", "--name string", "--type string", "--profile string", "--auto-mode", "--deletion-protection", "--vswitch strings", "--pod-vswitch strings", "--tag stringArray", "--no-wait", "--timeout duration"}},
 		{[]string{"ack", "cluster", "get", "--help"}, []string{"Get ACK cluster", "--with-resources", "--with-tags", "--with-policy-governance"}},
 		{[]string{"ack", "cluster", "list", "--help"}, []string{"List ACK clusters", "--cross-account", "--filter", "--limit int"}},
 	}
@@ -113,6 +113,43 @@ func TestACKClusterCreateUsesClusterAlias(t *testing.T) {
 	request := fake.calls[0].request
 	if request["body.name"] != "prod" || request["body.cluster_type"] != "ManagedKubernetes" || request["body.cluster_spec"] != "ack.pro.small" {
 		t.Fatalf("CreateCluster request = %#v", request)
+	}
+}
+
+func TestACKClusterCreateAutoModeMapsNestedRequest(t *testing.T) {
+	t.Parallel()
+	fake := &fakeSpecCaller{responses: []map[string]any{{
+		"request_id": "req-create",
+		"cluster_id": "c-auto",
+	}}}
+	runCLI := ackClusterCaller(t, fake)
+
+	stdout, stderr, code := runCLI("ack", "create",
+		"--region", "cn-beijing",
+		"--name", "prod-auto",
+		"--type", "ManagedKubernetes",
+		"--edition", "ack.pro.small",
+		"--profile", "Default",
+		"--auto-mode",
+		"--pod-vswitch", "vsw-pod-a",
+		"--pod-vswitch", "vsw-pod-b",
+		"--deletion-protection=false",
+		"--no-wait",
+	)
+	if code != 0 {
+		t.Fatalf("ack create --auto-mode exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	requireACKOperations(t, fake.calls, []string{"CreateCluster"})
+	request := fake.calls[0].request
+	if request["body.auto_mode.enable"] != true {
+		t.Fatalf("CreateCluster body.auto_mode.enable = %#v; request = %#v", request["body.auto_mode.enable"], request)
+	}
+	if _, ok := request["body.auto_mode"]; ok {
+		t.Fatalf("CreateCluster must map the boolean under body.auto_mode.enable: %#v", request)
+	}
+	requireStringValues(t, request["body.pod_vswitch_ids"], []string{"vsw-pod-a", "vsw-pod-b"})
+	if request["body.deletion_protection"] != false {
+		t.Fatalf("CreateCluster body.deletion_protection = %#v; request = %#v", request["body.deletion_protection"], request)
 	}
 }
 
@@ -405,6 +442,30 @@ func TestACKClusterUpgradeMapsRequestBody(t *testing.T) {
 	}
 	if fake.calls[1].request["task_id"] != "T-upgrade" {
 		t.Fatalf("DescribeTaskInfo request = %#v", fake.calls[1].request)
+	}
+}
+
+func TestACKClusterUpgradeNoWaitEmitsTaskID(t *testing.T) {
+	fake := &fakeSpecCaller{responses: []map[string]any{{
+		"request_id": "req-upgrade",
+		"cluster_id": "c-123",
+		"task_id":    "T-upgrade",
+	}}}
+	runCLI := ackClusterCaller(t, fake)
+
+	stdout, stderr, code := runCLI("ack", "upgrade", "c-123",
+		"--region", "cn-beijing",
+		"--version", "1.36.1-aliyun.1",
+		"--master-only",
+		"--no-wait",
+	)
+	if code != 0 {
+		t.Fatalf("ack upgrade --no-wait exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	requireACKOperations(t, fake.calls, []string{"UpgradeCluster"})
+	cluster, _ := decodeObject(t, stdout)["cluster"].(map[string]any)
+	if cluster == nil || cluster["id"] != "c-123" || cluster["task_id"] != "T-upgrade" {
+		t.Fatalf("unexpected output: %s", stdout)
 	}
 }
 

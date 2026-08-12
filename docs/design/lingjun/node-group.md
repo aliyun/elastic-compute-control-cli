@@ -8,7 +8,7 @@
 
 本文件只描述 `ecctl lingjun node-group` 的 interface 级命令设计：每个操作命令对应哪些 eflo-controller API，不展开完整 flag、参数结构和输出结构；仅在多 API 分流时标明必要的特殊开关。
 
-设计目标：覆盖灵骏节点组的全生命周期（创建/修改/删除/列表查询）。节点组是集群内节点的逻辑分组，用于统一管理一组同质节点的配置和调度策略。单个节点组的详情通过 `ecctl lingjun cluster get --with-nodes` 间接查看，不单独设计 `get` 动作。
+设计目标：覆盖灵骏节点组的全生命周期（创建/修改/删除/详情/列表查询）。节点组是集群内节点的逻辑分组，用于统一管理一组同质节点的配置和调度策略。
 
 特殊开关命名是 interface 级建议，用来说明何时触发额外 API；最终字段名和参数细节在资源 spec 中定义。
 
@@ -42,6 +42,14 @@
 注意事项：删除节点组不会删除组内的节点，节点会变为未分组状态。
 
 形态：`ecctl lingjun node-group delete <ng-id>`
+
+## `ecctl lingjun node-group get`
+
+调用 API：
+
+- [DescribeNodeGroup](https://help.aliyun.com/zh/pai/developer-reference/api-eflo-controller-2022-12-15-describenodegroup)：查询单个节点组详情。
+
+形态：`ecctl lingjun node-group get <ng-id>`
 
 ## `ecctl lingjun node-group list`
 

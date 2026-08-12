@@ -7,11 +7,12 @@ display_name:
   en: alert
   zh-CN: 报警
 description:
-  en: Manage ACK alert rule state
-  zh-CN: 管理 ACK 报警规则状态
+  en: Manage ACK alert rule state and contact-group bindings
+  zh-CN: 管理 ACK 报警规则状态及联系人组绑定
 examples:
   - ecctl ack alert update --cluster <cluster-id> --enabled=true --rule-id <rule-id>
   - ecctl ack alert update --cluster <cluster-id> --enabled=false --ruleset-id <ruleset-id>
+  - ecctl ack alert update --cluster <cluster-id> --ruleset-id <ruleset-id> --group-id <group-id>
 
 identity:
   output_root:
@@ -40,21 +41,35 @@ schema:
       description:
         en: alert ruleset ID
         zh-CN: 报警规则集 ID
+    group_ids:
+      type: string_array
+      description:
+        en: alert contact group IDs to bind
+        zh-CN: 需要绑定的报警联系人分组 ID
 
 bindings:
   start_alert:
     api: StartAlert
     request:
       ClusterId: $.cluster
-      alert_rule_name: $.rule_id
-      alert_rule_group_name: $.ruleset_id
+      body.alert_rule_name: $.rule_id
+      body.alert_rule_group_name: $.ruleset_id
     request_id_from: $.RequestId
   stop_alert:
     api: StopAlert
     request:
       ClusterId: $.cluster
+      body.alert_rule_name: $.rule_id
+      body.alert_rule_group_name: $.ruleset_id
+    request_id_from: $.RequestId
+  update_contact_groups:
+    api: UpdateContactGroupForAlert
+    request:
+      ClusterId: $.cluster
       alert_rule_name: $.rule_id
       alert_rule_group_name: $.ruleset_id
+      contact_group_ids:
+        each: $.group_ids
     request_id_from: $.RequestId
 
 operations:
@@ -66,12 +81,17 @@ operations:
       zh-CN: 启动或停止 ACK 报警规则或规则集
     require_any:
       - raw: $.enabled
+      - raw: $.group_ids
     require_when:
       - when_any: [enabled]
+        require_any: [rule_id, ruleset_id]
+      - when_any: [group_ids]
         require_any: [rule_id, ruleset_id]
     conflicts:
       - any: [rule_id]
         with_any: [ruleset_id]
+      - any: [enabled]
+        with_any: [group_ids]
     input:
       fields:
         - cluster:
@@ -79,14 +99,19 @@ operations:
         - enabled
         - rule_id
         - ruleset_id
+        - group_ids:
+            flag_name: group-id
     workflow:
       - binding: start_alert
-        when: input.enabled
+        when: input.enabled == true
       - binding: stop_alert
-        unless: input.enabled
+        when: input.enabled == false
+      - binding: update_contact_groups
+        when: has(input.group_ids)
       - emit:
           fields:
             cluster: $input.cluster
             enabled: $input.enabled
             rule_id: $input.rule_id
             ruleset_id: $input.ruleset_id
+            group_ids: $input.group_ids

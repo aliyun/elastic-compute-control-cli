@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -99,6 +100,15 @@ func TestPolicyRejectsEmptyCandidateSetsOnlyWhenRequired(t *testing.T) {
 	}
 	if err := policy.ValidateFor([]string{"ecs.instance_type"}); err == nil {
 		t.Fatal("expected instance-type candidate validation error")
+	}
+}
+
+func TestPolicySupportsDiscoveredACKAddonLifecycle(t *testing.T) {
+	policy := Policy{}
+	for _, key := range []string{"ack.addon_name", "ack.addon_version", "ack.addon_upgrade_version"} {
+		if !policy.Supports(key) {
+			t.Fatalf("dynamic parameter %q is not supported", key)
+		}
 	}
 }
 
@@ -433,6 +443,168 @@ func TestResolveACKReportsMissingUpgradePathSeparately(t *testing.T) {
 	}
 }
 
+func TestResolveACKSelectsSafeAddonLifecycleFromCatalog(t *testing.T) {
+	var commands []string
+	query := func(_ context.Context, command string) (any, error) {
+		commands = append(commands, command)
+		switch {
+		case strings.Contains(command, "ack version list"):
+			return map[string]any{"versions": []any{
+				map[string]any{"version": "1.34.3-aliyun.1", "creatable": true, "edition": "ack.pro.small", "profile": "Default"},
+			}}, nil
+		case strings.Contains(command, "ack addon list --catalog"):
+			return map[string]any{"addons": []any{
+				map[string]any{"name": "a-default", "version": "1.0.0", "install_by_default": true, "supported_actions": []any{"Install", "Modify", "Upgrade", "Uninstall"}},
+				map[string]any{"name": "a-role-addon", "version": "1.0.0", "install_by_default": false, "supported_actions": []any{"Install", "Modify", "Upgrade", "Uninstall"}},
+				map[string]any{"name": "gatekeeper", "version": "3.18.6", "install_by_default": false, "supported_actions": []any{"Install", "Modify", "Upgrade", "Uninstall"}},
+				map[string]any{"name": "ack-kruise", "version": "1.0.0", "managed": false, "install_by_default": false, "supported_actions": []any{"Install", "Modify", "Upgrade", "Uninstall"}},
+				map[string]any{"name": "managed-security-inspector", "version": "v0.17.4", "managed": true, "install_by_default": false, "supported_actions": []any{"Install", "Modify", "Upgrade", "Uninstall"}},
+			}}, nil
+		case strings.Contains(command, "ack addon get a-role-addon --catalog"):
+			return map[string]any{"addon": map[string]any{
+				"name": "a-role-addon", "version": "1.0.0", "config_schema": map[string]any{},
+				"newer_versions": []any{map[string]any{"version": "1.1.0", "upgradable": true}},
+			}}, nil
+		case strings.Contains(command, "ack addon get managed-security-inspector --catalog"):
+			return map[string]any{"addon": map[string]any{
+				"name": "managed-security-inspector", "version": "v0.17.4", "config_schema": map[string]any{},
+				"newer_versions": []any{
+					map[string]any{"version": "v0.18.0", "upgradable": false},
+					map[string]any{"version": "v0.17.5", "upgradable": true},
+				},
+			}}, nil
+		default:
+			return nil, fmt.Errorf("unexpected query %q", command)
+		}
+	}
+
+	got, err := ResolveACK(context.Background(), query, "cn-hangzhou", []string{"ManagedKubernetes"},
+		[]string{"ack.addon_name", "ack.addon_version", "ack.addon_upgrade_version"}, ECSResult{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := reflect.ValueOf(got)
+	for field, want := range map[string]string{
+		"AddonName": "managed-security-inspector", "AddonVersion": "v0.17.4", "AddonUpgradeVersion": "v0.17.5",
+	} {
+		actual := value.FieldByName(field)
+		if !actual.IsValid() || actual.String() != want {
+			t.Fatalf("ACK result field %s = %v, want %q; result=%+v", field, actual, want, got)
+		}
+	}
+	joined := strings.Join(commands, "\n")
+	for _, want := range []string{
+		"ack addon list --catalog", "--cluster-type ManagedKubernetes", "--cluster-version 1.34.3-aliyun.1",
+		"--cluster-spec ack.pro.small", "--cluster-profile Default", "ack addon get managed-security-inspector --catalog",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("addon discovery commands = %v, missing %q", commands, want)
+		}
+	}
+	if joined := strings.Join(commands, "\n"); strings.Contains(joined, "ack addon get a-role-addon") {
+		t.Fatalf("addon discovery commands = %v; non-allowlisted addon should not be queried", commands)
+	}
+}
+
+func TestResolveACKDiscoversOlderAddonVersionFromCreatableClusterCatalog(t *testing.T) {
+	var commands []string
+	query := func(_ context.Context, command string) (any, error) {
+		commands = append(commands, command)
+		switch {
+		case strings.Contains(command, "ack version list"):
+			return map[string]any{"versions": []any{
+				map[string]any{"version": "1.36.1-aliyun.1", "creatable": true},
+				map[string]any{"version": "1.24.6-aliyun.1", "creatable": true},
+			}}, nil
+		case strings.Contains(command, "ack addon list --catalog") && strings.Contains(command, "--cluster-version 1.36.1-aliyun.1"):
+			return map[string]any{"addons": []any{
+				map[string]any{"name": "managed-servicemesh-operator", "version": "v0.1.24", "managed": false, "install_by_default": false, "supported_actions": []any{"Install", "Modify", "Upgrade", "Uninstall"}},
+				map[string]any{"name": "managed-security-inspector", "version": "v0.17.5", "managed": true, "install_by_default": false, "supported_actions": []any{"Install", "Modify", "Upgrade", "Uninstall"}},
+			}}, nil
+		case strings.Contains(command, "ack addon list --catalog") && strings.Contains(command, "--cluster-version 1.24.6-aliyun.1"):
+			return map[string]any{"addons": []any{
+				map[string]any{"name": "managed-servicemesh-operator", "version": "v0.1.9", "managed": false, "install_by_default": false, "supported_actions": []any{"Install", "Modify", "Upgrade", "Uninstall"}},
+				map[string]any{"name": "managed-security-inspector", "version": "v0.17.4", "managed": true, "install_by_default": false, "supported_actions": []any{"Install", "Upgrade", "Uninstall"}},
+			}}, nil
+		case strings.Contains(command, "ack addon get managed-servicemesh-operator --catalog") && strings.Contains(command, "--version v0.1.9"):
+			return map[string]any{"addon": map[string]any{
+				"name": "managed-servicemesh-operator", "version": "v0.1.9", "config_schema": nil,
+				"newer_versions": []any{map[string]any{"version": "v0.1.24", "upgradable": true}},
+			}}, nil
+		case strings.Contains(command, "ack addon get managed-servicemesh-operator --catalog"):
+			return map[string]any{"addon": map[string]any{
+				"name": "managed-servicemesh-operator", "version": "v0.1.24", "config_schema": nil,
+			}}, nil
+		case strings.Contains(command, "ack addon get managed-security-inspector --catalog") && strings.Contains(command, "--version v0.17.4"):
+			return map[string]any{"addon": map[string]any{
+				"name": "managed-security-inspector", "version": "v0.17.4", "config_schema": nil,
+				"newer_versions": []any{map[string]any{"version": "v0.17.5", "upgradable": true}},
+			}}, nil
+		case strings.Contains(command, "ack addon get managed-security-inspector --catalog"):
+			return map[string]any{"addon": map[string]any{
+				"name": "managed-security-inspector", "version": "v0.17.5", "config_schema": nil,
+			}}, nil
+		default:
+			return nil, fmt.Errorf("unexpected query %q", command)
+		}
+	}
+
+	got, err := ResolveACK(context.Background(), query, "cn-zhangjiakou", []string{"ManagedKubernetes"},
+		[]string{"ack.addon_name", "ack.addon_version", "ack.addon_upgrade_version"}, ECSResult{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AddonName != "managed-security-inspector" || got.AddonVersion != "v0.17.4" || got.AddonUpgradeVersion != "v0.17.5" {
+		t.Fatalf("ACK addon result = %+v", got)
+	}
+	if joined := strings.Join(commands, "\n"); strings.Contains(joined, "ack addon get managed-servicemesh-operator") {
+		t.Fatalf("addon discovery commands = %v; role-dependent service mesh addon should have been excluded by name", commands)
+	}
+	if joined := strings.Join(commands, "\n"); !strings.Contains(joined, "--cluster-version 1.24.6-aliyun.1") {
+		t.Fatalf("addon discovery commands = %v; older creatable cluster catalog was not queried", commands)
+	}
+}
+
+func TestResolveACKDiscoversPreviousManagedAddonPatch(t *testing.T) {
+	var commands []string
+	query := func(_ context.Context, command string) (any, error) {
+		commands = append(commands, command)
+		switch {
+		case strings.Contains(command, "ack version list"):
+			return map[string]any{"versions": []any{
+				map[string]any{"version": "1.36.1-aliyun.1", "creatable": true, "edition": "ack.pro.small", "profile": "Default"},
+			}}, nil
+		case strings.Contains(command, "ack addon list --catalog"):
+			return map[string]any{"addons": []any{
+				map[string]any{"name": "managed-security-inspector", "version": "v0.17.5", "managed": true, "install_by_default": false, "supported_actions": []any{"Install", "Modify", "Upgrade", "Uninstall"}},
+			}}, nil
+		case strings.Contains(command, "ack addon get managed-security-inspector --catalog") && strings.Contains(command, "--version v0.17.4"):
+			return map[string]any{"addon": map[string]any{
+				"name": "managed-security-inspector", "version": "v0.17.4", "config_schema": "",
+				"newer_versions": []any{map[string]any{"version": "v0.17.5", "upgradable": true}},
+			}}, nil
+		case strings.Contains(command, "ack addon get managed-security-inspector --catalog"):
+			return map[string]any{"addon": map[string]any{
+				"name": "managed-security-inspector", "version": "v0.17.5", "config_schema": "",
+			}}, nil
+		default:
+			return nil, fmt.Errorf("unexpected query %q", command)
+		}
+	}
+
+	got, err := ResolveACK(context.Background(), query, "cn-zhangjiakou", []string{"ManagedKubernetes"},
+		[]string{"ack.addon_name", "ack.addon_version", "ack.addon_upgrade_version"}, ECSResult{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AddonName != "managed-security-inspector" || got.AddonVersion != "v0.17.4" || got.AddonUpgradeVersion != "v0.17.5" {
+		t.Fatalf("ACK addon result = %+v", got)
+	}
+	if joined := strings.Join(commands, "\n"); !strings.Contains(joined, "--version v0.17.4") {
+		t.Fatalf("addon discovery commands = %v; previous patch was not queried", commands)
+	}
+}
+
 func TestResolveACKDoesNotTreatUnrelatedIDAsVersion(t *testing.T) {
 	query := func(_ context.Context, command string) (any, error) {
 		if strings.Contains(command, "--cluster-type ManagedKubernetes") {
@@ -450,7 +622,7 @@ func TestResolveACKDoesNotTreatUnrelatedIDAsVersion(t *testing.T) {
 
 func TestResolveLingjunSelectsAvailableNodeProfile(t *testing.T) {
 	query := func(_ context.Context, command string) (any, error) {
-		if !strings.Contains(command, "lingjun node list --free") {
+		if !strings.Contains(command, "ListFreeNodes") {
 			return nil, fmt.Errorf("unexpected query %q", command)
 		}
 		return map[string]any{"nodes": []any{
@@ -470,7 +642,7 @@ func TestResolveLingjunSelectsAvailableNodeProfile(t *testing.T) {
 func TestResolveLingjunSkipsNodeProfileWithWrongClusterType(t *testing.T) {
 	query := func(_ context.Context, command string) (any, error) {
 		switch {
-		case strings.Contains(command, "lingjun node list --free"):
+		case strings.Contains(command, "ListFreeNodes"):
 			return map[string]any{"nodes": []any{
 				map[string]any{"cluster_type": "Standard", "node_group": "ng-a", "hpn_zone": "hpn-wrong", "zone": "cn-hangzhou-a", "machine_type": "wrong"},
 				map[string]any{"cluster_type": "Lite", "node_group": "ng-a", "hpn_zone": "hpn-a", "zone": "cn-hangzhou-b", "machine_type": "lingjun.g1xlarge"},
@@ -491,7 +663,7 @@ func TestResolveLingjunSkipsNodeProfileWithWrongClusterType(t *testing.T) {
 
 func TestResolveLingjunRejectsMissingConfiguredNodeGroup(t *testing.T) {
 	query := func(_ context.Context, command string) (any, error) {
-		if strings.Contains(command, "lingjun node list --free") {
+		if strings.Contains(command, "ListFreeNodes") {
 			return map[string]any{"nodes": []any{
 				map[string]any{"node_group": "ng-a", "hpn_zone": "hpn-a", "zone": "cn-hangzhou-b", "machine_type": "lingjun.g1xlarge"},
 			}}, nil
@@ -506,7 +678,7 @@ func TestResolveLingjunRejectsMissingConfiguredNodeGroup(t *testing.T) {
 
 func TestResolveLingjunRejectsIncompatibleConfiguredNodeGroups(t *testing.T) {
 	query := func(_ context.Context, command string) (any, error) {
-		if strings.Contains(command, "lingjun node list --free") {
+		if strings.Contains(command, "ListFreeNodes") {
 			return map[string]any{"nodes": []any{
 				map[string]any{"node_group": "ng-a", "hpn_zone": "hpn-a", "zone": "cn-hangzhou-b", "machine_type": "lingjun.g1xlarge", "image_id": "img-lite-1"},
 				map[string]any{"node_group": "ng-b", "hpn_zone": "hpn-b", "zone": "cn-hangzhou-c", "machine_type": "lingjun.g2xlarge", "image_id": "img-lite-2"},
@@ -529,5 +701,81 @@ func TestResolveLingjunRequiresTwoDistinctNodeGroups(t *testing.T) {
 		if _, err := ResolveLingjun(context.Background(), query, "cn-hangzhou", "Lite", nodeGroupIDs); err == nil {
 			t.Fatalf("node_group_ids %v should be rejected", nodeGroupIDs)
 		}
+	}
+}
+
+func TestResolveLingjunNodeGroupProfileUsesPublicInventoryWithoutFreeNodes(t *testing.T) {
+	query := func(_ context.Context, command string) (any, error) {
+		switch command {
+		case "ecctl call eflo-controller DescribeZones":
+			return map[string]any{"response": map[string]any{"Zones": []any{
+				map[string]any{"ZoneId": "cn-heyuan-a"},
+			}}}, nil
+		case "ecctl call eflo-controller ListMachineTypes":
+			return map[string]any{"response": map[string]any{"MachineTypes": []any{
+				map[string]any{"Name": "efg1.nvga1", "Type": "Public"},
+			}}}, nil
+		case "ecctl call eflo-controller ListImages":
+			return map[string]any{"response": map[string]any{"Images": []any{
+				map[string]any{"ImageId": "img-lingjun-1", "Description": "适配 efg1.nvga1 机型"},
+			}}}, nil
+		default:
+			t.Fatalf("unexpected command %q", command)
+			return nil, nil
+		}
+	}
+	got, err := ResolveLingjunNodeGroupProfile(context.Background(), query, "cn-heyuan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.HPNZone != "" || got.Zone != "cn-heyuan-a" || got.MachineType != "efg1.nvga1" || got.ImageID != "img-lingjun-1" {
+		t.Fatalf("node group profile = %+v", got)
+	}
+}
+
+func TestResolveLingjunNodeGroupProfileSkipsPrivateMachineAndAlipayZone(t *testing.T) {
+	query := func(_ context.Context, command string) (any, error) {
+		switch command {
+		case "ecctl call eflo-controller DescribeZones":
+			return map[string]any{"response": map[string]any{"Zones": []any{
+				map[string]any{"ZoneId": "cn-hangzhou-j-alipay"},
+				map[string]any{"ZoneId": "cn-hangzhou-a"},
+			}}}, nil
+		case "ecctl call eflo-controller ListMachineTypes":
+			return map[string]any{"response": map[string]any{"MachineTypes": []any{
+				map[string]any{"Name": "efg2.C48cA3sen", "Type": "Private"},
+				map[string]any{"Name": "efg2.C48eNH3ebn", "Type": "Public"},
+			}}}, nil
+		case "ecctl call eflo-controller ListImages":
+			return map[string]any{"response": map[string]any{"Images": []any{
+				map[string]any{"ImageId": "img-private", "Description": "适配efg2.C48cA3sen机型"},
+				map[string]any{"ImageId": "img-public", "Description": "适配efg2.C48eNH3ebn机型"},
+			}}}, nil
+		default:
+			t.Fatalf("unexpected command %q", command)
+			return nil, nil
+		}
+	}
+	got, err := ResolveLingjunNodeGroupProfile(context.Background(), query, "cn-hangzhou")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Zone != "cn-hangzhou-a" || got.MachineType != "efg2.C48eNH3ebn" || got.ImageID != "img-public" {
+		t.Fatalf("node group profile = %+v", got)
+	}
+}
+
+func TestResolveLingjunNodeGroupProfileRequiresPublicZone(t *testing.T) {
+	query := func(_ context.Context, command string) (any, error) {
+		if command != "ecctl call eflo-controller DescribeZones" {
+			t.Fatalf("unexpected command %q", command)
+		}
+		return map[string]any{"response": map[string]any{"Zones": []any{
+			map[string]any{"ZoneId": "cn-hangzhou-j-alipay"},
+		}}}, nil
+	}
+	_, err := ResolveLingjunNodeGroupProfile(context.Background(), query, "cn-hangzhou")
+	if err == nil || !strings.Contains(err.Error(), "no public Lingjun zone") {
+		t.Fatalf("err = %v, want missing public-zone failure", err)
 	}
 }

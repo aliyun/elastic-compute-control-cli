@@ -122,7 +122,11 @@ func suiteNeeds(suites []*scenario.Suite) []string {
 	seen := map[string]bool{}
 	var needs []string
 	for _, s := range suites {
-		for _, need := range s.Needs {
+		all := append([]string(nil), s.Needs...)
+		for _, step := range s.Steps {
+			all = append(all, step.Needs...)
+		}
+		for _, need := range all {
 			if !seen[need] {
 				seen[need] = true
 				needs = append(needs, need)

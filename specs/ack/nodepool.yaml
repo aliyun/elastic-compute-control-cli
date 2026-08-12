@@ -258,6 +258,8 @@ waiters:
   task_succeeded:
     probe: task
     target: success
+    match:
+      state_only: true
     interval: 2s
     timeout: 3600s
     failure:
@@ -673,6 +675,7 @@ operations:
           fields:
             id: $input.id
             cluster: $input.cluster
+            task_id: $context.task_id
   repair:
     examples:
       - ecctl ack nodepool repair <nodepool-id> --cluster <cluster-id>

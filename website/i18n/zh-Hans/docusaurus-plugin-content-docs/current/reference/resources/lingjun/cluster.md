@@ -33,6 +33,7 @@ ecctl lingjun cluster create [flags]
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `--name` | string | ✓ | 灵骏集群名称 |
+| `--node-groups` | string | ✓ | 符合灵骏 API 结构的节点组 JSON 数组 |
 | `--region` | string | ✓ | Alibaba Cloud region |
 | `--cluster-type` | string |  | 灵骏集群类型 |
 | `--components` | string |  | 符合灵骏 API 结构的组件 JSON 数组 |
@@ -41,7 +42,6 @@ ecctl lingjun cluster create [flags]
 | `--ignore-failed-node-tasks` | boolean |  | 在 API 支持时跳过失败节点任务 |
 | `--networks` | string |  | 符合灵骏 API 结构的网络 JSON 对象 |
 | `--nimiz-vswitches` | string |  | NIMIZ 交换机 JSON 数组 |
-| `--node-groups` | string |  | 符合灵骏 API 结构的节点组 JSON 数组 |
 | `--open-eni-jumbo-frame` | boolean |  | 启用 ENI Jumbo Frame |
 | `--resource-group` | string |  | 资源组 ID |
 | `--tag` | key_value |  | 标签赋值 key=value |

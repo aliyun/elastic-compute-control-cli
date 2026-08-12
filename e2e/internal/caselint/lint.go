@@ -61,6 +61,9 @@ type stackContract struct {
 
 type stackStep struct {
 	ID                    string            `yaml:"id"`
+	Resource              string            `yaml:"resource"`
+	Mode                  string            `yaml:"mode"`
+	Lifetime              string            `yaml:"lifetime"`
 	Needs                 []string          `yaml:"needs"`
 	RequiresParams        []string          `yaml:"requires_params"`
 	RequiresPrerequisites []string          `yaml:"requires_prerequisites"`
@@ -88,6 +91,7 @@ func Check(opts Options) (*Report, error) {
 	if len(resources) == 0 {
 		resources = suiteResources(suites)
 	}
+	checkUniqueSuiteResources(rep, suites)
 	stack, err := loadStackContract(opts.StackFile)
 	if err != nil {
 		return nil, err
@@ -128,6 +132,31 @@ func Check(opts Options) (*Report, error) {
 	return rep, nil
 }
 
+func checkUniqueSuiteResources(rep *Report, suites []*scenario.Suite) {
+	seen := map[string]string{}
+	for _, suite := range suites {
+		name := strings.ToLower(filepath.Base(suite.Path))
+		if strings.Contains(name, "readonly") || strings.Contains(name, "read-only") || strings.Contains(name, "read_only") {
+			rep.add(
+				suite.Path,
+				"",
+				"readonly_case_name",
+				"case names must use the resource lifecycle identity and must not encode readonly",
+			)
+		}
+		if previous, exists := seen[suite.Resource]; exists {
+			rep.add(
+				suite.Path,
+				"",
+				"duplicate_resource_case",
+				fmt.Sprintf("resource %q must have exactly one lifecycle case; already declared by %s", suite.Resource, previous),
+			)
+			continue
+		}
+		seen[suite.Resource] = suite.Path
+	}
+}
+
 func indexStack(rep *Report, path string, stack stackContract) stackIndex {
 	index := stackIndex{byID: map[string]stackStep{}, captureProvider: map[string]string{}}
 	for _, step := range stack.Provision {
@@ -138,6 +167,21 @@ func indexStack(rep *Report, path string, stack stackContract) stackIndex {
 		if _, exists := index.byID[step.ID]; exists {
 			rep.add(path, step.ID, "duplicate_stack_id", fmt.Sprintf("stack provision id %q is declared more than once", step.ID))
 			continue
+		}
+		if strings.TrimSpace(step.Resource) == "" {
+			rep.add(path, step.ID, "missing_stack_resource", "stack provision step must declare canonical resource metadata")
+		} else if parts := strings.Split(step.Resource, "/"); len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+			rep.add(path, step.ID, "invalid_stack_resource", fmt.Sprintf("stack resource %q must be product/resource", step.Resource))
+		}
+		switch step.Mode {
+		case "", "create", "lookup":
+		default:
+			rep.add(path, step.ID, "invalid_stack_mode", fmt.Sprintf("stack mode %q must be create or lookup", step.Mode))
+		}
+		switch step.Lifetime {
+		case "", "execution", "run":
+		default:
+			rep.add(path, step.ID, "invalid_stack_lifetime", fmt.Sprintf("stack lifetime %q must be execution or run", step.Lifetime))
 		}
 		index.byID[step.ID] = step
 		for capture := range step.Capture {
@@ -151,8 +195,13 @@ func indexStack(rep *Report, path string, stack stackContract) stackIndex {
 
 	for _, step := range index.byID {
 		for _, dependency := range step.Needs {
-			if _, exists := index.byID[dependency]; !exists {
+			parent, exists := index.byID[dependency]
+			if !exists {
 				rep.add(path, step.ID, "unknown_stack_dependency", fmt.Sprintf("stack node %q depends on unknown node %q", step.ID, dependency))
+				continue
+			}
+			if step.Lifetime == "run" && parent.Lifetime != "run" {
+				rep.add(path, step.ID, "invalid_stack_lifetime_dependency", fmt.Sprintf("run lifetime stack node %q depends on execution lifetime node %q", step.ID, dependency))
 			}
 		}
 	}
@@ -254,7 +303,7 @@ func loadStackContract(path string) (stackContract, error) {
 }
 
 func checkStackRequirements(rep *Report, path string, stack stackContract, policy *paramspkg.Policy) {
-	defined := map[string]bool{"run_name": true, "run_id": true, "resource_prefix": true, "oss_export_prefix": true, "time": true, "region": true, "regions": true, "zone": true, "global": true, "params": true, "prerequisites": true, "stack": true}
+	defined := map[string]bool{"run_name": true, "run_id": true, "resource_prefix": true, "oss_export_prefix": true, "oss_bucket_name": true, "work_dir": true, "time": true, "region": true, "regions": true, "zone": true, "global": true, "params": true, "prerequisites": true, "stack": true}
 	for _, step := range stack.Provision {
 		declaredParams := make(map[string]bool, len(step.RequiresParams))
 		for _, key := range step.RequiresParams {
@@ -317,7 +366,7 @@ func checkStackTemplateRefs(rep *Report, path, step, field, text string, defined
 	}
 	for _, ref := range refs {
 		switch ref.Root {
-		case "run_name", "run_id", "resource_prefix", "oss_export_prefix", "time", "region", "regions", "zone", "stack":
+		case "run_name", "run_id", "resource_prefix", "oss_export_prefix", "oss_bucket_name", "work_dir", "time", "region", "regions", "zone", "stack":
 			continue
 		case "prerequisites":
 			checkPrerequisiteRef(rep, path, step, field, ref.Path, 1, declaredPrerequisites)
@@ -404,51 +453,124 @@ func checkSuite(rep *Report, suite *scenario.Suite, inputsDir string, resources 
 			rep.add(suite.Path, "", "unknown_stack_need", fmt.Sprintf("case needs unknown stack node %q", need))
 		}
 	}
-	stackCaptures := stack.capturesFor(suite.Needs)
-	primaryPrerequisites := stack.prerequisitesFor(suite.Needs)
-	for _, requirement := range suite.RequiresPrerequisites {
-		primaryPrerequisites[requirement] = true
-	}
-	regionPrerequisites := map[string]map[string]bool{"primary": primaryPrerequisites}
-	for role, requirement := range suite.RegionRequirements {
-		declared := map[string]bool{}
-		for _, name := range requirement.RequiresPrerequisites {
-			declared[name] = true
+	for _, step := range suite.Steps {
+		for _, need := range step.Needs {
+			if _, exists := stack.byID[need]; !exists {
+				rep.add(suite.Path, step.Name, "unknown_stack_need", fmt.Sprintf("step needs unknown stack node %q", need))
+			}
 		}
-		regionPrerequisites[role] = declared
+	}
+	captureProvider := map[string]string{}
+	for _, step := range suite.Steps {
+		for name := range step.Capture {
+			if previous := captureProvider[name]; previous != "" {
+				rep.add(suite.Path, step.Name, "duplicate_capture", fmt.Sprintf("capture %q is already defined by %q", name, previous))
+				continue
+			}
+			captureProvider[name] = step.Name
+		}
 	}
 	defined := map[string]bool{}
 	for _, st := range suite.Steps {
+		stepDefined := defined
+		effectiveNeeds := append([]string(nil), suite.Needs...)
+		if suite.Execution == scenario.ExecutionDAG {
+			stepDefined = map[string]bool{}
+			for _, ancestor := range dagAncestors(suite, st.Name) {
+				for name, provider := range captureProvider {
+					if provider == ancestor {
+						stepDefined[name] = true
+					}
+				}
+				effectiveNeeds = append(effectiveNeeds, suite.Steps[stepIndex(suite, ancestor)].Needs...)
+			}
+		}
+		effectiveNeeds = append(effectiveNeeds, st.Needs...)
+		stackCaptures := stack.capturesFor(effectiveNeeds)
+		primaryPrerequisites := stack.prerequisitesFor(effectiveNeeds)
+		for _, requirement := range suite.RequiresPrerequisites {
+			primaryPrerequisites[requirement] = true
+		}
+		for _, requirement := range st.RequiresPrerequisites {
+			primaryPrerequisites[requirement] = true
+		}
+		regionPrerequisites := map[string]map[string]bool{"primary": primaryPrerequisites}
+		for role, requirement := range suite.RegionRequirements {
+			declared := map[string]bool{}
+			for _, name := range requirement.RequiresPrerequisites {
+				declared[name] = true
+			}
+			regionPrerequisites[role] = declared
+		}
 		info := checkCommandShape(rep, suite, st, resources)
-		checkTemplateRefs(rep, suite.Path, st.Name, "run", st.Run, inputs, defined, declaredGlobal, global, declaredParams, parameterPolicy, stackCaptures, regionPrerequisites)
-		_, verb := commandResourceVerb(info.Positionals, resources)
+		checkTemplateRefs(rep, suite.Path, st.Name, "run", st.Run, inputs, stepDefined, declaredGlobal, global, declaredParams, parameterPolicy, stackCaptures, regionPrerequisites)
+		if st.Local != nil {
+			checkTemplateRefs(rep, suite.Path, st.Name, "local.source", st.Local.Source, inputs, stepDefined, declaredGlobal, global, declaredParams, parameterPolicy, stackCaptures, regionPrerequisites)
+			checkTemplateRefs(rep, suite.Path, st.Name, "local.destination", st.Local.Destination, inputs, stepDefined, declaredGlobal, global, declaredParams, parameterPolicy, stackCaptures, regionPrerequisites)
+		}
+		for _, lock := range st.Locks {
+			checkTemplateRefs(rep, suite.Path, st.Name, "lock", lock, inputs, stepDefined, declaredGlobal, global, declaredParams, parameterPolicy, stackCaptures, regionPrerequisites)
+		}
+		resource, verb := commandResourceVerb(info.Positionals, resources)
 		if info.Valid && !info.Call && verb == "create" {
 			checkCreateTags(rep, suite.Path, st.Name, st.Run)
-			if strings.TrimSpace(st.Teardown) == "" {
+			if strings.TrimSpace(st.Teardown) == "" && !allowsFixtureOwnedCreate(suite, resource) {
 				rep.add(suite.Path, st.Name, "missing_teardown", "create command requires teardown")
 			}
 		}
 		for _, pm := range st.Expect {
 			for _, text := range matcherStrings(pm.Matcher) {
-				checkTemplateRefs(rep, suite.Path, st.Name, "expect", text, inputs, defined, declaredGlobal, global, declaredParams, parameterPolicy, stackCaptures, regionPrerequisites)
+				checkTemplateRefs(rep, suite.Path, st.Name, "expect", text, inputs, stepDefined, declaredGlobal, global, declaredParams, parameterPolicy, stackCaptures, regionPrerequisites)
 			}
 		}
 		for _, assert := range st.Assert {
-			checkTemplateRefs(rep, suite.Path, st.Name, "assert", assert, inputs, defined, declaredGlobal, global, declaredParams, parameterPolicy, stackCaptures, regionPrerequisites)
+			checkTemplateRefs(rep, suite.Path, st.Name, "assert", assert, inputs, stepDefined, declaredGlobal, global, declaredParams, parameterPolicy, stackCaptures, regionPrerequisites)
 		}
-		teardownDefined := cloneSet(defined)
+		teardownDefined := cloneSet(stepDefined)
 		for name := range st.Capture {
 			teardownDefined[name] = true
 		}
 		checkTemplateRefs(rep, suite.Path, st.Name, "teardown", st.Teardown, inputs, teardownDefined, declaredGlobal, global, declaredParams, parameterPolicy, stackCaptures, regionPrerequisites)
-		for name := range st.Capture {
-			if defined[name] {
-				rep.add(suite.Path, st.Name, "duplicate_capture", fmt.Sprintf("capture %q is already defined", name))
-				continue
+		if suite.Execution != scenario.ExecutionDAG {
+			for name := range st.Capture {
+				defined[name] = true
 			}
-			defined[name] = true
 		}
 	}
+}
+
+func stepIndex(suite *scenario.Suite, name string) int {
+	for index, step := range suite.Steps {
+		if step.Name == name {
+			return index
+		}
+	}
+	return -1
+}
+
+func dagAncestors(suite *scenario.Suite, name string) []string {
+	index := stepIndex(suite, name)
+	if index < 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	ordered := make([]string, 0)
+	var visit func(string)
+	visit = func(current string) {
+		currentIndex := stepIndex(suite, current)
+		if currentIndex < 0 {
+			return
+		}
+		for _, dependency := range suite.Steps[currentIndex].DependsOn {
+			visit(dependency)
+			if !seen[dependency] {
+				seen[dependency] = true
+				ordered = append(ordered, dependency)
+			}
+		}
+	}
+	visit(name)
+	return ordered
 }
 
 func checkCoverageCases(rep *Report, suites []*scenario.Suite, opts Options) error {
@@ -511,7 +633,7 @@ func checkTemplateRefs(rep *Report, path, step, field, text string, inputs, defi
 	}
 	for _, ref := range refs {
 		switch ref.Root {
-		case "run_name", "run_id", "resource_prefix", "oss_export_prefix", "time", "region", "zone":
+		case "run_name", "run_id", "resource_prefix", "oss_export_prefix", "oss_bucket_name", "work_dir", "time", "region", "zone":
 			continue
 		case "prerequisites":
 			checkPrerequisiteRef(rep, path, step, field, ref.Path, 1, regionPrerequisites["primary"])
@@ -595,10 +717,29 @@ func checkPrerequisiteRef(rep *Report, path, step, field string, refPath []strin
 func checkCreateTags(rep *Report, path, step, run string) {
 	info := parseCommand(run)
 	resource, _ := commandResourceVerb(info.Positionals, nil)
-	// RAM roles and Resource Manager policies do not expose tag fields in their
-	// APIs. They are still cleaned through the case journal, so requiring sweep
-	// tags here would reject valid, untaggable prerequisites.
-	if resource == "rg/role" || resource == "rg/policy" || resource == "ack/kubeconfig" || resource == "ack/nodepool" {
+	// These resources do not expose E2E tag fields in their APIs. They are
+	// still cleaned through the case journal and declared non-sweepable, so
+	// requiring sweep tags here would reject valid, untaggable resources.
+	if resource == "rg/role" ||
+		resource == "rg/policy" ||
+		resource == "rg/service-linked-role" ||
+		resource == "tag/associated-resource-rule" ||
+		resource == "tag/policy" ||
+		resource == "ack/addon" ||
+		resource == "ack/auto-repair-policy" ||
+		resource == "ack/check" ||
+		resource == "ack/diagnosis" ||
+		resource == "ack/instance" ||
+		resource == "ack/inspect" ||
+		resource == "ack/kubeconfig" ||
+		resource == "ack/nodepool" ||
+		resource == "ack/policy" ||
+		resource == "ack/report" ||
+		resource == "ack/template" ||
+		resource == "ack/trigger" ||
+		resource == "ack/vuls" ||
+		resource == "lingjun/net-test" ||
+		resource == "lingjun/node-group" {
 		return
 	}
 	tags := commandTags(run)
@@ -607,7 +748,26 @@ func checkCreateTags(rep *Report, path, step, run string) {
 	}
 }
 
+func allowsFixtureOwnedCreate(suite *scenario.Suite, resource string) bool {
+	switch resource {
+	case "ack/check", "ack/report", "ack/vuls", "lingjun/net-test":
+		// These APIs create immutable task/report history and expose no delete
+		// operation. The disposable cluster/node fixture owns their lifetime.
+		return true
+	case "ack/diagnosis":
+		for _, need := range suite.Needs {
+			if need == "ack_diagnosis_node" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func checkCommandShape(rep *Report, suite *scenario.Suite, st scenario.Step, resources map[string]bool) commandInfo {
+	if st.Local != nil {
+		return commandInfo{}
+	}
 	info := parseCommand(st.Run)
 	if !info.Valid {
 		rep.add(suite.Path, st.Name, "invalid_command_shape", "run must be a parseable ecctl command")
@@ -673,6 +833,9 @@ func suiteResources(suites []*scenario.Suite) map[string]bool {
 	for _, suite := range suites {
 		if suite.Resource != "" {
 			out[suite.Resource] = true
+		}
+		for _, resource := range suite.Covers {
+			out[resource] = true
 		}
 		for _, st := range suite.Steps {
 			info := parseCommand(st.Run)

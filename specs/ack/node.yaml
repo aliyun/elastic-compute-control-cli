@@ -184,10 +184,19 @@ waiters:
   attach_task_succeeded:
     probe: attach_task
     target: success
+    match:
+      state_only: true
     interval: 2s
     timeout: 300s
     failure:
       states: [fail, failed]
+  ready_after_attach:
+    probe: by_id
+    target: Ready
+    interval: 5s
+    timeout: 900s
+    failure:
+      states: [failed, error]
 
 bindings:
   delete_to_absent:
@@ -306,6 +315,10 @@ operations:
     workflow:
       - binding: attach_to_ready
         wait_unless: input.no_wait
+      - wait: ready_after_attach
+        ids:
+          - $input.id
+        unless: input.no_wait
       - probe: by_id
         ids:
           - $input.id

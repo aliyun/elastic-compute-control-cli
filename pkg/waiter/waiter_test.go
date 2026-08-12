@@ -28,6 +28,22 @@ func TestWaitReturnsWhenTargetObserved(t *testing.T) {
 	}
 }
 
+func TestWaitMatchesTargetStateCaseInsensitively(t *testing.T) {
+	got, err := Wait(context.Background(), Options{
+		Target:      "running",
+		MaxAttempts: 1,
+		Probe: func(context.Context) (Observation, error) {
+			return Observation{State: "Running"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if got.State != "Running" {
+		t.Fatalf("state = %q, want provider state preserved", got.State)
+	}
+}
+
 func TestWaitTimeoutUsesStructuredError(t *testing.T) {
 	_, err := Wait(context.Background(), Options{
 		Target:      "running",
@@ -131,6 +147,27 @@ func TestWaitReturnsServiceFailureOnFailureState(t *testing.T) {
 	appErr, ok := AsAppError(err)
 	if !ok || appErr.Payload().Code != "WaitFailed" || appErr.Payload().Kind != "service" || appErr.Payload().CurrentState != "deleted" {
 		t.Fatalf("error = %T %v, want service WaitFailed with current state deleted", err, err)
+	}
+}
+
+func TestWaitMatchesFailureStateCaseInsensitively(t *testing.T) {
+	got, err := Wait(context.Background(), Options{
+		Target:        "running",
+		FailureStates: []string{"failed"},
+		MaxAttempts:   1,
+		Probe: func(context.Context) (Observation, error) {
+			return Observation{State: "Failed"}, nil
+		},
+	})
+	if err == nil {
+		t.Fatal("expected failure-state error")
+	}
+	appErr, ok := AsAppError(err)
+	if !ok || appErr.Payload().Code != "WaitFailed" {
+		t.Fatalf("error = %T %v, want WaitFailed", err, err)
+	}
+	if got.State != "Failed" {
+		t.Fatalf("state = %q, want provider state preserved", got.State)
 	}
 }
 

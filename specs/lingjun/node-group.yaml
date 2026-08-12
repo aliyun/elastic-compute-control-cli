@@ -11,10 +11,10 @@ description:
   en: Manage Lingjun node group resources
   zh-CN: 管理灵骏节点组资源
 examples:
-  - ecctl lingjun node-group list --filter cluster=c-xxx
   - ecctl lingjun node-group create --cluster c-xxx --name training-ng --node-group @node-group.json
   - ecctl lingjun node-group update ng-xxx --name training-ng-renamed
   - ecctl lingjun node-group delete ng-xxx
+  - ecctl lingjun node-group get ng-xxx
 
 identity:
   field: id
@@ -62,6 +62,7 @@ schema:
         zh-CN: 密钥对名称
     login_password:
       type: string
+      input_style: text|@file
       description:
         en: 'login password (sensitive: prefer --key-pair; inject via @file or environment variable to avoid leaking through shell history)'
         zh-CN: 登录密码（敏感：建议优先使用 --key-pair；通过 @file 或环境变量注入，避免出现在 shell 历史记录中）
@@ -327,6 +328,21 @@ operations:
           fields:
             id: $input.id
           deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get Lingjun node group details
+      zh-CN: 查询灵骏节点组详情
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        not_found: error
   list:
     examples:
       - ecctl lingjun node-group list

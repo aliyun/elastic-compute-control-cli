@@ -1,0 +1,45 @@
+resource: lingjun/node-group
+needs: [lingjun_node_group_cluster]
+requires_prerequisites: [lingjun.cluster_network]
+timeout: 1h
+serial: true
+
+steps:
+  - name: create
+    run: >
+      ecctl lingjun node-group create
+      --cluster {{.stack.lingjun_node_group_cluster}}
+      --name {{.resource_prefix}}-ng
+      --node-group '{"NodeGroupName":"{{.resource_prefix}}-ng","NodeGroupDescription":"ecctl E2E {{.run_id}}","Az":"{{.prerequisites.lingjun.cluster_network.zone}}","MachineType":"{{.prerequisites.lingjun.cluster_network.machine_type}}","ImageId":"{{.prerequisites.lingjun.cluster_network.image_id}}","KeyPairName":"{{.stack.lingjun_node_group_keypair}}","FileSystemMountEnabled":false,"VirtualGpuEnabled":false,"SystemDisk":{"Category":"cloud_essd","Size":180,"PerformanceLevel":"PL1"}}'
+    at: $.node_group
+    expect:
+      id: { type: string, min_len: 1 }
+      cluster: { eq: "{{.stack.lingjun_node_group_cluster}}" }
+      name: { eq: "{{.resource_prefix}}-ng" }
+    capture:
+      node_group_id: id
+    teardown: ecctl lingjun node-group delete {{.node_group_id}} --cluster {{.stack.lingjun_node_group_cluster}} --timeout 15m
+
+  - name: get
+    run: ecctl lingjun node-group get {{.node_group_id}}
+    at: $.node_group
+    expect:
+      id: { eq: "{{.node_group_id}}" }
+      cluster: { eq: "{{.stack.lingjun_node_group_cluster}}" }
+
+  - name: list
+    run: ecctl lingjun node-group list --cluster {{.stack.lingjun_node_group_cluster}} --limit 10
+    assert:
+      - len($.node_groups) >= 1
+
+  - name: update
+    run: ecctl lingjun node-group update {{.node_group_id}} --name {{.resource_prefix}}-ng-updated
+    at: $.node_group
+    expect:
+      id: { eq: "{{.node_group_id}}" }
+      name: { eq: "{{.resource_prefix}}-ng-updated" }
+
+  - name: delete
+    run: ecctl lingjun node-group delete {{.node_group_id}} --cluster {{.stack.lingjun_node_group_cluster}} --timeout 15m
+    expect:
+      $.deleted: { eq: true }

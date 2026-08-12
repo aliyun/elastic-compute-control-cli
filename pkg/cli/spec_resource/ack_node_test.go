@@ -187,6 +187,7 @@ func TestACKNodeAttachUsesAttachInstancesWithNodepool(t *testing.T) {
 	fake := &fakeSpecCaller{responses: []map[string]any{
 		{"task_id": "T-attach", "list": []any{map[string]any{"code": "200", "instanceId": "i-node-1", "message": "successful"}}},
 		{"task_id": "T-attach", "state": "success", "task_type": "cluster_attach"},
+		fakeACKNodeListResponse("i-node-1", "NotReady"),
 		fakeACKNodeListResponse("i-node-1", "Ready"),
 	}}
 	runCLI := ackNodeCaller(t, fake)
@@ -195,7 +196,11 @@ func TestACKNodeAttachUsesAttachInstancesWithNodepool(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("ack node attach exit %d stderr=%s stdout=%s", code, stderr, stdout)
 	}
-	if len(fake.calls) != 3 || fake.calls[0].operation != "AttachInstances" || fake.calls[1].operation != "DescribeTaskInfo" || fake.calls[2].operation != "DescribeClusterNodes" {
+	if len(fake.calls) != 4 ||
+		fake.calls[0].operation != "AttachInstances" ||
+		fake.calls[1].operation != "DescribeTaskInfo" ||
+		fake.calls[2].operation != "DescribeClusterNodes" ||
+		fake.calls[3].operation != "DescribeClusterNodes" {
 		t.Fatalf("calls = %#v", fake.calls)
 	}
 	attachReq := fake.calls[0].request
@@ -218,7 +223,7 @@ func TestACKNodeAttachUsesAttachInstancesWithNodepool(t *testing.T) {
 	if fake.calls[1].request["task_id"] != "T-attach" {
 		t.Fatalf("DescribeTaskInfo request = %#v", fake.calls[1].request)
 	}
-	readReq := fake.calls[2].request
+	readReq := fake.calls[3].request
 	if readReq["ClusterId"] != "c-123" || readReq["instanceIds"] != "i-node-1" {
 		t.Fatalf("DescribeClusterNodes readback request = %#v", readReq)
 	}

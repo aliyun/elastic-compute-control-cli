@@ -23,6 +23,10 @@ var unavailableMarkers = []string{
 	"invalidzoneid",
 	"zonenotsupported",
 	"unsupportedzone",
+	// Tag associated-resource-rule create/delete are served by the
+	// Hangzhou endpoint only; other regions reject them with this error
+	// and the case must fall back to a later candidate.
+	"only hangzhou endpoint supports",
 	"no compatible ecs test combination found in region",
 	"no compatible ecs test combination found in explicit zone",
 	"no ecs zone supporting vswitch creation found in region",
@@ -30,6 +34,7 @@ var unavailableMarkers = []string{
 	"no compatible creatable ack cluster version found in region",
 	"no compatible lingjun cluster type",
 	"no compatible lingjun node profile found in region",
+	"no compatible lingjun node group profile found in region",
 }
 
 var nonRetryableMarkers = []string{

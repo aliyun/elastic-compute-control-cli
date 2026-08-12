@@ -1,6 +1,10 @@
 schema_version: 2
 product: tag
 resource: associated-resource-rule
+# This API family is served in cn-hangzhou only. The effective region is pinned
+# so both the RegionId parameter and the endpoint resolve to cn-hangzhou even
+# when the user configures a different region.
+fixed_region: cn-hangzhou
 kind: regional
 aliases: [arr]
 display_name:

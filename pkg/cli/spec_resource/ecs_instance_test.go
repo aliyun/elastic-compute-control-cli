@@ -495,6 +495,16 @@ func TestECSInstanceUpdateRoutesDocumentedSingleAPIs(t *testing.T) {
 		if fake.calls[i].operation != want {
 			t.Fatalf("call %d operation = %s, want %s; calls=%#v", i, fake.calls[i].operation, want, fake.calls)
 		}
+		if want == "ModifyInstanceChargeType" {
+			got, ok := fake.calls[i].request["InstanceIds"].([]string)
+			if !ok || len(got) != 1 || got[0] != "i-123" {
+				t.Fatalf("%s request missing instance ids: %#v", want, fake.calls[i].request)
+			}
+			if _, exists := fake.calls[i].request["InstanceId"]; exists {
+				t.Fatalf("%s request contains unsupported InstanceId: %#v", want, fake.calls[i].request)
+			}
+			continue
+		}
 		if want == "ModifyInstanceMaintenanceAttributes" {
 			if fake.calls[i].request["InstanceId.1"] != "i-123" {
 				t.Fatalf("%s request missing instance id: %#v", want, fake.calls[i].request)

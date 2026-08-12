@@ -329,29 +329,10 @@ ecctl ack kubeconfig create \
 
 Omitting `--user-id` makes ecctl use `DescribeClusterUserKubeconfig` instead.
 
-### Update expiry or revoke access
+### Revoke access
 
-ACK uses one API to change subaccount kubeconfig expiry and another to revoke
-the current cluster kubeconfig. ecctl exposes them as explicit resource actions.
-
-Alibaba Cloud CLI:
-
-```bash
-aliyun cs UpdateK8sClusterUserConfigExpire \
-  --ClusterId c-bp1234567890example \
-  --body '{"expire_hour":24,"user":"1234567890"}'
-```
-
-ecctl:
-
-```bash
-ecctl ack kubeconfig update \
-  --cluster c-bp1234567890example \
-  --user-id 1234567890 \
-  --expire-time 24
-```
-
-Revocation uses the corresponding pair:
+Kubeconfig expiration updates are not part of the public resource command
+surface. Revocation uses the corresponding pair:
 
 Alibaba Cloud CLI:
 

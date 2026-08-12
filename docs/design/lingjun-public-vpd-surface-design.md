@@ -1,6 +1,10 @@
-# Lingjun Public VPD Surface Design
+# Lingjun Public Surface Design
 
-Status: approved on 2026-07-13
+Status: superseded on 2026-07-27
+
+As of 2026-07-29, the public surface includes every Lingjun resource and action
+except `net-test`. The remainder of this document records the narrower
+2026-07-13 decision for historical context.
 
 ## Context
 

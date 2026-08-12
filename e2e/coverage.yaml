@@ -4,11 +4,11 @@ generated:
   cases_dir: cases
 summary:
   surface: public
-  resources: 33
-  operations: 168
+  resources: 57
+  operations: 253
   missing_cases: 0
-  passed: 159
-  not_passed: 9
+  passed: 253
+  not_passed: 0
 resources:
   ack:
     ack:
@@ -16,160 +16,300 @@ resources:
         create:
           status: live-pass
           case: cases/ack/ack-lifecycle.yaml
-          fingerprint: sha256:909042f388045603a598bf54088a9a6777cd35f5ae8d41472b82f067bca768f8
-          time: "2026-07-14T16:30:43.020872+08:00"
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/ack/ack-lifecycle.yaml
-          fingerprint: sha256:909042f388045603a598bf54088a9a6777cd35f5ae8d41472b82f067bca768f8
-          time: "2026-07-14T16:30:43.020872+08:00"
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/ack/ack-lifecycle.yaml
-          fingerprint: sha256:909042f388045603a598bf54088a9a6777cd35f5ae8d41472b82f067bca768f8
-          time: "2026-07-14T16:30:43.020872+08:00"
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/ack/ack-lifecycle.yaml
-          fingerprint: sha256:909042f388045603a598bf54088a9a6777cd35f5ae8d41472b82f067bca768f8
-          time: "2026-07-14T16:30:43.020872+08:00"
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/ack/ack-lifecycle.yaml
-          fingerprint: sha256:909042f388045603a598bf54088a9a6777cd35f5ae8d41472b82f067bca768f8
-          time: "2026-07-14T16:30:43.020872+08:00"
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
           reason: live-verified
         upgrade:
           status: live-pass
-          case: cases/ack/ack-upgrade-lifecycle.yaml
-          fingerprint: sha256:b4bc6fa99249e4632074525e082846d058d08c4944a87d592a543fc1cac9e994
-          time: "2026-07-14T18:59:17.749221+08:00"
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
+          reason: live-verified
+    addon:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ack/addon-lifecycle.yaml
+          fingerprint: sha256:d4993dc06547fc35295e0c37c4c1ae4269986dc0b560a4e81dc2269a45b7897a
+          time: "2026-08-03T15:24:39.585121+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ack/addon-lifecycle.yaml
+          fingerprint: sha256:d4993dc06547fc35295e0c37c4c1ae4269986dc0b560a4e81dc2269a45b7897a
+          time: "2026-08-03T15:24:39.585121+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ack/addon-lifecycle.yaml
+          fingerprint: sha256:d4993dc06547fc35295e0c37c4c1ae4269986dc0b560a4e81dc2269a45b7897a
+          time: "2026-08-03T15:24:39.585121+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ack/addon-lifecycle.yaml
+          fingerprint: sha256:d4993dc06547fc35295e0c37c4c1ae4269986dc0b560a4e81dc2269a45b7897a
+          time: "2026-08-03T15:24:39.585121+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ack/addon-lifecycle.yaml
+          fingerprint: sha256:d4993dc06547fc35295e0c37c4c1ae4269986dc0b560a4e81dc2269a45b7897a
+          time: "2026-08-03T15:24:39.585121+08:00"
+          reason: live-verified
+        upgrade:
+          status: live-pass
+          case: cases/ack/addon-lifecycle.yaml
+          fingerprint: sha256:d4993dc06547fc35295e0c37c4c1ae4269986dc0b560a4e81dc2269a45b7897a
+          time: "2026-08-03T15:24:39.585121+08:00"
+          reason: live-verified
+    alert:
+      operations:
+        update:
+          status: live-pass
+          case: cases/ack/alert-lifecycle.yaml
+          fingerprint: sha256:3d6cd5ea8ec63f552639e2df8de68cb466c9d9bde7cbb4fa5af85b902d3638a3
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+    audit:
+      operations:
+        get:
+          status: live-pass
+          case: cases/ack/audit-lifecycle.yaml
+          fingerprint: sha256:ffbd93df0cc0bc2914ec7fc0b48c3dab6b4b9d61a7b7a41cf99bdbaa84735c80
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ack/audit-lifecycle.yaml
+          fingerprint: sha256:ffbd93df0cc0bc2914ec7fc0b48c3dab6b4b9d61a7b7a41cf99bdbaa84735c80
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+    check:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ack/check-lifecycle.yaml
+          fingerprint: sha256:2d928fbf65ea0ee60a1f9fb35e3b1ae550f773ec1673024fa8e619e81cd2a4f0
+          time: "2026-08-03T15:24:39.585121+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ack/check-lifecycle.yaml
+          fingerprint: sha256:2d928fbf65ea0ee60a1f9fb35e3b1ae550f773ec1673024fa8e619e81cd2a4f0
+          time: "2026-08-03T15:24:39.585121+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ack/check-lifecycle.yaml
+          fingerprint: sha256:2d928fbf65ea0ee60a1f9fb35e3b1ae550f773ec1673024fa8e619e81cd2a4f0
+          time: "2026-08-03T15:24:39.585121+08:00"
+          reason: live-verified
+    config:
+      operations:
+        delete:
+          status: live-pass
+          case: cases/ack/config-lifecycle.yaml
+          fingerprint: sha256:90ca173abfba20641259f6dc2f2d075647c01f9c0d21319df8bc745423ee51ce
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ack/config-lifecycle.yaml
+          fingerprint: sha256:90ca173abfba20641259f6dc2f2d075647c01f9c0d21319df8bc745423ee51ce
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ack/config-lifecycle.yaml
+          fingerprint: sha256:90ca173abfba20641259f6dc2f2d075647c01f9c0d21319df8bc745423ee51ce
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+    control-plane-log:
+      operations:
+        get:
+          status: live-pass
+          case: cases/ack/control-plane-log-lifecycle.yaml
+          fingerprint: sha256:0b6a858e2e535434720a1cf90bfadd90d36040762c2dcf13ad2497963bac2bf5
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ack/control-plane-log-lifecycle.yaml
+          fingerprint: sha256:0b6a858e2e535434720a1cf90bfadd90d36040762c2dcf13ad2497963bac2bf5
+          time: "2026-07-28T18:10:09.278946+08:00"
           reason: live-verified
     event:
       operations:
         list:
-          status: offline
-          case: cases/ack/event-readonly.yaml
-          fingerprint: sha256:3d14309727fa2585dbfca535e971a55749ceb3a75c27526f3591b6969d98f8cc
-          time: "2026-07-22T15:14:26.963337+08:00"
-          reason: not-run
+          status: live-pass
+          case: cases/ack/event-lifecycle.yaml
+          fingerprint: sha256:c590fc3815869ae147410fa4d7c3b89a1f08b1c718d3db9dcac0ed3d04c5ad11
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+    instance:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ack/instance-lifecycle.yaml
+          fingerprint: sha256:1af40c9814b20ad8f1b64110a683671c95def815abba116491df92e6e9a25580
+          time: "2026-08-03T15:37:58.174836+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ack/instance-lifecycle.yaml
+          fingerprint: sha256:1af40c9814b20ad8f1b64110a683671c95def815abba116491df92e6e9a25580
+          time: "2026-08-03T15:37:58.174836+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ack/instance-lifecycle.yaml
+          fingerprint: sha256:1af40c9814b20ad8f1b64110a683671c95def815abba116491df92e6e9a25580
+          time: "2026-08-03T15:37:58.174836+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ack/instance-lifecycle.yaml
+          fingerprint: sha256:1af40c9814b20ad8f1b64110a683671c95def815abba116491df92e6e9a25580
+          time: "2026-08-03T15:37:58.174836+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ack/instance-lifecycle.yaml
+          fingerprint: sha256:1af40c9814b20ad8f1b64110a683671c95def815abba116491df92e6e9a25580
+          time: "2026-08-03T15:37:58.174836+08:00"
+          reason: live-verified
     kubeconfig:
       operations:
         create:
           status: live-pass
           case: cases/ack/kubeconfig-lifecycle.yaml
-          fingerprint: sha256:24f7da700973fc531f4353d4086b891c3f9ceb28aef470fbf91ee1a2315c5c19
-          time: "2026-07-15T10:29:46.153532+08:00"
+          fingerprint: sha256:59db838ae81011ad2971fa5cd0637643ce5f2a6a1397d47fe4db72d1afb02597
+          time: "2026-08-03T11:12:57.936407+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/ack/kubeconfig-lifecycle.yaml
-          fingerprint: sha256:24f7da700973fc531f4353d4086b891c3f9ceb28aef470fbf91ee1a2315c5c19
-          time: "2026-07-15T10:29:46.153532+08:00"
+          fingerprint: sha256:59db838ae81011ad2971fa5cd0637643ce5f2a6a1397d47fe4db72d1afb02597
+          time: "2026-08-03T11:12:57.936407+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/ack/kubeconfig-lifecycle.yaml
-          fingerprint: sha256:24f7da700973fc531f4353d4086b891c3f9ceb28aef470fbf91ee1a2315c5c19
-          time: "2026-07-15T10:29:46.153532+08:00"
+          fingerprint: sha256:59db838ae81011ad2971fa5cd0637643ce5f2a6a1397d47fe4db72d1afb02597
+          time: "2026-08-03T11:12:57.936407+08:00"
           reason: live-verified
         revoke:
           status: live-pass
           case: cases/ack/kubeconfig-lifecycle.yaml
-          fingerprint: sha256:24f7da700973fc531f4353d4086b891c3f9ceb28aef470fbf91ee1a2315c5c19
-          time: "2026-07-15T10:29:46.153532+08:00"
+          fingerprint: sha256:59db838ae81011ad2971fa5cd0637643ce5f2a6a1397d47fe4db72d1afb02597
+          time: "2026-08-03T11:12:57.936407+08:00"
           reason: live-verified
-        update:
-          status: offline
-          case: cases/ack/kubeconfig-update-lifecycle.yaml
-          fingerprint: sha256:16e030b7cee2b3d7cdec44360ff705020ffdcebd1f2de8d4f6ceb0c6075a7c3c
-          time: "2026-07-22T15:14:26.963337+08:00"
-          reason: not-run
     node:
       operations:
         attach:
           status: live-pass
           case: cases/ack/node-lifecycle.yaml
           fingerprint: sha256:25cdcc0b417fa19ace776c9bff965436f494024d53b8c1443b0d1f030cb98e99
-          time: "2026-07-14T19:09:12.190565+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/ack/node-lifecycle.yaml
           fingerprint: sha256:25cdcc0b417fa19ace776c9bff965436f494024d53b8c1443b0d1f030cb98e99
-          time: "2026-07-14T19:09:12.190565+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/ack/node-lifecycle.yaml
           fingerprint: sha256:25cdcc0b417fa19ace776c9bff965436f494024d53b8c1443b0d1f030cb98e99
-          time: "2026-07-14T19:09:12.190565+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/ack/node-lifecycle.yaml
           fingerprint: sha256:25cdcc0b417fa19ace776c9bff965436f494024d53b8c1443b0d1f030cb98e99
-          time: "2026-07-14T19:09:12.190565+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
     nodepool:
       operations:
         attach:
           status: live-pass
-          case: cases/ack/nodepool-lifecycle.yaml
-          fingerprint: sha256:cd840bbd60a1baaf891364de8bbba0b2ffac96837069142104ec5cef7104cf92
-          time: "2026-07-14T19:56:42.555206+08:00"
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
           reason: live-verified
         create:
           status: live-pass
-          case: cases/ack/nodepool-lifecycle.yaml
-          fingerprint: sha256:cd840bbd60a1baaf891364de8bbba0b2ffac96837069142104ec5cef7104cf92
-          time: "2026-07-14T19:56:42.555206+08:00"
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
           reason: live-verified
         delete:
           status: live-pass
-          case: cases/ack/nodepool-lifecycle.yaml
-          fingerprint: sha256:cd840bbd60a1baaf891364de8bbba0b2ffac96837069142104ec5cef7104cf92
-          time: "2026-07-14T19:56:42.555206+08:00"
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
           reason: live-verified
         detach:
           status: live-pass
-          case: cases/ack/nodepool-lifecycle.yaml
-          fingerprint: sha256:cd840bbd60a1baaf891364de8bbba0b2ffac96837069142104ec5cef7104cf92
-          time: "2026-07-14T19:56:42.555206+08:00"
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
           reason: live-verified
         get:
           status: live-pass
-          case: cases/ack/nodepool-lifecycle.yaml
-          fingerprint: sha256:cd840bbd60a1baaf891364de8bbba0b2ffac96837069142104ec5cef7104cf92
-          time: "2026-07-14T19:56:42.555206+08:00"
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
           reason: live-verified
         list:
           status: live-pass
-          case: cases/ack/nodepool-lifecycle.yaml
-          fingerprint: sha256:cd840bbd60a1baaf891364de8bbba0b2ffac96837069142104ec5cef7104cf92
-          time: "2026-07-14T19:56:42.555206+08:00"
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
           reason: live-verified
         repair:
           status: live-pass
-          case: cases/ack/nodepool-lifecycle.yaml
-          fingerprint: sha256:cd840bbd60a1baaf891364de8bbba0b2ffac96837069142104ec5cef7104cf92
-          time: "2026-07-14T19:56:42.555206+08:00"
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
           reason: live-verified
         update:
           status: live-pass
-          case: cases/ack/nodepool-lifecycle.yaml
-          fingerprint: sha256:cd840bbd60a1baaf891364de8bbba0b2ffac96837069142104ec5cef7104cf92
-          time: "2026-07-14T19:56:42.555206+08:00"
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
           reason: live-verified
         upgrade:
           status: live-pass
-          case: cases/ack/nodepool-upgrade-lifecycle.yaml
-          fingerprint: sha256:4ac3b82f2ce3288ea57fd0b0173de131786c88cf432ff117da681dc58e779bc5
-          time: "2026-07-14T20:21:05.124532+08:00"
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
           reason: live-verified
     permission:
       operations:
@@ -177,55 +317,179 @@ resources:
           status: live-pass
           case: cases/ack/permission-lifecycle.yaml
           fingerprint: sha256:68fc66ee6bceb7977776ee5bb73aa3ae6050141ea2faf3b7c821419c626f3d15
-          time: "2026-07-15T10:29:46.153532+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/ack/permission-lifecycle.yaml
           fingerprint: sha256:68fc66ee6bceb7977776ee5bb73aa3ae6050141ea2faf3b7c821419c626f3d15
-          time: "2026-07-15T10:29:46.153532+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/ack/permission-lifecycle.yaml
           fingerprint: sha256:68fc66ee6bceb7977776ee5bb73aa3ae6050141ea2faf3b7c821419c626f3d15
-          time: "2026-07-15T10:29:46.153532+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/ack/permission-lifecycle.yaml
           fingerprint: sha256:68fc66ee6bceb7977776ee5bb73aa3ae6050141ea2faf3b7c821419c626f3d15
-          time: "2026-07-15T10:29:46.153532+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
     policy:
       operations:
         get:
-          status: offline
-          case: cases/ack/policy-readonly.yaml
-          fingerprint: sha256:59d2e9c44b2d076f8bc351321bf6758e79408200908e6ccce312ba38b2ea42d7
-          time: "2026-07-22T15:14:26.963337+08:00"
-          reason: not-run
+          status: live-pass
+          case: cases/ack/policy-lifecycle.yaml
+          fingerprint: sha256:cc0f53633bef330e84742424b9dbda1ce1b55033df5be9dc5e832715f9768672
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
         list:
-          status: offline
-          case: cases/ack/policy-readonly.yaml
-          fingerprint: sha256:59d2e9c44b2d076f8bc351321bf6758e79408200908e6ccce312ba38b2ea42d7
-          time: "2026-07-22T15:14:26.963337+08:00"
-          reason: not-run
+          status: live-pass
+          case: cases/ack/policy-lifecycle.yaml
+          fingerprint: sha256:cc0f53633bef330e84742424b9dbda1ce1b55033df5be9dc5e832715f9768672
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
     region:
       operations:
         list:
           status: live-pass
           case: cases/ack/region-lifecycle.yaml
           fingerprint: sha256:17be88e7fc9c4fe5bc9d071a3fc8ca83dd5cde60dc30134fd45b099539c3d286
-          time: "2026-07-14T13:43:29.792992+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
+          reason: live-verified
+    report:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ack/report-lifecycle.yaml
+          fingerprint: sha256:9891e4fbfbc18e984b5a770afb1759977c43ac07c3ac498e8553e50b7de70917
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ack/report-lifecycle.yaml
+          fingerprint: sha256:9891e4fbfbc18e984b5a770afb1759977c43ac07c3ac498e8553e50b7de70917
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ack/report-lifecycle.yaml
+          fingerprint: sha256:9891e4fbfbc18e984b5a770afb1759977c43ac07c3ac498e8553e50b7de70917
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+    task:
+      operations:
+        cancel:
+          status: live-pass
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
+          reason: live-verified
+        pause:
+          status: live-pass
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
+          reason: live-verified
+        resume:
+          status: live-pass
+          case: cases/ack/ack-lifecycle.yaml
+          fingerprint: sha256:a70f0b9a88ee9051bf6fa1eb76a0f70147fc71ea27fabc73726370c92827c994
+          time: "2026-08-03T10:55:31.699064+08:00"
+          reason: live-verified
+    template:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ack/template-lifecycle.yaml
+          fingerprint: sha256:7a0e1bee29472d5681352e24b1402bbbe6f15928e0eca4865ba1ea6640cc05d5
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ack/template-lifecycle.yaml
+          fingerprint: sha256:7a0e1bee29472d5681352e24b1402bbbe6f15928e0eca4865ba1ea6640cc05d5
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ack/template-lifecycle.yaml
+          fingerprint: sha256:7a0e1bee29472d5681352e24b1402bbbe6f15928e0eca4865ba1ea6640cc05d5
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ack/template-lifecycle.yaml
+          fingerprint: sha256:7a0e1bee29472d5681352e24b1402bbbe6f15928e0eca4865ba1ea6640cc05d5
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/ack/template-lifecycle.yaml
+          fingerprint: sha256:7a0e1bee29472d5681352e24b1402bbbe6f15928e0eca4865ba1ea6640cc05d5
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+    trigger:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ack/trigger-lifecycle.yaml
+          fingerprint: sha256:007b6e718234354c4af2732caa662fd22de3475c3621fe44c596afe3b51f9e63
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/ack/trigger-lifecycle.yaml
+          fingerprint: sha256:007b6e718234354c4af2732caa662fd22de3475c3621fe44c596afe3b51f9e63
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/ack/trigger-lifecycle.yaml
+          fingerprint: sha256:007b6e718234354c4af2732caa662fd22de3475c3621fe44c596afe3b51f9e63
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ack/trigger-lifecycle.yaml
+          fingerprint: sha256:007b6e718234354c4af2732caa662fd22de3475c3621fe44c596afe3b51f9e63
+          time: "2026-07-28T18:10:09.278946+08:00"
           reason: live-verified
     version:
       operations:
         list:
           status: live-pass
-          case: cases/ack/region-lifecycle.yaml
-          fingerprint: sha256:17be88e7fc9c4fe5bc9d071a3fc8ca83dd5cde60dc30134fd45b099539c3d286
-          time: "2026-07-14T13:43:29.792992+08:00"
+          case: cases/ack/version-lifecycle.yaml
+          fingerprint: sha256:fac2ddf9bb70ae3087407d1a23406da4d67a284c071dcaa7eb6333fd95080238
+          time: "2026-07-28T16:50:04.565315+08:00"
+          reason: live-verified
+    vuls:
+      operations:
+        create:
+          status: live-pass
+          case: cases/ack/vuls-lifecycle.yaml
+          fingerprint: sha256:df7ae7065a25546ea726cb3339df372919d0ce30b9aecf2d7dcf312ef61c0be3
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/ack/vuls-lifecycle.yaml
+          fingerprint: sha256:df7ae7065a25546ea726cb3339df372919d0ce30b9aecf2d7dcf312ef61c0be3
+          time: "2026-07-28T18:10:09.278946+08:00"
           reason: live-verified
   ecs:
     assistant:
@@ -234,19 +498,19 @@ resources:
           status: live-pass
           case: cases/ecs/assistant-lifecycle.yaml
           fingerprint: sha256:87f92e4b7f3d9e99b962e608c79e695de375599aba12816b59c8207301eedb01
-          time: "2026-07-14T15:55:56.239775+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         install:
           status: live-pass
           case: cases/ecs/assistant-lifecycle.yaml
           fingerprint: sha256:87f92e4b7f3d9e99b962e608c79e695de375599aba12816b59c8207301eedb01
-          time: "2026-07-14T15:55:56.239775+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/ecs/assistant-lifecycle.yaml
           fingerprint: sha256:87f92e4b7f3d9e99b962e608c79e695de375599aba12816b59c8207301eedb01
-          time: "2026-07-14T15:55:56.239775+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
     auto-snapshot-policy:
       operations:
@@ -254,31 +518,31 @@ resources:
           status: live-pass
           case: cases/ecs/auto-snapshot-policy-lifecycle.yaml
           fingerprint: sha256:2783800dc38c328219242e8d5e30f03e7cde5108b8cc1fdcd5d7dda733bc20d8
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/ecs/auto-snapshot-policy-lifecycle.yaml
           fingerprint: sha256:2783800dc38c328219242e8d5e30f03e7cde5108b8cc1fdcd5d7dda733bc20d8
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/ecs/auto-snapshot-policy-lifecycle.yaml
           fingerprint: sha256:2783800dc38c328219242e8d5e30f03e7cde5108b8cc1fdcd5d7dda733bc20d8
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/ecs/auto-snapshot-policy-lifecycle.yaml
           fingerprint: sha256:2783800dc38c328219242e8d5e30f03e7cde5108b8cc1fdcd5d7dda733bc20d8
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/ecs/auto-snapshot-policy-lifecycle.yaml
           fingerprint: sha256:2783800dc38c328219242e8d5e30f03e7cde5108b8cc1fdcd5d7dda733bc20d8
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
     command:
       operations:
@@ -286,43 +550,43 @@ resources:
           status: live-pass
           case: cases/ecs/command-lifecycle.yaml
           fingerprint: sha256:aec5cae5927c095d621aaae8de00f3b644b59f8f106760471bd0f3bc2fe01c03
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/ecs/command-lifecycle.yaml
           fingerprint: sha256:aec5cae5927c095d621aaae8de00f3b644b59f8f106760471bd0f3bc2fe01c03
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/ecs/command-lifecycle.yaml
           fingerprint: sha256:aec5cae5927c095d621aaae8de00f3b644b59f8f106760471bd0f3bc2fe01c03
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         invoke:
           status: live-pass
           case: cases/ecs/command-lifecycle.yaml
           fingerprint: sha256:aec5cae5927c095d621aaae8de00f3b644b59f8f106760471bd0f3bc2fe01c03
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/ecs/command-lifecycle.yaml
           fingerprint: sha256:aec5cae5927c095d621aaae8de00f3b644b59f8f106760471bd0f3bc2fe01c03
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         stop:
           status: live-pass
           case: cases/ecs/command-lifecycle.yaml
           fingerprint: sha256:aec5cae5927c095d621aaae8de00f3b644b59f8f106760471bd0f3bc2fe01c03
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/ecs/command-lifecycle.yaml
           fingerprint: sha256:aec5cae5927c095d621aaae8de00f3b644b59f8f106760471bd0f3bc2fe01c03
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
     disk:
       operations:
@@ -330,67 +594,67 @@ resources:
           status: live-pass
           case: cases/ecs/disk-lifecycle.yaml
           fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
-          time: "2026-07-14T15:55:56.239775+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         clone:
           status: live-pass
           case: cases/ecs/disk-lifecycle.yaml
           fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
-          time: "2026-07-14T15:55:56.239775+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         create:
           status: live-pass
           case: cases/ecs/disk-lifecycle.yaml
           fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
-          time: "2026-07-14T15:55:56.239775+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/ecs/disk-lifecycle.yaml
           fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
-          time: "2026-07-14T15:55:56.239775+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         detach:
           status: live-pass
           case: cases/ecs/disk-lifecycle.yaml
           fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
-          time: "2026-07-14T15:55:56.239775+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/ecs/disk-lifecycle.yaml
           fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
-          time: "2026-07-14T15:55:56.239775+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/ecs/disk-lifecycle.yaml
           fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
-          time: "2026-07-14T15:55:56.239775+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         monitor:
           status: live-pass
           case: cases/ecs/disk-lifecycle.yaml
           fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
-          time: "2026-07-14T15:55:56.239775+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         reinit:
           status: live-pass
           case: cases/ecs/disk-lifecycle.yaml
           fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
-          time: "2026-07-14T15:55:56.239775+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         reset:
           status: live-pass
           case: cases/ecs/disk-lifecycle.yaml
           fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
-          time: "2026-07-14T15:55:56.239775+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/ecs/disk-lifecycle.yaml
           fingerprint: sha256:61f259a310112078c870bee361c413a1a26399ceba0c3d375fc4da613ad6024c
-          time: "2026-07-14T15:55:56.239775+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
     eni:
       operations:
@@ -398,167 +662,167 @@ resources:
           status: live-pass
           case: cases/ecs/eni-lifecycle.yaml
           fingerprint: sha256:ed30050c782b4c24d9cf0cbff5ff03dda851c8ca3bd0c2b3b541b0f43221e8f2
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         create:
           status: live-pass
           case: cases/ecs/eni-lifecycle.yaml
           fingerprint: sha256:ed30050c782b4c24d9cf0cbff5ff03dda851c8ca3bd0c2b3b541b0f43221e8f2
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/ecs/eni-lifecycle.yaml
           fingerprint: sha256:ed30050c782b4c24d9cf0cbff5ff03dda851c8ca3bd0c2b3b541b0f43221e8f2
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         detach:
           status: live-pass
           case: cases/ecs/eni-lifecycle.yaml
           fingerprint: sha256:ed30050c782b4c24d9cf0cbff5ff03dda851c8ca3bd0c2b3b541b0f43221e8f2
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/ecs/eni-lifecycle.yaml
           fingerprint: sha256:ed30050c782b4c24d9cf0cbff5ff03dda851c8ca3bd0c2b3b541b0f43221e8f2
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/ecs/eni-lifecycle.yaml
           fingerprint: sha256:ed30050c782b4c24d9cf0cbff5ff03dda851c8ca3bd0c2b3b541b0f43221e8f2
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/ecs/eni-lifecycle.yaml
           fingerprint: sha256:ed30050c782b4c24d9cf0cbff5ff03dda851c8ca3bd0c2b3b541b0f43221e8f2
-          time: "2026-07-14T15:42:36.355234+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
     image:
       operations:
         copy:
           status: live-pass
-          case: cases/ecs/image-copy-lifecycle.yaml
-          fingerprint: sha256:c60f3599549305621ae0b07689a269e44b70cdb1bd282b59d301dc5bc45962f8
-          time: "2026-07-14T13:11:12.283909+08:00"
+          case: cases/ecs/image-lifecycle.yaml
+          fingerprint: sha256:324bff21fd65166f3031f0d03e317d47fb394bafd1af404012637e81a21e19bd
+          time: "2026-08-06T15:44:27.382509+08:00"
           reason: live-verified
         create:
           status: live-pass
-          case: cases/ecs/image-copy-lifecycle.yaml
-          fingerprint: sha256:c60f3599549305621ae0b07689a269e44b70cdb1bd282b59d301dc5bc45962f8
-          time: "2026-07-14T13:11:12.283909+08:00"
+          case: cases/ecs/image-lifecycle.yaml
+          fingerprint: sha256:324bff21fd65166f3031f0d03e317d47fb394bafd1af404012637e81a21e19bd
+          time: "2026-08-06T15:44:27.382509+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/ecs/image-lifecycle.yaml
-          fingerprint: sha256:74c13f162a1e3b5eeb99d2b8462b26d603762634d8c626b4ca2c646ece6e817c
-          time: "2026-07-14T13:39:51.320077+08:00"
+          fingerprint: sha256:324bff21fd65166f3031f0d03e317d47fb394bafd1af404012637e81a21e19bd
+          time: "2026-08-06T15:44:27.382509+08:00"
           reason: live-verified
         export:
-          status: offline
-          case: cases/ecs/image-export-lifecycle.yaml
-          fingerprint: sha256:0dd803e4c2c04b9b4b9f9a855ffd0398e4aa3b2937d73a710755022e480083a5
-          time: "2026-07-22T15:14:26.963337+08:00"
-          reason: not-run
+          status: live-pass
+          case: cases/ecs/image-lifecycle.yaml
+          fingerprint: sha256:324bff21fd65166f3031f0d03e317d47fb394bafd1af404012637e81a21e19bd
+          time: "2026-08-06T15:44:27.382509+08:00"
+          reason: live-verified
         get:
           status: live-pass
           case: cases/ecs/image-lifecycle.yaml
-          fingerprint: sha256:74c13f162a1e3b5eeb99d2b8462b26d603762634d8c626b4ca2c646ece6e817c
-          time: "2026-07-14T13:39:51.320077+08:00"
+          fingerprint: sha256:324bff21fd65166f3031f0d03e317d47fb394bafd1af404012637e81a21e19bd
+          time: "2026-08-06T15:44:27.382509+08:00"
           reason: live-verified
         import:
-          status: offline
-          case: cases/ecs/image-import-lifecycle.yaml
-          fingerprint: sha256:49ce7836ed6f996cc1bac92a4d3785ead829ce58b35573cd12a2c4f0590d2389
-          time: "2026-07-22T15:14:26.963337+08:00"
-          reason: not-run
+          status: live-pass
+          case: cases/ecs/image-lifecycle.yaml
+          fingerprint: sha256:324bff21fd65166f3031f0d03e317d47fb394bafd1af404012637e81a21e19bd
+          time: "2026-08-06T15:44:27.382509+08:00"
+          reason: live-verified
         list:
           status: live-pass
           case: cases/ecs/image-lifecycle.yaml
-          fingerprint: sha256:74c13f162a1e3b5eeb99d2b8462b26d603762634d8c626b4ca2c646ece6e817c
-          time: "2026-07-14T13:39:51.320077+08:00"
+          fingerprint: sha256:324bff21fd65166f3031f0d03e317d47fb394bafd1af404012637e81a21e19bd
+          time: "2026-08-06T15:44:27.382509+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/ecs/image-lifecycle.yaml
-          fingerprint: sha256:74c13f162a1e3b5eeb99d2b8462b26d603762634d8c626b4ca2c646ece6e817c
-          time: "2026-07-14T13:39:51.320077+08:00"
+          fingerprint: sha256:324bff21fd65166f3031f0d03e317d47fb394bafd1af404012637e81a21e19bd
+          time: "2026-08-06T15:44:27.382509+08:00"
           reason: live-verified
     instance:
       operations:
         create:
           status: live-pass
           case: cases/ecs/instance-lifecycle.yaml
-          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
-          time: "2026-07-14T15:23:15.281625+08:00"
+          fingerprint: sha256:9f02df315bcb7ac0f1ab4b3062dcecb4c8bf24090203d6281f1534e710deed0a
+          time: "2026-08-06T16:07:53.114885+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/ecs/instance-lifecycle.yaml
-          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
-          time: "2026-07-14T15:23:15.281625+08:00"
+          fingerprint: sha256:9f02df315bcb7ac0f1ab4b3062dcecb4c8bf24090203d6281f1534e710deed0a
+          time: "2026-08-06T16:07:53.114885+08:00"
           reason: live-verified
         exec:
           status: live-pass
           case: cases/ecs/instance-lifecycle.yaml
-          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
-          time: "2026-07-14T15:23:15.281625+08:00"
+          fingerprint: sha256:9f02df315bcb7ac0f1ab4b3062dcecb4c8bf24090203d6281f1534e710deed0a
+          time: "2026-08-06T16:07:53.114885+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/ecs/instance-lifecycle.yaml
-          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
-          time: "2026-07-14T15:23:15.281625+08:00"
+          fingerprint: sha256:9f02df315bcb7ac0f1ab4b3062dcecb4c8bf24090203d6281f1534e710deed0a
+          time: "2026-08-06T16:07:53.114885+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/ecs/instance-lifecycle.yaml
-          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
-          time: "2026-07-14T15:23:15.281625+08:00"
+          fingerprint: sha256:9f02df315bcb7ac0f1ab4b3062dcecb4c8bf24090203d6281f1534e710deed0a
+          time: "2026-08-06T16:07:53.114885+08:00"
           reason: live-verified
         monitor:
           status: live-pass
           case: cases/ecs/instance-lifecycle.yaml
-          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
-          time: "2026-07-14T15:23:15.281625+08:00"
+          fingerprint: sha256:9f02df315bcb7ac0f1ab4b3062dcecb4c8bf24090203d6281f1534e710deed0a
+          time: "2026-08-06T16:07:53.114885+08:00"
           reason: live-verified
         reboot:
           status: live-pass
           case: cases/ecs/instance-lifecycle.yaml
-          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
-          time: "2026-07-14T15:23:15.281625+08:00"
+          fingerprint: sha256:9f02df315bcb7ac0f1ab4b3062dcecb4c8bf24090203d6281f1534e710deed0a
+          time: "2026-08-06T16:07:53.114885+08:00"
           reason: live-verified
         renew:
-          status: offline
-          case: cases/ecs/instance-renew-lifecycle.yaml
-          fingerprint: sha256:e0b8de197bdabacad440146ca8badbb26ece809a8ba7dc88f872859dd27d4a8c
-          time: "2026-07-22T15:14:26.963337+08:00"
-          reason: not-run
+          status: live-pass
+          case: cases/ecs/instance-lifecycle.yaml
+          fingerprint: sha256:9f02df315bcb7ac0f1ab4b3062dcecb4c8bf24090203d6281f1534e710deed0a
+          time: "2026-08-06T16:07:53.114885+08:00"
+          reason: live-verified
         sendfile:
           status: live-pass
           case: cases/ecs/instance-lifecycle.yaml
-          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
-          time: "2026-07-14T15:23:15.281625+08:00"
+          fingerprint: sha256:9f02df315bcb7ac0f1ab4b3062dcecb4c8bf24090203d6281f1534e710deed0a
+          time: "2026-08-06T16:07:53.114885+08:00"
           reason: live-verified
         start:
           status: live-pass
           case: cases/ecs/instance-lifecycle.yaml
-          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
-          time: "2026-07-14T15:23:15.281625+08:00"
+          fingerprint: sha256:9f02df315bcb7ac0f1ab4b3062dcecb4c8bf24090203d6281f1534e710deed0a
+          time: "2026-08-06T16:07:53.114885+08:00"
           reason: live-verified
         stop:
           status: live-pass
           case: cases/ecs/instance-lifecycle.yaml
-          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
-          time: "2026-07-14T15:23:15.281625+08:00"
+          fingerprint: sha256:9f02df315bcb7ac0f1ab4b3062dcecb4c8bf24090203d6281f1534e710deed0a
+          time: "2026-08-06T16:07:53.114885+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/ecs/instance-lifecycle.yaml
-          fingerprint: sha256:ea9c96eac055f7e0f229f08056d844c9dffc0eb11c7838c8cfe7f071628dc117
-          time: "2026-07-14T15:23:15.281625+08:00"
+          fingerprint: sha256:9f02df315bcb7ac0f1ab4b3062dcecb4c8bf24090203d6281f1534e710deed0a
+          time: "2026-08-06T16:07:53.114885+08:00"
           reason: live-verified
     keypair:
       operations:
@@ -566,25 +830,25 @@ resources:
           status: live-pass
           case: cases/ecs/keypair-lifecycle.yaml
           fingerprint: sha256:7e6e104c77946326eef5dbc8fef06e12f2bd68786e1abff0034434674951528d
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/ecs/keypair-lifecycle.yaml
           fingerprint: sha256:7e6e104c77946326eef5dbc8fef06e12f2bd68786e1abff0034434674951528d
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/ecs/keypair-lifecycle.yaml
           fingerprint: sha256:7e6e104c77946326eef5dbc8fef06e12f2bd68786e1abff0034434674951528d
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/ecs/keypair-lifecycle.yaml
           fingerprint: sha256:7e6e104c77946326eef5dbc8fef06e12f2bd68786e1abff0034434674951528d
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
     launch-template:
       operations:
@@ -592,31 +856,31 @@ resources:
           status: live-pass
           case: cases/ecs/launch-template-lifecycle.yaml
           fingerprint: sha256:ba10f05315e47ab65733e256dab1255d74eb4feb5fb0662e5182f320c2ae1878
-          time: "2026-07-14T15:23:15.281625+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/ecs/launch-template-lifecycle.yaml
           fingerprint: sha256:ba10f05315e47ab65733e256dab1255d74eb4feb5fb0662e5182f320c2ae1878
-          time: "2026-07-14T15:23:15.281625+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/ecs/launch-template-lifecycle.yaml
           fingerprint: sha256:ba10f05315e47ab65733e256dab1255d74eb4feb5fb0662e5182f320c2ae1878
-          time: "2026-07-14T15:23:15.281625+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/ecs/launch-template-lifecycle.yaml
           fingerprint: sha256:ba10f05315e47ab65733e256dab1255d74eb4feb5fb0662e5182f320c2ae1878
-          time: "2026-07-14T15:23:15.281625+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/ecs/launch-template-lifecycle.yaml
           fingerprint: sha256:ba10f05315e47ab65733e256dab1255d74eb4feb5fb0662e5182f320c2ae1878
-          time: "2026-07-14T15:23:15.281625+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
     port-range-list:
       operations:
@@ -624,31 +888,31 @@ resources:
           status: live-pass
           case: cases/ecs/port-range-list-lifecycle.yaml
           fingerprint: sha256:e009e37f9dabc71fcfbff7a26068c4dc91aec04a12cb1d5f4adf2bab08e0bf79
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/ecs/port-range-list-lifecycle.yaml
           fingerprint: sha256:e009e37f9dabc71fcfbff7a26068c4dc91aec04a12cb1d5f4adf2bab08e0bf79
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/ecs/port-range-list-lifecycle.yaml
           fingerprint: sha256:e009e37f9dabc71fcfbff7a26068c4dc91aec04a12cb1d5f4adf2bab08e0bf79
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/ecs/port-range-list-lifecycle.yaml
           fingerprint: sha256:e009e37f9dabc71fcfbff7a26068c4dc91aec04a12cb1d5f4adf2bab08e0bf79
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/ecs/port-range-list-lifecycle.yaml
           fingerprint: sha256:e009e37f9dabc71fcfbff7a26068c4dc91aec04a12cb1d5f4adf2bab08e0bf79
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
     prefix-list:
       operations:
@@ -656,31 +920,31 @@ resources:
           status: live-pass
           case: cases/ecs/prefix-list-lifecycle.yaml
           fingerprint: sha256:e08b78abb42dcfb6b27c86be0a4a74c5ee430498e32e445558286bd9baa286f9
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/ecs/prefix-list-lifecycle.yaml
           fingerprint: sha256:e08b78abb42dcfb6b27c86be0a4a74c5ee430498e32e445558286bd9baa286f9
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/ecs/prefix-list-lifecycle.yaml
           fingerprint: sha256:e08b78abb42dcfb6b27c86be0a4a74c5ee430498e32e445558286bd9baa286f9
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/ecs/prefix-list-lifecycle.yaml
           fingerprint: sha256:e08b78abb42dcfb6b27c86be0a4a74c5ee430498e32e445558286bd9baa286f9
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/ecs/prefix-list-lifecycle.yaml
           fingerprint: sha256:e08b78abb42dcfb6b27c86be0a4a74c5ee430498e32e445558286bd9baa286f9
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
     region:
       operations:
@@ -688,7 +952,7 @@ resources:
           status: live-pass
           case: cases/ecs/region-lifecycle.yaml
           fingerprint: sha256:6f670ecdb7651381193a60e02dec15664d96a1b3e8ed19ba2f643aeffd338237
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
     sg:
       operations:
@@ -696,81 +960,81 @@ resources:
           status: live-pass
           case: cases/ecs/sg-lifecycle.yaml
           fingerprint: sha256:be54627ba46faf2942467c69f8bc0f65dfb75b278aa7d7d9ab974637b6181f71
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         create:
           status: live-pass
           case: cases/ecs/sg-lifecycle.yaml
           fingerprint: sha256:be54627ba46faf2942467c69f8bc0f65dfb75b278aa7d7d9ab974637b6181f71
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/ecs/sg-lifecycle.yaml
           fingerprint: sha256:be54627ba46faf2942467c69f8bc0f65dfb75b278aa7d7d9ab974637b6181f71
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/ecs/sg-lifecycle.yaml
           fingerprint: sha256:be54627ba46faf2942467c69f8bc0f65dfb75b278aa7d7d9ab974637b6181f71
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/ecs/sg-lifecycle.yaml
           fingerprint: sha256:be54627ba46faf2942467c69f8bc0f65dfb75b278aa7d7d9ab974637b6181f71
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         revoke:
           status: live-pass
           case: cases/ecs/sg-lifecycle.yaml
           fingerprint: sha256:be54627ba46faf2942467c69f8bc0f65dfb75b278aa7d7d9ab974637b6181f71
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/ecs/sg-lifecycle.yaml
           fingerprint: sha256:be54627ba46faf2942467c69f8bc0f65dfb75b278aa7d7d9ab974637b6181f71
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
     snapshot:
       operations:
         copy:
           status: live-pass
-          case: cases/ecs/snapshot-copy-lifecycle.yaml
-          fingerprint: sha256:f6c784600e0f9415590e4fe41671fb87e7d3e9be1281d027d70decaa7aaf4fdd
-          time: "2026-07-15T09:49:15.711572+08:00"
+          case: cases/ecs/snapshot-lifecycle.yaml
+          fingerprint: sha256:b890caee829e3fb809dbd4dc5b3b992b053f0ff3c40d6ba6937ac979ef6d6e07
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         create:
           status: live-pass
-          case: cases/ecs/snapshot-copy-lifecycle.yaml
-          fingerprint: sha256:f6c784600e0f9415590e4fe41671fb87e7d3e9be1281d027d70decaa7aaf4fdd
-          time: "2026-07-15T09:49:15.711572+08:00"
+          case: cases/ecs/snapshot-lifecycle.yaml
+          fingerprint: sha256:b890caee829e3fb809dbd4dc5b3b992b053f0ff3c40d6ba6937ac979ef6d6e07
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/ecs/snapshot-lifecycle.yaml
-          fingerprint: sha256:401bfce2ba00b53dc145c767397e8b878199b968a654faf2ff8bd4857b3b90ba
-          time: "2026-07-14T15:23:15.281625+08:00"
+          fingerprint: sha256:b890caee829e3fb809dbd4dc5b3b992b053f0ff3c40d6ba6937ac979ef6d6e07
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/ecs/snapshot-lifecycle.yaml
-          fingerprint: sha256:401bfce2ba00b53dc145c767397e8b878199b968a654faf2ff8bd4857b3b90ba
-          time: "2026-07-14T15:23:15.281625+08:00"
+          fingerprint: sha256:b890caee829e3fb809dbd4dc5b3b992b053f0ff3c40d6ba6937ac979ef6d6e07
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/ecs/snapshot-lifecycle.yaml
-          fingerprint: sha256:401bfce2ba00b53dc145c767397e8b878199b968a654faf2ff8bd4857b3b90ba
-          time: "2026-07-14T15:23:15.281625+08:00"
+          fingerprint: sha256:b890caee829e3fb809dbd4dc5b3b992b053f0ff3c40d6ba6937ac979ef6d6e07
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/ecs/snapshot-lifecycle.yaml
-          fingerprint: sha256:401bfce2ba00b53dc145c767397e8b878199b968a654faf2ff8bd4857b3b90ba
-          time: "2026-07-14T15:23:15.281625+08:00"
+          fingerprint: sha256:b890caee829e3fb809dbd4dc5b3b992b053f0ff3c40d6ba6937ac979ef6d6e07
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
     snapshot-group:
       operations:
@@ -778,31 +1042,31 @@ resources:
           status: live-pass
           case: cases/ecs/snapshot-group-lifecycle.yaml
           fingerprint: sha256:05b5693d9849d959a419da1db0f7ec1fab2b7e7bdfe1786027be5b89fab2e125
-          time: "2026-07-14T15:23:15.281625+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/ecs/snapshot-group-lifecycle.yaml
           fingerprint: sha256:05b5693d9849d959a419da1db0f7ec1fab2b7e7bdfe1786027be5b89fab2e125
-          time: "2026-07-14T15:23:15.281625+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/ecs/snapshot-group-lifecycle.yaml
           fingerprint: sha256:05b5693d9849d959a419da1db0f7ec1fab2b7e7bdfe1786027be5b89fab2e125
-          time: "2026-07-14T15:23:15.281625+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/ecs/snapshot-group-lifecycle.yaml
           fingerprint: sha256:05b5693d9849d959a419da1db0f7ec1fab2b7e7bdfe1786027be5b89fab2e125
-          time: "2026-07-14T15:23:15.281625+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/ecs/snapshot-group-lifecycle.yaml
           fingerprint: sha256:05b5693d9849d959a419da1db0f7ec1fab2b7e7bdfe1786027be5b89fab2e125
-          time: "2026-07-14T15:23:15.281625+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
     zone:
       operations:
@@ -810,49 +1074,169 @@ resources:
           status: live-pass
           case: cases/ecs/zone-lifecycle.yaml
           fingerprint: sha256:9fc34fb66f89cc5d283ee7590872f14cbecd64609d108e5437646b558ac91b3d
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
   lingjun:
     cluster:
       operations:
         create:
-          status: offline
+          status: live-pass
           case: cases/lingjun/cluster-lifecycle.yaml
-          fingerprint: sha256:a8353a1c2c2e9600f353a73a9e4d29bd7c71fbb8a315b1496cce27dadb824c88
-          time: "2026-07-22T15:14:26.963337+08:00"
-          reason: not-run
+          fingerprint: sha256:1281680f8f8e893a8e4ae0570fffd4865b3c7f3fe666e07aedcab0f5b8859bf8
+          time: "2026-08-07T16:47:15.000000+08:00"
+          reason: live-verified
         delete:
-          status: offline
+          status: live-pass
           case: cases/lingjun/cluster-lifecycle.yaml
-          fingerprint: sha256:a8353a1c2c2e9600f353a73a9e4d29bd7c71fbb8a315b1496cce27dadb824c88
-          time: "2026-07-22T15:14:26.963337+08:00"
-          reason: not-run
+          fingerprint: sha256:1281680f8f8e893a8e4ae0570fffd4865b3c7f3fe666e07aedcab0f5b8859bf8
+          time: "2026-08-07T16:47:15.000000+08:00"
+          reason: live-verified
         get:
-          status: offline
+          status: live-pass
           case: cases/lingjun/cluster-lifecycle.yaml
-          fingerprint: sha256:a8353a1c2c2e9600f353a73a9e4d29bd7c71fbb8a315b1496cce27dadb824c88
-          time: "2026-07-22T15:14:26.963337+08:00"
-          reason: not-run
+          fingerprint: sha256:1281680f8f8e893a8e4ae0570fffd4865b3c7f3fe666e07aedcab0f5b8859bf8
+          time: "2026-08-07T16:47:15.000000+08:00"
+          reason: live-verified
         list:
-          status: offline
+          status: live-pass
           case: cases/lingjun/cluster-lifecycle.yaml
-          fingerprint: sha256:a8353a1c2c2e9600f353a73a9e4d29bd7c71fbb8a315b1496cce27dadb824c88
-          time: "2026-07-22T15:14:26.963337+08:00"
-          reason: not-run
+          fingerprint: sha256:1281680f8f8e893a8e4ae0570fffd4865b3c7f3fe666e07aedcab0f5b8859bf8
+          time: "2026-08-07T16:47:15.000000+08:00"
+          reason: live-verified
         update:
-          status: offline
-          case: cases/lingjun/cluster-scaling-lifecycle.yaml
-          fingerprint: sha256:b5f303beb9b5e80535d02e1379f15ffff3a077fcd20f5628d8f335aa841fd91c
-          time: "2026-07-22T15:14:26.963337+08:00"
-          reason: not-run
-    node:
+          status: live-pass
+          case: cases/lingjun/cluster-lifecycle.yaml
+          fingerprint: sha256:1281680f8f8e893a8e4ae0570fffd4865b3c7f3fe666e07aedcab0f5b8859bf8
+          time: "2026-08-07T16:47:15.000000+08:00"
+          reason: live-verified
+    eni:
       operations:
+        create:
+          status: live-pass
+          case: cases/lingjun/eni-lifecycle.yaml
+          fingerprint: sha256:321f7e7f6ba7c1d2d28bb906f3c34a0a976043ce331493adab1b8e7189dca6b7
+          time: "2026-08-10T16:51:23.124348+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/lingjun/eni-lifecycle.yaml
+          fingerprint: sha256:321f7e7f6ba7c1d2d28bb906f3c34a0a976043ce331493adab1b8e7189dca6b7
+          time: "2026-08-10T16:51:23.124348+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/lingjun/eni-lifecycle.yaml
+          fingerprint: sha256:321f7e7f6ba7c1d2d28bb906f3c34a0a976043ce331493adab1b8e7189dca6b7
+          time: "2026-08-10T16:51:23.124348+08:00"
+          reason: live-verified
         list:
-          status: offline
-          case: cases/lingjun/node-readonly.yaml
-          fingerprint: sha256:32cb11773a9cc2a00bc0afb72b9acf3f98e520a2c00623a3deeb6c3b9208de7c
-          time: "2026-07-22T15:14:26.963337+08:00"
-          reason: not-run
+          status: live-pass
+          case: cases/lingjun/eni-lifecycle.yaml
+          fingerprint: sha256:321f7e7f6ba7c1d2d28bb906f3c34a0a976043ce331493adab1b8e7189dca6b7
+          time: "2026-08-10T16:51:23.124348+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/lingjun/eni-lifecycle.yaml
+          fingerprint: sha256:321f7e7f6ba7c1d2d28bb906f3c34a0a976043ce331493adab1b8e7189dca6b7
+          time: "2026-08-10T16:51:23.124348+08:00"
+          reason: live-verified
+    er:
+      operations:
+        create:
+          status: live-pass
+          case: cases/lingjun/er-lifecycle.yaml
+          fingerprint: sha256:0faffd485cdb5e0849181bbfbbb9cf47271c6e6e07c8bd0c6db43323c448c14c
+          time: "2026-08-07T18:06:12.000000+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/lingjun/er-lifecycle.yaml
+          fingerprint: sha256:0faffd485cdb5e0849181bbfbbb9cf47271c6e6e07c8bd0c6db43323c448c14c
+          time: "2026-08-07T18:06:12.000000+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/lingjun/er-lifecycle.yaml
+          fingerprint: sha256:0faffd485cdb5e0849181bbfbbb9cf47271c6e6e07c8bd0c6db43323c448c14c
+          time: "2026-08-07T18:06:12.000000+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/lingjun/er-lifecycle.yaml
+          fingerprint: sha256:0faffd485cdb5e0849181bbfbbb9cf47271c6e6e07c8bd0c6db43323c448c14c
+          time: "2026-08-07T18:06:12.000000+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/lingjun/er-lifecycle.yaml
+          fingerprint: sha256:0faffd485cdb5e0849181bbfbbb9cf47271c6e6e07c8bd0c6db43323c448c14c
+          time: "2026-08-07T18:06:12.000000+08:00"
+          reason: live-verified
+    node-group:
+      operations:
+        create:
+          status: live-pass
+          case: cases/lingjun/node-group-lifecycle.yaml
+          fingerprint: sha256:6eade95e9fc623835290b7a03466664889eca3d738c5ea7c981a280c9e68a7a4
+          time: "2026-07-29T10:24:56.239676+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/lingjun/node-group-lifecycle.yaml
+          fingerprint: sha256:6eade95e9fc623835290b7a03466664889eca3d738c5ea7c981a280c9e68a7a4
+          time: "2026-07-29T10:24:56.239676+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/lingjun/node-group-lifecycle.yaml
+          fingerprint: sha256:6eade95e9fc623835290b7a03466664889eca3d738c5ea7c981a280c9e68a7a4
+          time: "2026-07-29T10:24:56.239676+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/lingjun/node-group-lifecycle.yaml
+          fingerprint: sha256:6eade95e9fc623835290b7a03466664889eca3d738c5ea7c981a280c9e68a7a4
+          time: "2026-07-29T10:24:56.239676+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/lingjun/node-group-lifecycle.yaml
+          fingerprint: sha256:6eade95e9fc623835290b7a03466664889eca3d738c5ea7c981a280c9e68a7a4
+          time: "2026-07-29T10:24:56.239676+08:00"
+          reason: live-verified
+    subnet:
+      operations:
+        create:
+          status: live-pass
+          case: cases/lingjun/subnet-lifecycle.yaml
+          fingerprint: sha256:7311d842fe4b9b8e392fb93f2043b01c3dcb70196889565029be190507bd230b
+          time: "2026-07-29T10:24:56.239676+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/lingjun/subnet-lifecycle.yaml
+          fingerprint: sha256:7311d842fe4b9b8e392fb93f2043b01c3dcb70196889565029be190507bd230b
+          time: "2026-07-29T10:24:56.239676+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/lingjun/subnet-lifecycle.yaml
+          fingerprint: sha256:7311d842fe4b9b8e392fb93f2043b01c3dcb70196889565029be190507bd230b
+          time: "2026-07-29T10:24:56.239676+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/lingjun/subnet-lifecycle.yaml
+          fingerprint: sha256:7311d842fe4b9b8e392fb93f2043b01c3dcb70196889565029be190507bd230b
+          time: "2026-07-29T10:24:56.239676+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/lingjun/subnet-lifecycle.yaml
+          fingerprint: sha256:7311d842fe4b9b8e392fb93f2043b01c3dcb70196889565029be190507bd230b
+          time: "2026-07-29T10:24:56.239676+08:00"
+          reason: live-verified
     vpd:
       operations:
         create:
@@ -886,75 +1270,135 @@ resources:
           time: "2026-07-14T15:23:15.281625+08:00"
           reason: live-verified
   rg:
+    admin-setting:
+      operations:
+        get:
+          status: live-pass
+          case: cases/rg/admin-setting-lifecycle.yaml
+          fingerprint: sha256:8e14f97adc755e1787791c00406864155ace7e1bbdc0e7ac6454cc499a14921a
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/rg/admin-setting-lifecycle.yaml
+          fingerprint: sha256:8e14f97adc755e1787791c00406864155ace7e1bbdc0e7ac6454cc499a14921a
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+    associated-transfer:
+      operations:
+        disable:
+          status: live-pass
+          case: cases/rg/associated-transfer-lifecycle.yaml
+          fingerprint: sha256:08d53fa5a3966201051268bdfed3242f9692bc5b87449bcdbf3052027f45575a
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        enable:
+          status: live-pass
+          case: cases/rg/associated-transfer-lifecycle.yaml
+          fingerprint: sha256:08d53fa5a3966201051268bdfed3242f9692bc5b87449bcdbf3052027f45575a
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/rg/associated-transfer-lifecycle.yaml
+          fingerprint: sha256:08d53fa5a3966201051268bdfed3242f9692bc5b87449bcdbf3052027f45575a
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/rg/associated-transfer-lifecycle.yaml
+          fingerprint: sha256:08d53fa5a3966201051268bdfed3242f9692bc5b87449bcdbf3052027f45575a
+          time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
     group:
       operations:
         create:
           status: live-pass
           case: cases/rg/group-lifecycle.yaml
           fingerprint: sha256:375ebfe47a9d1b0bd05544d0c6a894a5ed9cc762f681157df638879ee687b99b
-          time: "2026-07-24T10:35:41.924518+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/rg/group-lifecycle.yaml
           fingerprint: sha256:375ebfe47a9d1b0bd05544d0c6a894a5ed9cc762f681157df638879ee687b99b
-          time: "2026-07-24T10:35:41.924518+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/rg/group-lifecycle.yaml
           fingerprint: sha256:375ebfe47a9d1b0bd05544d0c6a894a5ed9cc762f681157df638879ee687b99b
-          time: "2026-07-24T10:35:41.924518+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/rg/group-lifecycle.yaml
           fingerprint: sha256:375ebfe47a9d1b0bd05544d0c6a894a5ed9cc762f681157df638879ee687b99b
-          time: "2026-07-24T10:35:41.924518+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/rg/group-lifecycle.yaml
           fingerprint: sha256:375ebfe47a9d1b0bd05544d0c6a894a5ed9cc762f681157df638879ee687b99b
-          time: "2026-07-24T10:35:41.924518+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
+          reason: live-verified
+    notification:
+      operations:
+        disable:
+          status: live-pass
+          case: cases/rg/notification-lifecycle.yaml
+          fingerprint: sha256:537ca763c6d0899cd9dd95ebced4f0f3a5e6939a17ad74bf0ab3471172655a72
+          time: "2026-08-11T15:04:24.091413+08:00"
+          reason: live-verified
+        enable:
+          status: live-pass
+          case: cases/rg/notification-lifecycle.yaml
+          fingerprint: sha256:537ca763c6d0899cd9dd95ebced4f0f3a5e6939a17ad74bf0ab3471172655a72
+          time: "2026-08-11T15:04:24.091413+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/rg/notification-lifecycle.yaml
+          fingerprint: sha256:537ca763c6d0899cd9dd95ebced4f0f3a5e6939a17ad74bf0ab3471172655a72
+          time: "2026-08-11T15:04:24.091413+08:00"
           reason: live-verified
     policy:
       operations:
         attach:
           status: live-pass
           case: cases/rg/policy-lifecycle.yaml
-          fingerprint: sha256:47376194fb39fea9e40361d8dd39efadab7a2a26895694b4d4cebd3361433137
-          time: "2026-07-23T12:03:43.028359+08:00"
+          fingerprint: sha256:7756453e50730d9373380f85f040d0ac75dc7be4e0d1704d60bcf34f7795cde7
+          time: "2026-08-11T15:04:24.091413+08:00"
           reason: live-verified
         create:
           status: live-pass
           case: cases/rg/policy-lifecycle.yaml
-          fingerprint: sha256:47376194fb39fea9e40361d8dd39efadab7a2a26895694b4d4cebd3361433137
-          time: "2026-07-23T12:03:43.028359+08:00"
+          fingerprint: sha256:7756453e50730d9373380f85f040d0ac75dc7be4e0d1704d60bcf34f7795cde7
+          time: "2026-08-11T15:04:24.091413+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/rg/policy-lifecycle.yaml
-          fingerprint: sha256:47376194fb39fea9e40361d8dd39efadab7a2a26895694b4d4cebd3361433137
-          time: "2026-07-23T12:03:43.028359+08:00"
+          fingerprint: sha256:7756453e50730d9373380f85f040d0ac75dc7be4e0d1704d60bcf34f7795cde7
+          time: "2026-08-11T15:04:24.091413+08:00"
           reason: live-verified
         detach:
           status: live-pass
           case: cases/rg/policy-lifecycle.yaml
-          fingerprint: sha256:47376194fb39fea9e40361d8dd39efadab7a2a26895694b4d4cebd3361433137
-          time: "2026-07-23T12:03:43.028359+08:00"
+          fingerprint: sha256:7756453e50730d9373380f85f040d0ac75dc7be4e0d1704d60bcf34f7795cde7
+          time: "2026-08-11T15:04:24.091413+08:00"
           reason: live-verified
         get:
           status: live-pass
-          case: cases/rg/governance-readonly.yaml
-          fingerprint: sha256:ed683b3a58a9bd5dd47eda23130ceeb31e4404c6ede2d77b858f167ac07c7bc7
-          time: "2026-07-23T12:03:43.028359+08:00"
+          case: cases/rg/policy-lifecycle.yaml
+          fingerprint: sha256:7756453e50730d9373380f85f040d0ac75dc7be4e0d1704d60bcf34f7795cde7
+          time: "2026-08-11T15:04:24.091413+08:00"
           reason: live-verified
         list:
           status: live-pass
-          case: cases/rg/governance-readonly.yaml
-          fingerprint: sha256:ed683b3a58a9bd5dd47eda23130ceeb31e4404c6ede2d77b858f167ac07c7bc7
-          time: "2026-07-23T12:03:43.028359+08:00"
+          case: cases/rg/policy-lifecycle.yaml
+          fingerprint: sha256:7756453e50730d9373380f85f040d0ac75dc7be4e0d1704d60bcf34f7795cde7
+          time: "2026-08-11T15:04:24.091413+08:00"
           reason: live-verified
     resource:
       operations:
@@ -1002,58 +1446,142 @@ resources:
           fingerprint: sha256:aea6b8d1b3026f67a8d039e7b366d1b4046ced42e0492f7ceba0ee7fea83dc13
           time: "2026-07-23T11:54:58.486696+08:00"
           reason: live-verified
+    service-linked-role:
+      operations:
+        create:
+          status: live-pass
+          case: cases/rg/service-linked-role-lifecycle.yaml
+          fingerprint: sha256:43aebad82524c5510fbaa0cb1c777f366a8e4bb4d9d380c1fe635f08643f3197
+          time: "2026-08-11T15:26:58.248889+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/rg/service-linked-role-lifecycle.yaml
+          fingerprint: sha256:43aebad82524c5510fbaa0cb1c777f366a8e4bb4d9d380c1fe635f08643f3197
+          time: "2026-08-11T15:26:58.248889+08:00"
+          reason: live-verified
     version:
       operations:
         create:
           status: live-pass
-          case: cases/rg/policy-version-lifecycle.yaml
-          fingerprint: sha256:0dc9484fe36d0ceefb9e78a61faf86899305906de1c8582c18aca3a41ac74b82
-          time: "2026-07-24T10:24:39.011429+08:00"
+          case: cases/rg/version-lifecycle.yaml
+          fingerprint: sha256:9de08bb2bf0e926dbacf578cfd1977066c0b1f45163afc5d2ed0a9b565ae9273
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         delete:
           status: live-pass
-          case: cases/rg/policy-version-lifecycle.yaml
-          fingerprint: sha256:0dc9484fe36d0ceefb9e78a61faf86899305906de1c8582c18aca3a41ac74b82
-          time: "2026-07-24T10:24:39.011429+08:00"
+          case: cases/rg/version-lifecycle.yaml
+          fingerprint: sha256:9de08bb2bf0e926dbacf578cfd1977066c0b1f45163afc5d2ed0a9b565ae9273
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
-          case: cases/rg/policy-version-lifecycle.yaml
-          fingerprint: sha256:0dc9484fe36d0ceefb9e78a61faf86899305906de1c8582c18aca3a41ac74b82
-          time: "2026-07-24T10:24:39.011429+08:00"
+          case: cases/rg/version-lifecycle.yaml
+          fingerprint: sha256:9de08bb2bf0e926dbacf578cfd1977066c0b1f45163afc5d2ed0a9b565ae9273
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
-          case: cases/rg/policy-version-lifecycle.yaml
-          fingerprint: sha256:0dc9484fe36d0ceefb9e78a61faf86899305906de1c8582c18aca3a41ac74b82
-          time: "2026-07-24T10:24:39.011429+08:00"
+          case: cases/rg/version-lifecycle.yaml
+          fingerprint: sha256:9de08bb2bf0e926dbacf578cfd1977066c0b1f45163afc5d2ed0a9b565ae9273
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         update:
           status: live-pass
-          case: cases/rg/policy-version-lifecycle.yaml
-          fingerprint: sha256:0dc9484fe36d0ceefb9e78a61faf86899305906de1c8582c18aca3a41ac74b82
-          time: "2026-07-24T10:24:39.011429+08:00"
+          case: cases/rg/version-lifecycle.yaml
+          fingerprint: sha256:9de08bb2bf0e926dbacf578cfd1977066c0b1f45163afc5d2ed0a9b565ae9273
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
   tag:
+    associated-resource-rule:
+      operations:
+        create:
+          status: live-pass
+          case: cases/tag/associated-resource-rule-lifecycle.yaml
+          fingerprint: sha256:6acc13b449ffbc017f9cf7f5e1756c06b23c48632597429cede8cd3571d43e84
+          time: "2026-08-07T11:51:55+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/tag/associated-resource-rule-lifecycle.yaml
+          fingerprint: sha256:6acc13b449ffbc017f9cf7f5e1756c06b23c48632597429cede8cd3571d43e84
+          time: "2026-08-07T11:51:55+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/tag/associated-resource-rule-lifecycle.yaml
+          fingerprint: sha256:6acc13b449ffbc017f9cf7f5e1756c06b23c48632597429cede8cd3571d43e84
+          time: "2026-08-07T11:51:55+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/tag/associated-resource-rule-lifecycle.yaml
+          fingerprint: sha256:6acc13b449ffbc017f9cf7f5e1756c06b23c48632597429cede8cd3571d43e84
+          time: "2026-08-07T11:51:55+08:00"
+          reason: live-verified
+    policy:
+      operations:
+        attach:
+          status: live-pass
+          case: cases/tag/policy-lifecycle.yaml
+          fingerprint: sha256:f66cfb01a767e4408bcf6d3b09c19717a6627dcc9c3523518c2883c1e1cf642b
+          time: "2026-07-29T10:26:24.534624+08:00"
+          reason: live-verified
+        create:
+          status: live-pass
+          case: cases/tag/policy-lifecycle.yaml
+          fingerprint: sha256:f66cfb01a767e4408bcf6d3b09c19717a6627dcc9c3523518c2883c1e1cf642b
+          time: "2026-07-29T10:26:24.534624+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/tag/policy-lifecycle.yaml
+          fingerprint: sha256:f66cfb01a767e4408bcf6d3b09c19717a6627dcc9c3523518c2883c1e1cf642b
+          time: "2026-07-29T10:26:24.534624+08:00"
+          reason: live-verified
+        detach:
+          status: live-pass
+          case: cases/tag/policy-lifecycle.yaml
+          fingerprint: sha256:f66cfb01a767e4408bcf6d3b09c19717a6627dcc9c3523518c2883c1e1cf642b
+          time: "2026-07-29T10:26:24.534624+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/tag/policy-lifecycle.yaml
+          fingerprint: sha256:f66cfb01a767e4408bcf6d3b09c19717a6627dcc9c3523518c2883c1e1cf642b
+          time: "2026-07-29T10:26:24.534624+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/tag/policy-lifecycle.yaml
+          fingerprint: sha256:f66cfb01a767e4408bcf6d3b09c19717a6627dcc9c3523518c2883c1e1cf642b
+          time: "2026-07-29T10:26:24.534624+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/tag/policy-lifecycle.yaml
+          fingerprint: sha256:f66cfb01a767e4408bcf6d3b09c19717a6627dcc9c3523518c2883c1e1cf642b
+          time: "2026-07-29T10:26:24.534624+08:00"
+          reason: live-verified
     resource:
       operations:
         apply:
           status: live-pass
           case: cases/tag/resource-lifecycle.yaml
           fingerprint: sha256:ad25b576e230427ed11a2bffa45d1cd01b54381d80397f7f4dea35bad06d5cc5
-          time: "2026-07-23T12:15:40.433009+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/tag/resource-lifecycle.yaml
           fingerprint: sha256:ad25b576e230427ed11a2bffa45d1cd01b54381d80397f7f4dea35bad06d5cc5
-          time: "2026-07-23T12:15:40.433009+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         remove:
           status: live-pass
           case: cases/tag/resource-lifecycle.yaml
           fingerprint: sha256:ad25b576e230427ed11a2bffa45d1cd01b54381d80397f7f4dea35bad06d5cc5
-          time: "2026-07-23T12:15:40.433009+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
   vpc:
     vpc:
@@ -1062,31 +1590,31 @@ resources:
           status: live-pass
           case: cases/vpc/vpc-lifecycle.yaml
           fingerprint: sha256:d6d0b70f082de48132605da2ee1ece45740251e1ae4887bc59b5f35e10368e0e
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/vpc/vpc-lifecycle.yaml
           fingerprint: sha256:d6d0b70f082de48132605da2ee1ece45740251e1ae4887bc59b5f35e10368e0e
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/vpc/vpc-lifecycle.yaml
           fingerprint: sha256:d6d0b70f082de48132605da2ee1ece45740251e1ae4887bc59b5f35e10368e0e
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/vpc/vpc-lifecycle.yaml
           fingerprint: sha256:d6d0b70f082de48132605da2ee1ece45740251e1ae4887bc59b5f35e10368e0e
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/vpc/vpc-lifecycle.yaml
           fingerprint: sha256:d6d0b70f082de48132605da2ee1ece45740251e1ae4887bc59b5f35e10368e0e
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
     vswitch:
       operations:
@@ -1094,29 +1622,29 @@ resources:
           status: live-pass
           case: cases/vpc/vswitch-lifecycle.yaml
           fingerprint: sha256:3402be1a4208b5e58e70465c449d7b1c4c21cf5a1d86d2e4d12785d69da0717c
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/vpc/vswitch-lifecycle.yaml
           fingerprint: sha256:3402be1a4208b5e58e70465c449d7b1c4c21cf5a1d86d2e4d12785d69da0717c
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/vpc/vswitch-lifecycle.yaml
           fingerprint: sha256:3402be1a4208b5e58e70465c449d7b1c4c21cf5a1d86d2e4d12785d69da0717c
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/vpc/vswitch-lifecycle.yaml
           fingerprint: sha256:3402be1a4208b5e58e70465c449d7b1c4c21cf5a1d86d2e4d12785d69da0717c
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/vpc/vswitch-lifecycle.yaml
           fingerprint: sha256:3402be1a4208b5e58e70465c449d7b1c4c21cf5a1d86d2e4d12785d69da0717c
-          time: "2026-07-14T13:39:51.320077+08:00"
+          time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified

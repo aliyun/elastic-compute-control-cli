@@ -4,6 +4,7 @@ package params
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -101,6 +102,8 @@ func (p Policy) Supports(key string) bool {
 	case "ecs.region", "ecs.zone", "ecs.instance_type", "ecs.image_id", "ecs.system_disk_category", "ecs.data_disk_category":
 		return true
 	case "ack.region", "ack.cluster_type", "ack.version", "ack.upgrade_version", "ack.edition", "ack.profile", "ack.runtime", "ack.runtime_version", "ack.zone", "ack.instance_type", "ack.image_id", "ack.system_disk_category", "ack.data_disk_category":
+		return true
+	case "ack.addon_name", "ack.addon_version", "ack.addon_upgrade_version":
 		return true
 	case "lingjun.region", "lingjun.cluster_type", "lingjun.hpn_zone", "lingjun.zone", "lingjun.machine_type", "lingjun.image_id":
 		return true
@@ -207,19 +210,22 @@ func IsNoCompatibleECSCombination(err error) bool {
 // ACKResult contains the API-selected ACK mode and version together with the
 // ECS-compatible node profile that the cluster/nodepool case can consume.
 type ACKResult struct {
-	Region             string
-	ClusterType        string
-	Version            string
-	UpgradeVersion     string
-	Edition            string
-	Profile            string
-	Runtime            string
-	RuntimeVersion     string
-	Zone               string
-	InstanceType       string
-	ImageID            string
-	SystemDiskCategory string
-	DataDiskCategory   string
+	Region              string
+	ClusterType         string
+	Version             string
+	UpgradeVersion      string
+	Edition             string
+	Profile             string
+	Runtime             string
+	RuntimeVersion      string
+	Zone                string
+	InstanceType        string
+	ImageID             string
+	SystemDiskCategory  string
+	DataDiskCategory    string
+	AddonName           string
+	AddonVersion        string
+	AddonUpgradeVersion string
 }
 
 // NoCompatibleACKUpgradePathError means creatable ACK versions exist, but none
@@ -234,6 +240,22 @@ func (e *NoCompatibleACKUpgradePathError) Error() string {
 
 func IsNoCompatibleACKUpgradePath(err error) bool {
 	var target *NoCompatibleACKUpgradePathError
+	return errors.As(err, &target)
+}
+
+// NoCompatibleACKAddonLifecycleError means the catalog has no non-default,
+// unreserved addon with an empty-config-safe install/modify/upgrade/uninstall
+// lifecycle. The addon case can be skipped without blocking other ACK cases.
+type NoCompatibleACKAddonLifecycleError struct {
+	Region string
+}
+
+func (e *NoCompatibleACKAddonLifecycleError) Error() string {
+	return fmt.Sprintf("no compatible ACK addon lifecycle found in region %q", e.Region)
+}
+
+func IsNoCompatibleACKAddonLifecycle(err error) bool {
+	var target *NoCompatibleACKAddonLifecycleError
 	return errors.As(err, &target)
 }
 
@@ -292,12 +314,352 @@ func ResolveACK(ctx context.Context, query Query, region string, clusterTypes, r
 		if version == "" {
 			continue
 		}
-		return ackResult(region, clusterType, version, upgradeVersion, versionInfo, ecs), nil
+		result := ackResult(region, clusterType, version, upgradeVersion, versionInfo, ecs)
+		if requiresACKAddonLifecycle(requirements) {
+			addonName, addonVersion, addonUpgradeVersion, err := resolveACKAddonLifecycle(ctx, query, result, ackCatalogVersions(value))
+			if err != nil {
+				return ACKResult{}, err
+			}
+			result.AddonName = addonName
+			result.AddonVersion = addonVersion
+			result.AddonUpgradeVersion = addonUpgradeVersion
+		}
+		return result, nil
 	}
 	if requireUpgrade && foundCreatableVersion {
 		return ACKResult{}, &NoCompatibleACKUpgradePathError{Region: region}
 	}
 	return ACKResult{}, fmt.Errorf("no compatible creatable ACK cluster version found in region %q", region)
+}
+
+func requiresACKAddonLifecycle(requirements []string) bool {
+	return containsString(requirements, "ack.addon_name") ||
+		containsString(requirements, "ack.addon_version") ||
+		containsString(requirements, "ack.addon_upgrade_version")
+}
+
+func ackCatalogVersions(value any) []string {
+	versions := make([]string, 0)
+	for _, info := range allACKVersionInfos(value, false) {
+		if version := firstStringForAnyKey(info, "version", "kubernetes_version"); version != "" {
+			versions = append(versions, version)
+		}
+	}
+	return uniqueStrings(versions)
+}
+
+func resolveACKAddonLifecycle(ctx context.Context, query Query, ack ACKResult, clusterVersions []string) (string, string, string, error) {
+	catalog, err := query(ctx, ackAddonCatalogCommand(ack))
+	if err != nil {
+		return "", "", "", err
+	}
+	candidates := objectsForAnyKey(catalog, "addons")
+	sort.Slice(candidates, func(i, j int) bool {
+		leftName := firstStringForAnyKey(candidates[i], "name")
+		rightName := firstStringForAnyKey(candidates[j], "name")
+		if leftName != rightName {
+			return leftName < rightName
+		}
+		return firstStringForAnyKey(candidates[i], "version") < firstStringForAnyKey(candidates[j], "version")
+	})
+	reserved := map[string]bool{
+		"gatekeeper":                         true,
+		"managed-gatekeeper":                 true,
+		"policy-template-controller":         true,
+		"managed-policy-template-controller": true,
+		"managed-servicemesh-operator":       true,
+	}
+	for _, candidate := range candidates {
+		name, version, ok := safeAddonCatalogCandidate(candidate, reserved)
+		if !ok {
+			continue
+		}
+		if baseVersion, upgradeVersion, found, err := resolveACKAddonCandidate(ctx, query, ack, name, version); err != nil {
+			return "", "", "", err
+		} else if found {
+			return name, baseVersion, upgradeVersion, nil
+		}
+	}
+
+	for versionIndex := len(clusterVersions) - 1; versionIndex >= 0; versionIndex-- {
+		clusterVersion := clusterVersions[versionIndex]
+		if clusterVersion == "" || clusterVersion == ack.Version {
+			continue
+		}
+		catalogACK := ack
+		catalogACK.Version = clusterVersion
+		olderCatalog, err := query(ctx, ackAddonCatalogCommand(catalogACK))
+		if err != nil {
+			return "", "", "", err
+		}
+		olderByName := map[string]string{}
+		for _, candidate := range objectsForAnyKey(olderCatalog, "addons") {
+			name, version, ok := safeAddonBaseVersionCandidate(candidate, reserved)
+			if ok {
+				olderByName[name] = version
+			}
+		}
+		for _, candidate := range candidates {
+			name, currentVersion, ok := safeAddonCatalogCandidate(candidate, reserved)
+			olderVersion := olderByName[name]
+			if !ok || olderVersion == "" || olderVersion == currentVersion {
+				continue
+			}
+			if baseVersion, upgradeVersion, found, err := resolveACKAddonCandidate(ctx, query, ack, name, olderVersion); err != nil {
+				return "", "", "", err
+			} else if found {
+				return name, baseVersion, upgradeVersion, nil
+			}
+		}
+	}
+
+	// Some managed addons expose only their latest version from ListAddons,
+	// while DescribeAddon still exposes the immediately preceding patch and
+	// its supported upgrade path. Probe that bounded predecessor so the public
+	// E2E resolver does not require a manually maintained addon version.
+	for _, candidate := range candidates {
+		name, currentVersion, ok := safeAddonCatalogCandidate(candidate, reserved)
+		if !ok {
+			continue
+		}
+		previousVersion, ok := previousAddonPatchVersion(currentVersion)
+		if !ok {
+			continue
+		}
+		if baseVersion, upgradeVersion, found, err := resolveACKAddonCandidate(ctx, query, ack, name, previousVersion); err != nil {
+			return "", "", "", err
+		} else if found {
+			return name, baseVersion, upgradeVersion, nil
+		}
+	}
+	return "", "", "", &NoCompatibleACKAddonLifecycleError{Region: ack.Region}
+}
+
+func safeAddonCatalogCandidate(candidate map[string]any, reserved map[string]bool) (string, string, bool) {
+	name, version, ok := safeAddonCandidateMetadata(candidate, reserved)
+	return name, version, ok && supportsAddonLifecycleActions(firstStringsForAnyKey(candidate, "supported_actions"))
+}
+
+func safeAddonBaseVersionCandidate(candidate map[string]any, reserved map[string]bool) (string, string, bool) {
+	name, version, ok := safeAddonCandidateMetadata(candidate, reserved)
+	return name, version, ok && supportsAddonBaseVersionActions(firstStringsForAnyKey(candidate, "supported_actions"))
+}
+
+func safeAddonCandidateMetadata(candidate map[string]any, reserved map[string]bool) (string, string, bool) {
+	name := firstStringForAnyKey(candidate, "name")
+	version := firstStringForAnyKey(candidate, "version")
+	installByDefault, hasInstallByDefault := firstBoolForAnyKey(candidate, "install_by_default")
+	managed, _ := firstBoolForAnyKey(candidate, "managed")
+	return name, version, strings.EqualFold(name, "managed-security-inspector") && version != "" && !reserved[strings.ToLower(name)] &&
+		hasInstallByDefault && !installByDefault && managed
+}
+
+func previousAddonPatchVersion(version string) (string, bool) {
+	prefix := ""
+	raw := strings.TrimSpace(version)
+	if strings.HasPrefix(raw, "v") {
+		prefix = "v"
+		raw = strings.TrimPrefix(raw, "v")
+	}
+	parts := strings.Split(raw, ".")
+	if len(parts) != 3 {
+		return "", false
+	}
+	patch, err := strconv.Atoi(parts[2])
+	if err != nil || patch <= 0 {
+		return "", false
+	}
+	return prefix + parts[0] + "." + parts[1] + "." + strconv.Itoa(patch-1), true
+}
+
+func resolveACKAddonCandidate(ctx context.Context, query Query, ack ACKResult, name, version string) (string, string, bool, error) {
+	detailValue, err := query(ctx, ackAddonDetailCommand(ack, name, version))
+	if err != nil {
+		return "", "", false, err
+	}
+	detail := firstObjectForAnyKey(detailValue, "addon")
+	if detail == nil {
+		if root, ok := detailValue.(map[string]any); ok {
+			detail = root
+		}
+	}
+	if detail == nil || !supportsEmptyAddonConfig(detail) {
+		return "", "", false, nil
+	}
+	baseVersion := firstStringForAnyKey(detail, "version")
+	upgradeVersions := upgradableAddonVersions(detail)
+	if baseVersion == "" || len(upgradeVersions) == 0 {
+		return "", "", false, nil
+	}
+	sort.Strings(upgradeVersions)
+	for _, upgradeVersion := range upgradeVersions {
+		if upgradeVersion != baseVersion {
+			return baseVersion, upgradeVersion, true, nil
+		}
+	}
+	return "", "", false, nil
+}
+
+func ackAddonCatalogCommand(ack ACKResult) string {
+	return strings.Join([]string{
+		"ecctl ack addon list --catalog",
+		"--cluster-type", ack.ClusterType,
+		"--cluster-version", ack.Version,
+		"--cluster-spec", ack.Edition,
+		"--cluster-profile", ack.Profile,
+	}, " ")
+}
+
+func ackAddonDetailCommand(ack ACKResult, name, version string) string {
+	return strings.Join([]string{
+		"ecctl ack addon get", name, "--catalog",
+		"--cluster-type", ack.ClusterType,
+		"--cluster-version", ack.Version,
+		"--cluster-spec", ack.Edition,
+		"--cluster-profile", ack.Profile,
+		"--version", version,
+	}, " ")
+}
+
+func supportsAddonLifecycleActions(actions []string) bool {
+	required := map[string]bool{"install": false, "modify": false, "upgrade": false, "uninstall": false}
+	for _, action := range actions {
+		if _, ok := required[strings.ToLower(strings.TrimSpace(action))]; ok {
+			required[strings.ToLower(strings.TrimSpace(action))] = true
+		}
+	}
+	for _, supported := range required {
+		if !supported {
+			return false
+		}
+	}
+	return true
+}
+
+func supportsAddonBaseVersionActions(actions []string) bool {
+	required := map[string]bool{"install": false, "upgrade": false, "uninstall": false}
+	for _, action := range actions {
+		if _, ok := required[strings.ToLower(strings.TrimSpace(action))]; ok {
+			required[strings.ToLower(strings.TrimSpace(action))] = true
+		}
+	}
+	for _, supported := range required {
+		if !supported {
+			return false
+		}
+	}
+	return true
+}
+
+func supportsEmptyAddonConfig(detail map[string]any) bool {
+	raw, ok := valueForAnyKey(detail, "config_schema")
+	if !ok {
+		return true
+	}
+	var schema map[string]any
+	switch value := raw.(type) {
+	case nil:
+		return true
+	case map[string]any:
+		schema = value
+	case string:
+		if strings.TrimSpace(value) == "" {
+			return true
+		}
+		if err := json.Unmarshal([]byte(value), &schema); err != nil {
+			return false
+		}
+	default:
+		return false
+	}
+	required, exists := valueForAnyKey(schema, "required")
+	if !exists {
+		return true
+	}
+	switch values := required.(type) {
+	case []any:
+		return len(values) == 0
+	case []string:
+		return len(values) == 0
+	default:
+		return false
+	}
+}
+
+func upgradableAddonVersions(detail map[string]any) []string {
+	items := objectsForAnyKey(detail, "newer_versions")
+	versions := make([]string, 0, len(items))
+	for _, item := range items {
+		upgradable, found := firstBoolForAnyKey(item, "upgradable")
+		version := firstStringForAnyKey(item, "version")
+		if found && upgradable && version != "" {
+			versions = append(versions, version)
+		}
+	}
+	return uniqueStrings(versions)
+}
+
+func objectsForAnyKey(value any, key string) []map[string]any {
+	wanted := normalizeFieldKey(key)
+	switch current := value.(type) {
+	case map[string]any:
+		for candidateKey, child := range current {
+			if normalizeFieldKey(candidateKey) != wanted {
+				continue
+			}
+			items, ok := child.([]any)
+			if !ok {
+				return nil
+			}
+			result := make([]map[string]any, 0, len(items))
+			for _, item := range items {
+				if object, ok := item.(map[string]any); ok {
+					result = append(result, object)
+				}
+			}
+			return result
+		}
+		for _, child := range current {
+			if result := objectsForAnyKey(child, key); len(result) > 0 {
+				return result
+			}
+		}
+	case []any:
+		for _, child := range current {
+			if result := objectsForAnyKey(child, key); len(result) > 0 {
+				return result
+			}
+		}
+	}
+	return nil
+}
+
+func firstObjectForAnyKey(value any, key string) map[string]any {
+	wanted := normalizeFieldKey(key)
+	if current, ok := value.(map[string]any); ok {
+		for candidateKey, child := range current {
+			if normalizeFieldKey(candidateKey) == wanted {
+				object, _ := child.(map[string]any)
+				return object
+			}
+		}
+		for _, child := range current {
+			if object := firstObjectForAnyKey(child, key); object != nil {
+				return object
+			}
+		}
+	}
+	return nil
+}
+
+func valueForAnyKey(value map[string]any, key string) (any, bool) {
+	wanted := normalizeFieldKey(key)
+	for candidateKey, child := range value {
+		if normalizeFieldKey(candidateKey) == wanted {
+			return child, true
+		}
+	}
+	return nil, false
 }
 
 func ackResult(region, clusterType, version, upgradeVersion string, versionInfo map[string]any, ecs ECSResult) ACKResult {
@@ -487,7 +849,7 @@ func ResolveLingjun(ctx context.Context, query Query, region, clusterType string
 	if nodeGroupIDs[0] == nodeGroupIDs[1] {
 		return LingjunResult{}, fmt.Errorf("Lingjun cluster node_group_ids must be distinct")
 	}
-	value, err := query(ctx, "ecctl lingjun node list --free --limit 100")
+	value, err := query(ctx, "ecctl call eflo-controller ListFreeNodes --MaxResults 100")
 	if err != nil {
 		return LingjunResult{}, err
 	}
@@ -507,6 +869,89 @@ func ResolveLingjun(ctx context.Context, query Query, region, clusterType string
 	profile.Region = region
 	profile.ClusterType = clusterType
 	return profile, nil
+}
+
+// ResolveLingjunNodeGroupProfile discovers a public machine type, compatible
+// image, and public zone for a node-group descriptor. Creating the cluster
+// requires a non-empty NodeGroups request, but it does not require assigning an
+// existing physical node.
+func ResolveLingjunNodeGroupProfile(ctx context.Context, query Query, region string) (LingjunResult, error) {
+	if query == nil {
+		return LingjunResult{}, fmt.Errorf("Lingjun parameter query is required")
+	}
+	zones, err := query(ctx, "ecctl call eflo-controller DescribeZones")
+	if err != nil {
+		return LingjunResult{}, err
+	}
+	zone, ok := firstPublicLingjunZone(zones)
+	if !ok {
+		return LingjunResult{}, fmt.Errorf("no public Lingjun zone found in region %q", region)
+	}
+	machineTypes, err := query(ctx, "ecctl call eflo-controller ListMachineTypes")
+	if err != nil {
+		return LingjunResult{}, err
+	}
+	images, err := query(ctx, "ecctl call eflo-controller ListImages")
+	if err != nil {
+		return LingjunResult{}, err
+	}
+	for _, machine := range nestedMapsWithAnyKey(machineTypes, "Name") {
+		if !strings.EqualFold(firstStringForAnyKey(machine, "Type"), "Public") {
+			continue
+		}
+		machineType := firstStringForAnyKey(machine, "Name")
+		for _, image := range nestedMapsWithAnyKey(images, "ImageId", "ImageID") {
+			searchable := firstStringForAnyKey(image, "Description") + " " + firstStringForAnyKey(image, "ImageName")
+			if !strings.Contains(strings.ToLower(searchable), strings.ToLower(machineType)) {
+				continue
+			}
+			return LingjunResult{
+				Region:      region,
+				ClusterType: "Lite",
+				Zone:        zone,
+				MachineType: machineType,
+				ImageID:     firstStringForAnyKey(image, "ImageId", "ImageID"),
+			}, nil
+		}
+	}
+	return LingjunResult{}, fmt.Errorf("no compatible public Lingjun node group profile found in region %q", region)
+}
+
+func firstPublicLingjunZone(value any) (string, bool) {
+	for _, item := range nestedMapsWithAnyKey(value, "ZoneId") {
+		zone := firstStringForAnyKey(item, "ZoneId")
+		if zone != "" && !strings.Contains(strings.ToLower(zone), "alipay") {
+			return zone, true
+		}
+	}
+	return "", false
+}
+
+func nestedMapsWithAnyKey(value any, keys ...string) []map[string]any {
+	var result []map[string]any
+	var walk func(any)
+	walk = func(current any) {
+		switch typed := current.(type) {
+		case map[string]any:
+			if firstStringForAnyKey(typed, keys...) != "" {
+				result = append(result, typed)
+			}
+			childKeys := make([]string, 0, len(typed))
+			for key := range typed {
+				childKeys = append(childKeys, key)
+			}
+			sort.Strings(childKeys)
+			for _, key := range childKeys {
+				walk(typed[key])
+			}
+		case []any:
+			for _, child := range typed {
+				walk(child)
+			}
+		}
+	}
+	walk(value)
+	return result
 }
 
 func lingjunProfilesByNodeGroup(value any, clusterType string) map[string]LingjunResult {

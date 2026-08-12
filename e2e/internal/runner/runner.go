@@ -21,6 +21,11 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/vars"
 )
 
+// stepRetryDelays paces retries for transient network errors during step
+// execution. Like cleanupRetryDelays, each delay is a best-effort back-off
+// bounded by the step context.
+var stepRetryDelays = []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second}
+
 // Options configures a run.
 type Options struct {
 	CasesDir           string
@@ -46,6 +51,7 @@ type Options struct {
 	Env                []string
 	Logf               func(string, ...any)
 	PreResolvedLingjun *paramspkg.LingjunResult
+	Session            *Session
 }
 
 // Region is one role's selected region profile and resolved prerequisite
@@ -125,6 +131,11 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 	if len(suites) == 0 {
 		return setupErr(fmt.Errorf("no cases selected"))
 	}
+	workDir, err := os.MkdirTemp("", "ecctl-e2e-")
+	if err != nil {
+		return setupErr(fmt.Errorf("create run work directory: %w", err))
+	}
+	defer os.RemoveAll(workDir)
 
 	// Load the shared-stack fixture once. Region and zone are selected by the
 	// run-level config and dynamic parameter resolver, never by the stack DAG.
@@ -199,7 +210,14 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 		}
 	}
 	run.Parameters = parameters
-	cl := newCleanup(execCfgs, opt.Keep, opt.CleanupJournal, report.CleanupJournal{RunID: opt.RunID, ExecutionID: opt.ExecutionID, Surface: opt.Surface}, opt.Logf)
+	operations := newOperationRuntime(opt.Parallel)
+	if opt.Session != nil {
+		operations, err = opt.Session.operationRuntime(opt.Parallel)
+		if err != nil {
+			return setupErr(err)
+		}
+	}
+	cl := newCleanup(execCfgs, operations, opt.Keep, opt.CleanupJournal, report.CleanupJournal{RunID: opt.RunID, ExecutionID: opt.ExecutionID, Surface: opt.Surface}, opt.Logf)
 	regionValues := make(map[string]any, len(regions))
 	for role, region := range regions {
 		prerequisites := region.Prerequisites
@@ -213,6 +231,8 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 		"run_id":            opt.RunID,
 		"resource_prefix":   resourcePrefix(opt.RunName),
 		"oss_export_prefix": ossExportPrefix(opt.RunID),
+		"oss_bucket_name":   ossBucketName(opt.RunID, opt.ExecutionID, run.StartedAt),
+		"work_dir":          workDir,
 		"time": map[string]any{
 			"monitor_start": run.StartedAt.Add(-time.Hour).UTC().Format(time.RFC3339),
 			"monitor_end":   run.StartedAt.UTC().Format(time.RFC3339),
@@ -234,26 +254,47 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 	if stackNeeded {
 		sc := report.Case{Name: "(shared stack)", Resource: "stack", Status: report.StatusPass}
 		start := time.Now()
-		stackFailures = provisionStack(ctx, opt, execCfg, cl, &stackScope, base, stackVars, fix, &sc)
+		executionFixture, runFixture := splitFixtureLifetimes(fix)
+		if opt.Session != nil && len(runFixture.Provision) > 0 {
+			sessionFailures, acquireErr := opt.Session.acquire(ctx, opt, execCfg, cl, base, stackVars, runFixture, &sc)
+			if acquireErr != nil {
+				return setupErr(acquireErr)
+			}
+			for id, failure := range sessionFailures {
+				stackFailures[id] = failure
+			}
+		} else if len(runFixture.Provision) > 0 {
+			localFailures := provisionStack(ctx, opt, execCfg, cl, &stackScope, base, stackVars, runFixture, &sc, nil)
+			for id, failure := range localFailures {
+				stackFailures[id] = failure
+			}
+		}
+		if len(executionFixture.Provision) > 0 {
+			localFailures := provisionStack(ctx, opt, execCfg, cl, &stackScope, base, stackVars, executionFixture, &sc, stackFailures)
+			for id, failure := range localFailures {
+				stackFailures[id] = failure
+			}
+		}
 		sc.DurationMs = time.Since(start).Milliseconds()
 		if len(stackFailures) > 0 {
-			sc.Status = report.StatusFail
-			sc.Error = formatStackFailures(fix.Provision, stackFailures)
-			opt.Logf("shared stack has failed branches (dependent cases skipped): %s", sc.Error)
+			if hasStackFailures(stackFailures) {
+				sc.Status = report.StatusFail
+				sc.Error = formatStackFailures(fix.Provision, stackFailures)
+				opt.Logf("shared stack has failed branches (dependent cases skipped): %s", sc.Error)
+			}
 		}
 		stackCase = &sc
 	}
 	base["stack"] = stackVars
 
 	caseResults := make([]report.Case, len(suites))
-	sem := make(chan struct{}, opt.Parallel)
 	var wg sync.WaitGroup
 
 	// runAndLog runs one case, bracketing it with start/finish lines so progress
 	// is visible in real time (cases otherwise run silently until the summary).
 	runAndLog := func(i int, s *scenario.Suite) report.Case {
 		opt.Logf("RUN   %s", s.Resource)
-		res := runCase(ctx, opt, execCfg, cl, base, s)
+		res := runCase(ctx, opt, execCfg, cl, operations, base, fix, stackFailures, s)
 		opt.Logf("%-5s %s (%s)", caseStatusLabel(res.Status), s.Resource,
 			(time.Duration(res.DurationMs) * time.Millisecond).Round(time.Second))
 		return res
@@ -283,10 +324,8 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 			continue
 		}
 		wg.Add(1)
-		sem <- struct{}{}
 		go func(i int, s *scenario.Suite) {
 			defer wg.Done()
-			defer func() { <-sem }()
 			caseResults[i] = runAndLog(i, s)
 		}(i, s)
 	}
@@ -367,6 +406,15 @@ func resolveParameters(ctx context.Context, opt Options, suites []*scenario.Suit
 				}
 			}
 			reason = "no ACK upgrade path satisfies dynamic parameters: " + err.Error()
+		case paramspkg.IsNoCompatibleACKAddonLifecycle(err):
+			for _, suite := range active {
+				if containsRequirement(suite.RequiresParams, "ack.addon_name") ||
+					containsRequirement(suite.RequiresParams, "ack.addon_version") ||
+					containsRequirement(suite.RequiresParams, "ack.addon_upgrade_version") {
+					skippedNow = append(skippedNow, suite)
+				}
+			}
+			reason = "no ACK addon lifecycle satisfies dynamic parameters: " + err.Error()
 		}
 		if len(skippedNow) == 0 {
 			return nil, nil, err
@@ -482,14 +530,28 @@ func resolveParametersWithConstraints(ctx context.Context, opt Options, suites [
 		parameters["ack"] = ackParametersFor(ackResult, requirements)
 	}
 	if needsLingjun {
-		if opt.PreResolvedLingjun != nil {
+		if opt.PreResolvedLingjun != nil && containsRequirement(requirements, "lingjun.hpn_zone") {
 			parameters["lingjun"] = lingjunParameters(*opt.PreResolvedLingjun)
-		} else {
+		} else if containsRequirement(requirements, "lingjun.hpn_zone") {
 			nodeGroupIDs, ok := nestedStringSlice(prerequisites, "lingjun", "cluster", "node_group_ids")
 			if !ok {
-				return nil, fmt.Errorf("prerequisite lingjun.cluster.node_group_ids is required by selected Lingjun cases")
+				// The base cluster lifecycle does not consume node groups; its
+				// descriptor only needs a public node-group profile. Scaling
+				// steps stay gated on the lingjun.cluster prerequisite.
+				lingjunResult, err := paramspkg.ResolveLingjunNodeGroupProfile(ctx, query, opt.Region)
+				if err != nil {
+					return nil, err
+				}
+				parameters["lingjun"] = lingjunParameters(lingjunResult)
+			} else {
+				lingjunResult, err := paramspkg.ResolveLingjun(ctx, query, opt.Region, "Lite", nodeGroupIDs)
+				if err != nil {
+					return nil, err
+				}
+				parameters["lingjun"] = lingjunParameters(lingjunResult)
 			}
-			lingjunResult, err := paramspkg.ResolveLingjun(ctx, query, opt.Region, "Lite", nodeGroupIDs)
+		} else {
+			lingjunResult, err := paramspkg.ResolveLingjunNodeGroupProfile(ctx, query, opt.Region)
 			if err != nil {
 				return nil, err
 			}
@@ -655,6 +717,7 @@ func staticParameters(policy paramspkg.Policy, region, zone string, needsECS, ne
 			Edition: "ack.standard", Profile: "Default", Runtime: "containerd", RuntimeVersion: "<ack-runtime-version>",
 			Zone: zoneOrPlaceholder(zone), InstanceType: "<instance-type>", ImageID: policy.ECS.StaticImageID,
 			SystemDiskCategory: "<system-disk-category>", DataDiskCategory: "<data-disk-category>",
+			AddonName: "<ack-addon-name>", AddonVersion: "<ack-addon-version>", AddonUpgradeVersion: "<ack-addon-upgrade-version>",
 		}, requirements)
 	}
 	if needsLingjun {
@@ -723,6 +786,12 @@ func ackParametersFor(result paramspkg.ACKResult, requirements []string) map[str
 			values["system_disk_category"] = result.SystemDiskCategory
 		case "ack.data_disk_category":
 			values["data_disk_category"] = result.DataDiskCategory
+		case "ack.addon_name":
+			values["addon_name"] = result.AddonName
+		case "ack.addon_version":
+			values["addon_version"] = result.AddonVersion
+		case "ack.addon_upgrade_version":
+			values["addon_upgrade_version"] = result.AddonUpgradeVersion
 		}
 	}
 	return values
@@ -786,6 +855,11 @@ func ossExportPrefix(runID string) string {
 	return fmt.Sprintf("E2E%x", digest)[:27]
 }
 
+func ossBucketName(runID, executionID string, startedAt time.Time) string {
+	digest := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%d", runID, executionID, startedAt.UnixNano())))
+	return fmt.Sprintf("ecctl-e2e-%s-%x", startedAt.UTC().Format("20060102t150405"), digest[:6])
+}
+
 func resourcePrefix(runName string) string {
 	const maxRunes = 40
 	runes := []rune(strings.TrimSpace(runName))
@@ -802,12 +876,20 @@ func resourcePrefix(runName string) string {
 // provisionStack creates the selected shared-stack resources and records a
 // failure per node. Independent branches continue after a failure; nodes whose
 // dependencies failed are skipped.
-func provisionStack(ctx context.Context, opt Options, execCfg execpkg.Config, cl *cleanup, scope *[]*cleanupItem, base, stackVars map[string]any, fix *Fixture, sc *report.Case) map[string]string {
-	failures := map[string]string{}
+func provisionStack(ctx context.Context, opt Options, execCfg execpkg.Config, cl *cleanup, scope *[]*cleanupItem, base, stackVars map[string]any, fix *Fixture, sc *report.Case, inheritedFailures map[string]string) map[string]string {
+	failures := make(map[string]string, len(inheritedFailures))
+	for id, failure := range inheritedFailures {
+		failures[id] = failure
+	}
 	for _, ps := range fix.Provision {
 		if failed := directFailedDependency(ps, failures); failed != "" {
 			message := fmt.Sprintf("dependency %q failed", failed)
-			failures[ps.ID] = message
+			if stackStepSkipped(failures[failed]) {
+				message = fmt.Sprintf("dependency %q unavailable", failed)
+				failures[ps.ID] = stackSkippedPrefix + message
+			} else {
+				failures[ps.ID] = message
+			}
 			sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusSkipped, Error: message})
 			continue
 		}
@@ -818,6 +900,15 @@ func provisionStack(ctx context.Context, opt Options, execCfg execpkg.Config, cl
 			data[k] = v
 		}
 		data["stack"] = stackVars
+		if missing := missingPrerequisites(data, ps.RequiresPrerequisites); len(missing) > 0 {
+			message := "prerequisites unavailable: " + strings.Join(missing, ", ")
+			failures[ps.ID] = stackSkippedPrefix + message
+			sc.Steps = append(sc.Steps, report.Step{
+				Name: ps.ID, Status: report.StatusSkipped, Error: message,
+				RequiresPrerequisites: append([]string(nil), ps.RequiresPrerequisites...),
+			})
+			continue
+		}
 
 		cmd, err := vars.Render(ps.Run, data)
 		if err != nil {
@@ -865,7 +956,7 @@ func provisionStack(ctx context.Context, opt Options, execCfg execpkg.Config, cl
 					failures[ps.ID] = step.Error
 					continue
 				}
-			} else if err := cl.push(scope, "stack", td, "primary"); err != nil {
+			} else if err := cl.push(scope, "stack", td, "primary", nil); err != nil {
 				step.Status, step.Error = report.StatusError, "cleanup journal: "+err.Error()
 				sc.Steps = append(sc.Steps, step)
 				failures[ps.ID] = step.Error
@@ -913,6 +1004,21 @@ func directFailedDependency(step ProvisionStep, failures map[string]string) stri
 	return ""
 }
 
+const stackSkippedPrefix = "skipped: "
+
+func stackStepSkipped(message string) bool {
+	return strings.HasPrefix(message, stackSkippedPrefix)
+}
+
+func hasStackFailures(failures map[string]string) bool {
+	for _, message := range failures {
+		if !stackStepSkipped(message) {
+			return true
+		}
+	}
+	return false
+}
+
 func failedStackDependencies(fix *Fixture, requested []string, failures map[string]string) []string {
 	if fix == nil || len(requested) == 0 {
 		return nil
@@ -933,7 +1039,7 @@ func failedStackDependencies(fix *Fixture, requested []string, failures map[stri
 func formatStackFailures(steps []ProvisionStep, failures map[string]string) string {
 	parts := make([]string, 0, len(failures))
 	for _, step := range steps {
-		if message, failed := failures[step.ID]; failed {
+		if message, failed := failures[step.ID]; failed && !stackStepSkipped(message) {
 			parts = append(parts, fmt.Sprintf("%s: %s", step.ID, message))
 		}
 	}
@@ -955,7 +1061,17 @@ func captureInto(data map[string]any, res execpkg.Result, at string, capture map
 	return m
 }
 
-func runCase(ctx context.Context, opt Options, execCfg execpkg.Config, cl *cleanup, base map[string]any, s *scenario.Suite) report.Case {
+func runCase(
+	ctx context.Context,
+	opt Options,
+	execCfg execpkg.Config,
+	cl *cleanup,
+	operations *operationRuntime,
+	base map[string]any,
+	fix *Fixture,
+	stackFailures map[string]string,
+	s *scenario.Suite,
+) report.Case {
 	start := time.Now()
 	cr := report.Case{Name: caseName(s), Resource: s.Resource, Path: s.Path, Status: report.StatusPass}
 
@@ -980,27 +1096,10 @@ func runCase(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 	var scope []*cleanupItem
 	defer func() { cl.run(scope) }()
 
-	for _, st := range s.Steps {
-		if opt.DryRun {
-			sr := renderDryStep(data, st)
-			cr.Steps = append(cr.Steps, sr)
-			if sr.Status == report.StatusError {
-				cr.Status, cr.Error = report.StatusError, sr.Error
-				break
-			}
-			continue
-		}
-		if ctx.Err() != nil {
-			cr.Steps = append(cr.Steps, report.Step{Name: st.Name, Status: report.StatusSkipped, Error: "run cancelled"})
-			cr.Status = report.StatusFail
-			break
-		}
-		sr, ok := runStep(ctx, opt, execCfg, cl, &scope, data, st, stepTimeout)
-		cr.Steps = append(cr.Steps, sr)
-		if !ok {
-			cr.Status = report.StatusFail
-			break // abort this case; teardown still runs via defer
-		}
+	if s.Execution == scenario.ExecutionDAG {
+		runDAGCase(ctx, opt, execCfg, cl, operations, &scope, data, fix, stackFailures, s, stepTimeout, &cr)
+	} else {
+		runSequentialCase(ctx, opt, execCfg, cl, operations, &scope, data, s, stepTimeout, &cr)
 	}
 	if opt.DryRun {
 		cr.Status = report.StatusSkipped
@@ -1016,23 +1115,310 @@ func runCase(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 	return cr
 }
 
+func runSequentialCase(
+	ctx context.Context,
+	opt Options,
+	execCfg execpkg.Config,
+	cl *cleanup,
+	operations *operationRuntime,
+	scope *[]*cleanupItem,
+	data map[string]any,
+	s *scenario.Suite,
+	stepTimeout time.Duration,
+	cr *report.Case,
+) {
+	for _, st := range s.Steps {
+		if opt.DryRun {
+			sr := renderDryStep(data, st)
+			annotateStep(&sr, st)
+			cr.Steps = append(cr.Steps, sr)
+			if sr.Status == report.StatusError {
+				cr.Status, cr.Error = report.StatusError, sr.Error
+				break
+			}
+			continue
+		}
+		if ctx.Err() != nil {
+			cr.Steps = append(cr.Steps, report.Step{Name: st.Name, Status: report.StatusSkipped, Error: "run cancelled"})
+			cr.Status = report.StatusFail
+			break
+		}
+		var sr report.Step
+		var ok bool
+		if err := operations.execute(ctx, data, st.Locks, func() {
+			sr, ok = runStep(ctx, opt, execCfg, cl, scope, data, st, stepTimeout)
+		}); err != nil {
+			sr = report.Step{Name: st.Name, Status: report.StatusError, Error: err.Error()}
+		}
+		annotateStep(&sr, st)
+		cr.Steps = append(cr.Steps, sr)
+		if !ok {
+			cr.Status = report.StatusFail
+			break // abort this case; teardown still runs via defer
+		}
+	}
+}
+
+type dagStepOutcome struct {
+	step     report.Step
+	success  bool
+	captures map[string]any
+}
+
+func runDAGCase(
+	ctx context.Context,
+	opt Options,
+	execCfg execpkg.Config,
+	cl *cleanup,
+	operations *operationRuntime,
+	scope *[]*cleanupItem,
+	base map[string]any,
+	fix *Fixture,
+	stackFailures map[string]string,
+	s *scenario.Suite,
+	stepTimeout time.Duration,
+	cr *report.Case,
+) {
+	indexByName := make(map[string]int, len(s.Steps))
+	for i, step := range s.Steps {
+		indexByName[step.Name] = i
+	}
+	success := make([]bool, len(s.Steps))
+	outcomes := make([]dagStepOutcome, len(s.Steps))
+	capturesByStep := make(map[string]map[string]any, len(s.Steps))
+	remainingDependencies := make([]int, len(s.Steps))
+	dependents := make([][]int, len(s.Steps))
+	for index, step := range s.Steps {
+		remainingDependencies[index] = len(step.DependsOn)
+		for _, dependency := range step.DependsOn {
+			parent := indexByName[dependency]
+			dependents[parent] = append(dependents[parent], index)
+		}
+	}
+	type completion struct {
+		index   int
+		outcome dagStepOutcome
+	}
+	completions := make(chan completion, len(s.Steps))
+	schedule := func(index int) {
+		step := s.Steps[index]
+		blockedBy := ""
+		for _, dependency := range step.DependsOn {
+			if !success[indexByName[dependency]] {
+				blockedBy = dependency
+				break
+			}
+		}
+		if blockedBy != "" {
+			outcome := dagStepOutcome{step: report.Step{
+				Name: step.Name, Status: report.StatusSkipped,
+				Error: fmt.Sprintf("dependency %q did not pass", blockedBy),
+			}}
+			annotateStep(&outcome.step, step)
+			completions <- completion{index: index, outcome: outcome}
+			return
+		}
+
+		data := dagStepData(base, step, indexByName, s.Steps, capturesByStep)
+		if failed := failedStackDependencies(fix, step.Needs, stackFailures); len(failed) > 0 {
+			outcome := dagStepOutcome{step: report.Step{
+				Name: step.Name, Status: report.StatusSkipped,
+				Error: "shared stack dependencies failed: " + strings.Join(failed, ", "),
+			}}
+			annotateStep(&outcome.step, step)
+			completions <- completion{index: index, outcome: outcome}
+			return
+		}
+		if missing := missingPrerequisites(data, step.RequiresPrerequisites); len(missing) > 0 {
+			outcome := dagStepOutcome{step: report.Step{
+				Name: step.Name, Status: report.StatusSkipped,
+				Error: "prerequisites unavailable: " + strings.Join(missing, ", "),
+			}}
+			annotateStep(&outcome.step, step)
+			completions <- completion{index: index, outcome: outcome}
+			return
+		}
+
+		go func() {
+			if opt.DryRun {
+				sr := renderDryStep(data, step)
+				annotateStep(&sr, step)
+				completions <- completion{index: index, outcome: dagStepOutcome{
+					step: sr, success: sr.Status != report.StatusError, captures: capturedData(data, step),
+				}}
+				return
+			}
+			var sr report.Step
+			var ok bool
+			err := operations.execute(ctx, data, step.Locks, func() {
+				sr, ok = runStep(ctx, opt, execCfg, cl, scope, data, step, stepTimeout)
+			})
+			if err != nil {
+				sr = report.Step{Name: step.Name, Status: report.StatusError, Error: err.Error()}
+				ok = false
+			}
+			annotateStep(&sr, step)
+			completions <- completion{
+				index:   index,
+				outcome: dagStepOutcome{step: sr, success: ok, captures: capturedData(data, step)},
+			}
+		}()
+	}
+
+	for index, count := range remainingDependencies {
+		if count == 0 {
+			schedule(index)
+		}
+	}
+	for completed := 0; completed < len(s.Steps); completed++ {
+		result := <-completions
+		outcomes[result.index] = result.outcome
+		success[result.index] = result.outcome.success
+		if result.outcome.success {
+			capturesByStep[s.Steps[result.index].Name] = result.outcome.captures
+		}
+		for _, dependent := range dependents[result.index] {
+			remainingDependencies[dependent]--
+			if remainingDependencies[dependent] == 0 {
+				schedule(dependent)
+			}
+		}
+	}
+
+	passed := 0
+	skipped := 0
+	for i := range s.Steps {
+		result := outcomes[i].step
+		cr.Steps = append(cr.Steps, result)
+		switch result.Status {
+		case report.StatusPass:
+			passed++
+		case report.StatusSkipped:
+			skipped++
+		default:
+			cr.Status = report.StatusFail
+			if cr.Error == "" {
+				cr.Error = fmt.Sprintf("%s: %s", result.Name, result.Error)
+			}
+		}
+	}
+	if passed == 0 && skipped == len(s.Steps) {
+		cr.Status = report.StatusSkipped
+	}
+}
+
+func dagStepData(base map[string]any, step scenario.Step, indexByName map[string]int, steps []scenario.Step, capturesByStep map[string]map[string]any) map[string]any {
+	data := vars.Clone(base)
+	visited := map[string]bool{}
+	var include func(string)
+	include = func(name string) {
+		if visited[name] {
+			return
+		}
+		visited[name] = true
+		for _, dependency := range steps[indexByName[name]].DependsOn {
+			include(dependency)
+		}
+		for key, value := range capturesByStep[name] {
+			data[key] = value
+		}
+	}
+	for _, dependency := range step.DependsOn {
+		include(dependency)
+	}
+	return data
+}
+
+func capturedData(data map[string]any, step scenario.Step) map[string]any {
+	captures := make(map[string]any, len(step.Capture))
+	for name := range step.Capture {
+		if value, ok := data[name]; ok {
+			captures[name] = value
+		}
+	}
+	return captures
+}
+
+func missingPrerequisites(data map[string]any, requirements []string) []string {
+	prerequisites, _ := data["prerequisites"].(map[string]any)
+	missing := make([]string, 0)
+	for _, requirement := range requirements {
+		var current any = prerequisites
+		found := true
+		for _, part := range strings.Split(requirement, ".") {
+			values, ok := current.(map[string]any)
+			if !ok {
+				found = false
+				break
+			}
+			current, ok = values[part]
+			if !ok {
+				found = false
+				break
+			}
+		}
+		if !found {
+			missing = append(missing, requirement)
+		}
+	}
+	return missing
+}
+
+func annotateStep(result *report.Step, step scenario.Step) {
+	result.DependsOn = append([]string(nil), step.DependsOn...)
+	result.DirectNeeds = append([]string(nil), step.Needs...)
+	result.RequiresPrerequisites = append([]string(nil), step.RequiresPrerequisites...)
+	result.Locks = append([]string(nil), step.Locks...)
+}
+
 func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *cleanup, scope *[]*cleanupItem, data map[string]any, st scenario.Step, timeout time.Duration) (report.Step, bool) {
 	wantExit := 0
 	if st.Exit != nil {
 		wantExit = *st.Exit
 	}
+	// not_found_ok accepts the NotFound exit code as success, mirroring the
+	// teardown cleanup semantics: the resource is already gone.
+	exitOK := func(code int) bool {
+		return code == wantExit || (st.NotFoundOK && code == exitNotFound)
+	}
 	sr := report.Step{Name: st.Name, WantExit: wantExit, Status: report.StatusPass}
 
-	cmd, err := vars.Render(st.Run, data)
+	lockKeys, err := renderLockKeys(data, st.Locks)
 	if err != nil {
-		sr.Status, sr.Error = report.StatusError, "render: "+err.Error()
+		sr.Status, sr.Error = report.StatusError, err.Error()
 		return sr, false
 	}
-	sr.Command = cmd
 
-	sctx, cancel := context.WithTimeout(ctx, timeout)
-	res := execpkg.Run(sctx, execCfg, cmd)
-	cancel()
+	var res execpkg.Result
+	var renderedCommand string
+	if st.Local != nil {
+		sctx, cancel := context.WithTimeout(ctx, timeout)
+		res = runLocalAction(sctx, data, *st.Local)
+		cancel()
+	} else {
+		cmd, renderErr := vars.Render(st.Run, data)
+		if renderErr != nil {
+			sr.Status, sr.Error = report.StatusError, "render: "+renderErr.Error()
+			return sr, false
+		}
+		renderedCommand = cmd
+		for attempt := 0; ; attempt++ {
+			sctx, cancel := context.WithTimeout(ctx, timeout)
+			res = execpkg.Run(sctx, execCfg, cmd)
+			cancel()
+			if res.Exit == 0 || !isTransientNetworkError(res) || attempt >= len(stepRetryDelays) {
+				break
+			}
+			opt.Logf("step retry %d/%d after transient network error: %s", attempt+1, len(stepRetryDelays), report.Scrub(renderedCommand))
+			select {
+			case <-ctx.Done():
+			case <-time.After(stepRetryDelays[attempt]):
+			}
+			if ctx.Err() != nil {
+				break
+			}
+		}
+	}
 	sr.Command = res.Command
 	sr.Exit = res.Exit
 	sr.DurationMs = res.Duration.Milliseconds()
@@ -1047,11 +1433,11 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 			// Failed creates commonly have no resource ID. Preserve the command
 			// error; teardown rendering is authoritative only after the command
 			// reached its expected exit status.
-			if res.Err == nil && res.Exit == wantExit {
+			if res.Err == nil && exitOK(res.Exit) {
 				sr.Status, sr.Error = report.StatusError, "render teardown: "+terr.Error()
 				return sr, false
 			}
-		} else if err := cl.push(scope, caseScope(data), td, st.TeardownRegion); err != nil {
+		} else if err := cl.push(scope, caseScope(data), td, st.TeardownRegion, lockKeys); err != nil {
 			sr.Status, sr.Error = report.StatusError, "cleanup journal: "+err.Error()
 			return sr, false
 		}
@@ -1061,10 +1447,7 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 		sr.Status, sr.Error = report.StatusError, res.Err.Error()
 		return sr, false
 	}
-	if res.Exit == 0 {
-		cl.satisfy(*scope, cmd, "primary")
-	}
-	if res.Exit != wantExit {
+	if !exitOK(res.Exit) {
 		if d := failureDetail(res); d != "" {
 			sr.Error = d
 		}
@@ -1098,8 +1481,41 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 	}
 	if !ok {
 		sr.Status = report.StatusFail
+		return sr, false
 	}
-	return sr, ok
+	if res.Exit == 0 && st.Local == nil {
+		if err := cl.satisfy(*scope, renderedCommand, "primary"); err != nil {
+			sr.Status, sr.Error = report.StatusError, "cleanup journal: "+err.Error()
+			return sr, false
+		}
+	}
+	return sr, true
+}
+
+// isTransientNetworkError reports whether the step failure looks like a
+// transport-level network error that may succeed on retry. It checks stdout
+// and stderr for Go net package error markers such as "dial tcp", "bad file
+// descriptor", and "connection refused". Non-network failures (assertion
+// mismatches, permission errors, quota limits) are not retried.
+func isTransientNetworkError(res execpkg.Result) bool {
+	if res.Exit == 0 {
+		return false
+	}
+	text := strings.ToLower(strings.Join([]string{res.Stdout, res.Stderr}, " "))
+	for _, marker := range []string{
+		"dial tcp",
+		"bad file descriptor",
+		"connection refused",
+		"connection reset",
+		"i/o timeout",
+		"no such host",
+		"tls: handshake",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // mergeCaptures returns data augmented with this step's captures so a teardown
@@ -1119,12 +1535,26 @@ func mergeCaptures(data map[string]any, res execpkg.Result, st scenario.Step) ma
 
 func renderDryStep(data map[string]any, st scenario.Step) report.Step {
 	sr := report.Step{Name: st.Name, Status: report.StatusSkipped}
-	cmd, err := vars.Render(st.Run, data)
-	if err != nil {
-		sr.Status, sr.Error = report.StatusError, "render: "+err.Error()
-		return sr
+	if st.Local != nil {
+		source, sourceErr := vars.Render(st.Local.Source, data)
+		destination, destinationErr := vars.Render(st.Local.Destination, data)
+		if sourceErr != nil || destinationErr != nil {
+			if sourceErr != nil {
+				sr.Status, sr.Error = report.StatusError, "render local source: "+sourceErr.Error()
+			} else {
+				sr.Status, sr.Error = report.StatusError, "render local destination: "+destinationErr.Error()
+			}
+			return sr
+		}
+		sr.Command = fmt.Sprintf("local %s %s %s", st.Local.Action, source, destination)
+	} else {
+		cmd, err := vars.Render(st.Run, data)
+		if err != nil {
+			sr.Status, sr.Error = report.StatusError, "render: "+err.Error()
+			return sr
+		}
+		sr.Command = cmd
 	}
-	sr.Command = cmd
 	for v := range st.Capture {
 		data[v] = "<" + v + ">"
 	}

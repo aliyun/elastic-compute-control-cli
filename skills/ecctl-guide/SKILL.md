@@ -12,7 +12,7 @@ Use this skill when choosing or executing `ecctl` commands.
 1. Run `ecctl <product> <resource> <action> --help` to see usage, examples, and available flags.
 2. Use `ecctl schema <cmd1> <cmd2> ...` to batch-query multiple schemas in one call.
 3. Use `ecctl schema <product>.<resource>.<action> --full` only when a needed advanced flag is absent from brief schema.
-4. Use `ecctl capabilities --output json` for the full product/resource/action surface.
+4. Use `ecctl capabilities --output json` for the current public product/resource/action surface.
 
 ## Agent Rules
 
@@ -27,11 +27,15 @@ Use this skill when choosing or executing `ecctl` commands.
 - When creating ECS instances, use `ecctl call ecs DescribeAvailableResource --DestinationResource InstanceType` before choosing zone/type/disk combinations. If `ecs instance create` returns a stock or disk-category error, follow its `error.suggested_action`.
 - ecctl output uses **normalized field names** (e.g. `id`, not `zone_id` or `ZoneId`). Always check `--help` or actual output to confirm field names before parsing.
 
-## Product And Resource Surface
+## Public Product And Resource Surface
 
-- `ack`: `ack`, `addon`, `alert`, `alert-contact`, `alert-contact-group`, `audit`, `audit-control-plane-log`, `auto-repair-policy`, `check`, `diagnosis`, `diagnosis-check-item`, `event`, `inspect`, `inspect-config`, `inspect-report`, `kubeconfig`, `node`, `nodepool`, `operation-plan`, `permission`, `policy`, `policy-instance`, `region`, `task`, `template`, `trigger`, `version`, `vuls`
+- `ack`: `ack`, `addon`, `alert`, `audit`, `audit-control-plane-log`, `check`, `event`, `inspect`, `inspect-config`, `inspect-report`, `kubeconfig`, `node`, `nodepool`, `permission`, `policy`, `policy-instance`, `region`, `task`, `template`, `trigger`, `version`, `vuls`
 - `ecs`: `instance`, `disk`, `image`, `sg`, `eni`, `keypair`, `snapshot`, `snapshot-group`, `auto-snapshot-policy`, `command`, `launch-template`, `prefix-list`, `port-range-list`, `region`, `zone`, `assistant`
 - `vpc`: `vpc`, `vswitch`
-- `lingjun`: `cluster`, `node`, `node-group`, `vpd`, `subnet`, `vcc`, `er`, `eni`, `lni`, `vsc`, `net-test`
+- `lingjun`: `cluster`, `node`, `node-group`, `vpd`, `subnet`, `vcc`, `er`, `eni`, `lni`, `vsc`
 - `rg`: `group`, `resource`, `policy`, `policy-version`, `role`, `service-linked-role`, `associated-transfer`, `admin-setting`, `notification`
 - `tag`: `resource`, `policy`, `associated-resource-rule`
+
+The separate `ecctl-full` surface additionally exposes
+`ack/auto-repair-policy`, `ack/diagnosis`, `ack/diagnosis/check-item`,
+`ack/operation-plan`, and `lingjun/net-test`.

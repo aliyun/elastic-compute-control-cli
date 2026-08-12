@@ -17,9 +17,8 @@ type Selection struct {
 }
 
 // Select applies Targets then Keyword to all, preserving input order. A target
-// of the form file::step truncates that case to the steps up to and including
-// the named step (lifecycle steps are a stateful sequence, so a node id runs the
-// prefix that produces the state, not the step in isolation).
+// of the form file::step includes the legacy lifecycle prefix or, for DAG
+// execution, the named operation and its dependency ancestors.
 func Select(all []*Suite, sel Selection) ([]*Suite, error) {
 	if sel.Surface != "" && !sel.Surface.Valid() {
 		return nil, fmt.Errorf("surface must be %q or %q", SurfacePublic, SurfaceFull)
@@ -28,7 +27,7 @@ func Select(all []*Suite, sel Selection) ([]*Suite, error) {
 	if sel.Surface != "" {
 		var kept []*Suite
 		for _, s := range out {
-			if s.Surface == sel.Surface {
+			if s.Surface == sel.Surface || (sel.Surface == SurfaceFull && s.Surface == SurfacePublic) {
 				kept = append(kept, s)
 			}
 		}
@@ -110,6 +109,32 @@ func truncateAfter(s *Suite, step string) (*Suite, error) {
 	for i, st := range s.Steps {
 		if st.Name == step {
 			clone := *s
+			if s.Execution == ExecutionDAG {
+				selected := map[string]bool{}
+				var include func(string)
+				include = func(name string) {
+					if selected[name] {
+						return
+					}
+					selected[name] = true
+					for _, candidate := range s.Steps {
+						if candidate.Name == name {
+							for _, dependency := range candidate.DependsOn {
+								include(dependency)
+							}
+							break
+						}
+					}
+				}
+				include(step)
+				clone.Steps = make([]Step, 0, len(selected))
+				for _, candidate := range s.Steps {
+					if selected[candidate.Name] {
+						clone.Steps = append(clone.Steps, candidate)
+					}
+				}
+				return &clone, nil
+			}
 			clone.Steps = s.Steps[:i+1]
 			return &clone, nil
 		}

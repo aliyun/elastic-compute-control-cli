@@ -101,6 +101,7 @@ func TestACKTriggerRoutesToCreateDeleteDescribe(t *testing.T) {
 	createRequest := fake.calls[0].request
 	for key, want := range map[string]any{
 		"cluster_id":      "c-ack",
+		"body.cluster_id": "c-ack",
 		"body.project_id": "default/web",
 		"body.action":     "redeploy",
 		"body.type":       "deployment",

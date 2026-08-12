@@ -30,10 +30,25 @@ func (s Surface) Valid() bool {
 	return s == SurfacePublic || s == SurfaceFull
 }
 
+// ExecutionMode controls whether a case preserves the historical ordered,
+// fail-fast lifecycle or schedules its steps as an operation dependency DAG.
+type ExecutionMode string
+
+const (
+	ExecutionSequential ExecutionMode = "sequential"
+	ExecutionDAG        ExecutionMode = "dag"
+)
+
+func (m ExecutionMode) Valid() bool {
+	return m == ExecutionSequential || m == ExecutionDAG
+}
+
 // Suite is one case file: a resource and the steps that exercise it.
 type Suite struct {
 	Surface               Surface                      `yaml:"surface"` // public (default) or full
+	Execution             ExecutionMode                `yaml:"execution"`
 	Resource              string                       `yaml:"resource"`
+	Covers                []string                     `yaml:"covers"`                 // additional resources exercised as part of this lifecycle
 	Timeout               string                       `yaml:"timeout"`                // optional per-case step timeout override
 	Serial                bool                         `yaml:"serial"`                 // run outside the parallel pool
 	Needs                 []string                     `yaml:"needs"`                  // requested shared-stack node IDs; dependencies are included transitively
@@ -70,15 +85,30 @@ type RegionRequirement struct {
 
 // Step is a single command invocation with its expectations.
 type Step struct {
-	Name           string            `yaml:"name"`
-	Run            string            `yaml:"run"` // full "ecctl ..." command line
-	At             string            `yaml:"at"`  // base jsonpath for expect/capture
-	Exit           *int              `yaml:"exit"`
-	Expect         Expectations      `yaml:"expect"`
-	Assert         []string          `yaml:"assert"`  // expression escape hatch
-	Capture        map[string]string `yaml:"capture"` // var -> jsonpath (relative to At)
-	Teardown       string            `yaml:"teardown"`
-	TeardownRegion string            `yaml:"teardown_region"` // primary (default) or a named region role
+	Name                  string            `yaml:"name"`
+	DependsOn             []string          `yaml:"depends_on"`
+	Needs                 []string          `yaml:"needs"`
+	RequiresPrerequisites []string          `yaml:"requires_prerequisites"`
+	Locks                 []string          `yaml:"locks"`
+	Run                   string            `yaml:"run"`   // full "ecctl ..." command line
+	Local                 *LocalAction      `yaml:"local"` // constrained runner-owned local action
+	At                    string            `yaml:"at"`    // base jsonpath for expect/capture
+	Exit                  *int              `yaml:"exit"`
+	NotFoundOK            bool              `yaml:"not_found_ok"` // exit 4 (NotFound) also passes
+	Expect                Expectations      `yaml:"expect"`
+	Assert                []string          `yaml:"assert"`  // expression escape hatch
+	Capture               map[string]string `yaml:"capture"` // var -> jsonpath (relative to At)
+	Teardown              string            `yaml:"teardown"`
+	TeardownRegion        string            `yaml:"teardown_region"` // primary (default) or a named region role
+}
+
+// LocalAction is a runner-owned operation that does not invoke a shell. The
+// action and both paths are validated before execution, and paths are confined
+// to the run's private temporary directory.
+type LocalAction struct {
+	Action      string `yaml:"action"`
+	Source      string `yaml:"source"`
+	Destination string `yaml:"destination"`
 }
 
 // Expectations preserves authoring order of the path->matcher mapping.
@@ -120,6 +150,9 @@ func Load(path string) (*Suite, error) {
 	}
 	if s.Surface == "" {
 		s.Surface = SurfacePublic
+	}
+	if s.Execution == "" {
+		s.Execution = ExecutionSequential
 	}
 	s.Path = path
 	if err := s.Validate(); err != nil {
@@ -164,8 +197,24 @@ func (s *Suite) Validate() error {
 	if !s.Surface.Valid() {
 		return fmt.Errorf("surface must be %q or %q", SurfacePublic, SurfaceFull)
 	}
+	if !s.Execution.Valid() {
+		return fmt.Errorf("execution must be %q or %q", ExecutionSequential, ExecutionDAG)
+	}
 	if s.Resource == "" {
 		return fmt.Errorf("resource is required")
+	}
+	if err := validateResourceIdentity(s.Resource); err != nil {
+		return fmt.Errorf("resource: %w", err)
+	}
+	covered := map[string]bool{s.Resource: true}
+	for _, resource := range s.Covers {
+		if err := validateResourceIdentity(resource); err != nil {
+			return fmt.Errorf("covers: %w", err)
+		}
+		if covered[resource] {
+			return fmt.Errorf("covers contains duplicate resource %q", resource)
+		}
+		covered[resource] = true
 	}
 	if len(s.Steps) == 0 {
 		return fmt.Errorf("at least one step is required")
@@ -213,12 +262,55 @@ func (s *Suite) Validate() error {
 		requirement.DistinctFrom = distinctFrom
 		s.RegionRequirements[role] = requirement
 	}
-	for i, st := range s.Steps {
-		if strings.TrimSpace(st.Run) == "" {
-			return fmt.Errorf("steps[%d] (%s): run is required", i, st.Name)
+	stepNames := make(map[string]int, len(s.Steps))
+	for i := range s.Steps {
+		st := &s.Steps[i]
+		st.Name = strings.TrimSpace(st.Name)
+		if s.Execution == ExecutionDAG {
+			if st.Name == "" {
+				return fmt.Errorf("steps[%d]: name is required for dag execution", i)
+			}
+			if previous, exists := stepNames[st.Name]; exists {
+				return fmt.Errorf("steps[%d] (%s): duplicate step name first declared at steps[%d]", i, st.Name, previous)
+			}
+			stepNames[st.Name] = i
 		}
-		if !strings.HasPrefix(strings.TrimSpace(st.Run), "ecctl") {
+		if err := validatePrerequisiteNames(st.RequiresPrerequisites); err != nil {
+			return fmt.Errorf("steps[%d] (%s) requires_prerequisites: %w", i, st.Name, err)
+		}
+		if s.Execution == ExecutionSequential {
+			switch {
+			case len(st.DependsOn) > 0:
+				return fmt.Errorf("steps[%d] (%s): depends_on requires execution: dag", i, st.Name)
+			case len(st.Needs) > 0:
+				return fmt.Errorf("steps[%d] (%s): needs requires execution: dag or suite-level needs", i, st.Name)
+			case len(st.RequiresPrerequisites) > 0:
+				return fmt.Errorf("steps[%d] (%s): requires_prerequisites requires execution: dag or suite-level requires_prerequisites", i, st.Name)
+			}
+		}
+		for _, lock := range st.Locks {
+			if strings.TrimSpace(lock) == "" {
+				return fmt.Errorf("steps[%d] (%s): lock entries must not be empty", i, st.Name)
+			}
+		}
+		hasRun := strings.TrimSpace(st.Run) != ""
+		hasLocal := st.Local != nil
+		if hasRun == hasLocal {
+			return fmt.Errorf("steps[%d] (%s): exactly one of run or local is required", i, st.Name)
+		}
+		if hasRun && !strings.HasPrefix(strings.TrimSpace(st.Run), "ecctl") {
 			return fmt.Errorf("steps[%d] (%s): run must be a full `ecctl ...` command", i, st.Name)
+		}
+		if hasLocal {
+			if st.Local.Action != "extract-tar-gzip" {
+				return fmt.Errorf("steps[%d] (%s): unsupported local action %q", i, st.Name, st.Local.Action)
+			}
+			if strings.TrimSpace(st.Local.Source) == "" || strings.TrimSpace(st.Local.Destination) == "" {
+				return fmt.Errorf("steps[%d] (%s): local source and destination are required", i, st.Name)
+			}
+			if strings.TrimSpace(st.Teardown) != "" || strings.TrimSpace(st.TeardownRegion) != "" {
+				return fmt.Errorf("steps[%d] (%s): local actions cannot declare teardown", i, st.Name)
+			}
 		}
 		if role := strings.TrimSpace(st.TeardownRegion); role != "" && !roles[role] {
 			return fmt.Errorf("steps[%d] (%s): teardown_region references unknown role %q", i, st.Name, role)
@@ -229,7 +321,58 @@ func (s *Suite) Validate() error {
 			}
 		}
 	}
+	if s.Execution == ExecutionDAG {
+		state := make(map[string]int, len(s.Steps))
+		var visit func(string) error
+		visit = func(name string) error {
+			switch state[name] {
+			case 1:
+				return fmt.Errorf("dependency cycle at step %q", name)
+			case 2:
+				return nil
+			}
+			index, exists := stepNames[name]
+			if !exists {
+				return fmt.Errorf("unknown step %q", name)
+			}
+			state[name] = 1
+			seen := map[string]bool{}
+			for _, dependency := range s.Steps[index].DependsOn {
+				dependency = strings.TrimSpace(dependency)
+				if dependency == "" {
+					return fmt.Errorf("steps[%d] (%s): depends_on entries must not be empty", index, name)
+				}
+				if seen[dependency] {
+					return fmt.Errorf("steps[%d] (%s): duplicate dependency %q", index, name, dependency)
+				}
+				seen[dependency] = true
+				if _, exists := stepNames[dependency]; !exists {
+					return fmt.Errorf("steps[%d] (%s): depends_on references unknown step %q", index, name, dependency)
+				}
+				if err := visit(dependency); err != nil {
+					return err
+				}
+			}
+			state[name] = 2
+			return nil
+		}
+		for name := range stepNames {
+			if err := visit(name); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
+}
+
+// CoversResource reports whether the suite owns coverage for a resource. A
+// secondary resource must be declared explicitly in covers; merely invoking a
+// foreign command for setup does not make it part of the case contract.
+func (s *Suite) CoversResource(resource string) bool {
+	if s.Resource == resource {
+		return true
+	}
+	return containsString(s.Covers, resource)
 }
 
 // Validate checks that constraints are meaningful and deterministic.
@@ -272,6 +415,14 @@ func containsString(values []string, wanted string) bool {
 		}
 	}
 	return false
+}
+
+func validateResourceIdentity(resource string) error {
+	parts := strings.Split(resource, "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return fmt.Errorf("%q must be a canonical product/resource identity", resource)
+	}
+	return nil
 }
 
 func validatePrerequisiteNames(names []string) error {

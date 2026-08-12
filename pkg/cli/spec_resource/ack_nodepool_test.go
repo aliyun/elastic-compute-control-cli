@@ -540,6 +540,31 @@ func TestACKNodepoolDetachMapsInstanceIDsAndControlsIntoQuery(t *testing.T) {
 	}
 }
 
+func TestACKNodepoolUpgradeNoWaitEmitsTaskID(t *testing.T) {
+	fake := &fakeSpecCaller{responses: []map[string]any{{
+		"request_id": "req-upgrade",
+		"task_id":    "T-upgrade",
+	}}}
+	runCLI := ackNodepoolRunner(t, fake)
+
+	stdout, stderr, code := runCLI("ack", "nodepool", "upgrade", "np-123",
+		"--cluster", "c-123",
+		"--config", `{"kubernetes_version":"1.36.1-aliyun.1"}`,
+		"--region", "cn-beijing",
+		"--no-wait",
+	)
+	if code != 0 {
+		t.Fatalf("ack nodepool upgrade --no-wait exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if len(fake.calls) != 1 || fake.calls[0].operation != "UpgradeClusterNodepool" {
+		t.Fatalf("calls = %#v", fake.calls)
+	}
+	nodepool, _ := decodeObject(t, stdout)["nodepool"].(map[string]any)
+	if nodepool == nil || nodepool["id"] != "np-123" || nodepool["task_id"] != "T-upgrade" {
+		t.Fatalf("unexpected output: %s", stdout)
+	}
+}
+
 func TestACKNodepoolDeleteForceDefaultsFalse(t *testing.T) {
 	t.Parallel()
 

@@ -18,9 +18,9 @@ func profile(id string, bundles ...string) fixtureconfig.RegionProfile {
 
 func completeBundle(name string) map[string]any {
 	switch name {
-	case "ecs.image":
-		return map[string]any{"oss_bucket": "bucket"}
-	case "ecs.instance_renew":
+	case "test.primary":
+		return map[string]any{"resource_id": "primary"}
+	case "test.optional":
 		return map[string]any{"instance_id": "i-test"}
 	case "lingjun.cluster":
 		return map[string]any{"node_group_ids": []any{"ng-a", "ng-b"}}
@@ -31,13 +31,13 @@ func completeBundle(name string) map[string]any {
 
 func TestBuildGroupsSuitesByRegionRequirementSignature(t *testing.T) {
 	suites := []*scenario.Suite{
-		{Path: "ecs/image.yaml", Resource: "ecs/image", RequiresPrerequisites: []string{"ecs.image"}},
-		{Path: "ecs/instance.yaml", Resource: "ecs/instance", RequiresPrerequisites: []string{"ecs.instance_renew"}},
-		{Path: "ecs/image-describe.yaml", Resource: "ecs/image", RequiresPrerequisites: []string{"ecs.image"}},
+		{Path: "ecs/image.yaml", Resource: "ecs/image", RequiresPrerequisites: []string{"test.primary"}},
+		{Path: "ecs/instance.yaml", Resource: "ecs/instance", RequiresPrerequisites: []string{"test.optional"}},
+		{Path: "ecs/image-describe.yaml", Resource: "ecs/image", RequiresPrerequisites: []string{"test.primary"}},
 	}
 	profiles := []fixtureconfig.RegionProfile{
-		profile("cn-hangzhou", "ecs.image", "ecs.instance_renew"),
-		profile("cn-zhangjiakou", "ecs.image"),
+		profile("cn-hangzhou", "test.primary", "test.optional"),
+		profile("cn-zhangjiakou", "test.primary"),
 	}
 
 	units, err := Build(Request{Suites: suites, Profiles: profiles})
@@ -62,15 +62,15 @@ func TestBuildCreatesOrderedDistinctCrossRegionAssignments(t *testing.T) {
 	suite := &scenario.Suite{
 		Path:                  "ecs/image-copy.yaml",
 		Resource:              "ecs/image",
-		RequiresPrerequisites: []string{"ecs.image"},
+		RequiresPrerequisites: []string{"test.primary"},
 		RegionRequirements: map[string]scenario.RegionRequirement{
-			"destination": {RequiresPrerequisites: []string{"ecs.image"}, DistinctFrom: PrimaryRole},
+			"destination": {RequiresPrerequisites: []string{"test.primary"}, DistinctFrom: PrimaryRole},
 		},
 	}
 	profiles := []fixtureconfig.RegionProfile{
-		profile("cn-hangzhou", "ecs.image"),
-		profile("cn-zhangjiakou", "ecs.image"),
-		profile("cn-heyuan", "ecs.image"),
+		profile("cn-hangzhou", "test.primary"),
+		profile("cn-zhangjiakou", "test.primary"),
+		profile("cn-heyuan", "test.primary"),
 	}
 
 	units, err := Build(Request{Suites: []*scenario.Suite{suite}, Profiles: profiles, PrimaryRegion: "cn-hangzhou"})
@@ -98,7 +98,7 @@ func TestBuildFailsBeforeExecutionWhenNoCompleteAssignmentExists(t *testing.T) {
 
 	_, err := Build(Request{
 		Suites:   []*scenario.Suite{suite},
-		Profiles: []fixtureconfig.RegionProfile{profile("cn-hangzhou", "ecs.instance_renew")},
+		Profiles: []fixtureconfig.RegionProfile{profile("cn-hangzhou", "test.optional")},
 	})
 	if err == nil {
 		t.Fatal("expected planning to fail")
@@ -158,5 +158,34 @@ func TestBuildSeparatesDynamicCapabilitySignatures(t *testing.T) {
 		if len(unit.Suites) != 1 {
 			t.Fatalf("capability unit unexpectedly mixed suites: %#v", unit)
 		}
+	}
+}
+
+func TestBuildPrefersButDoesNotRequireStepPrerequisites(t *testing.T) {
+	suite := &scenario.Suite{
+		Path: "ecs/instance.yaml", Resource: "ecs/instance",
+		Steps: []scenario.Step{
+			{Name: "ordinary", Run: "ecctl ecs instance list"},
+			{Name: "renew", Run: "ecctl ecs instance renew i-test", RequiresPrerequisites: []string{"test.optional"}},
+		},
+	}
+	units, err := Build(Request{
+		Suites: []*scenario.Suite{suite},
+		Profiles: []fixtureconfig.RegionProfile{
+			profile("cn-no-renew"),
+			profile("cn-renew", "test.optional"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(units[0].Assignments); got != 2 {
+		t.Fatalf("assignments = %d, want both profiles", got)
+	}
+	if got := units[0].Assignments[0].Regions[PrimaryRole].ID; got != "cn-renew" {
+		t.Fatalf("first assignment = %q, want optional prerequisite profile", got)
+	}
+	if got := units[0].Requirements[PrimaryRole]; len(got) != 0 {
+		t.Fatalf("hard requirements = %#v, want none", got)
 	}
 }

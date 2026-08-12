@@ -518,6 +518,135 @@ func TestOpenAPICallerBuildsCSROAJSONBodyFromFlatBodyFields(t *testing.T) {
 	}
 }
 
+func TestOpenAPICallerBuildsCSROAJSONBodyFromNamedBodyParameter(t *testing.T) {
+	caller := &OpenAPICaller{Product: "cs", Resource: "addon", Region: "cn-hangzhou"}
+
+	req, err := caller.commonRequest("UnInstallClusterAddons", map[string]any{
+		"ClusterId":                        "c-123",
+		"addons.1.name":                    "coredns",
+		"addons.1.cleanup_cloud_resources": true,
+	})
+	if err != nil {
+		t.Fatalf("commonRequest: %v", err)
+	}
+	req.TransToAcsRequest()
+	raw, err := io.ReadAll(req.GetBodyReader())
+	if err != nil {
+		t.Fatalf("ReadAll body: %v", err)
+	}
+	var decoded []map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("body is not JSON array: %q: %v", string(raw), err)
+	}
+	if len(decoded) != 1 || decoded[0]["name"] != "coredns" || decoded[0]["cleanup_cloud_resources"] != true {
+		t.Fatalf("body = %#v", decoded)
+	}
+	if _, ok := req.FormParams["addons.1.name"]; ok {
+		t.Fatalf("body fields should not be sent as form params: %#v", req.FormParams)
+	}
+}
+
+func TestOpenAPICallerBuildsACKStateAndInspectRequests(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		operation string
+		values    map[string]any
+		wantPath  string
+		wantBody  map[string]any
+		wantQuery map[string]string
+	}{
+		{
+			name:      "stop alert body",
+			operation: "StopAlert",
+			values: map[string]any{
+				"ClusterId":                  "c-123",
+				"body.alert_rule_group_name": "ack-cluster",
+			},
+			wantPath: "/alert/c-123/alert_rule/stop",
+			wantBody: map[string]any{"alert_rule_group_name": "ack-cluster"},
+		},
+		{
+			name:      "disable audit body",
+			operation: "UpdateClusterAuditLogConfig",
+			values: map[string]any{
+				"clusterid":    "c-123",
+				"body.disable": true,
+			},
+			wantPath: "/clusters/c-123/audit_log",
+			wantBody: map[string]any{"disable": true},
+		},
+		{
+			name:      "disable control plane log body",
+			operation: "UpdateControlPlaneLog",
+			values: map[string]any{
+				"ClusterId":       "c-123",
+				"body.components": []string{},
+			},
+			wantPath: "/clusters/c-123/controlplanelog",
+			wantBody: map[string]any{"components": []any{}},
+		},
+		{
+			name:      "create trigger path and body",
+			operation: "CreateTrigger",
+			values: map[string]any{
+				"cluster_id":      "c-123",
+				"body.cluster_id": "c-123",
+				"body.project_id": "default/web",
+				"body.action":     "redeploy",
+				"body.type":       "deployment",
+			},
+			wantPath: "/clusters/c-123/triggers",
+			wantBody: map[string]any{
+				"cluster_id": "c-123",
+				"project_id": "default/web",
+				"action":     "redeploy",
+				"type":       "deployment",
+			},
+		},
+		{
+			name:      "get inspect config path",
+			operation: "GetClusterInspectConfig",
+			values:    map[string]any{"clusterId": "c-123"},
+			wantPath:  "/clusters/c-123/inspectConfig",
+		},
+		{
+			name:      "list inspect reports path and query",
+			operation: "ListClusterInspectReports",
+			values: map[string]any{
+				"clusterId":  "c-123",
+				"maxResults": 10,
+			},
+			wantPath:  "/clusters/c-123/inspectReports",
+			wantQuery: map[string]string{"maxResults": "10"},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			caller := &OpenAPICaller{Product: "cs", Region: "cn-hangzhou"}
+			req, err := caller.commonRequest(tt.operation, tt.values)
+			if err != nil {
+				t.Fatalf("commonRequest(%s): %v", tt.operation, err)
+			}
+			if got := req.BuildPath(); got != tt.wantPath {
+				t.Fatalf("BuildPath() = %q, want %q; params=%#v", got, tt.wantPath, req.PathParams)
+			}
+			if tt.wantBody != nil && !reflect.DeepEqual(req.BodyValue(), tt.wantBody) {
+				t.Fatalf("BodyValue() = %#v, want %#v", req.BodyValue(), tt.wantBody)
+			}
+			for key, want := range tt.wantQuery {
+				if req.QueryParams[key] != want {
+					t.Fatalf("QueryParams[%q] = %q, want %q; query=%#v", key, req.QueryParams[key], want, req.QueryParams)
+				}
+			}
+		})
+	}
+}
+
 func TestOpenAPICallerRejectsInvalidFlatBodyArrayIndexes(t *testing.T) {
 	t.Parallel()
 
@@ -543,7 +672,7 @@ func TestOpenAPICallerRejectsInvalidFlatBodyArrayIndexes(t *testing.T) {
 }
 
 func TestOpenAPIRequestBodyBuildsObjectBodyAndRejectsMixedFlatFields(t *testing.T) {
-	api := &OpenAPIOperationDetail{Parameters: []OpenAPIParameter{{Name: "body", Position: "Body"}}}
+	api := &OpenAPIOperationDetail{Style: "ROA", Parameters: []OpenAPIParameter{{Name: "body", Position: "Body"}}}
 
 	body, used, err := openAPIRequestBody(api, map[string]any{
 		"body.name":       "coredns",
@@ -579,7 +708,7 @@ func TestOpenAPIRequestBodyBuildsObjectBodyAndRejectsMixedFlatFields(t *testing.
 }
 
 func TestOpenAPIRequestBodyUsesExplicitJSONBodyAndSkipsEmptyBodies(t *testing.T) {
-	api := &OpenAPIOperationDetail{Parameters: []OpenAPIParameter{{Name: "body", Position: "Body"}}}
+	api := &OpenAPIOperationDetail{Style: "ROA", Parameters: []OpenAPIParameter{{Name: "body", Position: "Body"}}}
 
 	body, used, err := openAPIRequestBody(api, map[string]any{"body": `{"enabled":true}`})
 	if err != nil {
@@ -1296,6 +1425,49 @@ func TestOpenAPICallerCloudAPIErrorUsesRawCloudMessage(t *testing.T) {
 		action.Message != "Specified CIDR block overlapped with other subnets." ||
 		action.RequestID != "req-cidr" {
 		t.Fatalf("action = %#v", action)
+	}
+}
+
+func TestOpenAPICallerRejectsUnsuccessfulBusinessResponse(t *testing.T) {
+	fake := &fakeOpenAPIExecutor{response: `{
+		"Code":"1006",
+		"Message":"zoneId 参数为空",
+		"RequestId":"req-business"
+	}`}
+	caller := &OpenAPICaller{
+		Product:  "eflo",
+		Resource: "vcc",
+		Region:   "cn-hangzhou",
+		executor: fake,
+	}
+
+	_, err := caller.Call(context.Background(), "CreateVcc", map[string]any{"RegionId": "cn-hangzhou"})
+	if err == nil {
+		t.Fatal("Call succeeded, want unsuccessful business response error")
+	}
+	var appErr *ecerrors.AppError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("error = %T %v, want AppError", err, err)
+	}
+	if payload := appErr.Payload(); payload.Code != "CloudAPIError" || payload.Message != "zoneId 参数为空" {
+		t.Fatalf("payload = %#v", payload)
+	}
+	action := ecerrors.ActionFromError("CreateVcc", err)
+	if action.Code != "1006" || action.Message != "zoneId 参数为空" || action.RequestID != "req-business" {
+		t.Fatalf("action = %#v", action)
+	}
+}
+
+func TestOpenAPICallerLeavesBusinessResponseVisibleForGenericCall(t *testing.T) {
+	fake := &fakeOpenAPIExecutor{response: `{"Code":"1006","Message":"zoneId 参数为空"}`}
+	caller := &OpenAPICaller{Product: "eflo", Region: "cn-hangzhou", executor: fake}
+
+	response, err := caller.Call(context.Background(), "CreateVcc", map[string]any{"RegionId": "cn-hangzhou"})
+	if err != nil {
+		t.Fatalf("generic Call returned error: %v", err)
+	}
+	if response["Code"] != "1006" {
+		t.Fatalf("response = %#v", response)
 	}
 }
 

@@ -1,0 +1,79 @@
+# Complete ACK addon lifecycle.
+resource: ack/addon
+serial: true
+needs: [ack_shared_cluster]
+requires_params: [ack.addon_name, ack.addon_version, ack.addon_upgrade_version]
+timeout: 45m
+
+steps:
+  # The dynamic parameter resolver selects a non-default managed addon whose
+  # service role is part of the public ACK authorization set and whose catalog
+  # metadata supports the complete lifecycle. This case owns the installed
+  # instance and always unregisters it.
+  - name: create
+    locks: ["ack-cluster:{{.stack.ack_shared_cluster}}"]
+    run: >
+      ecctl ack addon create
+      {{.params.ack.addon_name}}
+      --cluster {{.stack.ack_shared_cluster}}
+      --version {{.params.ack.addon_version}}
+      --config '{}'
+      --timeout 15m
+    expect:
+      $.actions: { type: array, min_len: 1 }
+    teardown: >
+      ecctl ack addon delete
+      {{.params.ack.addon_name}}
+      --cluster {{.stack.ack_shared_cluster}}
+      --timeout 20m
+
+  - name: get
+    locks: ["ack-cluster:{{.stack.ack_shared_cluster}}"]
+    run: >
+      ecctl ack addon get
+      {{.params.ack.addon_name}}
+      --cluster {{.stack.ack_shared_cluster}}
+    at: $.addon
+    expect:
+      name: { eq: "{{.params.ack.addon_name}}" }
+
+  - name: list
+    run: ecctl ack addon list --cluster {{.stack.ack_shared_cluster}}
+    assert:
+      - len($.addons) >= 1
+
+  - name: upgrade
+    locks: ["ack-cluster:{{.stack.ack_shared_cluster}}"]
+    run: >
+      ecctl ack addon upgrade
+      {{.params.ack.addon_name}}
+      --cluster {{.stack.ack_shared_cluster}}
+      --version {{.params.ack.addon_upgrade_version}}
+      --timeout 15m
+    at: $.addon
+    expect:
+      name: { eq: "{{.params.ack.addon_name}}" }
+      version: { eq: "{{.params.ack.addon_upgrade_version}}" }
+
+  - name: update
+    locks: ["ack-cluster:{{.stack.ack_shared_cluster}}"]
+    run: >
+      ecctl ack addon update
+      {{.params.ack.addon_name}}
+      --cluster {{.stack.ack_shared_cluster}}
+      --config '{}'
+      --timeout 15m
+    at: $.addon
+    expect:
+      name: { eq: "{{.params.ack.addon_name}}" }
+      version: { eq: "{{.params.ack.addon_upgrade_version}}" }
+
+  - name: delete
+    locks: ["ack-cluster:{{.stack.ack_shared_cluster}}"]
+    run: >
+      ecctl ack addon delete
+      {{.params.ack.addon_name}}
+      --cluster {{.stack.ack_shared_cluster}}
+      --timeout 20m
+    expect:
+      $.deleted: { eq: true }
