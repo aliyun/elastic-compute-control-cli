@@ -108,7 +108,7 @@ jobs:
               if [[ -n "${BEFORE_SHA}" && ! "${BEFORE_SHA}" =~ ^0+$ ]]; then
                 comparison_ref=${BEFORE_SHA}
               fi
-            else
+            elif [[ "${RELEASE_EVENT}" != "workflow_dispatch" ]]; then
               comparison_ref=$(git rev-parse HEAD^1 2>/dev/null || true)
             fi
             if [[ -n "${comparison_ref}" ]]; then

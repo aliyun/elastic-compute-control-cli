@@ -106,6 +106,24 @@ func TestReleaseWorkflowUsesCurrentToolingForHistoricalRecovery(t *testing.T) {
 	}
 }
 
+func TestReleaseWorkflowManualNewReleaseUsesPublishedTagsBaseline(t *testing.T) {
+	workflowPath := filepath.Join("..", "..", ".github", "workflows", "release.yml")
+	raw, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(raw)
+	for _, required := range []string{
+		`git tag --merged refs/remotes/origin/main --list 'v*' > "${released_tags}"`,
+		`version_args+=(--released-tags-file "${released_tags}")`,
+		`elif [[ "${RELEASE_EVENT}" != "workflow_dispatch" ]]; then`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("manual release version validation is missing %q", required)
+		}
+	}
+}
+
 func TestReleaseAssetValidatorRejectsInvalidExtra(t *testing.T) {
 	jqPath, err := exec.LookPath("jq")
 	if err != nil {
