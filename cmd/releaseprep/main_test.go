@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -206,6 +207,8 @@ func TestReleaseConfigurationBuildsCompleteDraftBeforePublishing(t *testing.T) {
 		"replace_existing_artifacts: true",
 		"skip_upload: true",
 		releaseartifact.OSSBaseURL,
+		"pkg/telemetry.releaseEndpointB64={{ .Env.ECCTL_TELEMETRY_ENDPOINT_B64 }}",
+		"pkg/telemetry.releaseHeadersB64={{ .Env.ECCTL_TELEMETRY_HEADERS_B64 }}",
 	} {
 		if !strings.Contains(config, required) {
 			t.Fatalf("GoReleaser configuration is missing %q", required)
@@ -220,10 +223,115 @@ func TestReleaseConfigurationBuildsCompleteDraftBeforePublishing(t *testing.T) {
 		t.Fatal(err)
 	}
 	ci := string(ciRaw)
-	for _, required := range []string{"Verify snapshot Homebrew Cask", "dist/homebrew/Casks/ecctl.rb", "--verify-homebrew-cask"} {
+	for _, required := range []string{"Verify snapshot Homebrew Cask", "dist/homebrew/Casks/ecctl.rb", "--verify-homebrew-cask", `ECCTL_TELEMETRY_ENDPOINT_B64: ""`, `ECCTL_TELEMETRY_HEADERS_B64: ""`} {
 		if !strings.Contains(ci, required) {
 			t.Fatalf("CI snapshot verification is missing %q", required)
 		}
+	}
+	releaseRaw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseWorkflow := string(releaseRaw)
+	for _, required := range []string{"Validate release telemetry wiring", "Revalidate release telemetry configuration", "secrets.ECCTL_TELEMETRY_ENDPOINT_B64", "secrets.ECCTL_TELEMETRY_HEADERS_B64"} {
+		if !strings.Contains(releaseWorkflow, required) {
+			t.Fatalf("release telemetry injection is missing %q", required)
+		}
+	}
+	validatorCommand := "go -C tooling run ./cmd/releaseprep --check-telemetry-config"
+	if count := strings.Count(releaseWorkflow, validatorCommand); count != 2 {
+		t.Fatalf("release workflow validator count = %d, want 2", count)
+	}
+	if strings.Contains(releaseWorkflow, `test -n "${ECCTL_TELEMETRY_`) {
+		t.Fatal("release workflow still performs only a non-empty telemetry check")
+	}
+	validateJob := releaseWorkflow[:strings.Index(releaseWorkflow, "  publish:")]
+	if strings.Contains(validateJob, "secrets.ECCTL_TELEMETRY_") {
+		t.Fatal("unprotected validate job reads production telemetry secrets")
+	}
+}
+
+func TestCheckTelemetryConfigUsesSharedStrictValidatorWithoutLeakingValues(t *testing.T) {
+	encode := func(value string) string {
+		value = strings.ReplaceAll(value, "example.com", "tracing-analysis-dc-hz.aliyuncs.com")
+		return base64.StdEncoding.EncodeToString([]byte(value))
+	}
+	encodeRaw := func(value string) string { return base64.StdEncoding.EncodeToString([]byte(value)) }
+	for _, valid := range []map[string]string{
+		{
+			"ECCTL_TELEMETRY_ENDPOINT_B64": encode("https://example.com/v1/traces?token=release-secret"),
+			"ECCTL_TELEMETRY_HEADERS_B64":  encode(`{"x-token":"header-secret"}`),
+		},
+		{
+			"ECCTL_TELEMETRY_ENDPOINT_B64": encode("https://example.com:4318/v1/traces"),
+			"ECCTL_TELEMETRY_HEADERS_B64":  encode(`{}`),
+		},
+		{
+			"ECCTL_TELEMETRY_ENDPOINT_B64": encode("https://example.com:1/v1/traces"),
+			"ECCTL_TELEMETRY_HEADERS_B64":  encode(`{}`),
+		},
+		{
+			"ECCTL_TELEMETRY_ENDPOINT_B64": encode("https://example.com:65535/v1/traces"),
+			"ECCTL_TELEMETRY_HEADERS_B64":  encode("{\"x-token\":\"header-secret\\t\u00e9\"}"),
+		},
+	} {
+		getenv := func(name string) string { return valid[name] }
+		if err := checkTelemetryConfig(getenv); err != nil {
+			t.Fatalf("valid telemetry config: %v", err)
+		}
+	}
+
+	for _, tc := range []struct {
+		name     string
+		endpoint string
+		headers  string
+	}{
+		{name: "missing", endpoint: "", headers: ""},
+		{name: "endpoint base64", endpoint: "%%%", headers: encode(`{}`)},
+		{name: "empty endpoint", endpoint: encode(""), headers: encode(`{}`)},
+		{name: "http", endpoint: encode("http://release-secret.invalid/v1/traces"), headers: encode(`{}`)},
+		{name: "relative", endpoint: encode("/v1/traces"), headers: encode(`{}`)},
+		{name: "userinfo", endpoint: encode("https://user:release-secret@example.com/v1/traces"), headers: encode(`{}`)},
+		{name: "fragment", endpoint: encode("https://example.com/v1/traces#release-secret"), headers: encode(`{}`)},
+		{name: "third-party host", endpoint: encodeRaw("https://example.com/v1/traces"), headers: encode(`{}`)},
+		{name: "suffix confusion", endpoint: encodeRaw("https://evilaliyuncs.com/v1/traces"), headers: encode(`{}`)},
+		{name: "tenant Function Compute host", endpoint: encodeRaw("https://123456789.cn-hangzhou.fc.aliyuncs.com/v1/traces"), headers: encode(`{}`)},
+		{name: "tenant OSS host", endpoint: encodeRaw("https://ecctl-metrics.oss-cn-hangzhou.aliyuncs.com/v1/traces"), headers: encode(`{}`)},
+		{name: "port zero", endpoint: encode("https://example.com:0/v1/traces"), headers: encode(`{}`)},
+		{name: "port too large", endpoint: encode("https://example.com:65536/v1/traces"), headers: encode(`{}`)},
+		{name: "port much too large", endpoint: encode("https://example.com:99999/v1/traces"), headers: encode(`{}`)},
+		{name: "port empty", endpoint: encode("https://example.com:/v1/traces"), headers: encode(`{}`)},
+		{name: "port non-numeric", endpoint: encode("https://example.com:not-a-port/v1/traces"), headers: encode(`{}`)},
+		{name: "port negative", endpoint: encode("https://example.com:-1/v1/traces"), headers: encode(`{}`)},
+		{name: "headers base64", endpoint: encode("https://example.com/v1/traces"), headers: "%%%"},
+		{name: "headers null", endpoint: encode("https://example.com/v1/traces"), headers: encode(`null`)},
+		{name: "headers array", endpoint: encode("https://example.com/v1/traces"), headers: encode(`[]`)},
+		{name: "headers non-string", endpoint: encode("https://example.com/v1/traces"), headers: encode(`{"x-token":1}`)},
+		{name: "header name", endpoint: encode("https://example.com/v1/traces"), headers: encode(`{"bad header":"header-secret"}`)},
+		{name: "header name control", endpoint: encode("https://example.com/v1/traces"), headers: encode("{\"bad\\u0000name\":\"header-secret\"}")},
+		{name: "header crlf", endpoint: encode("https://example.com/v1/traces"), headers: encode("{\"x-token\":\"header-secret\\r\\nleak\"}")},
+		{name: "header nul", endpoint: encode("https://example.com/v1/traces"), headers: encode("{\"x-token\":\"header-secret\\u0000leak\"}")},
+		{name: "header unit separator", endpoint: encode("https://example.com/v1/traces"), headers: encode("{\"x-token\":\"header-secret\\u001fleak\"}")},
+		{name: "header delete", endpoint: encode("https://example.com/v1/traces"), headers: encode("{\"x-token\":\"header-secret\\u007fleak\"}")},
+		{name: "duplicate header", endpoint: encode("https://example.com/v1/traces"), headers: encode(`{"Authorization":"a","authorization":"b"}`)},
+		{name: "reserved header", endpoint: encode("https://example.com/v1/traces"), headers: encode(`{"Content-Encoding":"gzip"}`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkTelemetryConfig(func(name string) string {
+				if name == "ECCTL_TELEMETRY_ENDPOINT_B64" {
+					return tc.endpoint
+				}
+				return tc.headers
+			})
+			if err == nil {
+				t.Fatal("invalid telemetry config was accepted")
+			}
+			for _, secret := range []string{"release-secret", "header-secret", tc.endpoint, tc.headers} {
+				if secret != "" && strings.Contains(err.Error(), secret) {
+					t.Fatalf("validator error leaked secret input: %v", err)
+				}
+			}
+		})
 	}
 }
 
@@ -640,7 +748,7 @@ func TestRewritePublicModule(t *testing.T) {
 	writeFile(t, filepath.Join(root, "e2e", "go.mod"), "module ecctl/e2e\n\ngo 1.25.0\n")
 	writeFile(t, filepath.Join(root, "cmd", "ecctl", "main.go"), "package main\n\nimport \"ecctl/pkg/cli\"\n")
 	writeFile(t, filepath.Join(root, "README.md"), "go install github.com/<owner>/ecctl/cmd/ecctl@latest\n")
-	writeFile(t, filepath.Join(root, ".goreleaser.yaml"), "ldflags:\n  - -X ecctl/pkg/cli.version={{ .Version }}\n")
+	writeFile(t, filepath.Join(root, ".goreleaser.yaml"), "ldflags:\n  - -X ecctl/pkg/cli.version={{ .Version }} -X ecctl/pkg/telemetry.releaseEndpointB64={{ .Env.ECCTL_TELEMETRY_ENDPOINT_B64 }}\n")
 	writeFile(t, filepath.Join(root, "Makefile"), "PUBLIC_MODULE is required, for example github.com/<owner>/ecctl\n")
 	writeFile(t, filepath.Join(root, "cmd", "releaseprep", "main.go"), "package main\n\nconst usage = \"github.com/<owner>/ecctl\"\n")
 
@@ -658,6 +766,7 @@ func TestRewritePublicModule(t *testing.T) {
 	assertFileContains(t, filepath.Join(root, "cmd", "ecctl", "main.go"), "\"github.com/another/ecctl-cli/pkg/cli\"")
 	assertFileContains(t, filepath.Join(root, "README.md"), "go install github.com/another/ecctl-cli/cmd/ecctl@latest")
 	assertFileContains(t, filepath.Join(root, ".goreleaser.yaml"), "-X github.com/another/ecctl-cli/pkg/cli.version={{ .Version }}")
+	assertFileContains(t, filepath.Join(root, ".goreleaser.yaml"), "-X github.com/another/ecctl-cli/pkg/telemetry.releaseEndpointB64={{ .Env.ECCTL_TELEMETRY_ENDPOINT_B64 }}")
 	assertFileContains(t, filepath.Join(root, "Makefile"), "github.com/<owner>/ecctl")
 	assertFileContains(t, filepath.Join(root, "cmd", "releaseprep", "main.go"), "github.com/<owner>/ecctl")
 }

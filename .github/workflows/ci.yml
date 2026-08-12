@@ -87,6 +87,9 @@ jobs:
           distribution: goreleaser
           version: v2.17.0
           args: release --snapshot --clean --skip=publish
+        env:
+          ECCTL_TELEMETRY_ENDPOINT_B64: ""
+          ECCTL_TELEMETRY_HEADERS_B64: ""
 
       - name: Verify snapshot Homebrew Cask
         shell: bash
@@ -122,3 +125,6 @@ jobs:
 
       - name: Test Windows update command surface
         run: go test ./pkg/cli -run "TestUpdateCommandReportsPendingWindowsReplacement|TestIsBuiltinRootCommandCoversAllBuiltins" -count=1
+
+      - name: Test Windows telemetry privacy boundary
+        run: go test ./pkg/telemetry -count=1

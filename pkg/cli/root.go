@@ -21,13 +21,18 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/output"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/schema"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/updater"
 )
 
 // RegionVerifier is the surface exposed by aliyun.RegionVerifier and any test
 // double swapped in via SetRegionVerifierFactoryForTest.
 type RegionVerifier interface {
-	Verify(region, serviceCode string) error
+	Verify(string, string) error
+}
+
+type regionVerifierWithContext interface {
+	VerifyContext(context.Context, string, string) error
 }
 
 // RegionVerifierFactory builds a RegionVerifier for the active profile. The
@@ -124,11 +129,51 @@ func formatVersion(injectedVersion string, injectedCommit string, injectedDate s
 	return display + " (" + strings.Join(metadata, ", ") + ")"
 }
 
-func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+func Run(ctx context.Context, args []string, stdout, stderr io.Writer) (exitCode int) {
 	args = normalizeAPICallParameterFlags(args)
 	args = normalizeHelpTopicArgs(args)
 	options := newGlobalOptions(args, os.Getenv)
 	options.fullSurface = fullCommandSurfaceFromContext(ctx)
+	customSpecSurface := strings.TrimSpace(os.Getenv("ECCTL_SPEC_DIR")) != ""
+	telemetryEnabled := !telemetry.Truthy(os.Getenv("ECCTL_DISABLE_TELEMETRY")) &&
+		!telemetry.Truthy(os.Getenv("DO_NOT_TRACK")) &&
+		!customSpecSurface &&
+		!telemetryOptOutRequested(args) &&
+		config.TelemetryEnabled(config.EcctlConfigPath(os.Getenv))
+	surface := "public"
+	if options.fullSurface {
+		surface = "full"
+	} else if customSpecSurface {
+		surface = "custom"
+	}
+	ctx, telemetrySession := telemetry.Start(ctx, telemetry.Options{
+		Enabled:    telemetryEnabled,
+		Surface:    surface,
+		Version:    currentReleaseVersion(),
+		ConfigPath: config.EcctlConfigPath(os.Getenv),
+	})
+	telemetryCommand := ""
+	if telemetrySession != nil {
+		defer func() {
+			command := options.command
+			if command == "" {
+				command = telemetryCommand
+			}
+			telemetrySession.Finish(command, exitCode)
+		}()
+	}
+	root := newRootCommand(options, stdout, args)
+	root.SetArgs(args)
+	root.SetOut(stdout)
+	root.SetErr(io.Discard)
+	root.SilenceErrors = true
+	root.SilenceUsage = true
+	if helpRequested(args) {
+		allowHelpWithUnknownFlags(root)
+	}
+	if command, _, findErr := root.Find(args); findErr == nil && command != nil {
+		telemetryCommand = command.CommandPath()
+	}
 	if !options.fullSurface && os.Getenv("ECCTL_SPEC_DIR") == "" && !publicCLICommandAllowed(args) {
 		return writeRunError(stdout, options, ecerrors.Client("UnknownCommand", "command is not supported"))
 	}
@@ -143,15 +188,6 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		options.forceJSON = true
 	}
 	maybeCheckForUpdate(ctx, args, stderr, options)
-	root := newRootCommand(options, stdout, args)
-	root.SetArgs(args)
-	root.SetOut(stdout)
-	root.SetErr(io.Discard)
-	root.SilenceErrors = true
-	root.SilenceUsage = true
-	if helpRequested(args) {
-		allowHelpWithUnknownFlags(root)
-	}
 
 	err := root.ExecuteContext(ctx)
 	if err == nil {
@@ -847,7 +883,7 @@ func newConfigCommand(options *globalOptions, stdout io.Writer) *cobra.Command {
 		Long:    "Supported settings: " + supportedConfigKeys(),
 		Example: "  ecctl configure set region cn-hangzhou\n  ecctl configure set access-key-id <value>\n  ecctl configure set lang zh-CN\n  ecctl configure set output text",
 		Args:    cobra.ArbitraryArgs,
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(runCmd *cobra.Command, args []string) error {
 			if len(args) != 0 && len(args) != 2 {
 				return ecerrors.Client("MissingParameter", "missing required parameters: <key>, <value>")
 			}
@@ -867,7 +903,7 @@ func newConfigCommand(options *globalOptions, stdout io.Writer) *cobra.Command {
 			}
 			var warnings []string
 			if isRegionConfigKey(key) && !setNoVerify {
-				if warning, verr := verifyRegionForConfig(profileName, value); verr != nil {
+				if warning, verr := verifyRegionForConfig(runCmd.Context(), profileName, value); verr != nil {
 					return verr
 				} else if warning != "" {
 					warnings = append(warnings, warning)
@@ -2163,6 +2199,14 @@ func commandPositionals(args []string) []string {
 	return positionals
 }
 
+func telemetryOptOutRequested(args []string) bool {
+	positionals := commandPositionals(args)
+	if len(positionals) != 4 || (positionals[0] != "configure" && positionals[0] != "config") || positionals[1] != "set" || positionals[3] != "false" {
+		return false
+	}
+	return positionals[2] == "telemetry.enabled" || positionals[2] == "telemetry-enabled"
+}
+
 func commandValueFlag(name string) bool {
 	switch name {
 	case "--fields", "--filter", "--limit", "--region", "--profile", "--lang", "--output", "--request", "--api-param":
@@ -2371,7 +2415,7 @@ func isRegionConfigKey(key string) bool {
 // invalid; returns a non-empty warning string (and nil error) when verification
 // cannot be performed (no credentials / network unreachable) so the caller can
 // surface a hint while still persisting the value.
-func verifyRegionForConfig(profileName, region string) (string, *ecerrors.AppError) {
+func verifyRegionForConfig(ctx context.Context, profileName, region string) (string, *ecerrors.AppError) {
 	if region == "" {
 		return "", nil
 	}
@@ -2382,7 +2426,13 @@ func verifyRegionForConfig(profileName, region string) (string, *ecerrors.AppErr
 		}
 		return "", ecerrors.Client("InvalidConfig", err.Error())
 	}
-	if err := verifier.Verify(region, ""); err != nil {
+	var verifyErr error
+	if contextual, ok := verifier.(regionVerifierWithContext); ok {
+		verifyErr = contextual.VerifyContext(ctx, region, "")
+	} else {
+		verifyErr = verifier.Verify(region, "")
+	}
+	if err := verifyErr; err != nil {
 		if code, message, ok := appErrorCodeMessage(err); ok {
 			if code == aliyun.ErrCodeVerificationUnavailable {
 				return "region verification skipped: " + message, nil

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/aliyun/elastic-compute-control-cli/internal/releaseartifact"
+	"github.com/aliyun/elastic-compute-control-cli/internal/telemetryconfig"
 )
 
 var (
@@ -32,6 +33,7 @@ func main() {
 	checkHomebrew := flag.Bool("check-homebrew-version", false, "check whether a release tag advances the current Homebrew Cask")
 	checkVersion := flag.Bool("check-version-file", false, "check the canonical release version file")
 	verifyHomebrew := flag.Bool("verify-homebrew-cask", false, "strictly validate a generated Homebrew Cask against immutable release checksums")
+	checkTelemetry := flag.Bool("check-telemetry-config", false, "validate release telemetry environment configuration")
 	repository := flag.String("repository", "", "GitHub repository identity for public release checks")
 	releaseTag := flag.String("release-tag", "", "candidate release tag for version and Homebrew checks")
 	versionFile := flag.String("version-file", "version.txt", "path to the canonical release version file")
@@ -44,7 +46,7 @@ func main() {
 	flag.Parse()
 
 	selected := 0
-	for _, enabled := range []bool{*write, *check, *checkHomebrew, *checkVersion, *verifyHomebrew} {
+	for _, enabled := range []bool{*write, *check, *checkHomebrew, *checkVersion, *verifyHomebrew, *checkTelemetry} {
 		if enabled {
 			selected++
 		}
@@ -54,6 +56,12 @@ func main() {
 	}
 	if *allowExistingRelease && !*checkVersion {
 		exitError(errors.New("--allow-existing-release is only valid with --check-version-file"))
+	}
+	if *checkTelemetry {
+		if err := checkTelemetryConfig(os.Getenv); err != nil {
+			exitError(err)
+		}
+		return
 	}
 	root, err := os.Getwd()
 	if err != nil {
@@ -88,6 +96,14 @@ func main() {
 	if err := checkReleaseReady(root, *repository); err != nil {
 		exitError(err)
 	}
+}
+
+func checkTelemetryConfig(getenv func(string) string) error {
+	if getenv == nil {
+		return telemetryconfig.ErrEndpoint
+	}
+	_, err := telemetryconfig.Decode(getenv("ECCTL_TELEMETRY_ENDPOINT_B64"), getenv("ECCTL_TELEMETRY_HEADERS_B64"))
+	return err
 }
 
 func verifyHomebrewCask(caskPath string, checksumsPath string, releaseVersion string) error {

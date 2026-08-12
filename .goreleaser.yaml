@@ -25,6 +25,8 @@ builds:
         -X github.com/aliyun/elastic-compute-control-cli/pkg/cli.version={{ .Version }}
         -X github.com/aliyun/elastic-compute-control-cli/pkg/cli.commit={{ .Commit }}
         -X github.com/aliyun/elastic-compute-control-cli/pkg/cli.date={{ .Date }}
+        -X github.com/aliyun/elastic-compute-control-cli/pkg/telemetry.releaseEndpointB64={{ .Env.ECCTL_TELEMETRY_ENDPOINT_B64 }}
+        -X github.com/aliyun/elastic-compute-control-cli/pkg/telemetry.releaseHeadersB64={{ .Env.ECCTL_TELEMETRY_HEADERS_B64 }}
 
   - id: ecctl-other
     main: ./cmd/ecctl
@@ -45,6 +47,8 @@ builds:
         -X github.com/aliyun/elastic-compute-control-cli/pkg/cli.version={{ .Version }}
         -X github.com/aliyun/elastic-compute-control-cli/pkg/cli.commit={{ .Commit }}
         -X github.com/aliyun/elastic-compute-control-cli/pkg/cli.date={{ .Date }}
+        -X github.com/aliyun/elastic-compute-control-cli/pkg/telemetry.releaseEndpointB64={{ .Env.ECCTL_TELEMETRY_ENDPOINT_B64 }}
+        -X github.com/aliyun/elastic-compute-control-cli/pkg/telemetry.releaseHeadersB64={{ .Env.ECCTL_TELEMETRY_HEADERS_B64 }}
 
 archives:
   - id: ecctl-darwin

@@ -1,11 +1,13 @@
 package aliyun
 
 import (
+	"context"
 	"sort"
 	"strings"
 
 	ecconfig "github.com/aliyun/elastic-compute-control-cli/pkg/config"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
 )
 
 // Location service used to validate region IDs without depending on a static
@@ -34,6 +36,7 @@ const (
 // via newRegionVerifierWithProcessor in tests.
 type RegionVerifier struct {
 	executor openAPIExecutor
+	profile  resolvedOpenAPIProfile
 }
 
 // NewRegionVerifier constructs a RegionVerifier using the credentials from the
@@ -59,7 +62,7 @@ func NewRegionVerifier(profileName, configPath string, getenv func(string) strin
 	if err != nil {
 		return nil, ecerrors.Client(ErrCodeVerificationUnavailable, callerSanitizeCloudError(err))
 	}
-	return &RegionVerifier{executor: executor}, nil
+	return &RegionVerifier{executor: executor, profile: openAPIProfile}, nil
 }
 
 // newRegionVerifierWithExecutor lets tests substitute the OpenAPI executor with a fake.
@@ -81,6 +84,12 @@ func VerifyRegion(profileName, configPath, region, serviceCode string, getenv fu
 // known to Alibaba Cloud. serviceCode defaults to "ecs" — the universal probe
 // because every region with any public API exposes ECS endpoints.
 func (v *RegionVerifier) Verify(region, serviceCode string) error {
+	return v.VerifyContext(context.Background(), region, serviceCode)
+}
+
+// VerifyContext is Verify with the command context used for telemetry parentage
+// and cancellation.
+func (v *RegionVerifier) VerifyContext(ctx context.Context, region, serviceCode string) error {
 	if v == nil || v.executor == nil {
 		return ecerrors.Client(ErrCodeVerificationUnavailable, "region verifier is not initialised")
 	}
@@ -101,33 +110,33 @@ func (v *RegionVerifier) Verify(region, serviceCode string) error {
 	req.QueryParams["Id"] = region
 	req.QueryParams["ServiceCode"] = serviceCode
 	req.QueryParams["Type"] = "openAPI"
-	decoded, err := v.executor.ExecuteOpenAPI(nil, req)
+	decoded, err := v.execute(ctx, req)
 	if err != nil {
 		if isInvalidRegionCloudError(err) {
-			return v.invalidRegionError(region, serviceCode)
+			return v.invalidRegionError(ctx, region, serviceCode)
 		}
 		return ecerrors.Client(ErrCodeVerificationUnavailable, callerSanitizeCloudError(err))
 	}
 	if locationResponseHasEndpoints(decoded, region) {
 		return nil
 	}
-	return v.invalidRegionError(region, serviceCode)
+	return v.invalidRegionError(ctx, region, serviceCode)
 }
 
 // invalidRegionError builds the typed InvalidRegion error and, on a best-effort
 // basis, attaches a Suggestion field listing the closest known region plus the
 // full set of valid regions. Failure to enumerate regions degrades silently —
 // the user still gets a precise InvalidRegion error, just without the list.
-func (v *RegionVerifier) invalidRegionError(region, serviceCode string) *ecerrors.AppError {
+func (v *RegionVerifier) invalidRegionError(ctx context.Context, region, serviceCode string) *ecerrors.AppError {
 	options := []ecerrors.Option{}
-	if suggestion := v.regionSuggestion(region); suggestion != "" {
+	if suggestion := v.regionSuggestion(ctx, region); suggestion != "" {
 		options = append(options, ecerrors.WithSuggestion(suggestion))
 	}
 	return ecerrors.Client(ErrCodeInvalidRegion, locationInvalidRegionMessage(region, serviceCode), options...)
 }
 
-func (v *RegionVerifier) regionSuggestion(region string) string {
-	candidates, err := v.knownRegionIDs()
+func (v *RegionVerifier) regionSuggestion(ctx context.Context, region string) string {
+	candidates, err := v.knownRegionIDs(ctx)
 	if err != nil || len(candidates) == 0 {
 		return ""
 	}
@@ -137,7 +146,7 @@ func (v *RegionVerifier) regionSuggestion(region string) string {
 // knownRegionIDs calls ECS/DescribeRegions to enumerate the regions reachable
 // for this account. It uses a known ECS endpoint and the verifier's OpenAPI
 // executor.
-func (v *RegionVerifier) knownRegionIDs() ([]string, error) {
+func (v *RegionVerifier) knownRegionIDs(ctx context.Context) ([]string, error) {
 	if v == nil || v.executor == nil {
 		return nil, ecerrors.Client(ErrCodeVerificationUnavailable, "region verifier is not initialised")
 	}
@@ -149,11 +158,34 @@ func (v *RegionVerifier) knownRegionIDs() ([]string, error) {
 	req.Method = "GET"
 	req.Scheme = "https"
 	req.Domain = "ecs." + locationDefaultSignRegion + ".aliyuncs.com"
-	decoded, err := v.executor.ExecuteOpenAPI(nil, req)
+	decoded, err := v.execute(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	return parseRegionIDsFromDescribeRegions(decoded), nil
+}
+
+func (v *RegionVerifier) execute(ctx context.Context, req *openAPIRequest) (map[string]any, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	session := telemetry.FromContext(ctx)
+	operationID := session.NextOperationID()
+	if session != nil {
+		session.RegisterIdentity(v.profile.AccessKeyID, identityResolver(v.profile, v.executor))
+	}
+	endSpan := session.StartAPI(telemetry.APIRequest{
+		Service:         req.Product,
+		API:             req.ApiName,
+		APIVersion:      req.Version,
+		Transport:       "location",
+		OperationID:     operationID,
+		Attempt:         1,
+		RetryObservable: true,
+	})
+	response, err := v.executor.ExecuteOpenAPI(ctx, req)
+	endSpan(err)
+	return response, err
 }
 
 func parseRegionIDsFromDescribeRegions(decoded map[string]any) []string {
