@@ -68,7 +68,7 @@ func TestReleaseWorkflowUsesCurrentToolingForHistoricalRecovery(t *testing.T) {
 		`ecctl_${RELEASE_VERSION}_cask.rb`,
 		`Build GitHub release draft`,
 		`Validate complete draft and publish immutable release`,
-		`state=draft`,
+		`state=recovery`,
 		`state=immutable`,
 		`Stable recovery may only replay current latest`,
 		`Snapshot stable OSS pointer before prerelease webhook`,
@@ -124,21 +124,37 @@ func TestReleaseWorkflowManualNewReleaseUsesPublishedTagsBaseline(t *testing.T) 
 	}
 }
 
-func TestReleaseWorkflowFindsDraftByReleaseAPIURL(t *testing.T) {
+func TestReleaseWorkflowFindsDraftOnlyWithWritePermission(t *testing.T) {
 	workflowPath := filepath.Join("..", "..", ".github", "workflows", "release.yml")
 	raw, err := os.ReadFile(workflowPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	workflow := string(raw)
+	publishIndex := strings.Index(workflow, "\n  publish:\n")
+	if publishIndex < 0 {
+		t.Fatal("release workflow is missing publish job")
+	}
+	validateJob := workflow[:publishIndex]
+	publishJobs := workflow[publishIndex:]
+	if strings.Contains(validateJob, `gh release view "${RELEASE_TAG}"`) {
+		t.Fatal("read-only validate job still attempts to discover draft Releases")
+	}
 	for _, required := range []string{
+		`gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"`,
+		`echo "state=recovery" >> "${GITHUB_OUTPUT}"`,
+		`name: Validate recovery draft`,
+		`if: needs.validate.outputs.release_state == 'recovery'`,
 		`gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json apiUrl --jq '.apiUrl'`,
 		`gh api "${release_api}" > "${release_file}"`,
 		`gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" > "${readback_file}"`,
 	} {
-		if !strings.Contains(workflow, required) {
+		if !strings.Contains(publishJobs, required) && !strings.Contains(validateJob, required) {
 			t.Fatalf("draft Release readback is missing %q", required)
 		}
+	}
+	if !strings.Contains(workflow, `if [[ "${{ needs.validate.outputs.release_state }}" != "missing" ]]; then`) {
+		t.Fatal("publish revalidation does not allow an existing recovery tag")
 	}
 	if count := strings.Count(workflow, `gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json apiUrl --jq '.apiUrl'`); count != 2 {
 		t.Fatalf("release workflow has %d draft-capable Release lookups, want 2", count)

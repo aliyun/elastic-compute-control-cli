@@ -161,37 +161,27 @@ jobs:
         run: |
           set -euo pipefail
           cd release-source
+          release_file=$(mktemp)
+          release_error=$(mktemp)
+          trap 'rm -f "${release_file}" "${release_error}"' EXIT
           set +e
-          release_api=$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json apiUrl --jq '.apiUrl' 2>&1)
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+            > "${release_file}" 2> "${release_error}"
           release_status=$?
           set -e
           if [[ ${release_status} -ne 0 ]]; then
-            if [[ "${release_api}" == *"release not found"* || "${release_api}" == *"HTTP 404"* ]]; then
+            if grep -q "HTTP 404" "${release_error}"; then
               if [[ -n "${RECOVERY_TAG}" ]]; then
-                echo "Recovery requires an existing draft or complete immutable GitHub Release for ${RECOVERY_TAG}." >&2
-                exit 1
+                echo "Published Release ${RECOVERY_TAG} is not visible to validation; publish must verify its draft."
+                echo "state=recovery" >> "${GITHUB_OUTPUT}"
+                exit 0
               fi
               echo "state=missing" >> "${GITHUB_OUTPUT}"
               exit 0
             fi
             echo "Could not determine whether GitHub Release ${RELEASE_TAG} exists." >&2
-            echo "${release_api}" >&2
+            cat "${release_error}" >&2
             exit 1
-          fi
-
-          release_file=$(mktemp)
-          trap 'rm -f "${release_file}"' EXIT
-          gh api "${release_api}" > "${release_file}"
-
-          if jq -e --arg tag "${RELEASE_TAG}" --arg version "${RELEASE_VERSION}" '
-            .tag_name == $tag and
-            .draft == true and
-            .immutable == false and
-            .prerelease == ($version | contains("-"))
-          ' "${release_file}" >/dev/null; then
-            echo "Existing draft ${RELEASE_TAG} will be resumed by GoReleaser."
-            echo "state=draft" >> "${GITHUB_OUTPUT}"
-            exit 0
           fi
 
           if [[ -z "${RECOVERY_TAG}" || "${RELEASE_EVENT}" != "workflow_dispatch" ]]; then
@@ -376,7 +366,7 @@ jobs:
             exit 1
           fi
           version_args=(--check-version-file --version-file "$(pwd)/version.txt" --release-tag "${RELEASE_TAG}")
-          if [[ "${{ needs.validate.outputs.release_state }}" == immutable ]]; then
+          if [[ "${{ needs.validate.outputs.release_state }}" != "missing" ]]; then
             version_args+=(--allow-existing-release)
           fi
           actual_version=$(go -C ../tooling run ./cmd/releaseprep "${version_args[@]}")
@@ -384,6 +374,30 @@ jobs:
             echo "Validated version changed from ${RELEASE_VERSION} to ${actual_version}." >&2
             exit 1
           fi
+
+      - name: Validate recovery draft
+        if: needs.validate.outputs.release_state == 'recovery'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_file=$(mktemp)
+          trap 'rm -f "${release_file}"' EXIT
+          release_api=$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json apiUrl --jq '.apiUrl')
+          gh api "${release_api}" > "${release_file}"
+          jq -e --arg tag "${RELEASE_TAG}" --arg version "${RELEASE_VERSION}" '
+            .tag_name == $tag and
+            .draft == true and
+            .immutable == false and
+            .prerelease == ($version | contains("-"))
+          ' "${release_file}" >/dev/null || {
+            echo "Recovery requires a matching mutable draft GitHub Release for ${RELEASE_TAG}." >&2
+            exit 1
+          }
+          echo "Existing draft ${RELEASE_TAG} is valid and will be resumed by GoReleaser."
 
       - name: Revalidate release telemetry configuration
         if: needs.validate.outputs.release_state != 'immutable'
