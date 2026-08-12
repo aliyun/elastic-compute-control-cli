@@ -302,7 +302,7 @@ jobs:
       - name: Validate release telemetry wiring
         if: steps.release.outputs.state != 'immutable'
         env:
-          ECCTL_TELEMETRY_ENDPOINT_B64: aHR0cHM6Ly90cmFjaW5nLWFuYWx5c2lzLWRjLWh6LmFsaXl1bmNzLmNvbS92MS90cmFjZXM=
+          ECCTL_TELEMETRY_ENDPOINT_B64: aHR0cHM6Ly90cmFjaW5nLWNuLWhhbmd6aG91LmFybXMuYWxpeXVuY3MuY29tL3YxL3RyYWNlcw==
           ECCTL_TELEMETRY_HEADERS_B64: e30=
         shell: bash
         run: go -C tooling run ./cmd/releaseprep --check-telemetry-config
@@ -316,7 +316,7 @@ jobs:
           args: release --clean --skip=publish --config ../tooling/.goreleaser.yaml
           workdir: release-source
         env:
-          ECCTL_TELEMETRY_ENDPOINT_B64: aHR0cHM6Ly90cmFjaW5nLWFuYWx5c2lzLWRjLWh6LmFsaXl1bmNzLmNvbS92MS90cmFjZXM=
+          ECCTL_TELEMETRY_ENDPOINT_B64: aHR0cHM6Ly90cmFjaW5nLWNuLWhhbmd6aG91LmFybXMuYWxpeXVuY3MuY29tL3YxL3RyYWNlcw==
           ECCTL_TELEMETRY_HEADERS_B64: e30=
           GORELEASER_CURRENT_TAG: ${{ steps.version.outputs.tag }}
 

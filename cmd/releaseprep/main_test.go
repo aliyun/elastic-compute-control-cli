@@ -253,7 +253,7 @@ func TestReleaseConfigurationBuildsCompleteDraftBeforePublishing(t *testing.T) {
 
 func TestCheckTelemetryConfigUsesSharedStrictValidatorWithoutLeakingValues(t *testing.T) {
 	encode := func(value string) string {
-		value = strings.ReplaceAll(value, "example.com", "tracing-analysis-dc-hz.aliyuncs.com")
+		value = strings.ReplaceAll(value, "example.com", "tracing-cn-hangzhou.arms.aliyuncs.com")
 		return base64.StdEncoding.EncodeToString([]byte(value))
 	}
 	encodeRaw := func(value string) string { return base64.StdEncoding.EncodeToString([]byte(value)) }
@@ -297,6 +297,7 @@ func TestCheckTelemetryConfigUsesSharedStrictValidatorWithoutLeakingValues(t *te
 		{name: "suffix confusion", endpoint: encodeRaw("https://evilaliyuncs.com/v1/traces"), headers: encode(`{}`)},
 		{name: "tenant Function Compute host", endpoint: encodeRaw("https://123456789.cn-hangzhou.fc.aliyuncs.com/v1/traces"), headers: encode(`{}`)},
 		{name: "tenant OSS host", endpoint: encodeRaw("https://ecctl-metrics.oss-cn-hangzhou.aliyuncs.com/v1/traces"), headers: encode(`{}`)},
+		{name: "legacy host with mismatched certificate", endpoint: encodeRaw("https://tracing-analysis-dc-hz.aliyuncs.com/v1/traces"), headers: encode(`{}`)},
 		{name: "port zero", endpoint: encode("https://example.com:0/v1/traces"), headers: encode(`{}`)},
 		{name: "port too large", endpoint: encode("https://example.com:65536/v1/traces"), headers: encode(`{}`)},
 		{name: "port much too large", endpoint: encode("https://example.com:99999/v1/traces"), headers: encode(`{}`)},
