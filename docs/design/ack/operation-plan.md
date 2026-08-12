@@ -6,6 +6,8 @@
 
 别名：`op`
 
+命令面：隐藏资源，仅由 `ecctl-full` 暴露；public CLI、public capabilities 和 public E2E 均不包含该资源。
+
 本文件只描述 `ecctl ack operation-plan` 的 interface 级命令设计：每个操作命令对应哪些 ACK API，不展开完整 flag、参数结构和输出结构；仅在多 API 分流时标明必要的特殊开关。
 
 设计目标：覆盖自动运维计划（控制面/节点池等定时维护任务）的查询与取消。

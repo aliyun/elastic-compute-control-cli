@@ -36,7 +36,7 @@
     "description": "The generated-index page title for category 'ACK' in sidebar 'docsSidebar'"
   },
   "sidebar.docsSidebar.category.ACK.link.generated-index.description": {
-    "message": "管理容器服务 Kubernetes 版（ACK）集群的完整生命周期，涵盖节点池、组件（Addon）、kubeconfig 访问、版本升级、诊断巡检与巡检报告以及告警规则。",
+    "message": "管理容器服务 Kubernetes 版（ACK）集群的完整生命周期，涵盖节点池、组件（Addon）、kubeconfig 访问、版本升级、集群检查与巡检报告以及告警规则。",
     "description": "The generated-index page description for category 'ACK' in sidebar 'docsSidebar'"
   },
   "sidebar.docsSidebar.category.ECS": {
@@ -60,7 +60,7 @@
     "description": "The generated-index page title for category 'LINGJUN' in sidebar 'docsSidebar'"
   },
   "sidebar.docsSidebar.category.LINGJUN.link.generated-index.description": {
-    "message": "通过公开的集群和 VPD 命令管理灵骏智算及高性能网络资源。",
+    "message": "管理灵骏集群、节点组及高性能网络资源。",
     "description": "The generated-index page description for category 'LINGJUN' in sidebar 'docsSidebar'"
   },
   "sidebar.docsSidebar.category.VPC": {

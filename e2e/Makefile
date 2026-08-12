@@ -5,7 +5,7 @@ FULL_ECCTL := bin/ecctl-full
 REPORTS := reports
 
 .DEFAULT_GOAL := help
-.PHONY: help build build-public build-full run run-public run-full coverage coverage-full sweep sweep-public sweep-full list validate lint test fmt
+.PHONY: help build build-public build-full run run-public run-full coverage coverage-full coverage-resources coverage-operations sweep sweep-public sweep-full list validate validate-full lint test fmt
 
 help: ## Show this help
 	@echo "ecctl-e2e — make targets:"
@@ -37,6 +37,12 @@ coverage: build-public ## Enforce the public capability registry is fully live-p
 coverage-full: build-full ## Enforce the full capability registry is fully live-pass
 	$(BIN) coverage registry check --specs ../specs --cases cases --registry coverage.yaml --ecctl-bin $(FULL_ECCTL) --surface full --fail-on-not-live
 
+coverage-resources: build-public ## Enforce that every implemented spec resource has at least one E2E case
+	$(BIN) coverage --specs ../specs --cases cases --ecctl-bin $(PUBLIC_ECCTL) --surface public --fail-on-resource-gap
+
+coverage-operations: build-public ## Enforce that every implemented spec operation has an E2E case step
+	$(BIN) coverage --specs ../specs --cases cases --ecctl-bin $(PUBLIC_ECCTL) --surface public --fail-on-gap
+
 sweep: sweep-public ## Sweep leftovers created by public-surface cases
 
 sweep-public: build-public ## Clean up public-surface leftovers in the cloud
@@ -48,11 +54,15 @@ sweep-full: build-full ## Clean up full-surface leftovers in the cloud
 list: build-public ## List public-surface cases
 	$(BIN) run --surface public --collect-only
 
-validate: lint ## Validate public case YAML offline (including stack contracts)
-	$(BIN) run --surface public --collect-only -q >/dev/null
+validate: lint build-public ## Validate public case YAML and command surface offline
+	$(BIN) run --surface public --ecctl-bin $(PUBLIC_ECCTL) --collect-only --validate-binary -q >/dev/null
+
+validate-full: lint build-full ## Validate full case YAML and hidden command surface offline
+	$(BIN) run --surface full --ecctl-bin $(FULL_ECCTL) --collect-only --validate-binary -q >/dev/null
 
 lint: build-public ## Validate cases, stack dependencies, run config, and registry links offline
 	$(BIN) lint cases --config e2e.yaml --cases cases --stack fixtures/stack.yaml --coverage coverage.yaml --parameter-policy fixtures/parameter-policy.yaml
+	$(BIN) coverage --specs ../specs --cases cases --ecctl-bin $(PUBLIC_ECCTL) --surface public --fail-on-gap --output json >/dev/null
 
 test: ## Run unit tests
 	go test ./...

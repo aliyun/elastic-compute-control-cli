@@ -18,7 +18,7 @@
 - [DescribeCluster](https://help.aliyun.com/zh/pai/developer-reference/api-eflo-controller-2022-12-15-describecluster)：轮询集群状态。
 
 注意事项：`CreateCluster` 是异步创建接口，默认等待集群进入 ready 状态并回读集群视图；高级用户可 `--no-wait` 立即返回。
-形态：`ecctl lingjun cluster create --name <name> --cluster-type <type> --node-groups @node-groups.json`
+形态：`ecctl lingjun cluster create --name <name> --cluster-type <type> --node-groups @node-groups.json`。`NodeGroups` 在服务端实际校验中必填且空数组会被请求层省略，因此创建 Lite 集群也需要至少一个初始节点组。
 
 ## `ecctl lingjun cluster update`
 

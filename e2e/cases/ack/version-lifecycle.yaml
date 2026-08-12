@@ -1,0 +1,9 @@
+# ACK version lifecycle; the resource exposes list only.
+resource: ack/version
+requires_params: [ack.cluster_type]
+
+steps:
+  - name: list
+    run: ecctl ack version list --cluster-type {{.params.ack.cluster_type}}
+    assert:
+      - len($.versions) >= 0

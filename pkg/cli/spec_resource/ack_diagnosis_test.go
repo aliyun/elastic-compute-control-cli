@@ -62,7 +62,7 @@ func TestACKDiagnosisHelpExposesDesignedSurface(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("ack diagnosis check-item list --help exit %d stderr=%s stdout=%s", code, stderr, stdout)
 	}
-	for _, want := range []string{"--cluster", "--type", "--language"} {
+	for _, want := range []string{"list <diagnosis-id>", "--cluster", "--language"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("ack diagnosis check-item list help missing %q:\n%s", want, stdout)
 		}
@@ -193,10 +193,9 @@ func TestACKDiagnosisGetAndCheckItemListCallDesignedAPIs(t *testing.T) {
 	}}
 	runList := ackDiagnosisCaller(t, listFake, "check-item", "diagnosis")
 
-	stdout, stderr, code = runList("ack", "diagnosis", "check-item", "list",
+	stdout, stderr, code = runList("ack", "diagnosis", "check-item", "list", "diag-123",
 		"--region", "cn-beijing",
 		"--cluster", "c-123",
-		"--type", "node",
 		"--language", "en",
 	)
 	if code != 0 {
@@ -206,7 +205,7 @@ func TestACKDiagnosisGetAndCheckItemListCallDesignedAPIs(t *testing.T) {
 		t.Fatalf("list calls = %#v", listFake.calls)
 	}
 	listReq := listFake.calls[0].request
-	if listReq["cluster_id"] != "c-123" || listReq["diagnosis_id"] != "node" || listReq["language"] != "en" {
+	if listReq["cluster_id"] != "c-123" || listReq["diagnosis_id"] != "diag-123" || listReq["language"] != "en" {
 		t.Fatalf("GetClusterDiagnosisCheckItems request = %#v", listReq)
 	}
 	items, _ := decodeObject(t, stdout)["check_items"].([]any)

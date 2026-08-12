@@ -36,8 +36,11 @@ ecctl ack create [flags]
 | `--region` | string | ✓ | Alibaba Cloud region |
 | `--type` | string | ✓ | 集群类型 |
 | `--api-server-public` | boolean |  | 通过公网端点开放 API Server |
+| `--auto-mode` | boolean |  | 启用 ACK Auto Mode；需要 ACK 托管版 Pro 集群 |
+| `--deletion-protection` | boolean |  | 启用集群删除保护 |
 | `--edition` | string |  | 集群版本规格；常见值包括 ack.standard、ack.pro.small、ack.pro.xlarge、ack.pro.2xlarge、ack.pro.4xlarge |
 | `--pod-cidr` | cidr |  | Pod 网络 CIDR，作为 ACK CreateCluster 的 container_cidr 发送 |
+| `--pod-vswitch` | string_array |  | 用于分配 Terway Pod IP 地址的交换机 ID |
 | `--profile` | string |  | ACK 集群场景类型。如需同时指定配置 profile 和 ACK profile，请将配置 profile 放在资源命令前，例如 ecctl --profile prod ack create --profile Serverless。 |
 | `--resource-group` | string |  | 资源组 ID |
 | `--service-cidr` | cidr |  | Service 网络 CIDR |

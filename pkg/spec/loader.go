@@ -55,25 +55,30 @@ func setCachedEntry(specDir string, entry *specCacheEntry) {
 }
 
 type ResourceSpec struct {
-	SchemaVersion int                      `yaml:"schema_version"`
-	Product       string                   `yaml:"product"`
-	APIProduct    string                   `yaml:"api_product"`
-	Resource      string                   `yaml:"resource"`
-	Parent        string                   `yaml:"parent"`
-	Kind          string                   `yaml:"kind"`
-	Aliases       []string                 `yaml:"aliases"`
-	DisplayName   LocalizedText            `yaml:"display_name"`
-	Description   LocalizedText            `yaml:"description"`
-	Help          LocalizedText            `yaml:"help"`
-	Examples      []string                 `yaml:"examples"`
-	Messages      map[string]LocalizedText `yaml:"messages"`
-	Identity      Identity                 `yaml:"identity"`
-	Schema        ResourceSchema           `yaml:"schema"`
-	Controls      map[string]SchemaField   `yaml:"controls"`
-	Probes        map[string]Probe         `yaml:"probes"`
-	Waiters       map[string]Waiter        `yaml:"waiters"`
-	Bindings      map[string]Binding       `yaml:"bindings"`
-	Operations    map[string]Operation     `yaml:"operations"`
+	SchemaVersion int    `yaml:"schema_version"`
+	Product       string `yaml:"product"`
+	APIProduct    string `yaml:"api_product"`
+	// FixedRegion pins the effective region for every operation of this
+	// resource, overriding the user-configured region. Used for API families
+	// served in a single region only: both the RegionId parameter and the
+	// endpoint are resolved from the pinned region.
+	FixedRegion string                   `yaml:"fixed_region"`
+	Resource    string                   `yaml:"resource"`
+	Parent      string                   `yaml:"parent"`
+	Kind        string                   `yaml:"kind"`
+	Aliases     []string                 `yaml:"aliases"`
+	DisplayName LocalizedText            `yaml:"display_name"`
+	Description LocalizedText            `yaml:"description"`
+	Help        LocalizedText            `yaml:"help"`
+	Examples    []string                 `yaml:"examples"`
+	Messages    map[string]LocalizedText `yaml:"messages"`
+	Identity    Identity                 `yaml:"identity"`
+	Schema      ResourceSchema           `yaml:"schema"`
+	Controls    map[string]SchemaField   `yaml:"controls"`
+	Probes      map[string]Probe         `yaml:"probes"`
+	Waiters     map[string]Waiter        `yaml:"waiters"`
+	Bindings    map[string]Binding       `yaml:"bindings"`
+	Operations  map[string]Operation     `yaml:"operations"`
 }
 
 type ProductSpec struct {
@@ -210,6 +215,7 @@ type WaiterMatch struct {
 	Capture          string            `yaml:"capture"`
 	By               []string          `yaml:"by"`
 	ProbeEachCapture bool              `yaml:"probe_each_capture"`
+	StateOnly        bool              `yaml:"state_only"`
 	Fields           map[string]string `yaml:"fields"`
 	Contains         map[string]string `yaml:"contains"`
 	Excludes         map[string]string `yaml:"excludes"`
@@ -973,6 +979,9 @@ func Validate(spec ResourceSpec) error {
 		}
 		if waiter.Target == "" {
 			return fmt.Errorf("waiter %q target is required", name)
+		}
+		if waiter.Match.StateOnly && (waiter.Match.Capture != "" || len(waiter.Match.By) > 0 || waiter.Match.ProbeEachCapture || len(waiter.Match.Fields) > 0 || len(waiter.Match.Contains) > 0 || len(waiter.Match.Excludes) > 0) {
+			return fmt.Errorf("waiter %q match state_only cannot be combined with other matchers", name)
 		}
 		if waiter.Match.Capture != "" && len(waiter.Match.By) == 0 {
 			return fmt.Errorf("waiter %q match by is required", name)

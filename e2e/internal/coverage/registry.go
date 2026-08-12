@@ -873,18 +873,19 @@ func loadCoveredDetails(casesDir string, index map[string]map[string]bool) (map[
 				continue
 			}
 			info := covered[capability]
+			suiteOwnsCapability := suite.CoversResource(capability.Resource)
 			switch {
 			case info.Case == "":
 				info = coverageInfo{
 					Case:          suite.Path,
-					SuiteResource: suite.Resource,
+					SuiteResource: ownedSuiteResource(suite, capability.Resource),
 					Fingerprint:   fingerprint,
 				}
 			case info.Case == suite.Path:
-			case suite.Resource == capability.Resource && info.SuiteResource != capability.Resource:
+			case suiteOwnsCapability && info.SuiteResource != capability.Resource:
 				info = coverageInfo{
 					Case:          suite.Path,
-					SuiteResource: suite.Resource,
+					SuiteResource: capability.Resource,
 					Fingerprint:   fingerprint,
 				}
 			default:
@@ -899,6 +900,13 @@ func loadCoveredDetails(casesDir string, index map[string]map[string]bool) (map[
 		covered[capability] = info
 	}
 	return covered, nil
+}
+
+func ownedSuiteResource(suite *scenario.Suite, capabilityResource string) string {
+	if suite.CoversResource(capabilityResource) {
+		return capabilityResource
+	}
+	return suite.Resource
 }
 
 func caseFingerprint(path string) (string, error) {

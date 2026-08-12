@@ -132,6 +132,9 @@ func loadExamplesTopics(options *globalOptions) (map[string]exampleTopic, error)
 
 		// Action topics — one per operation.
 		for actionName, operation := range resource.Operations {
+			if filterPublic && !publicCLIResourceAction(ref.Product, ref.Resource, actionName) {
+				continue
+			}
 			actionKey := ref.Product + "." + ref.Resource + "." + actionName
 			examples := filterExamplesForPublicCLI(operation.Examples, filterPublic)
 			// Falling back to resource/product examples used to display unrelated

@@ -1,0 +1,61 @@
+# Complete Lingjun subnet lifecycle.
+resource: lingjun/subnet
+needs: [lingjun_vpd]
+requires_prerequisites: [lingjun.network]
+timeout: 60m
+serial: true
+
+steps:
+  - name: create
+    run: >
+      ecctl lingjun subnet create
+      --vpd {{.stack.lingjun_vpd}}
+      --zone {{.prerequisites.lingjun.network.zone}}
+      --cidr 10.120.1.0/24
+      --name {{.resource_prefix}}-subnet
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 20m
+    at: $.subnet
+    expect:
+      id: { type: string, min_len: 1 }
+      vpd: { eq: "{{.stack.lingjun_vpd}}" }
+      name: { eq: "{{.resource_prefix}}-subnet" }
+    capture:
+      lingjun_subnet_id: id
+    teardown: >
+      ecctl lingjun subnet delete {{.lingjun_subnet_id}}
+      --vpd {{.stack.lingjun_vpd}}
+      --zone {{.prerequisites.lingjun.network.zone}}
+      --timeout 20m
+
+  - name: get
+    run: ecctl lingjun subnet get {{.lingjun_subnet_id}} --vpd {{.stack.lingjun_vpd}}
+    at: $.subnet
+    expect:
+      id: { eq: "{{.lingjun_subnet_id}}" }
+
+  - name: list
+    run: ecctl lingjun subnet list --filter id={{.lingjun_subnet_id}} --limit 10
+    assert:
+      - len($.subnets) >= 1
+
+  - name: update
+    run: >
+      ecctl lingjun subnet update {{.lingjun_subnet_id}}
+      --vpd {{.stack.lingjun_vpd}}
+      --zone {{.prerequisites.lingjun.network.zone}}
+      --name {{.resource_prefix}}-subnet-updated
+      --timeout 20m
+    at: $.subnet
+    expect:
+      id: { eq: "{{.lingjun_subnet_id}}" }
+      name: { eq: "{{.resource_prefix}}-subnet-updated" }
+
+  - name: delete
+    run: >
+      ecctl lingjun subnet delete {{.lingjun_subnet_id}}
+      --vpd {{.stack.lingjun_vpd}}
+      --zone {{.prerequisites.lingjun.network.zone}}
+      --timeout 20m
+    expect:
+      $.deleted: { eq: true }

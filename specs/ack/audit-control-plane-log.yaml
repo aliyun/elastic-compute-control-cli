@@ -87,6 +87,30 @@ probes:
           int: $.log_ttl
         aliuid: $.aliuid
         components: $.components
+  task:
+    api: DescribeTaskInfo
+    request:
+      task_id: $context.task_id
+    response:
+      item: $
+      request_id: $.request_id
+      id: $.task_id
+      state: $.state
+      fields:
+        task_id: $.task_id
+        status: $.state
+        error: $.error
+
+waiters:
+  task_succeeded:
+    probe: task
+    target: success
+    match:
+      state_only: true
+    interval: 2s
+    timeout: 600s
+    failure:
+      states: [fail, failed]
 
 bindings:
   disable_control_plane_log:
@@ -101,25 +125,31 @@ bindings:
       before:
         - disable_control_plane_log_components
     request_id_from: $.request_id
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
   update_control_plane_log:
     api: UpdateControlPlaneLog
     request:
       ClusterId: $.id
-      log_project: $.project
-      log_ttl: $.log_ttl
-      aliuid: $.aliuid
-      components: $.components
+      body.log_project: $.project
+      body.log_ttl: $.log_ttl
+      body.aliuid: $.aliuid
+      body.components: $.components
       ApiParam:
         raw: $.api_param
     require_all:
       - raw: $.id
     require_any:
-      - request: log_project
-      - request: log_ttl
-      - request: aliuid
-      - request: components
+      - request: body.log_project
+      - request: body.log_ttl
+      - request: body.aliuid
+      - request: body.components
       - raw: $.api_param
     request_id_from: $.request_id
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
 
 operations:
   update:
@@ -145,8 +175,10 @@ operations:
     workflow:
       - binding: disable_control_plane_log
         when: input.enabled == false
+        wait_unless: input.no_wait
       - binding: update_control_plane_log
         unless: input.enabled == false
+        wait_unless: input.no_wait
       - probe: state
         ids:
           - $input.id

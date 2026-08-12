@@ -15,9 +15,17 @@ type ossUtilParameterMetadata struct {
 type ossUtilOperationMetadata struct {
 	command    string
 	mutation   bool
+	transfer   ossUtilTransfer
 	summary    map[string]string
 	parameters []ossUtilParameterMetadata
 }
+
+type ossUtilTransfer string
+
+const (
+	ossUtilDownload ossUtilTransfer = "download"
+	ossUtilUpload   ossUtilTransfer = "upload"
+)
 
 var ossUtilOperations = map[string]ossUtilOperationMetadata{
 	"PutBucket": {
@@ -85,6 +93,35 @@ var ossUtilOperations = map[string]ossUtilOperationMetadata{
 			ossUtilParameter("MaxKeys", "max-keys", "The maximum number of objects to return.", "Query", "Integer", false),
 			ossUtilParameter("Prefix", "prefix", "The prefix that object names must contain.", "Query", "String", false),
 			ossUtilParameter("StartAfter", "start-after", "The object name after which the listing starts.", "Query", "String", false),
+		},
+	},
+	"GetObject": {
+		command:  "cp",
+		transfer: ossUtilDownload,
+		summary: map[string]string{
+			"en": "Download an OSS object to a local file.",
+			"zh": "下载 OSS 对象到本地文件。",
+		},
+		parameters: []ossUtilParameterMetadata{
+			ossUtilParameter("Bucket", "bucket", "The name of the bucket.", "Path", "String", true),
+			ossUtilParameter("Key", "key", "The name of the object.", "Path", "String", true),
+			ossUtilParameter("File", "file", "The local destination file.", "Local", "String", true),
+			ossUtilParameter("Force", "force", "Whether to overwrite an existing local destination file.", "Local", "Boolean", false),
+		},
+	},
+	"PutObject": {
+		command:  "cp",
+		mutation: true,
+		transfer: ossUtilUpload,
+		summary: map[string]string{
+			"en": "Upload a local file as an OSS object.",
+			"zh": "上传本地文件为 OSS 对象。",
+		},
+		parameters: []ossUtilParameterMetadata{
+			ossUtilParameter("Bucket", "bucket", "The name of the bucket.", "Path", "String", true),
+			ossUtilParameter("Key", "key", "The name of the object.", "Path", "String", true),
+			ossUtilParameter("File", "file", "The local source file.", "Local", "String", true),
+			ossUtilParameter("Force", "force", "Whether to overwrite an existing OSS object.", "Local", "Boolean", false),
 		},
 	},
 	"DeleteObject": {

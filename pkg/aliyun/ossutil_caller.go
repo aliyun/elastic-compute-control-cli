@@ -94,6 +94,13 @@ func (c *OSSUtilCaller) CallWithArgs(ctx context.Context, operation string, requ
 	if runErr != nil {
 		return nil, c.commandError(runErr, stdout, stderr, request)
 	}
+	if metadata.transfer != "" {
+		return map[string]any{
+			"Bucket": callerStringMapValue(request, "Bucket"),
+			"Key":    callerStringMapValue(request, "Key"),
+			"File":   callerStringMapValue(request, "File"),
+		}, nil
+	}
 	return decodeOSSUtilResponse(stdout, metadata.mutation)
 }
 
@@ -114,7 +121,11 @@ func (c *OSSUtilCaller) requireVersion2(ctx context.Context, runtimePath string,
 }
 
 func (c *OSSUtilCaller) requireOperation(ctx context.Context, runtimePath string, metadata ossUtilOperationMetadata, env []string) error {
-	stdout, stderr, err := c.runner.Run(ctx, runtimePath, []string{"api", metadata.command, "--help"}, env)
+	helpArgs := []string{"api", metadata.command, "--help"}
+	if metadata.transfer != "" {
+		helpArgs = []string{metadata.command, "--help"}
+	}
+	stdout, stderr, err := c.runner.Run(ctx, runtimePath, helpArgs, env)
 	if err == nil {
 		return nil
 	}
@@ -153,6 +164,9 @@ func (c *OSSUtilCaller) commandArgs(operation string, request map[string]any, pa
 			return nil, ossUtilOperationMetadata{}, ecerrors.Client("UnsupportedOSSParameter", "parameter is not supported for OSS calls", ecerrors.WithField(key))
 		}
 	}
+	if metadata.transfer != "" {
+		return c.transferCommandArgs(metadata, request, passthrough)
+	}
 
 	args := []string{"--auto-plugin-install", "false", "ossutil", "api", metadata.command}
 	for _, parameter := range metadata.parameters {
@@ -186,7 +200,7 @@ func (c *OSSUtilCaller) commandArgs(operation string, request map[string]any, pa
 		args = append(args, "--"+parameter.flag, encoded)
 	}
 
-	forwarded, err := ossUtilPassthroughArgs(passthrough)
+	forwarded, err := ossUtilPassthroughArgs(passthrough, false)
 	if err != nil {
 		return nil, ossUtilOperationMetadata{}, err
 	}
@@ -196,7 +210,60 @@ func (c *OSSUtilCaller) commandArgs(operation string, request map[string]any, pa
 	return args, metadata, nil
 }
 
-func ossUtilPassthroughArgs(args []string) ([]string, error) {
+func (c *OSSUtilCaller) transferCommandArgs(metadata ossUtilOperationMetadata, request map[string]any, passthrough []string) ([]string, ossUtilOperationMetadata, error) {
+	values := make(map[string]string, len(metadata.parameters))
+	force := false
+	for _, parameter := range metadata.parameters {
+		value, exists := request[parameter.Name]
+		if strings.EqualFold(parameter.Type, "Boolean") {
+			if !exists {
+				if parameter.Required {
+					return nil, ossUtilOperationMetadata{}, ecerrors.Client("MissingParameter", "required parameter is missing: --"+parameter.Name, ecerrors.WithField(parameter.Name))
+				}
+				continue
+			}
+			enabled, ok := value.(bool)
+			if !ok {
+				return nil, ossUtilOperationMetadata{}, ecerrors.Client("InvalidParameter", fmt.Sprintf("%s is invalid", parameter.Name), ecerrors.WithField(parameter.Name))
+			}
+			if parameter.Name == "Force" {
+				force = enabled
+			}
+			continue
+		}
+		encoded, err := cliParamValue(value)
+		if err != nil {
+			return nil, ossUtilOperationMetadata{}, ecerrors.Client("InvalidParameter", fmt.Sprintf("%s is invalid", parameter.Name), ecerrors.WithField(parameter.Name))
+		}
+		encoded = strings.TrimSpace(encoded)
+		if !exists || encoded == "" {
+			if parameter.Required {
+				return nil, ossUtilOperationMetadata{}, ecerrors.Client("MissingParameter", "required parameter is missing: --"+parameter.Name, ecerrors.WithField(parameter.Name))
+			}
+			continue
+		}
+		values[parameter.Name] = encoded
+	}
+	objectURI := "oss://" + values["Bucket"] + "/" + values["Key"]
+	source, destination := objectURI, values["File"]
+	if metadata.transfer == ossUtilUpload {
+		source, destination = destination, objectURI
+	}
+	args := []string{"--auto-plugin-install", "false", "ossutil", metadata.command, source, destination}
+	if force {
+		args = append(args, "--force")
+	}
+	args = append(args, "--no-progress")
+	forwarded, err := ossUtilPassthroughArgs(passthrough, true)
+	if err != nil {
+		return nil, ossUtilOperationMetadata{}, err
+	}
+	args = append(args, forwarded...)
+	args = append(args, "--region", c.Region)
+	return args, metadata, nil
+}
+
+func ossUtilPassthroughArgs(args []string, transfer bool) ([]string, error) {
 	type allowedFlag struct {
 		output string
 		value  bool
@@ -208,6 +275,10 @@ func ossUtilPassthroughArgs(args []string) ([]string, error) {
 		"--connect-timeout": {output: "--connect-timeout", value: true},
 		"--retry-count":     {output: "--retry-times", value: true},
 		"--user-agent":      {output: "--user-agent", value: true},
+	}
+	if transfer {
+		allowed["--parallel"] = allowedFlag{output: "--parallel", value: true}
+		allowed["--part-size"] = allowedFlag{output: "--part-size", value: true}
 	}
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {

@@ -27,9 +27,9 @@ func TestACKAlertCommandSurfaceUsesSpecDrivenBindings(t *testing.T) {
 			resource: "alert",
 			wantCall: "StartAlert",
 			wantReq: map[string]any{
-				"ClusterId":             "c-123",
-				"alert_rule_name":       "cpu-high",
-				"alert_rule_group_name": nil,
+				"ClusterId":                  "c-123",
+				"body.alert_rule_name":       "cpu-high",
+				"body.alert_rule_group_name": nil,
 			},
 			wantRoot: "alert",
 			wantState: map[string]any{
@@ -44,8 +44,8 @@ func TestACKAlertCommandSurfaceUsesSpecDrivenBindings(t *testing.T) {
 			resource: "alert",
 			wantCall: "StopAlert",
 			wantReq: map[string]any{
-				"ClusterId":             "c-123",
-				"alert_rule_group_name": "ack-cluster",
+				"ClusterId":                  "c-123",
+				"body.alert_rule_group_name": "ack-cluster",
 			},
 			wantRoot: "alert",
 			wantState: map[string]any{
@@ -55,46 +55,20 @@ func TestACKAlertCommandSurfaceUsesSpecDrivenBindings(t *testing.T) {
 			},
 		},
 		{
-			name:     "contact delete",
-			args:     []string{"ack", "alert", "contact", "delete", "12345", "--region", "cn-beijing"},
-			resource: "contact",
-			wantCall: "DeleteAlertContact",
-			wantReq: map[string]any{
-				"contact_ids.1": "12345",
-			},
-			wantRoot: "contact",
-			wantState: map[string]any{
-				"id": "12345",
-			},
-		},
-		{
-			name:     "contact-group update",
-			args:     []string{"ack", "alert", "contact-group", "update", "--region", "cn-beijing", "--cluster", "c-123", "--ruleset-id", "ack-cluster", "--group-id", "12345"},
-			resource: "contact-group",
+			name:     "alert update binds contact groups",
+			args:     []string{"ack", "alert", "update", "--region", "cn-beijing", "--cluster", "c-123", "--ruleset-id", "ack-cluster", "--group-id", "12345"},
+			resource: "alert",
 			wantCall: "UpdateContactGroupForAlert",
 			wantReq: map[string]any{
 				"ClusterId":             "c-123",
 				"alert_rule_group_name": "ack-cluster",
 				"contact_group_ids.1":   "12345",
 			},
-			wantRoot: "contact_group",
+			wantRoot: "alert",
 			wantState: map[string]any{
 				"cluster":    "c-123",
 				"group_ids":  []any{"12345"},
 				"ruleset_id": "ack-cluster",
-			},
-		},
-		{
-			name:     "contact-group delete",
-			args:     []string{"ack", "alert", "contact-group", "delete", "12345", "--region", "cn-beijing"},
-			resource: "contact-group",
-			wantCall: "DeleteAlertContactGroup",
-			wantReq: map[string]any{
-				"contact_group_ids.1": "12345",
-			},
-			wantRoot: "contact_group",
-			wantState: map[string]any{
-				"id": "12345",
 			},
 		},
 	}
@@ -164,22 +138,7 @@ func TestACKAlertHelpExposesExpectedFlags(t *testing.T) {
 		{
 			name: "alert update help",
 			args: []string{"ack", "alert", "update", "--help"},
-			want: []string{"--cluster", "--enabled", "--rule-id", "--ruleset-id"},
-		},
-		{
-			name: "contact delete help",
-			args: []string{"ack", "alert", "contact", "delete", "--help"},
-			want: []string{"delete <id>"},
-		},
-		{
-			name: "contact-group update help",
-			args: []string{"ack", "alert", "contact-group", "update", "--help"},
-			want: []string{"--cluster", "--rule-id", "--ruleset-id", "--group-id"},
-		},
-		{
-			name: "contact-group delete help",
-			args: []string{"ack", "alert", "contact-group", "delete", "--help"},
-			want: []string{"delete <id>"},
+			want: []string{"--cluster", "--enabled", "--rule-id", "--ruleset-id", "--group-id"},
 		},
 	}
 

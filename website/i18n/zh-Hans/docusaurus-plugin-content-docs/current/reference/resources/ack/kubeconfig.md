@@ -32,30 +32,9 @@ ecctl ack kubeconfig create [flags]
 |---|---|---|---|
 | `--cluster` | string | ✓ | ACK 集群 ID |
 | `--region` | string | ✓ | Alibaba Cloud region |
-| `--expire-time` | integer |  | KubeConfig 有效期；create 按分钟发送，update 按 ACK 要求按小时发送 |
+| `--expire-time` | integer |  | KubeConfig 有效期，单位为分钟 |
 | `--private-ip` | boolean |  | 返回内网访问 KubeConfig |
 | `--user-id` | string |  | 用于代签发 KubeConfig 或用户维度状态查询的 RAM 用户或角色 ID |
-
-## update
-
-```bash
-ecctl ack kubeconfig update [flags]
-```
-
-更新 KubeConfig 过期时间
-
-- 类型：`mutation` · 风险：medium
-
-| API | 调用时机 | 用途 |
-|---|---|---|
-| `UpdateK8sClusterUserConfigExpire` | 每次执行命令时 | 执行资源操作。 |
-
-| 参数 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `--cluster` | string | ✓ | ACK 集群 ID |
-| `--expire-time` | integer | ✓ | KubeConfig 有效期；create 按分钟发送，update 按 ACK 要求按小时发送 |
-| `--region` | string | ✓ | Alibaba Cloud region |
-| `--user-id` | string | ✓ | 用于代签发 KubeConfig 或用户维度状态查询的 RAM 用户或角色 ID |
 
 ## get
 

@@ -37,7 +37,7 @@ schema:
       description:
         en: diagnosis type
         zh-CN: 诊断类型
-      enum: [node, ingress, cluster, memory, pod, service, network]
+      enum: [node, ingress, memory, pod, service, network]
     target:
       type: object
       description:

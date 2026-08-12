@@ -38,11 +38,11 @@ func TestACKInspectHelpShowsConfigAndReportChildren(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{args: []string{"ack", "inspect", "config", "update", "--help"}, want: []string{"--cluster string", "--enabled", "--schedule string", "--scope string"}},
+		{args: []string{"ack", "inspect", "config", "update", "--help"}, want: []string{"--cluster string", "--enabled", "--recurrence string", "--disabled-check-item"}},
 		{args: []string{"ack", "inspect", "config", "delete", "--help"}, want: []string{"--cluster string"}},
 		{args: []string{"ack", "inspect", "report", "create", "--help"}, want: []string{"--cluster string", "--no-wait", "--timeout duration"}},
 		{args: []string{"ack", "inspect", "report", "get", "--help"}, want: []string{"get <report-id>", "--cluster string"}},
-		{args: []string{"ack", "inspect", "report", "list", "--help"}, want: []string{"--cluster string", "--limit int", "--page int"}},
+		{args: []string{"ack", "inspect", "report", "list", "--help"}, want: []string{"--cluster string", "--limit int", "--next-token string"}},
 	} {
 		stdout, stderr, code := runCLI(append([]string{"--lang", "en"}, tt.args...)...)
 		if code != 0 {
@@ -62,13 +62,13 @@ func TestACKInspectConfigUpdateDeleteGetRouteToConfigAPIs(t *testing.T) {
 	t.Run("update", func(t *testing.T) {
 		t.Parallel()
 		fake := &fakeSpecCaller{responses: []map[string]any{
-			{"cluster_id": "c-123", "enabled": false, "schedule": "weekly"},
+			{"enabled": false, "recurrence": "FREQ=DAILY;BYHOUR=9;BYMINUTE=0"},
 			{"requestId": "req-update"},
-			{"cluster_id": "c-123", "enabled": true, "schedule": "daily", "scope": "all"},
+			{"enabled": true, "recurrence": "FREQ=DAILY;BYHOUR=10;BYMINUTE=15"},
 		}}
 		runCLI := ackInspectCaller(t, fake, "config")
 
-		stdout, stderr, code := runCLI("ack", "inspect", "config", "update", "--region", "cn-hangzhou", "--cluster", "c-123", "--enabled", "--schedule", "daily", "--scope", "all")
+		stdout, stderr, code := runCLI("ack", "inspect", "config", "update", "--region", "cn-hangzhou", "--cluster", "c-123", "--enabled", "--recurrence", "FREQ=DAILY;BYHOUR=10;BYMINUTE=15")
 		if code != 0 {
 			t.Fatalf("inspect config update exit %d stderr=%s stdout=%s", code, stderr, stdout)
 		}
@@ -78,11 +78,12 @@ func TestACKInspectConfigUpdateDeleteGetRouteToConfigAPIs(t *testing.T) {
 			fake.calls[2].operation != "GetClusterInspectConfig" {
 			t.Fatalf("calls = %#v", fake.calls)
 		}
-		if fake.calls[1].request["cluster_id"] != "c-123" || fake.calls[1].request["body.enabled"] != true {
+		if fake.calls[1].request["clusterId"] != "c-123" || fake.calls[1].request["body.enabled"] != true ||
+			fake.calls[1].request["body.recurrence"] != "FREQ=DAILY;BYHOUR=10;BYMINUTE=15" {
 			t.Fatalf("update request = %#v", fake.calls[1].request)
 		}
 		config, _ := decodeObject(t, stdout)["config"].(map[string]any)
-		if config == nil || config["cluster_id"] != "c-123" || config["enabled"] != true {
+		if config == nil || config["cluster"] != "c-123" || config["enabled"] != true {
 			t.Fatalf("unexpected output: %s", stdout)
 		}
 	})
@@ -92,11 +93,11 @@ func TestACKInspectConfigUpdateDeleteGetRouteToConfigAPIs(t *testing.T) {
 		fake := &fakeSpecCaller{responses: []map[string]any{
 			{"requestId": "req-empty"},
 			{"requestId": "req-create"},
-			{"cluster_id": "c-123", "enabled": true, "schedule": "daily", "scope": "all"},
+			{"enabled": true, "recurrence": "FREQ=DAILY;BYHOUR=10;BYMINUTE=15"},
 		}}
 		runCLI := ackInspectCaller(t, fake, "config")
 
-		stdout, stderr, code := runCLI("ack", "inspect", "config", "update", "--region", "cn-hangzhou", "--cluster", "c-123", "--enabled", "--schedule", "daily", "--scope", "all")
+		stdout, stderr, code := runCLI("ack", "inspect", "config", "update", "--region", "cn-hangzhou", "--cluster", "c-123", "--enabled", "--recurrence", "FREQ=DAILY;BYHOUR=10;BYMINUTE=15")
 		if code != 0 {
 			t.Fatalf("inspect config update create path exit %d stderr=%s stdout=%s", code, stderr, stdout)
 		}
@@ -106,11 +107,12 @@ func TestACKInspectConfigUpdateDeleteGetRouteToConfigAPIs(t *testing.T) {
 			fake.calls[2].operation != "GetClusterInspectConfig" {
 			t.Fatalf("calls = %#v", fake.calls)
 		}
-		if fake.calls[1].request["cluster_id"] != "c-123" || fake.calls[1].request["body.enabled"] != true {
+		if fake.calls[1].request["clusterId"] != "c-123" || fake.calls[1].request["body.enabled"] != true ||
+			fake.calls[1].request["body.recurrence"] != "FREQ=DAILY;BYHOUR=10;BYMINUTE=15" {
 			t.Fatalf("create request = %#v", fake.calls[1].request)
 		}
 		config, _ := decodeObject(t, stdout)["config"].(map[string]any)
-		if config == nil || config["cluster_id"] != "c-123" || config["enabled"] != true {
+		if config == nil || config["cluster"] != "c-123" || config["enabled"] != true {
 			t.Fatalf("unexpected output: %s", stdout)
 		}
 	})
@@ -127,11 +129,14 @@ func TestACKInspectConfigUpdateDeleteGetRouteToConfigAPIs(t *testing.T) {
 		if len(fake.calls) != 1 || fake.calls[0].operation != "DeleteClusterInspectConfig" {
 			t.Fatalf("calls = %#v", fake.calls)
 		}
+		if fake.calls[0].request["clusterId"] != "c-123" {
+			t.Fatalf("delete request = %#v", fake.calls[0].request)
+		}
 	})
 
 	t.Run("get", func(t *testing.T) {
 		t.Parallel()
-		fake := &fakeSpecCaller{responses: []map[string]any{{"cluster_id": "c-123", "enabled": true}}}
+		fake := &fakeSpecCaller{responses: []map[string]any{{"enabled": true}}}
 		runCLI := ackInspectCaller(t, fake, "config")
 
 		stdout, stderr, code := runCLI("ack", "inspect", "config", "get", "--region", "cn-hangzhou", "--cluster", "c-123")
@@ -140,6 +145,9 @@ func TestACKInspectConfigUpdateDeleteGetRouteToConfigAPIs(t *testing.T) {
 		}
 		if len(fake.calls) != 1 || fake.calls[0].operation != "GetClusterInspectConfig" {
 			t.Fatalf("calls = %#v", fake.calls)
+		}
+		if fake.calls[0].request["clusterId"] != "c-123" {
+			t.Fatalf("get request = %#v", fake.calls[0].request)
 		}
 	})
 }
@@ -150,9 +158,9 @@ func TestACKInspectReportCreateGetListRouteToReportAPIs(t *testing.T) {
 	t.Run("create", func(t *testing.T) {
 		t.Parallel()
 		fake := &fakeSpecCaller{responses: []map[string]any{
-			{"requestId": "req-run", "task_id": "task-123"},
-			{"reports": []any{map[string]any{"report_id": "r-1", "status": "finished"}}},
-			{"report_id": "r-1", "status": "finished", "details": []any{map[string]any{"name": "node-check"}}},
+			{"requestId": "req-run", "taskId": "task-123", "reportId": "r-1"},
+			{"reports": []any{map[string]any{"reportId": "r-1", "status": "completed"}}},
+			{"reportId": "r-1", "status": "completed", "checkItemResults": []any{map[string]any{"name": "node-check"}}},
 		}}
 		runCLI := ackInspectCaller(t, fake, "report")
 
@@ -166,7 +174,7 @@ func TestACKInspectReportCreateGetListRouteToReportAPIs(t *testing.T) {
 			fake.calls[2].operation != "GetClusterInspectReportDetail" {
 			t.Fatalf("calls = %#v", fake.calls)
 		}
-		if fake.calls[2].request["report_id"] != "r-1" {
+		if fake.calls[0].request["clusterId"] != "c-123" || fake.calls[2].request["reportId"] != "r-1" {
 			t.Fatalf("detail request = %#v", fake.calls[2].request)
 		}
 		report, _ := decodeObject(t, stdout)["report"].(map[string]any)
@@ -177,7 +185,7 @@ func TestACKInspectReportCreateGetListRouteToReportAPIs(t *testing.T) {
 
 	t.Run("get", func(t *testing.T) {
 		t.Parallel()
-		fake := &fakeSpecCaller{responses: []map[string]any{{"report_id": "r-1", "status": "finished"}}}
+		fake := &fakeSpecCaller{responses: []map[string]any{{"reportId": "r-1", "status": "completed"}}}
 		runCLI := ackInspectCaller(t, fake, "report")
 
 		stdout, stderr, code := runCLI("ack", "inspect", "report", "get", "r-1", "--region", "cn-hangzhou", "--cluster", "c-123")
@@ -187,7 +195,7 @@ func TestACKInspectReportCreateGetListRouteToReportAPIs(t *testing.T) {
 		if len(fake.calls) != 1 || fake.calls[0].operation != "GetClusterInspectReportDetail" {
 			t.Fatalf("calls = %#v", fake.calls)
 		}
-		if fake.calls[0].request["report_id"] != "r-1" {
+		if fake.calls[0].request["clusterId"] != "c-123" || fake.calls[0].request["reportId"] != "r-1" {
 			t.Fatalf("get request = %#v", fake.calls[0].request)
 		}
 	})
@@ -195,8 +203,7 @@ func TestACKInspectReportCreateGetListRouteToReportAPIs(t *testing.T) {
 	t.Run("list", func(t *testing.T) {
 		t.Parallel()
 		fake := &fakeSpecCaller{responses: []map[string]any{{
-			"reports":   []any{map[string]any{"report_id": "r-1", "status": "finished"}},
-			"page_info": map[string]any{"total_count": 1},
+			"reports": []any{map[string]any{"reportId": "r-1", "status": "completed"}},
 		}}}
 		runCLI := ackInspectCaller(t, fake, "report")
 
@@ -206,6 +213,9 @@ func TestACKInspectReportCreateGetListRouteToReportAPIs(t *testing.T) {
 		}
 		if len(fake.calls) != 1 || fake.calls[0].operation != "ListClusterInspectReports" {
 			t.Fatalf("calls = %#v", fake.calls)
+		}
+		if fake.calls[0].request["clusterId"] != "c-123" || fake.calls[0].request["maxResults"] != 50 {
+			t.Fatalf("list request = %#v", fake.calls[0].request)
 		}
 	})
 }

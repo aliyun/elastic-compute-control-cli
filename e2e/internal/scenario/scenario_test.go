@@ -3,6 +3,7 @@ package scenario
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -153,14 +154,14 @@ func TestLoadRegionPrerequisiteRequirements(t *testing.T) {
 	dir := t.TempDir()
 	p := write(t, dir, "image-copy.yaml", `
 resource: ecs/image
-requires_prerequisites: [ecs.image]
+requires_prerequisites: [test.primary]
 region_requirements:
   destination:
-    requires_prerequisites: [ecs.image]
+    requires_prerequisites: [test.primary]
     distinct_from: primary
 steps:
   - name: copy
-    run: ecctl ecs image copy {{.prerequisites.ecs.image.image_id}} --destination-region {{.regions.destination.id}}
+    run: ecctl ecs image copy {{.prerequisites.test.primary.image_id}} --destination-region {{.regions.destination.id}}
     teardown: ecctl ecs image delete {{.image_id}}
     teardown_region: destination
 `)
@@ -169,7 +170,7 @@ steps:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := suite.RequiresPrerequisites; len(got) != 1 || got[0] != "ecs.image" {
+	if got := suite.RequiresPrerequisites; len(got) != 1 || got[0] != "test.primary" {
 		t.Fatalf("primary prerequisites = %#v", got)
 	}
 	destination, ok := suite.RegionRequirements["destination"]
@@ -197,5 +198,116 @@ steps:
 
 	if _, err := Load(p); err == nil {
 		t.Fatal("expected unknown teardown region error")
+	}
+}
+
+func TestLoadDAGStepDependencies(t *testing.T) {
+	dir := t.TempDir()
+	p := write(t, dir, "dag.yaml", `
+resource: ecs/instance
+execution: dag
+steps:
+  - name: create
+    needs: [image]
+    locks: ["instance:{{.run_id}}"]
+    run: ecctl ecs instance create
+    capture: { instance_id: $.instance.id }
+  - name: get
+    depends_on: [create]
+    requires_prerequisites: [test.optional]
+    run: ecctl ecs instance get {{.instance_id}}
+`)
+
+	suite, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if suite.Execution != ExecutionDAG {
+		t.Fatalf("execution = %q, want %q", suite.Execution, ExecutionDAG)
+	}
+	if got := suite.Steps[1].DependsOn; len(got) != 1 || got[0] != "create" {
+		t.Fatalf("depends_on = %#v", got)
+	}
+	if got := suite.Steps[0].Needs; len(got) != 1 || got[0] != "image" {
+		t.Fatalf("needs = %#v", got)
+	}
+}
+
+func TestLoadRejectsInvalidDAG(t *testing.T) {
+	dir := t.TempDir()
+	for name, test := range map[string]struct {
+		body string
+		want string
+	}{
+		"duplicate": {
+			body: `
+  - name: same
+    run: ecctl ecs instance list
+  - name: same
+    run: ecctl ecs instance list
+`,
+			want: "duplicate step name",
+		},
+		"unknown": {
+			body: `
+  - name: get
+    depends_on: [missing]
+    run: ecctl ecs instance list
+`,
+			want: "unknown step",
+		},
+		"cycle": {
+			body: `
+  - name: first
+    depends_on: [second]
+    run: ecctl ecs instance list
+  - name: second
+    depends_on: [first]
+    run: ecctl ecs instance list
+`,
+			want: "dependency cycle",
+		},
+		"empty-lock": {
+			body: `
+  - name: get
+    locks: [" "]
+    run: ecctl ecs instance list
+`,
+			want: "lock",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := write(t, dir, name+".yaml", "resource: ecs/instance\nexecution: dag\nsteps:\n"+test.body)
+			_, err := Load(p)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsOperationDependenciesInSequentialSuite(t *testing.T) {
+	dir := t.TempDir()
+	for name, field := range map[string]string{
+		"depends":      "depends_on: [before]",
+		"needs":        "needs: [image]",
+		"prerequisite": "requires_prerequisites: [test.optional]",
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := write(t, dir, name+".yaml", `
+resource: ecs/instance
+steps:
+  - name: before
+    run: ecctl ecs instance list
+  - name: after
+    `+field+`
+    locks: [shared]
+    run: ecctl ecs instance list
+`)
+			_, err := Load(p)
+			if err == nil || !strings.Contains(err.Error(), "execution: dag") {
+				t.Fatalf("error = %v, want execution: dag guidance", err)
+			}
+		})
 	}
 }

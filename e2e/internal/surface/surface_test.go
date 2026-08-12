@@ -119,3 +119,77 @@ func TestValidateSuitesAcceptsDefaultAndNestedResources(t *testing.T) {
 		t.Fatalf("errors = %+v, want none", errs)
 	}
 }
+
+func TestValidateSuitesPrefersExecutableChildOverGroupingParent(t *testing.T) {
+	caps, err := Decode([]byte(`{
+  "products": [{
+    "product": "ack",
+    "resources": [
+      {"name": "inspect", "actions": null},
+      {"name": "config", "parent": "inspect", "actions": ["update"]}
+    ]
+  }]
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	suites := []*scenario.Suite{{
+		Surface:  scenario.SurfaceFull,
+		Resource: "ack/config",
+		Path:     "cases/ack/inspect-config-lifecycle.yaml",
+		Steps: []scenario.Step{{
+			Name: "update", Run: "ecctl ack inspect config update --cluster c",
+		}},
+	}}
+	if issues := ValidateSuites(suites, caps); len(issues) != 0 {
+		t.Fatalf("issues = %+v, want child resource accepted", issues)
+	}
+}
+
+func TestValidateCommandParsersRejectsUnknownFlag(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a shell script")
+	}
+	path := filepath.Join(t.TempDir(), "ecctl")
+	if err := os.WriteFile(path, []byte(`#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "--unknown" ]; then
+    echo "unknown flag: --unknown" >&2
+    exit 2
+  fi
+done
+exit 0
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	suites := []*scenario.Suite{{
+		Path: "cases/ecs/instance.yaml",
+		Steps: []scenario.Step{{
+			Name: "list", Run: "ecctl ecs instance list --unknown value",
+		}},
+	}}
+	issues := ValidateCommandParsers(context.Background(), path, suites)
+	if len(issues) != 1 || issues[0].Code != "invalid_cli_command" ||
+		issues[0].Step != "list" {
+		t.Fatalf("issues = %+v, want invalid_cli_command for list", issues)
+	}
+}
+
+func TestValidateCommandParsersSkipsRawCall(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a shell script")
+	}
+	path := filepath.Join(t.TempDir(), "ecctl")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 2\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	suites := []*scenario.Suite{{
+		Path: "fixtures/stack.yaml",
+		Steps: []scenario.Step{{
+			Name: "raw call", Run: "ecctl --region cn-hangzhou call ram CreateUser --request '{}'",
+		}},
+	}}
+	if issues := ValidateCommandParsers(context.Background(), path, suites); len(issues) != 0 {
+		t.Fatalf("issues = %+v, want raw call skipped", issues)
+	}
+}

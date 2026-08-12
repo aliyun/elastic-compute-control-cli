@@ -1,12 +1,13 @@
 ---
 title: Lingjun Optimizations
-description: Lingjun cluster and VPD workflows in the public ecctl surface.
+description: Lingjun resource workflows in the public ecctl surface.
 ---
 
 # Lingjun Optimizations
 
-The optimizations below apply to Lingjun clusters and VPD network segments.
-The resource IDs and response values are illustrative.
+The public surface includes every Lingjun resource and action except
+`net-test`. The optimizations below focus on cluster and VPD workflows. The
+resource IDs and response values are illustrative.
 
 ## Clusters
 

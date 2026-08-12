@@ -491,7 +491,6 @@ bindings:
       - request: VccName
       - request: Bandwidth
       - request: OrderId
-    id_from: $.Content.VccId
     request_id_from: $.RequestId
   add_route:
     api: CreateVccRouteEntry

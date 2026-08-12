@@ -1,15 +1,26 @@
-# Lingjun cluster lifecycle that does not require pre-existing nodes.
+# Lingjun requires a non-empty bootstrap node-group descriptor, but creating
+# the cluster does not assign or consume an existing physical node.
 resource: lingjun/cluster
+execution: dag
+requires_params: [lingjun.cluster_type, lingjun.hpn_zone]
 timeout: 2h
 serial: true
 
 steps:
   - name: create
+    needs: [lingjun_node_group_keypair, vpc, security_group, lingjun_cluster_network_vswitch, lingjun_cluster_network_eni]
+    requires_prerequisites: [lingjun.cluster_network]
+    locks: ["lingjun-cluster:{{.run_name}}-base"]
     run: >
       ecctl lingjun cluster create
       --name {{.run_name}}-cluster
       --description "ecctl E2E cluster {{.run_id}}"
       --cluster-type Lite
+      --hpn-zone {{.prerequisites.lingjun.cluster_network.hpn_zone}}
+      --resource-group {{.prerequisites.lingjun.cluster_network.resource_group_id}}
+      --networks '{"VpdInfo":{"VpdId":"{{.stack.vpc}}","VpdSubnets":["{{.stack.lingjun_cluster_network_vswitch}}"]},"SecurityGroupId":"{{.stack.security_group}}","VSwitchZoneId":"{{.prerequisites.lingjun.cluster_network.zone}}","VpcId":"{{.stack.vpc}}","VSwitchId":"{{.stack.lingjun_cluster_network_vswitch}}","TailIpVersion":"IPv4"}'
+      --nimiz-vswitches '["{{.stack.lingjun_cluster_network_vswitch}}"]'
+      --node-groups '[{"NodeGroupName":"{{.resource_prefix}}-bootstrap","NodeGroupDescription":"ecctl E2E bootstrap {{.run_id}}","ZoneId":"{{.prerequisites.lingjun.cluster_network.zone}}","MachineType":"{{.prerequisites.lingjun.cluster_network.machine_type}}","ImageId":"{{.prerequisites.lingjun.cluster_network.image_id}}","KeyPairName":"{{.stack.lingjun_node_group_keypair}}","FileSystemMountEnabled":false,"VirtualGpuEnabled":false,"SystemDisk":{"Category":"cloud_essd","Size":180,"PerformanceLevel":"PL1"}}]'
       --tag ecctl-e2e=1 --tag run-id={{.run_id}}
       --timeout 30m
     at: $.cluster
@@ -22,17 +33,85 @@ steps:
     teardown: ecctl lingjun cluster delete {{.cluster_id}} --timeout 30m
 
   - name: get
+    depends_on: [create]
+    locks: ["lingjun-cluster:{{.run_name}}-base"]
     run: ecctl lingjun cluster get {{.cluster_id}}
     at: $.cluster
     expect:
       id: { eq: "{{.cluster_id}}" }
 
   - name: list
-    run: ecctl lingjun cluster list --filter name={{.run_name}}-cluster --limit 10
+    depends_on: [create]
+    locks: ["lingjun-cluster:{{.run_name}}-base"]
+    run: ecctl lingjun cluster list --filter tag.run-id={{.run_id}} --limit 10
     assert:
       - len($.clusters) >= 1
 
   - name: delete
+    depends_on: [get, list]
+    locks: ["lingjun-cluster:{{.run_name}}-base"]
     run: ecctl lingjun cluster delete {{.cluster_id}} --timeout 30m
+    expect:
+      $.deleted: { eq: true }
+
+  - name: create scaling fixture
+    requires_prerequisites: [lingjun.cluster]
+    locks: ["lingjun-cluster:{{.run_name}}-scaling"]
+    run: >
+      ecctl lingjun cluster create
+      --name {{.run_name}}-scaling-cluster
+      --description "ecctl E2E scaling cluster {{.run_id}}"
+      --cluster-type {{.params.lingjun.cluster_type}}
+      --hpn-zone {{.params.lingjun.hpn_zone}}
+      --node-groups '[{"NodeGroupId":"{{index .prerequisites.lingjun.cluster.node_group_ids 0}}","NodeCount":1},{"NodeGroupId":"{{index .prerequisites.lingjun.cluster.node_group_ids 1}}","NodeCount":1}]'
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 30m
+    at: $.cluster
+    expect:
+      id: { type: string, min_len: 1 }
+      name: { eq: "{{.run_name}}-scaling-cluster" }
+      status: { oneof: [running, Running] }
+    capture:
+      scaling_cluster_id: id
+    teardown: ecctl lingjun cluster delete {{.scaling_cluster_id}} --timeout 30m
+
+  - name: get scaling nodes
+    depends_on: [create scaling fixture]
+    locks: ["lingjun-cluster:{{.run_name}}-scaling"]
+    run: ecctl lingjun cluster get {{.scaling_cluster_id}} --with-nodes
+    at: $.cluster
+    expect:
+      id: { eq: "{{.scaling_cluster_id}}" }
+      nodes: { type: array, min_len: 2 }
+    capture:
+      shrink_node_id: nodes[0].id
+      shrink_node_group_id: nodes[0].node_group
+
+  - name: update shrink
+    depends_on: [get scaling nodes]
+    locks: ["lingjun-cluster:{{.run_name}}-scaling"]
+    run: >
+      ecctl lingjun cluster update {{.scaling_cluster_id}}
+      --shrink '[{"NodeGroupId":"{{.shrink_node_group_id}}","Nodes":[{"NodeId":"{{.shrink_node_id}}"}]}]'
+      --timeout 30m
+    at: $.cluster
+    expect:
+      id: { eq: "{{.scaling_cluster_id}}" }
+
+  - name: update extend
+    depends_on: [update shrink]
+    locks: ["lingjun-cluster:{{.run_name}}-scaling"]
+    run: >
+      ecctl lingjun cluster update {{.scaling_cluster_id}}
+      --extend '[{"NodeGroupId":"{{.shrink_node_group_id}}","NodeCount":1}]'
+      --timeout 30m
+    at: $.cluster
+    expect:
+      id: { eq: "{{.scaling_cluster_id}}" }
+
+  - name: delete scaling fixture
+    depends_on: [update extend]
+    locks: ["lingjun-cluster:{{.run_name}}-scaling"]
+    run: ecctl lingjun cluster delete {{.scaling_cluster_id}} --timeout 30m
     expect:
       $.deleted: { eq: true }

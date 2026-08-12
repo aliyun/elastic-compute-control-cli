@@ -22,6 +22,8 @@ Output shape:
     {"name": "ack"},
     {"name": "ecs"},
     {"name": "lingjun"},
+    {"name": "rg"},
+    {"name": "tag"},
     {"name": "vpc"}
   ]
 }

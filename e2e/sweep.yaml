@@ -32,6 +32,7 @@ kinds:
     id_field: id
     runid_field: tags.run-id
     created_field: creation_time
+    depends_on: [ecs-image, ecs-keypair, ecs-sg, vpc-vswitch]
     # --force so running leftovers are released too (sweep is a hard cleanup);
     # without it a Running instance fails with IncorrectInstanceStatus.
     delete: ecctl ecs instance delete {{.id}} --force --no-wait
@@ -52,6 +53,7 @@ kinds:
     id_field: id
     runid_field: tags.run-id
     created_field: creation_time
+    depends_on: [ecs-sg, vpc-vswitch]
     delete: ecctl ecs eni delete {{.id}}
 
   - name: ecs-disk
@@ -72,15 +74,6 @@ kinds:
     created_field: creation_time
     delete: ecctl ecs command delete {{.id}}
 
-  - name: ecs-keypair
-    resource: ecs/keypair
-    list: ecctl ecs keypair list --filter tag.ecctl-e2e=1
-    items_path: $.keypairs
-    id_field: id
-    runid_field: tags.run-id
-    created_field: creation_time
-    delete: ecctl ecs keypair delete {{.id}}
-
   - name: ecs-port-range-list
     resource: ecs/port-range-list
     list: ecctl ecs port-range-list list --filter tag.ecctl-e2e=1
@@ -98,24 +91,6 @@ kinds:
     runid_field: tags.run-id
     created_field: creation_time
     delete: ecctl ecs prefix-list delete {{.id}}
-
-  - name: vpc-vswitch
-    resource: vpc/vswitch
-    list: ecctl vpc vswitch list --filter tag.ecctl-e2e=1
-    items_path: $.vswitches
-    id_field: id
-    runid_field: tags.run-id
-    created_field: creation_time
-    delete: ecctl vpc vswitch delete {{.id}}
-
-  - name: ecs-sg
-    resource: ecs/sg
-    list: ecctl ecs sg list --filter tag.ecctl-e2e=1
-    items_path: $.security_groups
-    id_field: id
-    runid_field: tags.run-id
-    created_field: creation_time
-    delete: ecctl ecs sg delete {{.id}}
 
   # Launch templates are tagged so the sweeper can reclaim them; the per-account
   # template quota is small, so leftovers from killed runs cause
@@ -136,7 +111,49 @@ kinds:
     id_field: id
     runid_field: tags.run-id
     created_field: create_time
+    depends_on: [lingjun-eni, ecs-keypair, ecs-sg, vpc-vswitch]
     delete: ecctl lingjun cluster delete {{.id}}
+
+  - name: ecs-keypair
+    resource: ecs/keypair
+    list: ecctl ecs keypair list --filter tag.ecctl-e2e=1
+    items_path: $.keypairs
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    delete: ecctl ecs keypair delete {{.id}}
+
+  - name: lingjun-eni
+    resource: lingjun/eni
+    list: ecctl lingjun eni list --filter tag.ecctl-e2e=1
+    items_path: $.enis
+    id_field: id
+    runid_field: tags.run-id
+    created_field: create_time
+    depends_on: [ecs-sg, vpc-vswitch]
+    delete: ecctl lingjun eni delete {{.id}}
+
+  - name: lingjun-er
+    resource: lingjun/er
+    list: ecctl lingjun er list --filter tag.ecctl-e2e=1
+    items_path: $.ers
+    id_field: id
+    runid_field: tags.run-id
+    created_field: create_time
+    delete: ecctl lingjun er delete {{.id}}
+
+  - name: lingjun-subnet
+    resource: lingjun/subnet
+    list: ecctl lingjun subnet list --filter tag.ecctl-e2e=1
+    items_path: $.subnets
+    id_field: id
+    runid_field: tags.run-id
+    created_field: create_time
+    delete_fields:
+      vpd: vpd
+      zone: zone
+    depends_on: [lingjun-vpd]
+    delete: ecctl lingjun subnet delete {{.id}} --vpd {{.vpd}} --zone {{.zone}}
 
   - name: lingjun-vpd
     resource: lingjun/vpd
@@ -146,6 +163,26 @@ kinds:
     runid_field: tags.run-id
     created_field: create_time
     delete: ecctl lingjun vpd delete {{.id}}
+
+  - name: vpc-vswitch
+    resource: vpc/vswitch
+    list: ecctl vpc vswitch list --filter tag.ecctl-e2e=1
+    items_path: $.vswitches
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    depends_on: [vpc]
+    delete: ecctl vpc vswitch delete {{.id}}
+
+  - name: ecs-sg
+    resource: ecs/sg
+    list: ecctl ecs sg list --filter tag.ecctl-e2e=1
+    items_path: $.security_groups
+    id_field: id
+    runid_field: tags.run-id
+    created_field: creation_time
+    depends_on: [vpc]
+    delete: ecctl ecs sg delete {{.id}}
 
   - name: vpc
     resource: vpc/vpc
@@ -177,7 +214,7 @@ non_sweepable:
   - resource: rg/policy
     reason: provider-limitation
     review_after: "2026-10-06"
-  - resource: rg/policy-version
+  - resource: rg/version
     reason: provider-limitation
     review_after: "2026-10-06"
   # ACK cluster listing cannot filter by tags; node pools and kubeconfigs can
@@ -192,3 +229,50 @@ non_sweepable:
   - resource: ack/kubeconfig
     reason: provider-limitation
     review_after: "2026-10-13"
+  # ACK templates do not support the E2E tag contract. Their explicit delete
+  # teardown and cleanup journal are the recovery path.
+  - resource: ack/template
+    reason: provider-limitation
+    review_after: "2026-10-24"
+  # These APIs do not accept tags. Deletable resources use explicit case
+  # teardown; task/report resources have no delete API and expire with their
+  # disposable cluster or remain as bounded history.
+  - resource: ack/addon
+    reason: provider-limitation
+    review_after: "2026-10-27"
+  - resource: ack/auto-repair-policy
+    reason: provider-limitation
+    review_after: "2026-10-27"
+  - resource: ack/check
+    reason: provider-no-delete
+    review_after: "2026-10-27"
+  - resource: ack/diagnosis
+    reason: shared-fixture-only
+    review_after: "2026-10-27"
+  - resource: ack/instance
+    reason: provider-limitation
+    review_after: "2026-10-27"
+  - resource: ack/report
+    reason: provider-no-delete
+    review_after: "2026-10-27"
+  - resource: ack/trigger
+    reason: provider-limitation
+    review_after: "2026-10-27"
+  - resource: ack/vuls
+    reason: provider-no-delete
+    review_after: "2026-10-27"
+  - resource: lingjun/node-group
+    reason: provider-limitation
+    review_after: "2026-10-27"
+  - resource: lingjun/net-test
+    reason: provider-no-delete
+    review_after: "2026-10-27"
+  - resource: rg/service-linked-role
+    reason: provider-limitation
+    review_after: "2026-10-27"
+  - resource: tag/associated-resource-rule
+    reason: provider-limitation
+    review_after: "2026-10-27"
+  - resource: tag/policy
+    reason: provider-limitation
+    review_after: "2026-10-27"

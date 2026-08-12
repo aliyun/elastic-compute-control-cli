@@ -18,6 +18,38 @@ func ackAddonCaller(t *testing.T, fake *fakeSpecCaller) func(args ...string) (st
 	})
 }
 
+func TestACKAddonMutationsWaitForConvergence(t *testing.T) {
+	t.Parallel()
+
+	resource, err := spec.LoadResource("", "ack", "addon")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"install", "uninstall", "upgrade"} {
+		binding := resource.Bindings[name]
+		if binding.ContextFrom["task_id"] != "$.task_id" || binding.Wait != "task_succeeded" {
+			t.Fatalf("binding %q does not wait for its ACK task: %+v", name, binding)
+		}
+	}
+	if got := resource.Bindings["modify_config"].Wait; got != "" {
+		t.Fatalf("modify_config cannot wait on a task ID that the API does not return: %q", got)
+	}
+	visible := resource.Waiters["modify_task_visible"]
+	if visible.Match.Fields["type"] != "cluster_addon_modify" ||
+		visible.Match.Excludes["task_id"] != `$captured_field("existing_modify_tasks","task_id")` {
+		t.Fatalf("modify task discovery waiter = %+v", visible)
+	}
+	for _, operationName := range []string{"create", "update", "delete", "upgrade"} {
+		found := false
+		for _, step := range resource.Operations[operationName].Workflow {
+			found = found || step.Wait == "cluster_running"
+		}
+		if !found {
+			t.Fatalf("operation %q does not wait for the ACK cluster to return to running", operationName)
+		}
+	}
+}
+
 func TestACKAddonHelpShape(t *testing.T) {
 	t.Parallel()
 
@@ -74,6 +106,8 @@ func TestACKAddonCreateRoutesToInstallAndReadback(t *testing.T) {
 	t.Parallel()
 	fake := &fakeSpecCaller{responses: []map[string]any{
 		{"request_id": "req-install", "task_id": "task-install"},
+		{"task_id": "task-install", "state": "success", "task_type": "cluster_addon_install"},
+		{"cluster_id": "c-123", "state": "running"},
 		{"name": "coredns", "version": "v1.10.0", "state": "active", "config": `{"replicas":2}`},
 	}}
 	runCLI := ackAddonCaller(t, fake)
@@ -83,7 +117,11 @@ func TestACKAddonCreateRoutesToInstallAndReadback(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("ack addon create exit %d stderr=%s stdout=%s", code, stderr, stdout)
 	}
-	if len(fake.calls) != 2 || fake.calls[0].operation != "InstallClusterAddons" || fake.calls[1].operation != "GetClusterAddonInstance" {
+	if len(fake.calls) != 4 ||
+		fake.calls[0].operation != "InstallClusterAddons" ||
+		fake.calls[1].operation != "DescribeTaskInfo" ||
+		fake.calls[2].operation != "DescribeClusterDetail" ||
+		fake.calls[3].operation != "GetClusterAddonInstance" {
 		t.Fatalf("calls = %#v", fake.calls)
 	}
 	request := fake.calls[0].request
@@ -97,12 +135,106 @@ func TestACKAddonCreateRoutesToInstallAndReadback(t *testing.T) {
 			t.Fatalf("request[%s] = %#v, want %#v; request=%#v", key, got, want, request)
 		}
 	}
-	readback := fake.calls[1].request
+	if task := fake.calls[1].request; task["task_id"] != "task-install" {
+		t.Fatalf("task request = %#v", task)
+	}
+	readback := fake.calls[3].request
 	if readback["cluster_id"] != "c-123" || readback["instance_name"] != "coredns" {
 		t.Fatalf("readback request = %#v", readback)
 	}
 	addon, _ := decodeObject(t, stdout)["addon"].(map[string]any)
 	if addon == nil || addon["name"] != "coredns" || addon["state"] != "active" {
+		t.Fatalf("unexpected output: %s", stdout)
+	}
+}
+
+func TestACKAddonDeleteRoutesNamedBodyParameter(t *testing.T) {
+	t.Parallel()
+	fake := &fakeSpecCaller{responses: []map[string]any{
+		{"request_id": "req-uninstall", "task_id": "task-uninstall"},
+		{"task_id": "task-uninstall", "state": "success", "task_type": "cluster_addon_uninstall"},
+		{"cluster_id": "c-123", "state": "running"},
+		{"addons": []any{}},
+	}}
+	runCLI := ackAddonCaller(t, fake)
+
+	stdout, stderr, code := runCLI("ack", "addon", "delete", "coredns", "--region", "cn-hangzhou",
+		"--cluster", "c-123", "--force")
+	if code != 0 {
+		t.Fatalf("ack addon delete exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if len(fake.calls) != 4 || fake.calls[0].operation != "UnInstallClusterAddons" ||
+		fake.calls[1].operation != "DescribeTaskInfo" || fake.calls[2].operation != "DescribeClusterDetail" ||
+		fake.calls[3].operation != "ListClusterAddonInstances" {
+		t.Fatalf("calls = %#v", fake.calls)
+	}
+	if task := fake.calls[1].request; task["task_id"] != "task-uninstall" {
+		t.Fatalf("task request = %#v", task)
+	}
+	request := fake.calls[0].request
+	if request["ClusterId"] != "c-123" || request["addons.1.name"] != "coredns" || request["addons.1.cleanup_cloud_resources"] != true {
+		t.Fatalf("UnInstallClusterAddons request = %#v", request)
+	}
+}
+
+func TestACKAddonUpgradeWaitsForTaskAndReadsTargetVersion(t *testing.T) {
+	t.Parallel()
+	fake := &fakeSpecCaller{responses: []map[string]any{
+		{"request_id": "req-upgrade", "task_id": "task-upgrade"},
+		{"task_id": "task-upgrade", "state": "success", "task_type": "cluster_addon_upgrade"},
+		{"cluster_id": "c-123", "state": "running"},
+		{"name": "ack-kruise", "version": "1.8.4", "state": "active"},
+	}}
+	runCLI := ackAddonCaller(t, fake)
+
+	stdout, stderr, code := runCLI("ack", "addon", "upgrade", "ack-kruise", "--region", "cn-hangzhou",
+		"--cluster", "c-123", "--version", "1.8.4")
+	if code != 0 {
+		t.Fatalf("ack addon upgrade exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if len(fake.calls) != 4 || fake.calls[0].operation != "UpgradeClusterAddons" ||
+		fake.calls[1].operation != "DescribeTaskInfo" || fake.calls[2].operation != "DescribeClusterDetail" ||
+		fake.calls[3].operation != "GetClusterAddonInstance" {
+		t.Fatalf("calls = %#v", fake.calls)
+	}
+	addon, _ := decodeObject(t, stdout)["addon"].(map[string]any)
+	if addon == nil || addon["version"] != "1.8.4" {
+		t.Fatalf("unexpected output: %s", stdout)
+	}
+}
+
+func TestACKAddonUpdateWaitsForNewModifyTask(t *testing.T) {
+	t.Parallel()
+	config := `{"featureGates":"PodUnavailableBudgetUpdateGate=true"}`
+	fake := &fakeSpecCaller{responses: []map[string]any{
+		{"tasks": []any{map[string]any{"task_id": "old-task", "task_type": "cluster_addon_modify", "state": "success"}}},
+		{},
+		{"tasks": []any{
+			map[string]any{"task_id": "new-task", "task_type": "cluster_addon_modify", "state": "running"},
+			map[string]any{"task_id": "old-task", "task_type": "cluster_addon_modify", "state": "success"},
+		}},
+		{"task_id": "new-task", "task_type": "cluster_addon_modify", "state": "success"},
+		{"cluster_id": "c-123", "state": "running"},
+		{"name": "ack-kruise", "version": "1.8.4", "state": "active", "config": config},
+	}}
+	runCLI := ackAddonCaller(t, fake)
+
+	stdout, stderr, code := runCLI("ack", "addon", "update", "ack-kruise", "--region", "cn-hangzhou",
+		"--cluster", "c-123", "--config", config)
+	if code != 0 {
+		t.Fatalf("ack addon update exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if len(fake.calls) != 6 || fake.calls[0].operation != "DescribeClusterTasks" ||
+		fake.calls[1].operation != "ModifyClusterAddon" || fake.calls[2].operation != "DescribeClusterTasks" ||
+		fake.calls[3].operation != "DescribeTaskInfo" || fake.calls[4].operation != "DescribeClusterDetail" ||
+		fake.calls[5].operation != "GetClusterAddonInstance" {
+		t.Fatalf("calls = %#v", fake.calls)
+	}
+	if got := fake.calls[1].request["body"]; got != config {
+		t.Fatalf("modify body = %#v, want %q", got, config)
+	}
+	addon, _ := decodeObject(t, stdout)["addon"].(map[string]any)
+	if addon == nil || addon["config"] != config {
 		t.Fatalf("unexpected output: %s", stdout)
 	}
 }
@@ -181,6 +313,7 @@ func TestACKAddonCatalogFlagRoutesGetAndListToCatalogAPIs(t *testing.T) {
 		t.Parallel()
 		fake := &fakeSpecCaller{responses: []map[string]any{{
 			"name": "coredns", "version": "v1.10.0", "config_schema": "{}",
+			"newer_versions": []any{map[string]any{"version": "v1.11.0", "upgradable": true}},
 		}}}
 		runCLI := ackAddonCaller(t, fake)
 
@@ -195,6 +328,11 @@ func TestACKAddonCatalogFlagRoutesGetAndListToCatalogAPIs(t *testing.T) {
 		request := fake.calls[0].request
 		if request["addon_name"] != "coredns" || request["cluster_type"] != "ManagedKubernetes" || request["profile"] != "Default" || request["region_id"] != "cn-hangzhou" {
 			t.Fatalf("DescribeAddon request = %#v", request)
+		}
+		addon, _ := decodeObject(t, stdout)["addon"].(map[string]any)
+		newer, _ := addon["newer_versions"].([]any)
+		if len(newer) != 1 {
+			t.Fatalf("newer_versions = %#v; stdout=%s", addon["newer_versions"], stdout)
 		}
 	})
 

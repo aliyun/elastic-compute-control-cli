@@ -52,6 +52,11 @@ func TestACKAuditUpdateAndGetUseClusterAuditAPIs(t *testing.T) {
 			"task_id":    "task-audit",
 		},
 		{
+			"request_id": "req-task",
+			"task_id":    "task-audit",
+			"state":      "success",
+		},
+		{
 			"request_id":       "req-get",
 			"audit_enabled":    true,
 			"sls_project_name": "k8s-log-c-ack1",
@@ -69,11 +74,14 @@ func TestACKAuditUpdateAndGetUseClusterAuditAPIs(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("ack audit update exit %d stderr=%s stdout=%s", code, stderr, stdout)
 	}
-	if len(fake.calls) != 2 || fake.calls[0].operation != "UpdateClusterAuditLogConfig" || fake.calls[1].operation != "GetClusterAuditProject" {
+	if len(fake.calls) != 3 ||
+		fake.calls[0].operation != "UpdateClusterAuditLogConfig" ||
+		fake.calls[1].operation != "DescribeTaskInfo" ||
+		fake.calls[2].operation != "GetClusterAuditProject" {
 		t.Fatalf("calls = %#v", fake.calls)
 	}
 	request := fake.calls[0].request
-	if request["clusterid"] != "c-ack1" || request["sls_project_name"] != "k8s-log-c-ack1" || request["disable"] != false {
+	if request["clusterid"] != "c-ack1" || request["body.sls_project_name"] != "k8s-log-c-ack1" || request["body.disable"] != false {
 		t.Fatalf("UpdateClusterAuditLogConfig request = %#v", request)
 	}
 	audit, _ := decodeObject(t, stdout)["audit"].(map[string]any)
@@ -111,6 +119,11 @@ func TestACKAuditControlPlaneLogUpdateAndGetUseControlPlaneLogAPIs(t *testing.T)
 			"task_id":    "task-control-plane",
 		},
 		{
+			"request_id": "req-task-control-plane",
+			"task_id":    "task-control-plane",
+			"state":      "success",
+		},
+		{
 			"request_id":  "req-check-control-plane",
 			"log_project": "k8s-log-c-ack1",
 			"log_ttl":     float64(30),
@@ -132,16 +145,19 @@ func TestACKAuditControlPlaneLogUpdateAndGetUseControlPlaneLogAPIs(t *testing.T)
 	if code != 0 {
 		t.Fatalf("ack audit control-plane-log update exit %d stderr=%s stdout=%s", code, stderr, stdout)
 	}
-	if len(fake.calls) != 2 || fake.calls[0].operation != "UpdateControlPlaneLog" || fake.calls[1].operation != "CheckControlPlaneLogEnable" {
+	if len(fake.calls) != 3 ||
+		fake.calls[0].operation != "UpdateControlPlaneLog" ||
+		fake.calls[1].operation != "DescribeTaskInfo" ||
+		fake.calls[2].operation != "CheckControlPlaneLogEnable" {
 		t.Fatalf("calls = %#v", fake.calls)
 	}
 	request := fake.calls[0].request
-	if request["ClusterId"] != "c-ack1" || request["log_project"] != "k8s-log-c-ack1" || request["log_ttl"] != 30 {
+	if request["ClusterId"] != "c-ack1" || request["body.log_project"] != "k8s-log-c-ack1" || request["body.log_ttl"] != 30 {
 		t.Fatalf("UpdateControlPlaneLog request = %#v", request)
 	}
-	components, _ := request["components"].([]string)
+	components, _ := request["body.components"].([]string)
 	if len(components) != 2 || components[0] != "apiserver" || components[1] != "kcm" {
-		t.Fatalf("UpdateControlPlaneLog components = %#v; request=%#v", request["components"], request)
+		t.Fatalf("UpdateControlPlaneLog components = %#v; request=%#v", request["body.components"], request)
 	}
 	controlPlaneLog, _ := decodeObject(t, stdout)["control_plane_log"].(map[string]any)
 	if controlPlaneLog == nil || controlPlaneLog["project"] != "k8s-log-c-ack1" {
@@ -174,7 +190,8 @@ func TestACKAuditControlPlaneLogUpdateAndGetUseControlPlaneLogAPIs(t *testing.T)
 
 func TestACKAuditControlPlaneLogDisableSendsEmptyComponents(t *testing.T) {
 	fake := &fakeSpecCaller{responses: []map[string]any{
-		{"request_id": "req-disable-control-plane"},
+		{"request_id": "req-disable-control-plane", "task_id": "task-disable-control-plane"},
+		{"request_id": "req-task-control-plane", "task_id": "task-disable-control-plane", "state": "success"},
 		{
 			"request_id": "req-check-control-plane",
 			"components": []any{},
@@ -191,15 +208,18 @@ func TestACKAuditControlPlaneLogDisableSendsEmptyComponents(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("ack audit control-plane-log disable exit %d stderr=%s stdout=%s", code, stderr, stdout)
 	}
-	if len(fake.calls) != 2 || fake.calls[0].operation != "UpdateControlPlaneLog" || fake.calls[1].operation != "CheckControlPlaneLogEnable" {
+	if len(fake.calls) != 3 ||
+		fake.calls[0].operation != "UpdateControlPlaneLog" ||
+		fake.calls[1].operation != "DescribeTaskInfo" ||
+		fake.calls[2].operation != "CheckControlPlaneLogEnable" {
 		t.Fatalf("calls = %#v", fake.calls)
 	}
 	request := fake.calls[0].request
 	if request["ClusterId"] != "c-ack1" {
 		t.Fatalf("UpdateControlPlaneLog request = %#v", request)
 	}
-	components, ok := request["components"].([]string)
+	components, ok := request["body.components"].([]string)
 	if !ok || len(components) != 0 {
-		t.Fatalf("disable components = %#v, want empty []string; request=%#v", request["components"], request)
+		t.Fatalf("disable components = %#v, want empty []string; request=%#v", request["body.components"], request)
 	}
 }

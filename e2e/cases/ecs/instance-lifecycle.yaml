@@ -3,11 +3,13 @@
 # --wait flag is needed (pass --no-wait to skip). The instance type comes from
 # the shared ECS inventory resolver.
 resource: ecs/instance
+execution: dag
 requires_params: [ecs.instance_type]
-needs: [vpc, vswitch, security_group, image]
 
 steps:
   - name: create
+    needs: [vpc, vswitch, security_group, image]
+    locks: ["ecs-instance:{{.run_name}}"]
     run: >
       ecctl ecs instance create
       --type {{.params.ecs.instance_type}}
@@ -25,6 +27,8 @@ steps:
     teardown: ecctl ecs instance delete {{.instance_id}} --force
 
   - name: get (read-back)
+    depends_on: [create]
+    locks: ["ecs-instance:{{.run_name}}"]
     run: ecctl ecs instance get {{.instance_id}}
     at: $.instance
     expect:
@@ -36,11 +40,15 @@ steps:
       hi_status: status
 
   - name: differential vs raw DescribeInstances
+    depends_on: [get (read-back)]
+    locks: ["ecs-instance:{{.run_name}}"]
     run: ecctl call ecs DescribeInstances --InstanceIds '["{{.instance_id}}"]'
     expect:
       $.response.Instances.Instance[0].Status: { eq: "{{.hi_status}}" }   # call wraps under .response
 
   - name: update (rename)
+    depends_on: [differential vs raw DescribeInstances]
+    locks: ["ecs-instance:{{.run_name}}"]
     run: ecctl ecs instance update {{.instance_id}} --name {{.run_name}}-renamed
     at: $.instance
     expect:
@@ -48,6 +56,8 @@ steps:
       name: { eq: "{{.run_name}}-renamed" }
 
   - name: get (read-back rename)
+    depends_on: [update (rename)]
+    locks: ["ecs-instance:{{.run_name}}"]
     run: ecctl ecs instance get {{.instance_id}}
     at: $.instance
     expect:
@@ -58,16 +68,22 @@ steps:
   # so an expected TODO(human) failure (monitor/exec/sendfile/renew) doesn't abort
   # the case before list runs. (A failed step aborts the rest of the case.)
   - name: list (find ours)
+    depends_on: [get (read-back rename)]
+    locks: ["ecs-instance:{{.run_name}}"]
     run: ecctl ecs instance list --filter status=Running
     assert:
       - len($.instances) >= 0
 
   - name: install assistant agent
+    depends_on: [list (find ours)]
+    locks: ["ecs-instance:{{.run_name}}"]
     run: ecctl ecs assistant install --instance-ids '["{{.instance_id}}"]'
     expect:
       $.statuses: { type: array, min_len: 1 }
 
   - name: monitor
+    depends_on: [install assistant agent]
+    locks: ["ecs-instance:{{.run_name}}"]
     run: >
       ecctl ecs instance monitor {{.instance_id}}
       --start-time {{.time.monitor_start}}
@@ -77,12 +93,16 @@ steps:
       $.monitor_data: { type: array }
 
   - name: exec
+    depends_on: [monitor]
+    locks: ["ecs-instance:{{.run_name}}"]
     run: ecctl ecs instance exec {{.instance_id}} --command 'printf ecctl-e2e'
     expect:
       $.invoke_id: { type: string, min_len: 1 }
       $.results: { type: array, min_len: 1 }
 
   - name: sendfile
+    depends_on: [exec]
+    locks: ["ecs-instance:{{.run_name}}"]
     run: >
       ecctl ecs instance sendfile {{.instance_id}}
       --file-name ecctl-e2e-{{.run_id}}.txt
@@ -94,12 +114,16 @@ steps:
       $.results: { type: array, min_len: 1 }
 
   - name: stop
+    depends_on: [sendfile]
+    locks: ["ecs-instance:{{.run_name}}"]
     run: ecctl ecs instance stop {{.instance_id}}
     at: $.instance
     expect:
       status: Stopped
 
   - name: start
+    depends_on: [stop]
+    locks: ["ecs-instance:{{.run_name}}"]
     run: ecctl ecs instance start {{.instance_id}}
     at: $.instance
     expect:
@@ -107,6 +131,8 @@ steps:
       status: Running
 
   - name: reboot
+    depends_on: [start]
+    locks: ["ecs-instance:{{.run_name}}"]
     run: ecctl ecs instance reboot {{.instance_id}}
     at: $.instance
     expect:
@@ -114,7 +140,64 @@ steps:
       status: Running
 
   - name: delete
+    depends_on: [reboot]
+    locks: ["ecs-instance:{{.run_name}}"]
     run: ecctl ecs instance delete {{.instance_id}} --force
     at: $.instance
     expect:
       id: { eq: "{{.instance_id}}" }
+
+  - name: create renewal instance
+    needs: [vpc, vswitch, security_group, image]
+    locks: ["ecs-instance-renew:{{.run_name}}"]
+    run: >
+      ecctl ecs instance create
+      --type {{.params.ecs.instance_type}}
+      --image {{.stack.image}}
+      --sg {{.stack.security_group}}
+      --vswitch {{.stack.vswitch}}
+      --name {{.run_name}}-renew
+      --instance-charge-type PrePaid
+      --period 1
+      --period-unit Month
+      --auto-pay
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+    at: $.instance
+    expect:
+      id: { type: string, prefix: i- }
+      status: Running
+    capture:
+      renew_instance_id: id
+    teardown: ecctl ecs instance delete {{.renew_instance_id}} --force
+
+  - name: get renewal instance
+    depends_on: [create renewal instance]
+    locks: ["ecs-instance-renew:{{.run_name}}"]
+    run: ecctl ecs instance get {{.renew_instance_id}}
+    at: $.instance
+    expect:
+      id: { eq: "{{.renew_instance_id}}" }
+      charge_type: { eq: PrePaid }
+    # DeleteInstance rejects in-warranty PrePaid instances (403 charge type).
+    # The ModifyInstanceChargeType call below unlocks deletion even when the
+    # async conversion does not take effect; teardowns run in LIFO order, so it
+    # executes before the create step's delete --force finalizer.
+    teardown: ecctl ecs instance update {{.renew_instance_id}} --instance-charge-type PostPaid
+
+  - name: renew
+    depends_on: [get renewal instance]
+    locks: ["ecs-instance-renew:{{.run_name}}"]
+    run: >
+      ecctl ecs instance renew {{.renew_instance_id}}
+      --period 1
+      --period-unit Month
+
+  - name: get renewed instance
+    depends_on: [renew]
+    locks: ["ecs-instance-renew:{{.run_name}}"]
+    run: ecctl ecs instance get {{.renew_instance_id}}
+    at: $.instance
+    expect:
+      id: { eq: "{{.renew_instance_id}}" }
+      charge_type: { eq: PrePaid }
+      expired_time: { type: string, min_len: 1 }

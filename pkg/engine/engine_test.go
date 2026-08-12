@@ -1265,6 +1265,88 @@ func TestWaiterStateCanTargetRequestedIDPresence(t *testing.T) {
 	if got := waiterState(spec.Waiter{Target: "present"}, probe, ProbeResult{Items: []map[string]any{{"name": "ready"}}}, nil); got != "present" {
 		t.Fatalf("present non-empty state = %q, want present", got)
 	}
+	states := ProbeResult{Items: []map[string]any{
+		{"id": "p-1", "status": "installing"},
+		{"id": "p-2", "status": "active"},
+	}}
+	if got := waiterState(spec.Waiter{Target: "active"}, probe, states, []string{"p-2"}); got != "active" {
+		t.Fatalf("matching requested id state = %q, want active", got)
+	}
+	if got := waiterState(spec.Waiter{Target: "active"}, probe, states, []string{"p-missing"}); got != "" {
+		t.Fatalf("missing requested id state = %q, want empty", got)
+	}
+	task := ProbeResult{Items: []map[string]any{{"id": "task-1", "status": "success"}}}
+	if got := waiterState(spec.Waiter{Target: "success"}, probe, task, []string{"cluster-1"}); got != "" {
+		t.Fatalf("unrelated single-item state = %q, want empty", got)
+	}
+	stateOnly := spec.Waiter{Target: "success", Match: spec.WaiterMatch{StateOnly: true}}
+	if got := waiterState(stateOnly, probe, task, []string{"cluster-1"}); got != "success" {
+		t.Fatalf("state-only single-item state = %q, want success", got)
+	}
+	stateOnly.Pending = []spec.WaiterPending{{Field: "status", Values: []string{"running"}}}
+	stateOnly.Failure.States = []string{"failed"}
+	mixed := ProbeResult{Items: []map[string]any{
+		{"id": "task-1", "status": "success"},
+		{"id": "task-2", "status": "running"},
+	}}
+	if got := waiterState(stateOnly, probe, mixed, []string{"cluster-1"}); got != "running" {
+		t.Fatalf("state-only mixed state = %q, want running", got)
+	}
+	mixed.Items[1]["status"] = "failed"
+	if got := waiterState(stateOnly, probe, mixed, []string{"cluster-1"}); got != "failed" {
+		t.Fatalf("state-only failure state = %q, want failed", got)
+	}
+	mixed.Items[1]["status"] = "success"
+	if got := waiterState(stateOnly, probe, mixed, []string{"cluster-1"}); got != "success" {
+		t.Fatalf("state-only all-target state = %q, want success", got)
+	}
+}
+
+func TestWaiterStateOnlyMatchesFailureStateCaseInsensitively(t *testing.T) {
+	waitSpec := spec.Waiter{
+		Target:  "success",
+		Match:   spec.WaiterMatch{StateOnly: true},
+		Pending: []spec.WaiterPending{{Field: "status", Values: []string{"running"}}},
+		Failure: spec.WaiterFailure{States: []string{"failed"}},
+	}
+	result := ProbeResult{Items: []map[string]any{
+		{"id": "task-1", "status": "running"},
+		{"id": "task-2", "status": "FAILED"},
+	}}
+
+	if got := waiterState(waitSpec, spec.Probe{}, result, nil); got != "FAILED" {
+		t.Fatalf("state-only mixed failure state = %q, want provider failure state preserved", got)
+	}
+}
+
+func TestWaiterStateOnlyMatchesTargetStateCaseInsensitivelyBeforeAggregating(t *testing.T) {
+	waitSpec := spec.Waiter{
+		Target: "success",
+		Match:  spec.WaiterMatch{StateOnly: true},
+	}
+	result := ProbeResult{Items: []map[string]any{
+		{"id": "task-1", "status": "SUCCESS"},
+		{"id": "task-2", "status": "running"},
+	}}
+
+	if got := waiterState(waitSpec, spec.Probe{}, result, nil); got != "running" {
+		t.Fatalf("state-only mixed target state = %q, want remaining non-target state", got)
+	}
+}
+
+func TestWaiterStateOnlyMatchesPendingValueCaseInsensitively(t *testing.T) {
+	waitSpec := spec.Waiter{
+		Target:  "success",
+		Match:   spec.WaiterMatch{StateOnly: true},
+		Pending: []spec.WaiterPending{{Field: "phase", Values: []string{"running"}}},
+	}
+	result := ProbeResult{Items: []map[string]any{
+		{"id": "task-1", "status": "SUCCESS", "phase": "RUNNING"},
+	}}
+
+	if got := waiterState(waitSpec, spec.Probe{}, result, nil); got != "RUNNING" {
+		t.Fatalf("state-only pending state = %q, want provider pending value preserved", got)
+	}
 }
 
 func TestWaiterStateCanTargetCapturedItemMatches(t *testing.T) {

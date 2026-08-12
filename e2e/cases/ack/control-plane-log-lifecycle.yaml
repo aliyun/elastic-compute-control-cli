@@ -1,0 +1,20 @@
+# Control-plane log lifecycle on the disposable shared cluster.
+resource: ack/control-plane-log
+needs: [ack_shared_cluster]
+serial: true
+
+steps:
+  - name: keep control plane logging disabled
+    run: >
+      ecctl ack audit control-plane-log update
+      --cluster {{.stack.ack_shared_cluster}}
+      --enabled=false
+    at: $.control_plane_log
+    expect:
+      cluster: { eq: "{{.stack.ack_shared_cluster}}" }
+
+  - name: get control plane log configuration
+    run: ecctl ack audit control-plane-log get --cluster {{.stack.ack_shared_cluster}}
+    at: $.control_plane_log
+    expect:
+      cluster: { eq: "{{.stack.ack_shared_cluster}}" }

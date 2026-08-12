@@ -196,7 +196,33 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		retryable := isThrottling(err) || (isReadOperation(operation) && isTransientNetworkError(err))
 		return nil, ecerrors.Service("CloudAPIError", callerCloudErrorMessage(err), retryable, cloudErrorOptions(err)...)
 	}
+	if c.Resource != "" {
+		if err := openAPIBusinessError(resp); err != nil {
+			return nil, err
+		}
+	}
 	return resp, nil
+}
+
+func openAPIBusinessError(response map[string]any) error {
+	rawCode, ok := response["Code"]
+	if !ok {
+		return nil
+	}
+	code := strings.TrimSpace(fmt.Sprint(rawCode))
+	switch strings.ToLower(code) {
+	case "", "0", "200", "ok", "success", "successful":
+		return nil
+	}
+	message := strings.TrimSpace(fmt.Sprint(response["Message"]))
+	if message == "" || message == "<nil>" {
+		message = "Alibaba Cloud API returned an unsuccessful business response"
+	}
+	requestID := strings.TrimSpace(fmt.Sprint(response["RequestId"]))
+	return ecerrors.Service("CloudAPIError", message, false,
+		ecerrors.WithRequestID(requestID),
+		ecerrors.WithRawCause(code, message),
+	)
 }
 
 // executeOpenAPIRequest calls OpenAPI, retrying with exponential backoff and
@@ -443,33 +469,54 @@ func setJSONParam(out map[string]string, key string, value any) error {
 
 func openAPIRequestBody(api *OpenAPIOperationDetail, values map[string]any) (any, map[string]bool, error) {
 	used := map[string]bool{}
-	bodyParam := api.FindParameter("body")
-	if bodyParam == nil || bodyParam.Position != "Body" {
+	bodyParam := openAPIBodyParameter(api)
+	if bodyParam == nil {
 		return nil, used, nil
 	}
-	if body, ok := values["body"]; ok {
-		used["body"] = true
+	bodyName := bodyParam.Name
+	if body, ok := values[bodyName]; ok {
+		used[bodyName] = true
 		if isEmptyOpenAPIBody(body) {
 			return nil, used, nil
 		}
 		return body, used, nil
 	}
-	body, err := flatOpenAPIBody(values, used)
+	body, err := flatOpenAPIBody(values, used, bodyName)
 	if err != nil || isEmptyOpenAPIBody(body) {
 		return nil, used, err
 	}
 	return body, used, nil
 }
 
-func flatOpenAPIBody(values map[string]any, used map[string]bool) (any, error) {
+func openAPIBodyParameter(api *OpenAPIOperationDetail) *OpenAPIParameter {
+	if openAPIStyle(api.Style) != "ROA" {
+		return nil
+	}
+	for i := range api.Parameters {
+		param := &api.Parameters[i]
+		if strings.EqualFold(param.Position, "Body") && strings.EqualFold(param.Name, "body") {
+			return param
+		}
+	}
+	for i := range api.Parameters {
+		param := &api.Parameters[i]
+		if strings.EqualFold(param.Position, "Body") {
+			return param
+		}
+	}
+	return nil
+}
+
+func flatOpenAPIBody(values map[string]any, used map[string]bool, bodyName string) (any, error) {
 	var object map[string]any
 	var items []any
+	prefix := bodyName + "."
 	for key, value := range values {
-		if !strings.HasPrefix(key, "body.") || isEmptyOpenAPIBody(value) {
+		if !strings.HasPrefix(key, prefix) || isEmptyOpenAPIBody(value) {
 			continue
 		}
 		used[key] = true
-		parts := strings.Split(strings.TrimPrefix(key, "body."), ".")
+		parts := strings.Split(strings.TrimPrefix(key, prefix), ".")
 		if len(parts) == 0 || parts[0] == "" {
 			return nil, fmt.Errorf("invalid body field %q", key)
 		}

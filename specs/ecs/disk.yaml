@@ -421,6 +421,8 @@ waiters:
   clone_finished:
     probe: clone_task
     target: Finished
+    match:
+      state_only: true
     interval: 15s
     timeout: 3600s
     failure:

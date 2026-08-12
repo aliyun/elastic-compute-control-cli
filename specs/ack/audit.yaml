@@ -67,40 +67,73 @@ probes:
       fields:
         enabled: $.audit_enabled
         project: $.sls_project_name
+  task:
+    api: DescribeTaskInfo
+    request:
+      task_id: $context.task_id
+    response:
+      item: $
+      request_id: $.request_id
+      id: $.task_id
+      state: $.state
+      fields:
+        task_id: $.task_id
+        status: $.state
+        error: $.error
+
+waiters:
+  task_succeeded:
+    probe: task
+    target: success
+    match:
+      state_only: true
+    interval: 2s
+    timeout: 600s
+    failure:
+      states: [fail, failed]
 
 bindings:
   enable_audit_log:
     api: UpdateClusterAuditLogConfig
     request:
       clusterid: $.id
-      disable: false
-      sls_project_name: $.project
+      body.disable: false
+      body.sls_project_name: $.project
       ApiParam:
         raw: $.api_param
     require_all:
       - raw: $.id
     request_id_from: $.request_id
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
   disable_audit_log:
     api: UpdateClusterAuditLogConfig
     request:
       clusterid: $.id
-      disable: true
-      sls_project_name: $.project
+      body.disable: true
+      body.sls_project_name: $.project
       ApiParam:
         raw: $.api_param
     require_all:
       - raw: $.id
     request_id_from: $.request_id
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
   update_audit_log_config:
     api: UpdateClusterAuditLogConfig
     request:
       clusterid: $.id
-      sls_project_name: $.project
+      body.sls_project_name: $.project
       ApiParam:
         raw: $.api_param
     require_all:
       - raw: $.id
     request_id_from: $.request_id
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
 
 operations:
   update:
@@ -123,11 +156,14 @@ operations:
     workflow:
       - binding: enable_audit_log
         when: input.enabled == true
+        wait_unless: input.no_wait
       - binding: disable_audit_log
         when: input.enabled == false
+        wait_unless: input.no_wait
       - binding: update_audit_log_config
         when: input.project
         unless: specified(input.enabled)
+        wait_unless: input.no_wait
       - probe: state
         ids:
           - $input.id

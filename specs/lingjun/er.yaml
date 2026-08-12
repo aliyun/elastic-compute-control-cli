@@ -314,7 +314,7 @@ waiters:
     failure:
       states: ["Not Available", Failed]
   deleted_after_delete:
-    probe: attribute
+    probe: list
     target: absent
     interval: 5s
     timeout: 600s

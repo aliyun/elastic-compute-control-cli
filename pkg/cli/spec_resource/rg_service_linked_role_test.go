@@ -45,7 +45,7 @@ func TestRGServiceLinkedRoleCreateCallsCreateServiceLinkedRole(t *testing.T) {
 		t.Fatalf("create request = %#v", fake.calls[0].request)
 	}
 	role, _ := decodeObject(t, stdout)["role"].(map[string]any)
-	if role == nil || role["service_name"] != "polardb.aliyuncs.com" {
+	if role == nil || role["name"] != "AliyunServiceRoleForPolarDB" || role["service_name"] != "polardb.aliyuncs.com" {
 		t.Fatalf("unexpected output: %s", stdout)
 	}
 }

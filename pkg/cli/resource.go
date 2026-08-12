@@ -20,6 +20,7 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/schema"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
 
@@ -64,6 +65,17 @@ func resourceAPIProduct(resource spec.ResourceSpec) string {
 		return resource.APIProduct
 	}
 	return resource.Product
+}
+
+// resourceEffectiveRegion returns the resource's fixed region when declared;
+// single-region API families (for example tag/associated-resource-rule, which
+// is served in cn-hangzhou only) must override the user-configured region for
+// both the RegionId parameter and endpoint resolution.
+func resourceEffectiveRegion(resource spec.ResourceSpec, region string) string {
+	if resource.FixedRegion != "" {
+		return resource.FixedRegion
+	}
+	return region
 }
 
 const (
@@ -306,28 +318,24 @@ func newProductCommand(options *globalOptions, stdout io.Writer, product string,
 }
 
 func publicCLIResource(product string, resource string) bool {
-	switch product {
-	case "ecs", "vpc":
-		return true
-	case "ack":
-		switch resource {
-		case "ack", "nodepool", "node", "region", "kubeconfig", "permission", "version":
-			return true
-		}
-	case "lingjun":
-		switch resource {
-		case "cluster", "vpd":
-			return true
-		}
-	case "rg":
-		switch resource {
-		case "group", "policy", "resource", "role", "version":
-			return true
-		}
-	case "tag":
-		return resource == "resource"
+	if !publicCLIProduct(product) {
+		return false
 	}
-	return false
+	switch product + "/" + resource {
+	case "ack/auto-repair-policy", "ack/diagnosis", "ack/check-item",
+		"ack/operation-plan",
+		"lingjun/lni", "lingjun/net-test", "lingjun/node", "lingjun/vcc", "lingjun/vsc":
+		return false
+	default:
+		return true
+	}
+}
+
+func publicCLIResourceAction(product string, resource string, action string) bool {
+	if !publicCLIResource(product, resource) {
+		return false
+	}
+	return product != "lingjun" || resource != "eni" || (action != "attach" && action != "detach")
 }
 
 func publicCLICommandAllowed(args []string) bool {
@@ -356,6 +364,13 @@ func publicCLICommandAllowed(args []string) bool {
 		}
 		if publicCLIDefaultResourceAction(product, positionals[1]) {
 			return true
+		}
+		if product == "ack" && len(positionals) >= 3 &&
+			(positionals[1] == "kubeconfig" || positionals[1] == "kc") && positionals[2] == "update" {
+			return false
+		}
+		if resource, action, ok := publicCLIExampleResourceAction(positionals); ok && action != "" {
+			return publicCLIResourceAction(product, resource, action)
 		}
 		return publicCLIResourceIdentifier(product, positionals[1])
 	default:
@@ -427,13 +442,69 @@ func publicCLIExample(example string) bool {
 	case "ecs", "vpc":
 		return true
 	case "ack", "lingjun", "rg", "tag":
-		if len(positionals) < 2 {
+		resource, action, ok := publicCLIExampleResourceAction(positionals)
+		if !ok {
 			return false
 		}
-		return publicCLIResourceIdentifier(product, positionals[1])
+		if action == "" {
+			return publicCLIResource(product, resource)
+		}
+		return publicCLIResourceAction(product, resource, action)
 	default:
 		return false
 	}
+}
+
+func publicCLIExampleResourceAction(positionals []string) (resource, action string, ok bool) {
+	if len(positionals) == 0 {
+		return "", "", false
+	}
+	product := positionals[0]
+	surface, found := schema.ProductList(product)
+	if !found {
+		return "", "", false
+	}
+	tail := positionals[1:]
+	for _, candidate := range surface.Resources {
+		if candidate.Name == product {
+			continue
+		}
+		path := []string{candidate.Name}
+		if candidate.Parent != "" {
+			path = []string{candidate.Parent, candidate.Name}
+		}
+		if len(tail) < len(path) {
+			continue
+		}
+		matches := true
+		for i := range path {
+			if tail[i] != path[i] {
+				matches = false
+				break
+			}
+		}
+		if !matches {
+			continue
+		}
+		if len(tail) == len(path) {
+			return candidate.Name, "", true
+		}
+		if containsString(candidate.Actions, tail[len(path)]) {
+			return candidate.Name, tail[len(path)], true
+		}
+	}
+	for _, candidate := range surface.Resources {
+		if candidate.Name != product {
+			continue
+		}
+		if len(tail) == 0 {
+			return candidate.Name, "", true
+		}
+		if containsString(candidate.Actions, tail[0]) {
+			return candidate.Name, tail[0], true
+		}
+	}
+	return "", "", false
 }
 
 func keyExamples(examples []string) []string {
@@ -527,7 +598,7 @@ func productCommandShort(product string, productSpec spec.ProductSpec, lang stri
 func newResourceCommand(options *globalOptions, stdout io.Writer, resource spec.ResourceSpec) *cobra.Command {
 	cmd := groupCommandForLanguage(resource.Product, resourceCommandShort(resource, options.lang), options.lang)
 	cmd.Long = resourceCommandLong(resource, options.lang)
-	cmd.Example = formatCommandExamples(keyExamples(resource.Examples))
+	cmd.Example = formatCommandExamples(publicCLIKeyExamples(resource.Examples, options.fullSurface))
 	preserveCommandOrderInHelp(cmd)
 	addResourceActionGroups(cmd, resource)
 	addResourceActionCommands(cmd, options, stdout, resource)
@@ -537,7 +608,7 @@ func newResourceCommand(options *globalOptions, stdout io.Writer, resource spec.
 func newResourceSubcommand(options *globalOptions, stdout io.Writer, resource spec.ResourceSpec) *cobra.Command {
 	cmd := groupCommandForLanguage(resource.Resource, resourceCommandShort(resource, options.lang), options.lang)
 	cmd.Long = resourceCommandLong(resource, options.lang)
-	cmd.Example = formatCommandExamples(keyExamples(resource.Examples))
+	cmd.Example = formatCommandExamples(publicCLIKeyExamples(resource.Examples, options.fullSurface))
 	preserveCommandOrderInHelp(cmd)
 	addResourceActionGroups(cmd, resource)
 	cmd.Aliases = append([]string(nil), resource.Aliases...)
@@ -548,11 +619,18 @@ func newResourceSubcommand(options *globalOptions, stdout io.Writer, resource sp
 func newDefaultResourceAliasSubcommand(options *globalOptions, stdout io.Writer, resource spec.ResourceSpec, alias string) *cobra.Command {
 	cmd := groupCommandForLanguage(alias, resourceCommandShort(resource, options.lang), options.lang)
 	cmd.Long = resourceCommandLong(resource, options.lang)
-	cmd.Example = formatCommandExamples(keyExamples(resource.Examples))
+	cmd.Example = formatCommandExamples(publicCLIKeyExamples(resource.Examples, options.fullSurface))
 	preserveCommandOrderInHelp(cmd)
 	addResourceActionGroups(cmd, resource)
 	addResourceActionCommands(cmd, options, stdout, resource)
 	return cmd
+}
+
+func publicCLIKeyExamples(examples []string, fullSurface bool) []string {
+	if fullSurface {
+		return keyExamples(examples)
+	}
+	return keyExamples(publicCLIExamples(examples, false))
 }
 
 func addResourceActionGroups(cmd *cobra.Command, resource spec.ResourceSpec) {
@@ -591,6 +669,9 @@ func resourceActionGroupTitle(_ string) string {
 
 func addResourceActionCommands(cmd *cobra.Command, options *globalOptions, stdout io.Writer, resource spec.ResourceSpec) {
 	for _, actionName := range orderedResourceActionNames(resource) {
+		if publicCLIFilterEnabled(options) && !publicCLIResourceAction(resource.Product, resource.Resource, actionName) {
+			continue
+		}
 		operation := resource.Operations[actionName]
 		actionCmd := newResourceActionCommand(options, stdout, resource, actionName, operation)
 		actionCmd.GroupID = resourceActionGroup(cmd.Groups())
@@ -1115,6 +1196,7 @@ func runResourceAction(cmd *cobra.Command, options *globalOptions, stdout io.Wri
 	if err != nil {
 		return err
 	}
+	region = resourceEffectiveRegion(resource, region)
 	input, timeout, err := resourceActionInput(cmd, resource, actionName, operation, args)
 	if err != nil {
 		return err

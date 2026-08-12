@@ -1,0 +1,49 @@
+# Complete Lingjun enterprise router lifecycle.
+resource: lingjun/er
+requires_prerequisites: [lingjun.network]
+timeout: 60m
+serial: true
+
+steps:
+  - name: create
+    run: >
+      ecctl lingjun er create
+      --name {{.resource_prefix}}-er
+      --description "ecctl E2E ER {{.run_id}}"
+      --master-zone {{.prerequisites.lingjun.network.zone}}
+      --tag ecctl-e2e=1 --tag run-id={{.run_id}}
+      --timeout 20m
+    at: $.er
+    expect:
+      id: { type: string, min_len: 1 }
+      name: { eq: "{{.resource_prefix}}-er" }
+    capture:
+      lingjun_er_id: id
+    teardown: ecctl lingjun er delete {{.lingjun_er_id}} --timeout 20m
+
+  - name: get
+    run: ecctl lingjun er get {{.lingjun_er_id}}
+    at: $.er
+    expect:
+      id: { eq: "{{.lingjun_er_id}}" }
+
+  - name: list
+    run: ecctl lingjun er list --filter id={{.lingjun_er_id}} --limit 10
+    assert:
+      - len($.ers) >= 1
+
+  - name: update
+    run: >
+      ecctl lingjun er update {{.lingjun_er_id}}
+      --name {{.resource_prefix}}-er-updated
+      --description "ecctl E2E ER updated {{.run_id}}"
+      --timeout 20m
+    at: $.er
+    expect:
+      id: { eq: "{{.lingjun_er_id}}" }
+      name: { eq: "{{.resource_prefix}}-er-updated" }
+
+  - name: delete
+    run: ecctl lingjun er delete {{.lingjun_er_id}} --timeout 20m
+    expect:
+      $.deleted: { eq: true }

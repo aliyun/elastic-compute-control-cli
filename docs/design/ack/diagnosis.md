@@ -11,7 +11,7 @@
 设计目标：覆盖集群专项问题排查场景（节点、网络、负载、Ingress 等），一次诊断 = 一份诊断报告。需要注意：
 
 1. 诊断是**一次性触发 + 异步**操作：`create` 触发后默认等待诊断完成并回读结果，避免用户再手工拉取一次 `get`。
-2. `check-item` 是 `diagnosis` 的子对象，承载诊断类型的检查项目录（元信息），只有 `list` 一个动作；与具体诊断实例无关。
+2. `check-item` 是 `diagnosis` 的子对象，承载具体诊断报告中的检查项，只有 `list` 一个动作；必须提供诊断 ID。
 3. **不提供 `list`**：底层 API 不支持诊断历史列举；用户需自行记录 `create` 返回的诊断 ID，后续通过 `get <diagnosisId>` 复读。
 4. **不提供 `delete`**：底层 API 不支持，诊断报告由平台侧生命周期管理。
 
@@ -40,7 +40,7 @@
 
 - [GetClusterDiagnosisCheckItems](https://help.aliyun.com/zh/ack/ack-managed-and-ack-dedicated/developer-reference/api-cs-2015-12-15-getclusterdiagnosischeckitems)：列出指定诊断类型的检查项目录。
 
-注意事项：`check-item` 是 `diagnosis` 的子对象，承载"某诊断类型会检查哪些维度"的元信息；只暴露 `list` 一个词表内动作，参照 ecs `diagnostic metric-set list` 子对象模式，不再使用 `diagnosis check-items` 这种非词表动词。通过 `--type` 指定诊断类型；不需要诊断 ID，也不返回诊断结果。
+注意事项：`check-item` 是 `diagnosis` 的子对象，只暴露 `list` 一个词表内动作。底层 API 路径要求真实诊断 ID，因此命令使用 `list <diagnosis-id> --cluster <cluster-id>`；诊断 ID 来自 `diagnosis create` 的返回值。
 
 ## 暂不进入主命令面的 API
 

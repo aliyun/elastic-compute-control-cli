@@ -85,6 +85,61 @@ steps:
 	}
 }
 
+func TestRunNotFoundOKAcceptsNotFoundExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a bash script")
+	}
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "ecctl")
+	if err := os.WriteFile(fake, []byte(`#!/usr/bin/env bash
+echo "$*" >> "$FAKE_LOG"
+if [[ "$*" == *"delete "* ]]; then echo '{"error":{"code":"NotFound","message":"resource does not exist"}}'; exit 4; fi
+echo '{}'
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	casesDir := filepath.Join(dir, "cases", "t")
+	if err := os.MkdirAll(casesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(casesDir, "thing.yaml"), []byte(`resource: t/thing
+steps:
+  - name: clear
+    run: ecctl t thing delete maybe-gone
+    not_found_ok: true
+  - name: strict delete
+    run: ecctl t thing delete strict-missing
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "calls.log")
+	t.Setenv("FAKE_LOG", logPath)
+
+	run, err := Run(context.Background(), Options{
+		CasesDir: casesDir, InputsDir: filepath.Join(dir, "inputs"), RunName: "test", RunID: "test",
+		EcctlBin: fake, StepTimeout: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(run.Cases) != 1 {
+		t.Fatalf("cases = %+v", run.Cases)
+	}
+	steps := map[string]report.Step{}
+	for _, step := range run.Cases[0].Steps {
+		steps[step.Name] = step
+	}
+	if got := steps["clear"]; got.Status != report.StatusPass {
+		t.Fatalf("clear status = %q, want pass: %+v", got.Status, got)
+	}
+	if got := steps["strict delete"]; got.Status != report.StatusFail {
+		t.Fatalf("strict delete status = %q, want fail: %+v", got.Status, got)
+	}
+	if run.Summary.Passed != 0 || run.Summary.Failed != 1 {
+		t.Fatalf("summary = %+v", run.Summary)
+	}
+}
+
 func TestRunRendersRelativeMonitorWindow(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake uses a bash script")
@@ -217,11 +272,13 @@ echo '{"resource":{"id":"res-123"}}'
 	if err := os.WriteFile(stack, []byte(`
 provision:
   - id: vpc
+    resource: test/vpc
     run: ecctl test stack vpc create
     at: $.resource
     capture: { vpc_id: id }
     teardown: ecctl test stack vpc delete {{.vpc_id}}
   - id: image
+    resource: test/image
     run: ecctl test stack image create
     at: $.resource
     capture: { image_id: id }
@@ -277,11 +334,13 @@ echo '{"resource":{"id":"res-123"}}'
 	if err := os.WriteFile(stack, []byte(`
 provision:
   - id: vpc
+    resource: test/vpc
     run: ecctl test stack vpc create
     at: $.resource
     capture: { vpc_id: id }
     teardown: ecctl test stack vpc delete {{.vpc_id}}
   - id: image
+    resource: test/image
     run: ecctl test stack image create
     at: $.resource
     capture: { image_id: id }
@@ -588,7 +647,7 @@ steps:
 	}
 }
 
-func TestRunSkipsOnlyACKUpgradeCaseWhenNoUpgradePathExists(t *testing.T) {
+func TestRunSkipsOnlyACKCasesWithoutDynamicLifecycleCandidates(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake uses a bash script")
 	}
@@ -598,6 +657,7 @@ func TestRunSkipsOnlyACKUpgradeCaseWhenNoUpgradePathExists(t *testing.T) {
 echo "$*" >> "$FAKE_LOG"
 case "$*" in
   *"ack version list"*) echo '{"versions":[{"version":"1.36.1-aliyun.1","creatable":true}]}' ;;
+  *"ack addon list"*) echo '{"addons":[]}' ;;
   *) echo '{}' ;;
 esac
 `), 0o755); err != nil {
@@ -626,6 +686,16 @@ steps:
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(casesDir, "addon.yaml"), []byte(`
+resource: ack/addon
+requires_params: [ack.addon_name, ack.addon_version, ack.addon_upgrade_version]
+needs: [vpc]
+steps:
+  - name: create
+    run: ecctl ack addon create {{.params.ack.addon_name}} --cluster c-example --version {{.params.ack.addon_version}}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	policy := filepath.Join(dir, "parameter-policy.yaml")
 	if err := os.WriteFile(policy, []byte("ecs: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -634,6 +704,7 @@ steps:
 	if err := os.WriteFile(stack, []byte(`
 provision:
   - id: vpc
+    resource: test/vpc
     run: ecctl test stack create
     at: $.vpc
     capture: { vpc: id }
@@ -651,13 +722,13 @@ provision:
 		RunName: "ecctl-e2e-test", RunID: "test", EcctlBin: fake, StepTimeout: 30 * time.Second,
 	})
 	if err != nil {
-		t.Fatalf("missing upgrade path must not abort ACK CRUD: %v", err)
+		t.Fatalf("missing dynamic lifecycle candidate must not abort ACK CRUD: %v", err)
 	}
 	statuses := map[string]string{}
 	for _, result := range run.Cases {
 		statuses[result.Name] = result.Status
 	}
-	if statuses["crud"] != report.StatusPass || statuses["upgrade"] != report.StatusSkipped {
+	if statuses["crud"] != report.StatusPass || statuses["upgrade"] != report.StatusSkipped || statuses["addon"] != report.StatusSkipped {
 		t.Fatalf("case statuses = %#v; cases=%+v", statuses, run.Cases)
 	}
 	logData, err := os.ReadFile(logPath)
@@ -703,10 +774,12 @@ esac
 	if err := os.WriteFile(stack, []byte(`
 provision:
   - id: vpc
+    resource: test/vpc
     run: ecctl test stack vpc create
     at: $.vpc
     capture: { vpc: id }
   - id: vswitch
+    resource: test/vswitch
     needs: [vpc]
     requires_params: [ecs.zone]
     run: ecctl test stack vswitch create --zone {{.params.ecs.zone}}
@@ -804,9 +877,11 @@ esac
 	if err := os.WriteFile(stack, []byte(`
 provision:
   - id: vswitch
+    resource: test/vswitch
     requires_params: [ecs.zone]
     run: ecctl test stack vswitch create
   - id: image
+    resource: test/image
     requires_params: [ecs.image_id]
     run: ecctl test stack image create
 `), 0o644); err != nil {
@@ -848,6 +923,70 @@ provision:
 	}
 }
 
+func TestRunFallsBackToNodeGroupProfileWithoutLingjunCluster(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a shell script")
+	}
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "ecctl")
+	if err := os.WriteFile(fake, []byte(`#!/usr/bin/env bash
+case "$*" in
+  *"DescribeZones"*) echo '{"zones":[{"ZoneId":"cn-hangzhou-b"}]}' ;;
+  *"ListMachineTypes"*) echo '{"machine_types":[{"Name":"efg2.C48vNHsbn","Type":"Public"}]}' ;;
+  *"ListImages"*) echo '{"images":[{"ImageId":"img-e2e","Description":"efg2.C48vNHsbn public image"}]}' ;;
+  *) echo '{}' ;;
+esac
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	casesDir := filepath.Join(dir, "cases", "lingjun")
+	if err := os.MkdirAll(casesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(casesDir, "node.yaml"), []byte(`
+resource: lingjun/node
+requires_params: [lingjun.hpn_zone]
+requires_prerequisites: [lingjun.cluster_network]
+steps:
+  - name: list
+    run: ecctl lingjun node list --free --filter zone={{.prerequisites.lingjun.cluster_network.zone}}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	policy := filepath.Join(dir, "parameter-policy.yaml")
+	if err := os.WriteFile(policy, []byte(`
+ecs:
+  cores: [1]
+  image_family: acs:alibaba_cloud_linux_3_2104_lts_x64
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run, err := Run(context.Background(), Options{
+		CasesDir: casesDir, InputsDir: filepath.Join(dir, "inputs"),
+		ParameterPolicy: policy, ParameterMode: "auto", Region: "cn-hangzhou", RunName: "ecctl-e2e-test",
+		RunID: "test", EcctlBin: fake, StepTimeout: 30 * time.Second,
+		Regions: map[string]Region{"primary": {ID: "cn-hangzhou", Prerequisites: map[string]any{
+			"lingjun": map[string]any{"cluster_network": map[string]any{
+				"zone": "cn-hangzhou-b", "hpn_zone": "B1",
+				"machine_type": "efg2.C48vNHsbn", "image_id": "img-e2e", "resource_group_id": "rg-e2e",
+			}},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Summary.Failed != 0 {
+		t.Fatalf("run failed: %+v", run.Cases)
+	}
+	lingjun, ok := run.Parameters["lingjun"].(map[string]any)
+	if !ok {
+		t.Fatalf("lingjun parameters missing after node-group profile fallback: %#v", run.Parameters)
+	}
+	if lingjun["zone"] != "cn-hangzhou-b" || lingjun["machine_type"] != "efg2.C48vNHsbn" {
+		t.Fatalf("resolved Lingjun parameters = %#v", lingjun)
+	}
+}
+
 func TestRunResolvesLingjunParamsFromDynamicInventory(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake uses a shell script")
@@ -856,7 +995,7 @@ func TestRunResolvesLingjunParamsFromDynamicInventory(t *testing.T) {
 	fake := filepath.Join(dir, "ecctl")
 	if err := os.WriteFile(fake, []byte(`#!/usr/bin/env bash
 case "$*" in
-  *"lingjun node list"*) echo '{"nodes":[{"node_group":"ng-a","hpn_zone":"hpn-a","zone":"cn-hangzhou-b","machine_type":"lingjun.g1xlarge","image_id":"img-lite-1"},{"node_group":"ng-b","hpn_zone":"hpn-a","zone":"cn-hangzhou-b","machine_type":"lingjun.g1xlarge","image_id":"img-lite-1"}]}' ;;
+  *"ListFreeNodes"*) echo '{"response":{"Nodes":[{"NodeGroupId":"ng-a","HpnZone":"hpn-a","ZoneId":"cn-hangzhou-b","MachineType":"lingjun.g1xlarge","ImageId":"img-lite-1"},{"NodeGroupId":"ng-b","HpnZone":"hpn-a","ZoneId":"cn-hangzhou-b","MachineType":"lingjun.g1xlarge","ImageId":"img-lite-1"}]}}' ;;
   *) echo '{}' ;;
 esac
 `), 0o755); err != nil {
@@ -913,7 +1052,7 @@ func TestRunReusesPreResolvedLingjunParams(t *testing.T) {
 	logPath := filepath.Join(dir, "calls.log")
 	if err := os.WriteFile(fake, []byte(`#!/usr/bin/env bash
 echo "$*" >> "$FAKE_LOG"
-if [[ "$*" == *"--limit 100"* ]]; then
+if [[ "$*" == *"ListFreeNodes"* ]]; then
   echo '{"error":{"code":"DuplicateInventoryQuery"}}'
   exit 1
 fi
@@ -963,7 +1102,7 @@ steps:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(log), "--limit 100") {
+	if strings.Contains(string(log), "ListFreeNodes") {
 		t.Fatalf("Lingjun inventory was queried twice:\n%s", log)
 	}
 	if !strings.Contains(string(log), "--filter hpn-zone=hpn-a --filter machine-type=lingjun.g1xlarge") {
@@ -1070,7 +1209,7 @@ steps:
 	}
 }
 
-func TestRunPersistsCleanupJournalWhenCreateSucceeds(t *testing.T) {
+func TestRunRemovesCleanupJournalEntryAfterCleanupSucceeds(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake uses a bash script")
 	}
@@ -1117,8 +1256,173 @@ steps:
 	if err := json.Unmarshal(data, &journal); err != nil {
 		t.Fatal(err)
 	}
-	if journal.RunID != "test" || len(journal.Entries) != 1 || journal.Entries[0].Teardown != "ecctl t thing delete res-123" {
+	if journal.RunID != "test" || len(journal.Entries) != 0 {
 		t.Fatalf("journal = %s", data)
+	}
+}
+
+func TestRunRemovesCleanupJournalEntryWhenExplicitDeleteSatisfiesFinalizer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a bash script")
+	}
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "ecctl")
+	if err := os.WriteFile(fake, []byte(`#!/usr/bin/env bash
+echo "$*" >> "$FAKE_LOG"
+echo '{"resource":{"id":"res-123"}}'
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	casesDir := filepath.Join(dir, "cases", "t")
+	if err := os.MkdirAll(casesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(casesDir, "thing.yaml"), []byte(`
+resource: t/thing
+steps:
+  - name: create
+    run: ecctl t thing create
+    at: $.resource
+    capture: { id: id }
+    teardown: ecctl t thing delete {{.id}}
+  - name: delete
+    run: ecctl t thing delete {{.id}}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "calls.log")
+	t.Setenv("FAKE_LOG", logPath)
+	journalPath := filepath.Join(dir, "cleanup-journal.json")
+	if _, err := Run(context.Background(), Options{
+		CasesDir: filepath.Join(dir, "cases"), InputsDir: filepath.Join(dir, "inputs"),
+		CleanupJournal: journalPath, RunName: "ecctl-e2e-test", RunID: "test",
+		EcctlBin: fake, StepTimeout: 30 * time.Second,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count := strings.Count(string(logData), "t thing delete res-123"); count != 1 {
+		t.Fatalf("delete count = %d, log=%s", count, logData)
+	}
+	data, err := os.ReadFile(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var journal report.CleanupJournal
+	if err := json.Unmarshal(data, &journal); err != nil {
+		t.Fatal(err)
+	}
+	if len(journal.Entries) != 0 {
+		t.Fatalf("satisfied journal retained entries: %s", data)
+	}
+}
+
+func TestRunDoesNotSatisfyFinalizerBeforeStepAssertionsPass(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a bash script")
+	}
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "ecctl")
+	if err := os.WriteFile(fake, []byte(`#!/usr/bin/env bash
+echo "$*" >> "$FAKE_LOG"
+if [[ "$*" == *" delete "* ]]; then echo '{"deleted":false}'; exit 0; fi
+echo '{"resource":{"id":"res-123"}}'
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	casesDir := filepath.Join(dir, "cases", "t")
+	if err := os.MkdirAll(casesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(casesDir, "thing.yaml"), []byte(`
+resource: t/thing
+steps:
+  - name: create
+    run: ecctl t thing create
+    at: $.resource
+    capture: { id: id }
+    teardown: ecctl t thing delete {{.id}}
+  - name: delete
+    run: ecctl t thing delete {{.id}}
+    expect:
+      $.deleted: { eq: true }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "calls.log")
+	t.Setenv("FAKE_LOG", logPath)
+	run, err := Run(context.Background(), Options{
+		CasesDir: filepath.Join(dir, "cases"), InputsDir: filepath.Join(dir, "inputs"),
+		CleanupJournal: filepath.Join(dir, "cleanup-journal.json"),
+		RunName:        "ecctl-e2e-test", RunID: "test", EcctlBin: fake, StepTimeout: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Summary.Failed == 0 {
+		t.Fatalf("failed delete assertion did not fail run: %+v", run.Cases)
+	}
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count := strings.Count(string(logData), "t thing delete res-123"); count != 2 {
+		t.Fatalf("delete count = %d, want explicit attempt plus finalizer; log=%s", count, logData)
+	}
+}
+
+func TestRunRetainsCleanupJournalEntryWhenCleanupFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a bash script")
+	}
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "ecctl")
+	if err := os.WriteFile(fake, []byte(`#!/usr/bin/env bash
+if [[ "$*" == *" delete "* ]]; then echo '{"error":{"code":"DeleteFailed"}}'; exit 2; fi
+echo '{"resource":{"id":"res-123"}}'
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	casesDir := filepath.Join(dir, "cases", "t")
+	if err := os.MkdirAll(casesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(casesDir, "thing.yaml"), []byte(`
+resource: t/thing
+steps:
+  - name: create
+    run: ecctl t thing create
+    at: $.resource
+    capture: { id: id }
+    teardown: ecctl t thing delete {{.id}}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	journalPath := filepath.Join(dir, "cleanup-journal.json")
+	run, err := Run(context.Background(), Options{
+		CasesDir: filepath.Join(dir, "cases"), InputsDir: filepath.Join(dir, "inputs"),
+		CleanupJournal: journalPath, RunName: "ecctl-e2e-test", RunID: "test",
+		EcctlBin: fake, StepTimeout: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Summary.Failed == 0 {
+		t.Fatalf("cleanup failure did not fail run: %+v", run.Cases)
+	}
+	data, err := os.ReadFile(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var journal report.CleanupJournal
+	if err := json.Unmarshal(data, &journal); err != nil {
+		t.Fatal(err)
+	}
+	if len(journal.Entries) != 1 || journal.Entries[0].Teardown != "ecctl t thing delete res-123" {
+		t.Fatalf("failed cleanup was removed from journal: %s", data)
 	}
 }
 
@@ -1201,14 +1505,14 @@ echo '{"image":{"id":"m-copy"}}'
 	}
 	if err := os.WriteFile(filepath.Join(casesDir, "image-copy.yaml"), []byte(`
 resource: ecs/image
-requires_prerequisites: [ecs.image]
+requires_prerequisites: [test.primary]
 region_requirements:
   destination:
-    requires_prerequisites: [ecs.image]
+    requires_prerequisites: [test.primary]
     distinct_from: primary
 steps:
   - name: copy
-    run: ecctl ecs image copy {{.prerequisites.ecs.image.image_id}} --bucket {{.prerequisites.ecs.image.oss_bucket}} --destination-region {{.regions.destination.id}}
+    run: ecctl ecs image copy {{.prerequisites.test.primary.image_id}} --bucket {{.prerequisites.test.primary.bucket}} --destination-region {{.regions.destination.id}}
     at: $.image
     capture: { image_id: id }
     teardown: ecctl ecs image delete {{.image_id}}
@@ -1229,13 +1533,13 @@ steps:
 		Regions: map[string]Region{
 			"primary": {
 				ID: "cn-hangzhou",
-				Prerequisites: map[string]any{"ecs": map[string]any{"image": map[string]any{
-					"image_id": "m-source", "oss_bucket": "e2e-images",
+				Prerequisites: map[string]any{"test": map[string]any{"primary": map[string]any{
+					"image_id": "m-source", "bucket": "e2e-images",
 				}}},
 			},
 			"destination": {
 				ID:            "cn-zhangjiakou",
-				Prerequisites: map[string]any{"ecs": map[string]any{"image": map[string]any{"enabled": true}}},
+				Prerequisites: map[string]any{"test": map[string]any{"primary": map[string]any{"enabled": true}}},
 			},
 		},
 		RunName:     "ecctl-e2e-test",
@@ -1271,5 +1575,125 @@ steps:
 	}
 	if journal.ExecutionID != "execution-01" || journal.RegionRole != "destination" || journal.Region != "cn-zhangjiakou" {
 		t.Fatalf("destination journal = %s", data)
+	}
+}
+
+func TestRunRetriesTransientNetworkError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a bash script")
+	}
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "ecctl")
+	if err := os.WriteFile(fake, []byte(`#!/usr/bin/env bash
+echo "$*" >> "$FAKE_LOG"
+COUNT=$(cat "${FAKE_LOG}.count" 2>/dev/null || echo 0)
+if [ "$COUNT" -eq 0 ]; then
+    echo 1 > "${FAKE_LOG}.count"
+    echo '{"error":{"code":"CloudAPIError","kind":"service","message":"dial tcp 47.113.160.230:443: connect: bad file descriptor"}}'
+    exit 2
+fi
+echo '{"thing":{"id":"t-1"}}'
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	casesDir := filepath.Join(dir, "cases", "test")
+	if err := os.MkdirAll(casesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(casesDir, "thing.yaml"), []byte(`
+resource: test/thing
+steps:
+  - name: get
+    run: ecctl test thing get
+    at: $.thing
+    expect:
+      id: { eq: "t-1" }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "calls.log")
+	t.Setenv("FAKE_LOG", logPath)
+	// Use short retry delays so the test completes quickly.
+	original := stepRetryDelays
+	stepRetryDelays = []time.Duration{10 * time.Millisecond}
+	t.Cleanup(func() { stepRetryDelays = original })
+
+	run, err := Run(context.Background(), Options{
+		CasesDir:    filepath.Join(dir, "cases"),
+		InputsDir:   filepath.Join(dir, "inputs"),
+		RunName:     "ecctl-e2e-test",
+		RunID:       "test",
+		EcctlBin:    fake,
+		StepTimeout: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Summary.Failed != 0 {
+		t.Fatalf("step should pass after retry: %+v", run.Cases)
+	}
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count := strings.Count(string(log), "test thing get"); count != 2 {
+		t.Fatalf("expected 2 calls (1 fail + 1 retry), got %d: %s", count, log)
+	}
+}
+
+func TestRunDoesNotRetryNonNetworkError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a bash script")
+	}
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "ecctl")
+	if err := os.WriteFile(fake, []byte(`#!/usr/bin/env bash
+echo "$*" >> "$FAKE_LOG"
+echo '{"error":{"code":"InvalidParameter","kind":"validation","message":"instance type not supported"}}'
+exit 2
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	casesDir := filepath.Join(dir, "cases", "test")
+	if err := os.MkdirAll(casesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(casesDir, "thing.yaml"), []byte(`
+resource: test/thing
+steps:
+  - name: get
+    run: ecctl test thing get
+    at: $.thing
+    expect:
+      id: { eq: "t-1" }
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "calls.log")
+	t.Setenv("FAKE_LOG", logPath)
+	original := stepRetryDelays
+	stepRetryDelays = []time.Duration{10 * time.Millisecond}
+	t.Cleanup(func() { stepRetryDelays = original })
+
+	run, err := Run(context.Background(), Options{
+		CasesDir:    filepath.Join(dir, "cases"),
+		InputsDir:   filepath.Join(dir, "inputs"),
+		RunName:     "ecctl-e2e-test",
+		RunID:       "test",
+		EcctlBin:    fake,
+		StepTimeout: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Summary.Failed != 1 {
+		t.Fatalf("step should fail without retry: %+v", run.Cases)
+	}
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count := strings.Count(string(log), "test thing get"); count != 1 {
+		t.Fatalf("expected 1 call (no retry for non-network error), got %d: %s", count, log)
 	}
 }

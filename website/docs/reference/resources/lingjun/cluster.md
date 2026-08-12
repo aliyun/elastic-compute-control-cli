@@ -33,6 +33,7 @@ Create a Lingjun cluster
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `--name` | string | ✓ | Lingjun cluster name |
+| `--node-groups` | string | ✓ | Node groups JSON array matching the Lingjun API shape |
 | `--region` | string | ✓ | Alibaba Cloud region |
 | `--cluster-type` | string |  | Lingjun cluster type |
 | `--components` | string |  | Components JSON array matching the Lingjun API shape |
@@ -41,7 +42,6 @@ Create a Lingjun cluster
 | `--ignore-failed-node-tasks` | boolean |  | Skip failed node tasks when the API supports it |
 | `--networks` | string |  | Network JSON object matching the Lingjun API shape |
 | `--nimiz-vswitches` | string |  | NIMIZ VSwitches JSON array |
-| `--node-groups` | string |  | Node groups JSON array matching the Lingjun API shape |
 | `--open-eni-jumbo-frame` | boolean |  | Enable ENI jumbo frames |
 | `--resource-group` | string |  | Resource group ID |
 | `--tag` | key_value |  | Tag assignment key=value |

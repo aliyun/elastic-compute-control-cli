@@ -32,30 +32,9 @@ Issue kubeconfig
 |---|---|---|---|
 | `--cluster` | string | ✓ | ACK cluster ID |
 | `--region` | string | ✓ | Alibaba Cloud region |
-| `--expire-time` | integer |  | KubeConfig validity duration; create sends minutes, update sends hours as required by ACK |
+| `--expire-time` | integer |  | KubeConfig validity duration in minutes |
 | `--private-ip` | boolean |  | return the private endpoint kubeconfig |
 | `--user-id` | string |  | RAM user or role ID for subaccount kubeconfig issuance or user-scope state queries |
-
-## update
-
-```bash
-ecctl ack kubeconfig update [flags]
-```
-
-Update kubeconfig expiration
-
-- Kind: `mutation` · Risk: medium
-
-| API | When called | Purpose |
-|---|---|---|
-| `UpdateK8sClusterUserConfigExpire` | Every time the command runs. | Perform the resource operation. |
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `--cluster` | string | ✓ | ACK cluster ID |
-| `--expire-time` | integer | ✓ | KubeConfig validity duration; create sends minutes, update sends hours as required by ACK |
-| `--region` | string | ✓ | Alibaba Cloud region |
-| `--user-id` | string | ✓ | RAM user or role ID for subaccount kubeconfig issuance or user-scope state queries |
 
 ## get
 

@@ -420,6 +420,8 @@ waiters:
   task_succeeded:
     probe: task
     target: execution_success
+    match:
+      state_only: true
     interval: 5s
     timeout: 1800s
     failure:

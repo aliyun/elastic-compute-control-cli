@@ -12,7 +12,7 @@ func TestMultiExecutionRenderersExposeExecutionAndRegionMapping(t *testing.T) {
 	started := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
 	run := Aggregate("run-1", "public", "ecctl-public", []Execution{
 		{
-			ID: "execution-01", Signature: "primary=[ecs.image]",
+			ID: "execution-01", Signature: "primary=[test.optional]",
 			Regions:   map[string]string{"primary": "cn-hangzhou"},
 			Attempts:  []ExecutionAttempt{{Regions: map[string]string{"primary": "cn-hangzhou"}, Status: StatusPass}},
 			StartedAt: started, FinishedAt: started.Add(time.Minute),

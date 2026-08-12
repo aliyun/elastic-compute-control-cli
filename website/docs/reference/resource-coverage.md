@@ -24,12 +24,27 @@ ecctl schema --list ack
 | Resource | Actions |
 |---|---|
 | `ack` | `list`, `get`, `create`, `update`, `delete`, `upgrade` |
-| `kubeconfig` | `list`, `get`, `create`, `update`, `revoke` |
+| `addon` | `list`, `get`, `create`, `update`, `delete`, `upgrade` |
+| `alert` | `update` |
+| `audit` | `get`, `update` |
+| `check` | `list`, `get`, `create` |
+| `inspect config` | `get`, `update`, `delete` |
+| `audit control-plane-log` | `get`, `update` |
+| `event` | `list` |
+| `inspect` | grouping command |
+| `policy instance` | `list`, `get`, `create`, `update`, `delete` |
+| `kubeconfig` | `list`, `get`, `create`, `revoke` |
 | `node` | `list`, `get`, `delete`, `attach` |
 | `nodepool` | `list`, `get`, `create`, `update`, `delete`, `attach`, `detach`, `repair`, `upgrade` |
 | `permission` | `list`, `get`, `update`, `delete` |
+| `policy` | `list`, `get` |
 | `region` | `list` |
+| `inspect report` | `list`, `get`, `create` |
+| `task` | `list`, `get`, `cancel`, `pause`, `resume` |
+| `template` | `list`, `get`, `create`, `update`, `delete` |
+| `trigger` | `list`, `get`, `create`, `delete` |
 | `version` | `list` |
+| `vuls` | `list`, `create` |
 
 ACK cluster commands can use the short product-level form:
 
@@ -72,7 +87,41 @@ ecctl schema --list lingjun
 | Resource | Actions |
 |---|---|
 | `cluster` | `list`, `get`, `create`, `update`, `delete` |
+| `eni` | `list`, `get`, `create`, `update`, `delete` |
+| `er` | `list`, `get`, `create`, `update`, `delete` |
+| `node-group` | `list`, `get`, `create`, `update`, `delete` |
+| `subnet` | `list`, `get`, `create`, `update`, `delete` |
 | `vpd` | `list`, `get`, `create`, `update`, `delete` |
+
+## Resource Group
+
+```bash
+ecctl schema --list rg
+```
+
+| Resource | Actions |
+|---|---|
+| `admin-setting` | `get`, `update` |
+| `associated-transfer` | `list`, `update`, `disable`, `enable` |
+| `group` | `list`, `get`, `create`, `update`, `delete` |
+| `notification` | `get`, `disable`, `enable` |
+| `policy` | `list`, `get`, `create`, `delete`, `attach`, `detach` |
+| `resource` | `list`, `update` |
+| `role` | `list`, `get`, `create`, `update`, `delete` |
+| `service-linked-role` | `create`, `delete` |
+| `policy version` | `list`, `get`, `create`, `update`, `delete` |
+
+## Tag
+
+```bash
+ecctl schema --list tag
+```
+
+| Resource | Actions |
+|---|---|
+| `associated-resource-rule` | `list`, `create`, `update`, `delete` |
+| `policy` | `list`, `get`, `create`, `update`, `delete`, `attach`, `detach` |
+| `resource` | `list`, `apply`, `remove` |
 
 ## VPC
 

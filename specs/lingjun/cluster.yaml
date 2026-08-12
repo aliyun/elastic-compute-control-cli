@@ -378,7 +378,8 @@ operations:
         - hpn_zone
         - components
         - networks
-        - node_groups
+        - node_groups:
+            required: true
         - nimiz_vswitches
         - resource_group
         - tag

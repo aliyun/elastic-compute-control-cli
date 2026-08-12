@@ -7,8 +7,8 @@ description: What ecctl is, what it covers, and where to start.
 # Overview
 
 `ecctl` is an Agent-first command-line controller for Alibaba Cloud compute,
-container, and network resources. It exposes a consistent command shape for
-resource operations:
+container, network, and governance resources. It exposes a consistent command
+shape for resource operations:
 
 ```bash
 ecctl <product> <resource> <action> [args] [flags]
@@ -20,8 +20,10 @@ before execution. Output is JSON-first and errors are structured, so agents and 
 read results and failures the same way. See [Concepts](./user-guide/concepts.md)
 for this model.
 
-The current public command surface covers ACK, ECS, VPC, and Lingjun resources.
-Use `schema` before running a cloud operation:
+The public command surface is generated from the current resource specs. Browse
+[Products](./reference/products.md) and
+[Resource Coverage](./reference/resource-coverage.md) for the exact product and
+resource list, and use `schema` before running a cloud operation:
 
 ```bash
 ecctl schema --list

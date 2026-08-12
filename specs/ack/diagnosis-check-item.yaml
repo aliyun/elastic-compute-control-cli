@@ -12,8 +12,8 @@ description:
   en: List ACK diagnosis check items
   zh-CN: 列出 ACK 诊断检查项
 examples:
-  - ecctl ack diagnosis check-item list --cluster <cluster-id> --type node
-  - ecctl ack diagnosis check-item list --cluster <cluster-id> --type pod
+  - ecctl ack diagnosis check-item list <diagnosis-id> --cluster <cluster-id>
+  - ecctl ack diagnosis check-item list <diagnosis-id> --cluster <cluster-id> --output json
 
 identity:
   field: name
@@ -33,12 +33,11 @@ schema:
       description:
         en: ACK cluster ID
         zh-CN: ACK 集群 ID
-    type:
+    diagnosis_id:
       type: string
       description:
-        en: diagnosis type
-        zh-CN: 诊断类型
-      enum: [node, ingress, cluster, memory, pod, service, network]
+        en: diagnosis ID
+        zh-CN: 诊断 ID
     language:
       type: string
       description:
@@ -50,7 +49,7 @@ probes:
     api: GetClusterDiagnosisCheckItems
     request:
       cluster_id: $.cluster
-      diagnosis_id: $.type
+      diagnosis_id: $.diagnosis_id
       language: $.language
     response:
       items: $.check_items
@@ -72,7 +71,7 @@ probes:
 operations:
   list:
     examples:
-      - ecctl ack diagnosis check-item list
+      - ecctl ack diagnosis check-item list <diagnosis-id> --cluster <cluster-id>
     description:
       en: List ACK diagnosis check items
       zh-CN: 列出 ACK 诊断检查项
@@ -80,8 +79,9 @@ operations:
       fields:
         - cluster:
             required: true
-        - type:
+        - diagnosis_id:
             required: true
+            positional: true
         - language
     workflow:
       - probe: list

@@ -42,17 +42,16 @@ schema:
 controls:
   limit:
     type: integer
-    default: 100
-    max: 100
+    default: 50
+    max: 50
     description:
       en: maximum reports to return
       zh-CN: 最多返回报告数量
-  page:
-    type: integer
-    default: 1
+  next_token:
+    type: string
     description:
-      en: results page to return
-      zh-CN: 返回结果页码
+      en: pagination token returned by a previous request
+      zh-CN: 上一次请求返回的分页令牌
   no_wait:
     type: boolean
     description:
@@ -75,73 +74,72 @@ probes:
   list:
     api: ListClusterInspectReports
     request:
-      cluster_id: $.cluster
-      page_size: $.limit
-      page_number: $.page
+      clusterId: $.cluster
+      maxResults: $.limit
+      nextToken: $.next_token
       ApiParam:
         raw: $.api_param
     response:
       items: $.reports
-      total: $.page_info.total_count
       request_id: $.requestId
-      id: $.report_id
+      id: $.reportId
       state: $.status
       fields:
-        id: $.report_id
-        report_id: $.report_id
+        id: $.reportId
+        report_id: $.reportId
         status: $.status
-        created: $.created
-        finished: $.finished
+        created: $.startTime
+        finished: $.endTime
         summary: $.summary
   detail:
     api: GetClusterInspectReportDetail
     request:
-      cluster_id: $.cluster
-      report_id: $.report_id
+      clusterId: $.cluster
+      reportId: $.report_id
       ApiParam:
         raw: $.api_param
     response:
       item: $
       request_id: $.requestId
-      id: $.report_id
+      id: $.reportId
       state: $.status
       fields:
-        id: $.report_id
-        report_id: $.report_id
+        id: $.reportId
+        report_id: $.reportId
         status: $.status
-        created: $.created
-        finished: $.finished
+        created: $.startTime
+        finished: $.endTime
         summary: $.summary
-        details: $.details
+        details: $.checkItemResults
   latest_detail:
     api: GetClusterInspectReportDetail
     request:
-      cluster_id: $.cluster
-      report_id: $context.latest.report_id
+      clusterId: $.cluster
+      reportId: $context.latest.report_id
       ApiParam:
         raw: $.api_param
     response:
       item: $
       request_id: $.requestId
-      id: $.report_id
+      id: $.reportId
       state: $.status
       fields:
-        id: $.report_id
-        report_id: $.report_id
+        id: $.reportId
+        report_id: $.reportId
         status: $.status
-        created: $.created
-        finished: $.finished
+        created: $.startTime
+        finished: $.endTime
         summary: $.summary
-        details: $.details
+        details: $.checkItemResults
 
 bindings:
   run:
     api: RunClusterInspect
     request:
-      cluster_id: $.cluster
+      clusterId: $.cluster
       ApiParam:
         raw: $.api_param
-    id_from: $.task_id
+    id_from: $.reportId
     request_id_from: $.requestId
 
 operations:
@@ -196,7 +194,7 @@ operations:
             required: true
       controls:
         - limit
-        - page
+        - next_token
         - api_param
     workflow:
       - probe: list

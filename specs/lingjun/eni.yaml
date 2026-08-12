@@ -12,7 +12,7 @@ description:
 examples:
   - ecctl lingjun eni list --filter status=Available
   - ecctl lingjun eni get <leni-id> --with-ips
-  - ecctl lingjun eni create --subnet <subnet-id> --vpd <vpd-id> --zone cn-wulanchabu-b --security-group <sg-id>
+  - ecctl lingjun eni create --subnet <vswitch-id> --vpd <vpc-id> --zone cn-wulanchabu-b --security-group <sg-id>
   - ecctl lingjun eni attach <leni-id> --node <node-id>
 
 identity:
@@ -47,13 +47,13 @@ schema:
     vpd:
       type: string
       description:
-        en: VPD ID
-        zh-CN: 灵骏网段 ID
+        en: cloud VPC ID
+        zh-CN: 云上 VPC ID
     subnet:
       type: string
       description:
-        en: subnet ID
-        zh-CN: 灵骏子网 ID
+        en: cloud vSwitch ID
+        zh-CN: 云上交换机 ID
     zone:
       type: string
       description:
@@ -242,9 +242,9 @@ probes:
         modified_time: $.GmtModified
 
 waiters:
-  available_after_create:
+  unattached_after_create:
     probe: attribute
-    target: Available
+    target: Unattached
     interval: 2s
     timeout: 300s
   deleted_after_delete:
@@ -278,7 +278,7 @@ bindings:
           Value: $kv_value($.value)
     id_from: $.Content.ElasticNetworkInterfaceId
     request_id_from: $.RequestId
-    wait: available_after_create
+    wait: unattached_after_create
   update_attributes:
     api: UpdateElasticNetworkInterface
     idempotency:
@@ -337,8 +337,8 @@ bindings:
 operations:
   create:
     examples:
-      - ecctl lingjun eni create --subnet <subnet-id> --vpd <vpd-id> --zone <zone-id>
-      - ecctl lingjun eni create --subnet <subnet-id> --vpd <vpd-id> --zone <zone-id> --tag env=prod
+      - ecctl lingjun eni create --subnet <vswitch-id> --vpd <vpc-id> --zone <zone-id>
+      - ecctl lingjun eni create --subnet <vswitch-id> --vpd <vpc-id> --zone <zone-id> --tag env=prod
     description:
       en: Create Lingjun ENI
       zh-CN: 创建灵骏弹性网卡

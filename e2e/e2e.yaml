@@ -12,22 +12,6 @@ version: 2
 regions:
   candidates:
     - id: cn-zhangjiakou
-      # Each region supports the prerequisite fields shown below; field allowlist
-      # validation is not currently enforced. When needed, copy this file to
-      # e2e.local.yaml, uncomment the fields under the matching region, and fill
-      # them in:
-      # prerequisites:
-      #   ecs.image:
-      #     oss_bucket: bucket-in-cn-zhangjiakou
-      #   ecs.instance_renew:
-      #     instance_id: i-prepaid-instance
-      #   lingjun.cluster:
-      #     # Used only by the Lingjun node inventory and cluster scaling cases:
-      #     # two distinct node groups, each with at least one available
-      #     # compatible dedicated idle node.
-      #     node_group_ids:
-      #       - ng-first
-      #       - ng-second
     - id: cn-heyuan
     - id: cn-hangzhou
 

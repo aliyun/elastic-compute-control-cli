@@ -10,6 +10,8 @@ Go module drives the `ecctl` binary as a subprocess.
 cmd/ecctl-e2e/      CLI (run / sweep / coverage / lint / report)
 internal/           runner, exec, scenario, match, report, sweeper, coverage, ...
 cases/              human-maintained lifecycle cases (AI-drafted)
+CASE_AUTHORING.md    reusable rules and definition of done for new cases
+OPERATION_COVERAGE.md operation-gap reasons, fixtures and cleanup contracts
 e2e.yaml            ordered region profiles + repository paths
 fixtures/           shared stack and dynamic-parameter policy
 sweep.yaml          sweepable kinds for the cleanup safety net
@@ -20,8 +22,11 @@ sweep.yaml          sweepable kinds for the cleanup safety net
 ```bash
 make build         # build the runner and the public ecctl binary
 make lint          # validate case/stack/run-config/dynamic-parameter contracts
+make coverage-resources # reject implemented resources that have no case
+make coverage-operations # reject declared operations that have no case step
 make coverage      # public-surface live-pass completion gate
 make list          # list discovered public cases (run --collect-only)
+make validate-full # collect and validate public + hidden cases offline
 ```
 
 The runner accepts the binary explicitly. `make build-public` produces
@@ -112,6 +117,20 @@ Print status counts for CI summaries:
 ecctl-e2e coverage registry summary --registry coverage.yaml --output json
 ```
 
+The fast spec-to-case audit is separate from the live registry:
+
+```bash
+ecctl-e2e coverage --specs ../specs --cases cases --fail-on-gap
+```
+
+Its JSON includes operation totals (`declared`, `covered`, `gaps`) and resource
+totals (`declared_resources`, `covered_resources`, `resource_gaps`). A resource
+is covered only when at least one declared operation appears in a case whose
+top-level `resource` matches it; fixture/helper steps in another resource's case
+do not satisfy the gate. `--fail-on-resource-gap` is the coarse resource audit.
+`--fail-on-gap` is the completion gate and requires every declared operation to
+appear as a real first-class `ecctl` step.
+
 The registry has two statuses:
 
 - `offline`: the operation has a case but has not been accepted by a real cloud
@@ -158,11 +177,7 @@ regions:
   candidates:
     - id: cn-example
       prerequisites:
-        ack.root_account: {}
-        ecs.image:
-          oss_bucket: bucket-in-cn-example
-        ecs.instance_renew:
-          instance_id: i-prepaid-e2e
+        ack.auto_repair_policy: {}
         lingjun.cluster:
           node_group_ids:
             - ng-e2e-a
@@ -181,34 +196,65 @@ loader intentionally does not enforce a field allowlist yet. Missing values
 for the account prerequisites below cause dependent cases to be skipped with a
 warning before any mutating case step runs.
 
-`ack.root_account: {}` is a capability marker, not a credential. Declare it
-only when the selected ecctl profile authenticates as the Alibaba Cloud account
-owner. Preflight verifies this with STS `GetCallerIdentity`; RAM users and
-assumed roles skip the root-only kubeconfig expiration update case.
+`ack.auto_repair_policy: {}` is a full-surface-only capability marker; public
+ACK cases do not read it. Declare it only after Alibaba Cloud support has
+allowlisted the account for ACK auto-repair policies. The disposable ACK
+cluster, node pool, diagnosis worker and trigger parent are created by
+`fixtures/stack.yaml`.
 
-The OSS bucket must contain `ecctl-e2e/import-source.qcow2` and have the
-account-level ECS image import/export roles and permissions already enabled.
-Image export uses a run-derived object prefix, so the bucket also needs a
-lifecycle rule that expires those objects. The prepaid instance is intentionally
-renewed for one month. The two Lingjun node group IDs are used only by the node
-inventory and cluster scaling cases. They must be different, and each group
-must expose at least one compatible free node in this region. The base Lingjun
-cluster create/get/list/delete lifecycle does not require this prerequisite.
+Public ACK cases require no manually declared ACK prerequisites. The addon
+lifecycle selects compatible names and versions from the live ACK catalog;
+KubeConfig expiration update is not part of the supported command surface, and
+operation plans are hidden from the public surface.
 
-Before building live execution units, the runner queries each configured OSS
-bucket with Resource Center `GetResourceConfiguration` using resource type
-`ACS::OSS::Bucket`, and queries Lingjun free-node inventory for both configured
-node groups. An empty value, `NotExists.Resource`, a missing free node, or an
-incompatible pair removes that prerequisite from the region profile; if no
-selected profile remains usable, dependent cases are reported as skipped and a
-`warning:` line is emitted. Permission, authentication, network, malformed
-response, and unknown API errors remain fatal so infrastructure failures are
-not hidden as missing resources. The live identity therefore needs
-`resourcecenter:GetResourceConfiguration` in addition to the permissions used
-by the cases. `--collect-only` and `--dry-run` do not call these live probes.
+ECS cases require no account resource values in `e2e.local.yaml`. The image
+lifecycle creates a run-unique private OSS bucket, exports a RAW image, downloads
+and safely extracts the archive in the runner's private temporary directory,
+uploads the uncompressed RAW object for import, and removes the objects and
+bucket. The prepaid instance is intentionally renewed for one month. The two
+`lingjun.cluster` node group IDs are used only by
+the node inventory and cluster scaling cases. They must be different, and each
+group must expose at least one compatible free node in this region.
+The basic Lingjun cluster and node-group lifecycles do not require free physical
+nodes and need no manually declared `lingjun.cluster_network` values: preflight
+auto-discovers the zone, derives its HPN zone, selects a compatible public
+machine type and image, and picks a usable resource group. The shared stack
+then provisions the VPC, a dedicated vSwitch and security group, and a CUSTOM
+Lingjun ENI as the cluster-network anchor. The fixture creates the key pair and,
+for the node-group case, the parent Lite cluster with a non-empty bootstrap
+node-group descriptor but without assigning `Nodes`; the case creates only the
+target node group. Both lifecycles use a 180 GiB PL1 ESSD system disk, avoiding
+the local-disk allowlist required by some Lingjun machine types. Neither
+lifecycle consumes the configured `lingjun.cluster.node_group_ids`. A run that
+cannot create these resources (for example, no public Lingjun zone or no
+compatible machine/image in the region) may still pin an explicit
+`lingjun.cluster_network` bundle in the region profile, naming an existing
+CUSTOM ENI and its resource group, VPC/VPD, vSwitch/subnet, security group, HPN
+zone, zone, machine type and image; the read-only preflight probe then verifies
+the ENI and its network ownership before any mutation.
 
-Cases declare `requires_prerequisites` for their primary region and may declare
-additional named roles under `region_requirements`. Cross-region copy cases use
+Most declarative bundles are safety/capability inputs rather than pre-existing
+resources. A bundle may identify a protected, externally onboarded resource
+only when the suite cannot create and safely remove it. Before planning
+mutations, preflight removes a bundle whose documented fields are missing or
+empty, so the dependent case is skipped instead of running with a partial
+cleanup contract.
+
+Before building live execution units, the runner checks the configured Lingjun CUSTOM ENI for cluster-network
+ownership, and queries Lingjun free-node inventory for both scaling node groups.
+An empty value, an ENI metadata mismatch, a missing free
+node, or an incompatible pair removes that prerequisite from the region
+profile; if no selected profile remains usable, dependent cases are reported as
+skipped and a `warning:` line is emitted. Permission, authentication, network,
+malformed response, and unknown API errors remain fatal so infrastructure
+failures are not hidden as missing resources. `--collect-only` and `--dry-run`
+do not call these live probes.
+
+Cases declare suite-level `requires_prerequisites` for hard requirements shared
+by every operation. DAG steps may declare optional requirements; profiles
+satisfying more optional requirements are tried first, but a missing optional
+bundle skips only that step and its descendants. Cases may declare additional
+named roles under `region_requirements`. Cross-region copy cases use
 a `destination` role with `distinct_from: primary`. After capability validation
 and the supported read-only prerequisite probes, the planner groups runnable
 cases by requirement signature and enumerates only complete assignments. An
@@ -220,14 +266,31 @@ ACK clusters, test nodes and RAM roles, along with resource groups and policies
 that can be created safely, are created by the shared stack or their cases
 rather than supplied as account-level values. Lingjun VPD CIDRs are case data,
 not prerequisite configuration.
-`fixtures/stack.yaml` is only the shared resource dependency graph and does not
-select a region. A case's `needs` entries are stack node IDs: the runner selects
-those nodes plus their transitive dependencies and does not provision unrelated
-branches. Each stack node declares its own `requires_params`, so selecting only
+Compatible ACK operations reuse the run-lifetime `ack_shared_cluster`. The
+`ack/ack` lifecycle owns the second cluster and covers the destructive
+`ack/nodepool` and `ack/task` operations on it. It completes control-plane and
+node-pool upgrades, exercises pause/resume/cancel on one node-pool upgrade task,
+releases a worker, and deletes the cluster as the final reset boundary. A full
+ACK run therefore provisions two clusters instead of six.
+`fixtures/stack.yaml` is the shared resource dependency graph and does not
+select a region. All creatable prerequisite resources live in this fixture;
+case steps do not create them. Suite and DAG-step `needs` entries are stack node IDs: the
+runner selects those nodes plus their transitive dependencies and does not
+provision unrelated branches. Each fixture node declares its canonical
+`resource`, whether it is a `create` or `lookup` node, and its lifetime.
+`lifetime: execution` is the default. Compatible `lifetime: run` nodes are
+leased once per top-level run, keyed by surface, binary, primary region, and
+fixture ID; a rendered-command mismatch is a setup error. Use
+`run --collect-only -v` for a readable expansion or
+`run --collect-only --output json` for `direct_needs` and the complete fixture
+closure. Each stack node declares its own `requires_params`, so selecting only
 `vpc` or `security_group` does not trigger zone, instance, disk, or image
 discovery. `fixtures/parameter-policy.yaml` supplies the ordered ECS
 `cores` candidates; instance types, system disks, and data disks are discovered
 from `DescribeAvailableResource` and the image is selected with `DescribeImages`.
+Step-level `depends_on`, `needs`, and `requires_prerequisites` are valid only
+with `execution: dag`; sequential cases may still declare step `locks`, while
+case-wide fixture and prerequisite requirements stay at the suite top level.
 In `auto` mode the runner performs only the read-only inventory queries required
 by the selected parameter keys. A zone-only request uses the ECS zone inventory.
 Cases may add `parameter_constraints.ecs.min_eni_quantity` or
@@ -238,10 +301,12 @@ only that unit. ACK metadata first lists creatable Kubernetes versions and then
 queries upgrade targets for each candidate. Upgrade-only cases are isolated and
 skipped when no path exists, while ACK CRUD cases continue. The ACK containerd
 version and test-node profile still come from the same bounded inventory pass.
-ECS cases consume the resulting region/zone, image and disk-category values;
-Lingjun discovery checks both configured node groups and derives the shared
-HPN/zone/machine profile. `IoOptimized` is sent as the ECS API value
-`optimized` (the API does not accept the literal boolean `true`).
+ECS cases consume the resulting region/zone, image and disk-category values.
+Lingjun scaling discovery checks both configured node groups and derives their
+shared HPN/zone/machine profile. Basic cluster and node-group cases instead use
+the auto-discovered or explicitly pinned `lingjun.cluster_network` values.
+`IoOptimized` is sent as the ECS API value `optimized` (the API does not accept
+the literal boolean `true`).
 
 The first complete region assignment is attempted first. A later assignment is
 used only when every failure in the attempt is classified as region/zone
@@ -261,10 +326,13 @@ The run order is deterministic:
    immediately after each create; if one branch fails, independent branches and
    their cases continue, while only cases whose closure contains a failed node
    are skipped;
-4. run independent cases in bounded parallelism, with `serial: true` cases
-   (ACK/Lingjun and image lifecycles) as barriers;
-5. tear down each case in reverse step order, then the shared stack in reverse
-   dependency order;
+4. run commands under one global operation semaphore. Legacy cases keep their
+   ordered fail-fast lifecycle; `execution: dag` cases run ready operations
+   concurrently, skip only descendants of failed or missing dependencies, and
+   use rendered keyed locks for shared mutations;
+5. tear down each case in reverse registration order, execution-lifetime
+   fixtures after their unit, and run-lifetime fixtures once in reverse
+   dependency order after all units;
 6. run the tag-based sweeper after the run to remove resources left by either
    a failed teardown or an interrupted process.
 
@@ -280,11 +348,12 @@ same `scenario` parser as `run --collect-only`, then checks cross-file rules
 that collection alone cannot see:
 
 - every `{{.inputs.*}}` template reference has a fixture key;
-- every case `needs` entry names a real stack node, and every `.stack.*`
-  reference is produced by that node's transitive dependency closure;
+- every suite/step `needs` entry names a real stack node, and every `.stack.*`
+  reference is produced by the step's suite/ancestor dependency closure;
 - stack node IDs and capture providers are unique, and each node declares the
   dynamic parameter keys used by its own templates;
-- every captured variable is defined before later steps use it;
+- DAG dependencies are acyclic, captures are used only by descendants, and lock
+  templates use variables available to that operation;
 - current-step captures may be used by that step's teardown;
 - taggable create commands include `--tag ecctl-e2e=1` and
   `--tag run-id={{.run_id}}`; untaggable RAM roles and policies are protected
@@ -308,15 +377,16 @@ ecctl-e2e run --config e2e.local.yaml --surface public \
   --ecctl-bin bin/ecctl-public --report-dir reports
 ```
 
-The prepaid ECS renewal case is selected only when one of the selected region
-profiles declares a non-empty `ecs.instance_renew.instance_id`. Its first step
-queries that instance and verifies it is prepaid; the single renewal command
-runs only after that check succeeds. Without this configuration the case is
-reported as skipped:
+The ECS renewal branch creates its own one-month prepaid instance, renews it,
+and verifies the renewed expiration. DeleteInstance rejects in-warranty prepaid
+instances, so the read-back step registers a `ModifyInstanceChargeType` teardown
+that unlocks deletion (even when the async conversion does not take effect);
+the create step's `delete --force` teardown then releases the instance, because
+teardowns run in LIFO order. No account-owned instance ID is required:
 
 ```bash
 ecctl-e2e run --config e2e.local.yaml \
-  cases/ecs/instance-renew-lifecycle.yaml
+  cases/ecs/instance-lifecycle.yaml
 ```
 
 `--report-dir` writes `e2e-report.{json,html,xml}`; under GitHub Actions a GFM
@@ -339,7 +409,7 @@ boolean keyword expression; with no selector, every case under `--cases` runs.
 ```bash
 ecctl-e2e run cases/vpc/                       # a directory
 ecctl-e2e run cases/ecs/eni-lifecycle.yaml     # one case file
-ecctl-e2e run cases/vpc/vpc-lifecycle.yaml::update   # up to & incl. that step
+ecctl-e2e run cases/vpc/vpc-lifecycle.yaml::update   # legacy prefix, or DAG step plus ancestors
 ecctl-e2e run -k "vpc or eni"                  # keyword expression
 ecctl-e2e run -k "ecs and not snapshot"
 ecctl-e2e run --collect-only                   # list selected cases (also validates)
@@ -354,15 +424,27 @@ cases selected (`--exit-zero` forces `0`).
 
 ## Authoring cases
 
-A case is an ordered list of full `ecctl` command lines with declarative
-matchers. AI may draft a case from
+A legacy case is an ordered list of steps. Each step declares exactly one full
+`ecctl` command in `run`, except the constrained `local` action used by the ECS
+image lifecycle to extract one `.raw` regular file from a `.tar.gz` archive.
+Local paths must be direct children of the runner's private `{{.work_dir}}`;
+the runner invokes no shell and rejects links, traversal, non-RAW files and
+multi-file archives. A case with
+`execution: dag` is an operation graph: `depends_on` defines ordering, step
+`needs` and `requires_prerequisites` localize resource gates, and `locks`
+serialize mutations of the same rendered resource key. Both forms use
+declarative matchers. AI may draft a case from
 a spec; a human then fills the independent assertions (read-back / differential)
 that the spec cannot know — that is what gives the suite its correctness power.
 Every declared `capture` is required: if its path is absent, that same step
-fails and later steps in the case are not rendered with an undefined value.
+fails. Legacy cases stop; DAG cases skip only descendants, and captures are
+published only to those descendants.
 Use `{{.resource_prefix}}` for cloud resource names: it is capped at 40
 characters and carries a stable hash when truncated. Keep `{{.run_id}}` in tags
 and reports so cleanup and evidence retain the complete run identity.
+
+Follow [CASE_AUTHORING.md](CASE_AUTHORING.md) for the reusable decision rules,
+required cleanup model, registry workflow and definition of done.
 
 ## Cleanup
 
@@ -370,7 +452,8 @@ Three layers: per-case + stack teardown stacks (signal-safe), a run-specific
 cleanup journal and manifest, and `ecctl-e2e sweep` as the safety net. Runtime
 finalizers may use safe lifecycle reversals such as ACK `revoke` or `detach`,
 but the persisted crash-recovery journal contains validated `ecctl ... delete`
-commands only.
+commands plus exact OSS `DeleteObject` and `DeleteBucket` calls only. Arbitrary
+raw API calls remain ineligible for unattended replay.
 Cleanup failures include timeout state, cloud/action error codes, and redacted
 stdout/stderr in the report; credential-like values are scrubbed before logging.
 
@@ -415,9 +498,7 @@ Manually dispatched live CI materializes the protected `live-e2e` environment se
 runs the selected suite using its ordered region profiles. The secret contains
 the complete version 2 YAML document shown above; the runner itself never
 resolves prerequisite values from environment variables. Manual dispatch can
-pass a single-region `--region` override and a `-k` expression. Instance
-renewal is enabled only by `ecs.instance_renew.instance_id` in the selected
-region profile:
+pass a single-region `--region` override and a `-k` expression:
 
 ```bash
 ecctl-e2e run --config e2e.local.yaml -k "vpc or eni" --report-dir reports --exit-zero

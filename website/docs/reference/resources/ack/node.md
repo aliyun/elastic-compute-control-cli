@@ -94,7 +94,8 @@ Attach an ECS instance directly to an ACK cluster
 |---|---|---|
 | `AttachInstances` | Every time the command runs. | Perform the resource operation. |
 | `DescribeTaskInfo` | When `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
-| `DescribeClusterNodes` | When `--no-wait` is not specified. | Read the resource view. |
+| `DescribeClusterNodes` | When `--no-wait` is not specified. | Poll until the resource reaches the target state. (repeated) |
+| `DescribeClusterNodes` | When `--no-wait` is not specified. | Return the final resource view. (cached; no additional request) |
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

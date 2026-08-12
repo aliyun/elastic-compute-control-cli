@@ -26,9 +26,12 @@ func (c Capability) String() string { return c.Resource + " " + c.Verb }
 
 // Report is the coverage result.
 type Report struct {
-	Declared int          `json:"declared"`
-	Covered  int          `json:"covered"`
-	Gaps     []Capability `json:"gaps"`
+	Declared          int          `json:"declared"`
+	Covered           int          `json:"covered"`
+	Gaps              []Capability `json:"gaps"`
+	DeclaredResources int          `json:"declared_resources"`
+	CoveredResources  int          `json:"covered_resources"`
+	ResourceGaps      []string     `json:"resource_gaps"`
 }
 
 type specFile struct {
@@ -39,17 +42,42 @@ type specFile struct {
 
 // Analyze loads specs and cases and computes the coverage gap.
 func Analyze(specsDir, casesDir string) (*Report, error) {
+	return analyze(specsDir, casesDir, nil)
+}
+
+// AnalyzeForCapabilities computes coverage only for the selected command
+// surface. Resources hidden from the public binary therefore do not require a
+// public E2E case while the unfiltered Analyze contract remains available for
+// full-spec audits.
+func AnalyzeForCapabilities(specsDir, casesDir string, filter map[Capability]bool) (*Report, error) {
+	return analyze(specsDir, casesDir, filter)
+}
+
+func analyze(specsDir, casesDir string, filter map[Capability]bool) (*Report, error) {
 	declared, index, err := loadDeclared(specsDir)
 	if err != nil {
 		return nil, err
 	}
-	covered, err := loadCovered(casesDir, index)
+	if filter != nil {
+		for capability := range declared {
+			if !filter[capability] {
+				delete(declared, capability)
+			}
+		}
+	}
+	covered, primaryCoveredResources, err := loadCovered(casesDir, index)
 	if err != nil {
 		return nil, err
 	}
 
 	var gaps []Capability
+	declaredResources := map[string]bool{}
+	coveredResources := map[string]bool{}
 	for cap := range declared {
+		declaredResources[cap.Resource] = true
+		if primaryCoveredResources[cap.Resource] {
+			coveredResources[cap.Resource] = true
+		}
 		if !covered[cap] {
 			gaps = append(gaps, cap)
 		}
@@ -60,7 +88,21 @@ func Analyze(specsDir, casesDir string) (*Report, error) {
 		}
 		return gaps[i].Verb < gaps[j].Verb
 	})
-	return &Report{Declared: len(declared), Covered: len(declared) - len(gaps), Gaps: gaps}, nil
+	resourceGaps := []string{}
+	for resource := range declaredResources {
+		if !coveredResources[resource] {
+			resourceGaps = append(resourceGaps, resource)
+		}
+	}
+	sort.Strings(resourceGaps)
+	return &Report{
+		Declared:          len(declared),
+		Covered:           len(declared) - len(gaps),
+		Gaps:              gaps,
+		DeclaredResources: len(declaredResources),
+		CoveredResources:  len(coveredResources),
+		ResourceGaps:      resourceGaps,
+	}, nil
 }
 
 // loadDeclared returns the set of declared capabilities and a product->resource
@@ -100,20 +142,24 @@ func loadDeclared(specsDir string) (map[Capability]bool, map[string]map[string]b
 	return declared, index, err
 }
 
-func loadCovered(casesDir string, index map[string]map[string]bool) (map[Capability]bool, error) {
+func loadCovered(casesDir string, index map[string]map[string]bool) (map[Capability]bool, map[string]bool, error) {
 	suites, err := scenario.LoadDir(casesDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	covered := map[Capability]bool{}
+	primaryCoveredResources := map[string]bool{}
 	for _, s := range suites {
 		for _, st := range s.Steps {
 			if cap, ok := commandCapability(st.Run, index); ok {
 				covered[cap] = true
+				if s.CoversResource(cap.Resource) {
+					primaryCoveredResources[cap.Resource] = true
+				}
 			}
 		}
 	}
-	return covered, nil
+	return covered, primaryCoveredResources, nil
 }
 
 // commandCapability maps a full "ecctl ..." command line to a (resource, verb),

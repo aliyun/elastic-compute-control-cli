@@ -45,6 +45,29 @@ schema:
       description:
         en: addon version
         zh-CN: 组件版本
+    newer_versions:
+      type: array
+      description:
+        en: compatible newer addon versions
+        zh-CN: 兼容的更新组件版本
+      items:
+        type: object
+        fields:
+          version:
+            type: string
+            description:
+              en: newer addon version
+              zh-CN: 更新组件版本
+          upgradable:
+            type: boolean
+            description:
+              en: whether the addon can upgrade to this version
+              zh-CN: 是否可以升级到该版本
+          minimum_cluster_version:
+            type: string
+            description:
+              en: minimum Kubernetes version required by the addon version
+              zh-CN: 该组件版本要求的最低 Kubernetes 版本
     config:
       type: string
       input_style: JSON/YAML text|@file
@@ -140,6 +163,19 @@ probes:
       request_id: $.request_id
       fields:
         resources: $.resources
+  cluster_detail:
+    api: DescribeClusterDetail
+    request:
+      ClusterId: $.cluster
+    response:
+      item: $
+      request_id: $.request_id
+      id: $.cluster_id
+      state: $.state
+      fields:
+        id: $.cluster_id
+        name: $.name
+        status: $.state
   instances:
     api: ListClusterAddonInstances
     request:
@@ -153,6 +189,55 @@ probes:
         version: $.version
         status: $.state
         state: $.state
+  task:
+    api: DescribeTaskInfo
+    request:
+      task_id: $context.task_id
+    response:
+      item: $
+      request_id: $.request_id
+      id: $.task_id
+      state: $.state
+      fields:
+        task_id: $.task_id
+        status: $.state
+        task_type: $.task_type
+        error: $.error
+        task_result: $.task_result
+  modify_tasks:
+    api: DescribeClusterTasks
+    request:
+      cluster_id: $.cluster
+      task_type: cluster_addon_modify
+      page_size: 20
+      page_number: 1
+    response:
+      items: $.tasks
+      total: $.page_info.total_count
+      request_id: $.requestId
+      id: $.task_id
+      state: $.state
+      fields:
+        task_id: $.task_id
+        type: $.task_type
+        status: $.state
+        created: $.created
+        updated: $.updated
+  modify_task_detail:
+    api: DescribeTaskInfo
+    request:
+      task_id: $context.modify_task.task_id
+    response:
+      item: $
+      request_id: $.request_id
+      id: $.task_id
+      state: $.state
+      fields:
+        task_id: $.task_id
+        type: $.task_type
+        status: $.state
+        error: $.error
+        task_result: $.task_result
   catalog_item:
     api: DescribeAddon
     request:
@@ -177,6 +262,7 @@ probes:
         managed: $.managed
         architecture: $.architecture
         supported_actions: $.supported_actions
+        newer_versions: $.newer_versions
   catalog:
     api: ListAddons
     request:
@@ -202,7 +288,7 @@ probes:
 
 waiters:
   active:
-    probe: instance
+    probe: instances
     target: active
     interval: 5s
     timeout: 600s
@@ -211,6 +297,44 @@ waiters:
         values: [installing, updating, upgrading, deleting]
     failure:
       states: [failed]
+  task_succeeded:
+    probe: task
+    target: success
+    match:
+      state_only: true
+    interval: 2s
+    timeout: 3600s
+    failure:
+      states: [fail, failed]
+  cluster_running:
+    probe: cluster_detail
+    target: running
+    interval: 2s
+    timeout: 600s
+    failure:
+      states: [failed]
+  modify_task_visible:
+    probe: modify_tasks
+    target: matched
+    interval: 2s
+    timeout: 600s
+    match:
+      fields:
+        type: cluster_addon_modify
+      excludes:
+        task_id: $captured_field("existing_modify_tasks","task_id")
+  modify_task_succeeded:
+    probe: modify_task_detail
+    target: success
+    interval: 2s
+    timeout: 600s
+    failure:
+      states: [fail, failed]
+  absent:
+    probe: instances
+    target: absent
+    interval: 5s
+    timeout: 600s
 
 bindings:
   install:
@@ -235,7 +359,9 @@ bindings:
       - request: body
       - raw: $.api_param
     request_id_from: $.request_id
-    wait: active
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
   modify_config:
     api: ModifyClusterAddon
     request:
@@ -248,7 +374,6 @@ bindings:
       - request: body
       - raw: $.api_param
     request_id_from: $.request_id
-    wait: active
   uninstall:
     api: UnInstallClusterAddons
     request:
@@ -264,6 +389,9 @@ bindings:
       - request: addons
       - raw: $.api_param
     request_id_from: $.request_id
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
   upgrade:
     api: UpgradeClusterAddons
     request:
@@ -288,7 +416,9 @@ bindings:
       - request: body
       - raw: $.api_param
     request_id_from: $.request_id
-    wait: active
+    context_from:
+      task_id: $.task_id
+    wait: task_succeeded
 
 operations:
   create:
@@ -314,6 +444,10 @@ operations:
     workflow:
       - binding: install
         wait_unless: input.no_wait
+      - wait: cluster_running
+        unless: input.no_wait
+      - probe: instance
+        unless: input.no_wait
   update:
     examples:
       - ecctl ack addon update my-name --cluster <cluster-id> --config <config-id>
@@ -334,8 +468,24 @@ operations:
         - timeout
         - api_param
     workflow:
+      - probe: modify_tasks
+        many: true
+        as: existing_modify_tasks
+        unless: input.no_wait
       - binding: modify_config
         wait_unless: input.no_wait
+      - wait: modify_task_visible
+        unless: input.no_wait
+      - probe: modify_tasks
+        many: true
+        as: modify_task
+        unless: input.no_wait
+      - wait: modify_task_succeeded
+        unless: input.no_wait
+      - wait: cluster_running
+        unless: input.no_wait
+      - probe: instance
+        unless: input.no_wait
   delete:
     examples:
       - ecctl ack addon delete <names> --cluster <cluster-id>
@@ -356,8 +506,11 @@ operations:
         - api_param
     workflow:
       - binding: uninstall
-      - probe: instances
-        many: true
+        wait_unless: input.no_wait
+      - wait: cluster_running
+        unless: input.no_wait
+      - wait: absent
+        ids: [$input.names]
         unless: input.no_wait
       - emit:
           deleted: true
@@ -465,3 +618,7 @@ operations:
     workflow:
       - binding: upgrade
         wait_unless: input.no_wait
+      - wait: cluster_running
+        unless: input.no_wait
+      - probe: instance
+        unless: input.no_wait

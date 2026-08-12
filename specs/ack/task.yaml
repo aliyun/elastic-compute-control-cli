@@ -119,6 +119,23 @@ probes:
         created: $.created
         updated: $.updated
 
+waiters:
+  paused_after_pause:
+    probe: detail
+    target: paused
+    interval: 2s
+    timeout: 10m
+  running_after_resume:
+    probe: detail
+    target: running
+    interval: 2s
+    timeout: 10m
+  canceled_after_cancel:
+    probe: detail
+    target: canceled
+    interval: 2s
+    timeout: 10m
+
 bindings:
   pause:
     api: PauseTask
@@ -127,6 +144,7 @@ bindings:
       ApiParam:
         raw: $.api_param
     request_id_from: $.requestId
+    wait: paused_after_pause
   resume:
     api: ResumeTask
     request:
@@ -134,6 +152,7 @@ bindings:
       ApiParam:
         raw: $.api_param
     request_id_from: $.requestId
+    wait: running_after_resume
   cancel:
     api: CancelTask
     request:
@@ -141,6 +160,7 @@ bindings:
       ApiParam:
         raw: $.api_param
     request_id_from: $.requestId
+    wait: canceled_after_cancel
 
 operations:
   get:

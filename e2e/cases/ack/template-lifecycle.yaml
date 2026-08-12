@@ -1,0 +1,46 @@
+resource: ack/template
+serial: true
+
+steps:
+  - name: create
+    run: >
+      ecctl ack template create
+      --name {{.resource_prefix}}-template
+      --content '{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"ecctl-e2e"}}'
+      --description "ecctl E2E template"
+      --template-type kubernetes
+    at: $.template
+    expect:
+      id: { type: string, min_len: 1 }
+      name: { eq: "{{.resource_prefix}}-template" }
+    capture:
+      template_id: id
+    teardown: ecctl ack template delete {{.template_id}}
+
+  - name: get
+    run: ecctl ack template get {{.template_id}}
+    at: $.template
+    expect:
+      id: { eq: "{{.template_id}}" }
+      name: { eq: "{{.resource_prefix}}-template" }
+
+  - name: list
+    run: >
+      ecctl ack template list
+      --template-type kubernetes
+      --fields id,name,template_type
+      --limit 100
+    assert:
+      - len($.templates) >= 1
+
+  - name: update
+    run: ecctl ack template update {{.template_id}} --name {{.resource_prefix}}-template-updated
+    at: $.template
+    expect:
+      id: { eq: "{{.template_id}}" }
+      name: { eq: "{{.resource_prefix}}-template-updated" }
+
+  - name: delete
+    run: ecctl ack template delete {{.template_id}}
+    expect:
+      $.deleted: { eq: true }

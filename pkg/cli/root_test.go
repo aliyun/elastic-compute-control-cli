@@ -718,7 +718,66 @@ func helpListsCommand(output, name string) bool {
 	return false
 }
 
-func TestOpenSourceCommandSurfaceHidesNonPublicResourcesOnlyInCLI(t *testing.T) {
+func TestPublicLingjunDescriptionExcludesHiddenNodes(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+		want string
+		old  string
+	}{
+		{
+			name: "English help",
+			args: []string{"--lang", "en", "lingjun", "--help"},
+			want: "Manage Lingjun clusters, node groups, and high-performance network resources.",
+			old:  "Manage Lingjun clusters, nodes, node groups, and high-performance network resources.",
+		},
+		{
+			name: "Chinese help",
+			args: []string{"--lang", "zh-CN", "lingjun", "--help"},
+			want: "管理灵骏集群、节点组及高性能网络资源。",
+			old:  "管理灵骏集群、节点、节点组及高性能网络资源。",
+		},
+		{
+			name: "English product list",
+			args: []string{"--lang", "en", "schema", "--list"},
+			want: "Manage Lingjun clusters, node groups, and high-performance network resources.",
+			old:  "Manage Lingjun clusters, nodes, node groups, and high-performance network resources.",
+		},
+		{
+			name: "Chinese product list",
+			args: []string{"--lang", "zh-CN", "schema", "--list"},
+			want: "管理灵骏集群、节点组及高性能网络资源。",
+			old:  "管理灵骏集群、节点、节点组及高性能网络资源。",
+		},
+		{
+			name: "English Lingjun schema list",
+			args: []string{"--lang", "en", "schema", "--list", "lingjun"},
+			want: "Manage Lingjun clusters, node groups, and high-performance network resources.",
+			old:  "Manage Lingjun clusters, nodes, node groups, and high-performance network resources.",
+		},
+		{
+			name: "Chinese Lingjun schema list",
+			args: []string{"--lang", "zh-CN", "schema", "--list", "lingjun"},
+			want: "管理灵骏集群、节点组及高性能网络资源。",
+			old:  "管理灵骏集群、节点、节点组及高性能网络资源。",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr, code := runCLI(tt.args...)
+			if code != 0 {
+				t.Fatalf("%v exit %d stderr=%s stdout=%s", tt.args, code, stderr, stdout)
+			}
+			if !strings.Contains(stdout, tt.want) {
+				t.Fatalf("%v missing current description %q: %s", tt.args, tt.want, stdout)
+			}
+			if strings.Contains(stdout, tt.old) {
+				t.Fatalf("%v exposes obsolete description %q: %s", tt.args, tt.old, stdout)
+			}
+		})
+	}
+}
+
+func TestOpenSourceCommandSurfaceMatchesFullMinusExcludedResources(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
 		args   []string
@@ -727,22 +786,12 @@ func TestOpenSourceCommandSurfaceHidesNonPublicResourcesOnlyInCLI(t *testing.T) 
 		{
 			name:   "ack help hides non-public resources",
 			args:   []string{"--lang", "en", "ack", "--help"},
-			hidden: []string{"addon", "diagnosis", "inspect"},
+			hidden: []string{"auto-repair-policy", "diagnosis", "operation-plan"},
 		},
 		{
-			name:   "lingjun help hides non-public resources",
+			name:   "lingjun help hides non-public resource",
 			args:   []string{"--lang", "en", "lingjun", "--help"},
-			hidden: []string{"eni", "node", "node-group", "vsc"},
-		},
-		{
-			name:   "rg help hides account-level resources",
-			args:   []string{"--lang", "en", "rg", "--help"},
-			hidden: []string{"admin-setting", "associated-transfer", "notification", "service-linked-role"},
-		},
-		{
-			name:   "tag help hides account-level resources",
-			args:   []string{"--lang", "en", "tag", "--help"},
-			hidden: []string{"associated-resource-rule", "policy"},
+			hidden: []string{"net-test"},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -766,14 +815,22 @@ func TestOpenSourceCommandSurfaceHidesNonPublicResourcesOnlyInCLI(t *testing.T) 
 		{name: "ack default cluster create remains public", args: []string{"--lang", "en", "ack", "create", "--help"}, want: "Create ACK cluster"},
 		{name: "ack cluster alias remains public", args: []string{"--lang", "en", "ack", "cluster", "create", "--help"}, want: "Create ACK cluster"},
 		{name: "ack nodepool remains public", args: []string{"--lang", "en", "ack", "nodepool", "--help"}, want: "nodepool"},
+		{name: "ack addon create becomes public", args: []string{"--lang", "en", "ack", "addon", "create", "--help"}, want: "Install"},
+		{name: "ack alert lifecycle becomes public", args: []string{"--lang", "en", "ack", "alert", "update", "--help"}, want: "Start or stop"},
+		{name: "ack inspect config lifecycle becomes public", args: []string{"--lang", "en", "ack", "inspect", "config", "update", "--help"}, want: "Update"},
+		{name: "ack template lifecycle becomes public", args: []string{"--lang", "en", "ack", "template", "create", "--help"}, want: "Create"},
 		{name: "lingjun cluster remains public", args: []string{"--lang", "en", "lingjun", "cluster", "--help"}, want: "cluster"},
+		{name: "lingjun ENI create becomes public", args: []string{"--lang", "en", "lingjun", "eni", "create", "--help"}, want: "Create"},
+		{name: "lingjun node group lifecycle becomes public", args: []string{"--lang", "en", "lingjun", "node-group", "create", "--help"}, want: "Create"},
 		{name: "lingjun VPD becomes public", args: []string{"--lang", "en", "lingjun", "vpd", "--help"}, want: "VPD"},
 		{name: "ecs remains public", args: []string{"--lang", "en", "ecs", "instance", "--help"}, want: "instance"},
 		{name: "vpc remains public", args: []string{"--lang", "en", "vpc", "vswitch", "--help"}, want: "vswitch"},
 		{name: "resource group becomes public", args: []string{"--lang", "en", "rg", "group", "--help"}, want: "resource group"},
 		{name: "resource group membership becomes public", args: []string{"--lang", "en", "rg", "resource", "--help"}, want: "resource"},
 		{name: "policy version becomes public", args: []string{"--lang", "en", "rg", "policy", "version", "--help"}, want: "policy version"},
+		{name: "service linked role becomes public", args: []string{"--lang", "en", "rg", "service-linked-role", "create", "--help"}, want: "Create"},
 		{name: "tag resource becomes public", args: []string{"--lang", "en", "tag", "resource", "--help"}, want: "tag"},
+		{name: "tag policy list becomes public", args: []string{"--lang", "en", "tag", "policy", "list", "--help"}, want: "List"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			stdout, stderr, code := runCLI(tt.args...)
@@ -787,15 +844,28 @@ func TestOpenSourceCommandSurfaceHidesNonPublicResourcesOnlyInCLI(t *testing.T) 
 	}
 
 	for _, args := range [][]string{
-		{"--lang", "en", "ack", "addon", "--help"},
-		{"--lang", "en", "lingjun", "eni", "--help"},
+		{"--lang", "en", "ack", "auto-repair-policy", "--help"},
+		{"--lang", "en", "ack", "diagnosis", "--help"},
+		{"--lang", "en", "ack", "diagnosis", "check-item", "--help"},
+		{"--lang", "en", "schema", "ack.diagnosis"},
+		{"--lang", "en", "schema", "ack.diagnosis.check-item"},
+		{"--lang", "en", "ack", "operation-plan", "--help"},
+		{"--lang", "en", "schema", "ack.operation-plan"},
+		{"--lang", "en", "ack", "kubeconfig", "update", "--help"},
+		{"--lang", "en", "lingjun", "net-test", "--help"},
+		{"--lang", "en", "schema", "lingjun.net-test"},
+		{"--lang", "en", "lingjun", "vcc", "--help"},
+		{"--lang", "en", "schema", "lingjun.vcc"},
+		{"--lang", "en", "lingjun", "lni", "--help"},
+		{"--lang", "en", "schema", "lingjun.lni"},
 		{"--lang", "en", "lingjun", "node", "--help"},
-		{"--lang", "en", "lingjun", "node-group", "--help"},
-		{"--lang", "en", "lingjun", "ng", "--help"},
-		{"--lang", "en", "rg", "notification", "--help"},
-		{"--lang", "en", "rg", "service-linked-role", "--help"},
-		{"--lang", "en", "tag", "associated-resource-rule", "--help"},
-		{"--lang", "en", "tag", "policy", "--help"},
+		{"--lang", "en", "schema", "lingjun.node"},
+		{"--lang", "en", "lingjun", "vsc", "--help"},
+		{"--lang", "en", "schema", "lingjun.vsc"},
+		{"--lang", "en", "lingjun", "eni", "attach", "--help"},
+		{"--lang", "en", "schema", "lingjun.eni.attach"},
+		{"--lang", "en", "lingjun", "eni", "detach", "--help"},
+		{"--lang", "en", "schema", "lingjun.eni.detach"},
 	} {
 		stdout, stderr, code := runCLI(args...)
 		if code == 0 {
@@ -804,14 +874,11 @@ func TestOpenSourceCommandSurfaceHidesNonPublicResourcesOnlyInCLI(t *testing.T) 
 	}
 
 	stdout, stderr, code := runCLI("--lang", "en", "schema", "ack.addon")
-	if code == 0 {
-		t.Fatalf("schema ack.addon should be hidden from CLI; stdout=%s stderr=%s", stdout, stderr)
-	}
-	if got := errorCode(t, stdout); got != "UnknownSchema" {
-		t.Fatalf("schema ack.addon error.code = %q, want UnknownSchema; stdout=%s", got, stdout)
+	if code != 0 {
+		t.Fatalf("schema ack.addon should be public; exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
 	if surface, ok := schema.ResourceForLanguage("ack", "addon", "en"); !ok || surface.Name != "addon" {
-		t.Fatalf("pkg/schema should still expose ack.addon, got %#v ok=%v", surface, ok)
+		t.Fatalf("pkg/schema should expose ack.addon, got %#v ok=%v", surface, ok)
 	}
 
 	stdout, stderr, code = runCLI("--lang", "en", "schema", "--list", "lingjun")
@@ -825,8 +892,35 @@ func TestOpenSourceCommandSurfaceHidesNonPublicResourcesOnlyInCLI(t *testing.T) 
 		name, _ := resource["name"].(string)
 		names = append(names, name)
 	}
-	if !reflect.DeepEqual(names, []string{"cluster", "vpd"}) {
-		t.Fatalf("public Lingjun schema resources = %#v, want [cluster vpd]; stdout=%s", names, stdout)
+	wantLingjun := []string{"cluster", "eni", "er", "node-group", "subnet", "vpd"}
+	sort.Strings(names)
+	if !reflect.DeepEqual(names, wantLingjun) {
+		t.Fatalf("public Lingjun schema resources = %#v, want %#v; stdout=%s", names, wantLingjun, stdout)
+	}
+
+	wantENIActions := []any{"list", "get", "create", "update", "delete"}
+	for _, args := range [][]string{
+		{"--lang", "en", "schema", "lingjun.eni"},
+		{"--lang", "en", "schema", "lingjun", "eni"},
+	} {
+		stdout, stderr, code = runCLI(args...)
+		if code != 0 {
+			t.Fatalf("public resource schema %v exit %d stderr=%s stdout=%s", args, code, stderr, stdout)
+		}
+		if actions, _ := decodeObject(t, stdout)["actions"].([]any); !reflect.DeepEqual(actions, wantENIActions) {
+			t.Fatalf("public resource schema %v actions = %#v, want %#v; stdout=%s", args, actions, wantENIActions, stdout)
+		}
+	}
+
+	stdout, stderr, code = runCLIWithFullSurface("--lang", "en", "schema", "lingjun.eni")
+	if code != 0 {
+		t.Fatalf("full Lingjun ENI schema exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	fullENIActions, _ := decodeObject(t, stdout)["actions"].([]any)
+	for _, action := range []string{"attach", "detach"} {
+		if !containsStringValue(fullENIActions, action) {
+			t.Fatalf("full Lingjun ENI schema missing %s action: %s", action, stdout)
+		}
 	}
 
 	stdout, stderr, code = runCLI("--lang", "en", "capabilities", "--output", "json")
@@ -847,19 +941,82 @@ func TestOpenSourceCommandSurfaceHidesNonPublicResourcesOnlyInCLI(t *testing.T) 
 			names = append(names, name)
 		}
 	}
-	if !reflect.DeepEqual(names, []string{"cluster", "vpd"}) {
-		t.Fatalf("public Lingjun capabilities resources = %#v, want [cluster vpd]; stdout=%s", names, stdout)
+	sort.Strings(names)
+	if !reflect.DeepEqual(names, wantLingjun) {
+		t.Fatalf("public Lingjun capabilities resources = %#v, want %#v; stdout=%s", names, wantLingjun, stdout)
 	}
 
 	for _, args := range [][]string{
+		{"--lang", "en", "ack", "auto-repair-policy", "--help"},
+		{"--lang", "en", "ack", "diagnosis", "--help"},
+		{"--lang", "en", "ack", "diagnosis", "check-item", "--help"},
+		{"--lang", "en", "schema", "ack.diagnosis"},
+		{"--lang", "en", "schema", "ack.diagnosis.check-item"},
+		{"--lang", "en", "ack", "operation-plan", "--help"},
+		{"--lang", "en", "schema", "ack.operation-plan"},
+		{"--lang", "en", "lingjun", "net-test", "--help"},
+		{"--lang", "en", "schema", "lingjun.net-test"},
 		{"--lang", "en", "lingjun", "node", "--help"},
 		{"--lang", "en", "lingjun", "node-group", "--help"},
 		{"--lang", "en", "lingjun", "ng", "--help"},
+		{"--lang", "en", "lingjun", "vcc", "--help"},
+		{"--lang", "en", "lingjun", "lni", "--help"},
+		{"--lang", "en", "lingjun", "vsc", "--help"},
+		{"--lang", "en", "lingjun", "eni", "attach", "--help"},
+		{"--lang", "en", "lingjun", "eni", "detach", "--help"},
 	} {
 		stdout, stderr, code = runCLIWithFullSurface(args...)
 		if code != 0 {
 			t.Fatalf("full surface %v exit %d stderr=%s stdout=%s", args, code, stderr, stdout)
 		}
+	}
+
+	stdout, stderr, code = runCLI("--lang", "en", "ack", "kubeconfig", "--help")
+	if code != 0 {
+		t.Fatalf("public kubeconfig help exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if helpListsCommand(stdout, "update") {
+		t.Fatalf("public kubeconfig help exposes unsupported update action:\n%s", stdout)
+	}
+
+	stdout, stderr, code = runCLI("--lang", "en", "lingjun", "eni", "--help")
+	if code != 0 {
+		t.Fatalf("public Lingjun ENI help exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	for _, action := range []string{"attach", "detach"} {
+		if helpListsCommand(stdout, action) {
+			t.Fatalf("public Lingjun ENI help exposes unsupported %s action:\n%s", action, stdout)
+		}
+	}
+
+	stdout, stderr, code = runCLI("--lang", "en", "capabilities", "--output", "json")
+	if code != 0 {
+		t.Fatalf("public capabilities exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if capabilitiesContainResourceAction(decodeObject(t, stdout)["products"], "ack", "kubeconfig", "update") {
+		t.Fatalf("public capabilities expose unsupported ack.kubeconfig.update: %s", stdout)
+	}
+	if capabilitiesContainResourceAction(decodeObject(t, stdout)["products"], "ack", "diagnosis", "create") {
+		t.Fatalf("public capabilities expose ack.diagnosis: %s", stdout)
+	}
+	if capabilitiesContainResourceAction(decodeObject(t, stdout)["products"], "lingjun", "net-test", "create") {
+		t.Fatalf("public capabilities expose lingjun.net-test: %s", stdout)
+	}
+	for _, action := range []string{"attach", "detach"} {
+		if capabilitiesContainResourceAction(decodeObject(t, stdout)["products"], "lingjun", "eni", action) {
+			t.Fatalf("public capabilities expose lingjun.eni.%s: %s", action, stdout)
+		}
+	}
+
+	stdout, stderr, code = runCLIWithFullSurface("--lang", "en", "capabilities", "--output", "json")
+	if code != 0 {
+		t.Fatalf("full capabilities exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if capabilitiesContainResourceAction(decodeObject(t, stdout)["products"], "ack", "kubeconfig", "update") {
+		t.Fatalf("full capabilities expose unsupported ack.kubeconfig.update: %s", stdout)
+	}
+	if !capabilitiesContainResourceAction(decodeObject(t, stdout)["products"], "ack", "diagnosis", "create") {
+		t.Fatalf("full capabilities missing ack.diagnosis: %s", stdout)
 	}
 }
 
@@ -887,8 +1044,8 @@ func TestGovernanceProductsExposeSelectedPublicResources(t *testing.T) {
 		product string
 		want    []string
 	}{
-		{product: "rg", want: []string{"group", "policy", "resource", "role", "version"}},
-		{product: "tag", want: []string{"resource"}},
+		{product: "rg", want: []string{"admin-setting", "associated-transfer", "group", "notification", "policy", "resource", "role", "service-linked-role", "version"}},
+		{product: "tag", want: []string{"associated-resource-rule", "policy", "resource"}},
 	} {
 		stdout, stderr, code = runCLI("--lang", "en", "schema", "--list", tt.product)
 		if code != 0 {
@@ -901,6 +1058,7 @@ func TestGovernanceProductsExposeSelectedPublicResources(t *testing.T) {
 			name, _ := resource["name"].(string)
 			got = append(got, name)
 		}
+		sort.Strings(got)
 		if !reflect.DeepEqual(got, tt.want) {
 			t.Fatalf("public %s resources = %#v, want %#v; stdout=%s", tt.product, got, tt.want, stdout)
 		}
@@ -1293,7 +1451,7 @@ func TestCallOSSMetadataSurface(t *testing.T) {
 		t.Fatalf("call --list oss exit %d stderr=%s stdout=%s", code, stderr, stdout)
 	}
 	list := decodeObject(t, stdout)
-	if list["product"] != "oss" || list["count"] != float64(7) || list["total"] != float64(7) {
+	if list["product"] != "oss" || list["count"] != float64(9) || list["total"] != float64(9) {
 		t.Fatalf("OSS operation list metadata = %#v", list)
 	}
 	items, _ := list["apis"].([]any)
@@ -1302,7 +1460,7 @@ func TestCallOSSMetadataSurface(t *testing.T) {
 		item, _ := raw.(map[string]any)
 		gotNames = append(gotNames, fmt.Sprint(item["name"]))
 	}
-	wantNames := []string{"DeleteBucket", "DeleteObject", "GetBucketAcl", "GetBucketInfo", "ListBuckets", "ListObjects", "PutBucket"}
+	wantNames := []string{"DeleteBucket", "DeleteObject", "GetBucketAcl", "GetBucketInfo", "GetObject", "ListBuckets", "ListObjects", "PutBucket", "PutObject"}
 	if !reflect.DeepEqual(gotNames, wantNames) {
 		t.Fatalf("OSS operation names = %#v, want %#v", gotNames, wantNames)
 	}
@@ -1386,6 +1544,30 @@ func TestCallOSSMetadataSurface(t *testing.T) {
 		t.Fatalf("DeleteObject request template = %#v", template)
 	}
 
+	stdout, stderr, code = runCLI("--lang", "en", "call", "--schema", "oss", "GetObject")
+	if code != 0 || stderr != "" {
+		t.Fatalf("call --schema oss GetObject exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	schema = decodeObject(t, stdout)
+	parameters, _ = schema["parameters"].([]any)
+	file := findCallParameter(parameters, "File")
+	if file == nil || file["required"] != true || file["position"] != "Local" {
+		t.Fatalf("GetObject File parameter = %#v; stdout=%s", file, stdout)
+	}
+	force := findCallParameter(parameters, "Force")
+	if force == nil || force["required"] != false || force["type"] != "Boolean" || force["position"] != "Local" {
+		t.Fatalf("GetObject Force parameter = %#v; stdout=%s", force, stdout)
+	}
+
+	stdout, stderr, code = runCLI("--lang", "en", "call", "--schema", "oss", "PutObject", "--generate-request")
+	if code != 0 || stderr != "" {
+		t.Fatalf("generate PutObject request exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	template = decodeObject(t, stdout)
+	if !reflect.DeepEqual(template, map[string]any{"Bucket": "<Bucket>", "File": "<File>", "Key": "<Key>"}) {
+		t.Fatalf("PutObject request template = %#v", template)
+	}
+
 	products, directive := completeCLI(t, "call", "os")
 	if directive != fmt.Sprintf(":%d", cobra.ShellCompDirectiveNoFileComp) || !containsCompletion(products, "oss") {
 		t.Fatalf("OSS product completion = %#v directive=%s", products, directive)
@@ -1401,6 +1583,10 @@ func TestCallOSSMetadataSurface(t *testing.T) {
 	operations, directive = completeCLI(t, "call", "oss", "DeleteObject")
 	if directive != fmt.Sprintf(":%d", cobra.ShellCompDirectiveNoFileComp) || !containsCompletion(operations, "DeleteObject") {
 		t.Fatalf("OSS DeleteObject completion = %#v directive=%s", operations, directive)
+	}
+	operations, directive = completeCLI(t, "call", "oss", "GetObject")
+	if directive != fmt.Sprintf(":%d", cobra.ShellCompDirectiveNoFileComp) || !containsCompletion(operations, "GetObject") {
+		t.Fatalf("OSS GetObject completion = %#v directive=%s", operations, directive)
 	}
 }
 
@@ -1460,6 +1646,50 @@ func TestCallOSSObjectParametersUseCommonFlagParsing(t *testing.T) {
 	}
 	want := map[string]any{"Bucket": "bucket", "FetchOwner": true, "MaxKeys": float64(10)}
 	if fake.operation != "ListObjects" || !reflect.DeepEqual(fake.request, want) {
+		t.Fatalf("operation=%q request=%#v, want request=%#v", fake.operation, fake.request, want)
+	}
+}
+
+func TestCallOSSFileTransferParametersUseCommonFlagParsing(t *testing.T) {
+	fake := &fakeAPICaller{response: map[string]any{"File": "/tmp/export.raw.tar.gz"}}
+	factory := func(profileName, configPath, product, region string, getenv func(string) string) (engine.Caller, error) {
+		return fake, nil
+	}
+	stdout, stderr, code := runCLIWithAPI(factory,
+		"--lang", "en",
+		"--region", "cn-hangzhou",
+		"call", "oss", "GetObject",
+		"--Bucket", "bucket",
+		"--Key", "export.raw.tar.gz",
+		"--File", "/tmp/export.raw.tar.gz",
+		"--parallel", "16",
+		"--part-size", "64Mi",
+	)
+	if code != 0 || stderr != "" {
+		t.Fatalf("call oss GetObject exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	want := map[string]any{"Bucket": "bucket", "Key": "export.raw.tar.gz", "File": "/tmp/export.raw.tar.gz"}
+	if fake.operation != "GetObject" || !reflect.DeepEqual(fake.request, want) {
+		t.Fatalf("operation=%q request=%#v, want request=%#v", fake.operation, fake.request, want)
+	}
+	if !reflect.DeepEqual(fake.passthrough, []string{"--parallel", "16", "--part-size", "64Mi"}) {
+		t.Fatalf("passthrough = %#v", fake.passthrough)
+	}
+
+	stdout, stderr, code = runCLIWithAPI(factory,
+		"--lang", "en",
+		"--region", "cn-hangzhou",
+		"call", "oss", "PutObject",
+		"--Bucket", "bucket",
+		"--Key", "import.raw",
+		"--File", "/tmp/import.raw",
+		"--Force",
+	)
+	if code != 0 || stderr != "" {
+		t.Fatalf("call oss PutObject --Force exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	want = map[string]any{"Bucket": "bucket", "Key": "import.raw", "File": "/tmp/import.raw", "Force": true}
+	if fake.operation != "PutObject" || !reflect.DeepEqual(fake.request, want) {
 		t.Fatalf("operation=%q request=%#v, want request=%#v", fake.operation, fake.request, want)
 	}
 }
@@ -2151,6 +2381,67 @@ func capabilitiesContainResourceAction(value any, productName string, resourceNa
 		}
 	}
 	return false
+}
+
+func capabilityResourceMap(value any) map[string][]string {
+	result := map[string][]string{}
+	products, _ := value.([]any)
+	for _, productValue := range products {
+		product, _ := productValue.(map[string]any)
+		productName, _ := product["product"].(string)
+		resources, _ := product["resources"].([]any)
+		for _, resourceValue := range resources {
+			resource, _ := resourceValue.(map[string]any)
+			resourceName, _ := resource["name"].(string)
+			values, _ := resource["actions"].([]any)
+			actions := make([]string, 0, len(values))
+			for _, value := range values {
+				action, _ := value.(string)
+				actions = append(actions, action)
+			}
+			sort.Strings(actions)
+			result[productName+"/"+resourceName] = actions
+		}
+	}
+	return result
+}
+
+func TestPublicCapabilitiesEqualFullCapabilitiesMinusExcludedResources(t *testing.T) {
+	publicStdout, publicStderr, code := runCLI("--lang", "en", "capabilities", "--output", "json")
+	if code != 0 {
+		t.Fatalf("public capabilities exit %d stderr=%s stdout=%s", code, publicStderr, publicStdout)
+	}
+
+	fullStdout, fullStderr, code := runCLIWithFullSurface("--lang", "en", "capabilities", "--output", "json")
+	if code != 0 {
+		t.Fatalf("full capabilities exit %d stderr=%s stdout=%s", code, fullStderr, fullStdout)
+	}
+
+	publicResources := capabilityResourceMap(decodeObject(t, publicStdout)["products"])
+	fullResources := capabilityResourceMap(decodeObject(t, fullStdout)["products"])
+	for _, excluded := range []string{
+		"ack/auto-repair-policy",
+		"ack/diagnosis",
+		"ack/check-item",
+		"ack/operation-plan",
+		"lingjun/lni",
+		"lingjun/net-test",
+		"lingjun/node",
+		"lingjun/vcc",
+		"lingjun/vsc",
+	} {
+		if _, ok := publicResources[excluded]; ok {
+			t.Errorf("public capabilities expose excluded resource %s", excluded)
+		}
+		if _, ok := fullResources[excluded]; !ok {
+			t.Errorf("full capabilities are missing excluded resource %s", excluded)
+		}
+		delete(fullResources, excluded)
+	}
+	fullResources["lingjun/eni"] = []string{"create", "delete", "get", "list", "update"}
+	if !reflect.DeepEqual(publicResources, fullResources) {
+		t.Fatalf("public capabilities differ from full capabilities after exclusions\npublic: %#v\nfull minus exclusions: %#v", publicResources, fullResources)
+	}
 }
 
 func TestSchemaPreservesDefaultValueTypes(t *testing.T) {
@@ -5797,10 +6088,11 @@ func TestExamplesAllListsAllTopics(t *testing.T) {
 
 func TestExamplesHideNonPublicTopics(t *testing.T) {
 	hiddenTopics := []string{
-		"rg.notification",
-		"rg.service-linked-role",
-		"tag.associated-resource-rule",
-		"tag.policy",
+		"ack.auto-repair-policy",
+		"ack.diagnosis",
+		"ack.check-item",
+		"ack.operation-plan",
+		"lingjun.net-test",
 	}
 	for _, args := range [][]string{
 		{"--lang", "en", "examples"},

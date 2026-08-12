@@ -13,15 +13,17 @@ import (
 	"github.com/google/shlex"
 
 	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalcmd"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalfile"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
 )
 
-const (
-	cleanupTimeout        = 10 * time.Minute
-	cleanupTimeoutPadding = time.Minute
-)
+const cleanupTimeoutPadding = time.Minute
 
-var cleanupRetryDelays = []time.Duration{5 * time.Second, 10 * time.Second, 15 * time.Second, 30 * time.Second, 30 * time.Second}
+var (
+	cleanupTimeout     = 10 * time.Minute
+	cleanupRetryDelays = []time.Duration{5 * time.Second, 10 * time.Second, 15 * time.Second, 30 * time.Second, 30 * time.Second}
+)
 
 // exitNotFound is ecctl's process exit code for a NotFound error (see
 // ecerrors.AppError.ExitCode). During teardown it means the resource is already
@@ -30,10 +32,11 @@ const exitNotFound = 4
 
 // cleanupItem is one teardown command and whether it has already run.
 type cleanupItem struct {
-	scope string
-	cmd   string
-	role  string
-	done  bool
+	scope    string
+	cmd      string
+	role     string
+	lockKeys []string
+	done     bool
 }
 
 // cleanup is the two-level teardown registry. Case scopes run when
@@ -45,18 +48,19 @@ type cleanup struct {
 	keep        bool
 	journal     string
 	execCfg     map[string]execpkg.Config
+	operations  *operationRuntime
 	logf        func(string, ...any)
 	manifest    []report.Resource
 	journalMeta report.CleanupJournal
 }
 
-func newCleanup(cfg map[string]execpkg.Config, keep bool, journal string, meta report.CleanupJournal, logf func(string, ...any)) *cleanup {
+func newCleanup(cfg map[string]execpkg.Config, operations *operationRuntime, keep bool, journal string, meta report.CleanupJournal, logf func(string, ...any)) *cleanup {
 	meta.Version = 2
-	return &cleanup{keep: keep, journal: journal, execCfg: cfg, logf: logf, journalMeta: meta}
+	return &cleanup{keep: keep, journal: journal, execCfg: cfg, operations: operations, logf: logf, journalMeta: meta}
 }
 
 // push registers a teardown command in a scope and records it in the manifest.
-func (c *cleanup) push(scope *[]*cleanupItem, name, cmd, role string) error {
+func (c *cleanup) push(scope *[]*cleanupItem, name, cmd, role string, lockKeys []string) error {
 	if role == "" {
 		role = "primary"
 	}
@@ -64,13 +68,17 @@ func (c *cleanup) push(scope *[]*cleanupItem, name, cmd, role string) error {
 	if !ok {
 		return fmt.Errorf("cleanup region role %q is not configured", role)
 	}
-	it := &cleanupItem{scope: name, cmd: cmd, role: role}
+	keys, err := normalizeLockKeys(lockKeys)
+	if err != nil {
+		return fmt.Errorf("cleanup lock keys: %w", err)
+	}
+	it := &cleanupItem{scope: name, cmd: cmd, role: role, lockKeys: keys}
 	c.mu.Lock()
 	*scope = append(*scope, it)
 	c.manifest = append(c.manifest, report.Resource{
 		Scope: name, Teardown: cmd, RegionRole: role, Region: cfg.Region, ExecutionID: c.journalMeta.ExecutionID,
 	})
-	err := c.writeJournalLocked(role)
+	err = c.appendJournalItemLocked(it)
 	c.mu.Unlock()
 	return err
 }
@@ -79,7 +87,7 @@ func (c *cleanup) push(scope *[]*cleanupItem, name, cmd, role string) error {
 // step performs the exact same cleanup successfully. This preserves explicit
 // delete/revoke/detach coverage without running the operation twice at scope
 // teardown.
-func (c *cleanup) satisfy(scope []*cleanupItem, command, role string) {
+func (c *cleanup) satisfy(scope []*cleanupItem, command, role string) error {
 	if role == "" {
 		role = "primary"
 	}
@@ -89,9 +97,10 @@ func (c *cleanup) satisfy(scope []*cleanupItem, command, role string) {
 		item := scope[i]
 		if !item.done && item.role == role && commandsEquivalent(item.cmd, command) {
 			item.done = true
-			return
+			return c.removeJournalItemLocked(item)
 		}
 	}
+	return nil
 }
 
 func commandsEquivalent(left, right string) bool {
@@ -108,27 +117,136 @@ func commandsEquivalent(left, right string) bool {
 	return true
 }
 
-func (c *cleanup) writeJournalLocked(role string) error {
+func (c *cleanup) appendJournalItemLocked(item *cleanupItem) error {
 	if c.journal == "" {
 		return nil
 	}
-	cfg := c.execCfg[role]
+	template, entry, path := c.journalValues(item)
+	return journalfile.WithLock(context.Background(), path, func() error {
+		journal, _, err := readRunnerJournal(path)
+		if os.IsNotExist(err) {
+			journal = template
+		} else if err != nil {
+			return err
+		}
+		if err := mergeJournalMetadata(&journal, template); err != nil {
+			return err
+		}
+		if !isReplayableTeardown(item.cmd) {
+			return writeRunnerJournal(path, journal)
+		}
+		journal.Entries = append(journal.Entries, entry)
+		return writeRunnerJournal(path, journal)
+	})
+}
+
+func (c *cleanup) removeJournalItemLocked(item *cleanupItem) error {
+	if c.journal == "" || !isReplayableTeardown(item.cmd) {
+		return nil
+	}
+	template, entry, path := c.journalValues(item)
+	return journalfile.WithLock(context.Background(), path, func() error {
+		journal, _, err := readRunnerJournal(path)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := mergeJournalMetadata(&journal, template); err != nil {
+			return err
+		}
+		index := -1
+		for i := len(journal.Entries) - 1; i >= 0; i-- {
+			if journalEntriesMatch(journal.Entries[i], entry) {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			return nil
+		}
+		journal.Entries = append(journal.Entries[:index], journal.Entries[index+1:]...)
+		return writeRunnerJournal(path, journal)
+	})
+}
+
+func (c *cleanup) journalValues(item *cleanupItem) (report.CleanupJournal, report.Resource, string) {
+	cfg := c.execCfg[item.role]
 	journal := c.journalMeta
-	journal.RegionRole = role
+	journal.RegionRole = item.role
 	journal.Region = cfg.Region
 	journal.EcctlBin = cfg.Bin
 	journal.Entries = make([]report.Resource, 0)
-	for _, entry := range c.manifest {
-		if entry.RegionRole == role && isReplayableDelete(entry.Teardown) {
-			journal.Entries = append(journal.Entries, entry)
+	entry := report.Resource{
+		Scope: item.scope, Teardown: item.cmd, RegionRole: item.role,
+		Region: cfg.Region, ExecutionID: c.journalMeta.ExecutionID,
+	}
+	return journal, entry, cleanupJournalPath(c.journal, item.role)
+}
+
+func readRunnerJournal(path string) (report.CleanupJournal, bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return report.CleanupJournal{}, false, err
+	}
+	var journal report.CleanupJournal
+	legacy := strings.HasPrefix(strings.TrimSpace(string(data)), "[")
+	if legacy {
+		if err := json.Unmarshal(data, &journal.Entries); err != nil {
+			return report.CleanupJournal{}, false, fmt.Errorf("cleanup journal %s: %w", path, err)
+		}
+	} else if err := json.Unmarshal(data, &journal); err != nil {
+		return report.CleanupJournal{}, false, fmt.Errorf("cleanup journal %s: %w", path, err)
+	}
+	return journal, legacy, nil
+}
+
+func mergeJournalMetadata(journal *report.CleanupJournal, desired report.CleanupJournal) error {
+	for _, field := range []struct {
+		name    string
+		current *string
+		desired string
+	}{
+		{name: "run id", current: &journal.RunID, desired: desired.RunID},
+		{name: "execution id", current: &journal.ExecutionID, desired: desired.ExecutionID},
+		{name: "region role", current: &journal.RegionRole, desired: desired.RegionRole},
+		{name: "region", current: &journal.Region, desired: desired.Region},
+		{name: "surface", current: &journal.Surface, desired: desired.Surface},
+		{name: "binary", current: &journal.EcctlBin, desired: desired.EcctlBin},
+	} {
+		if *field.current != "" && field.desired != "" && *field.current != field.desired {
+			return fmt.Errorf("cleanup journal %s %q does not match %q", field.name, *field.current, field.desired)
+		}
+		if *field.current == "" {
+			*field.current = field.desired
 		}
 	}
+	if journal.Version == 0 {
+		journal.Version = desired.Version
+	}
+	return nil
+}
+
+func journalEntriesMatch(left, right report.Resource) bool {
+	if left.Scope != right.Scope || left.Teardown != right.Teardown {
+		return false
+	}
+	for _, values := range [][2]string{
+		{left.RegionRole, right.RegionRole},
+		{left.Region, right.Region},
+		{left.ExecutionID, right.ExecutionID},
+	} {
+		if values[0] != "" && values[1] != "" && values[0] != values[1] {
+			return false
+		}
+	}
+	return true
+}
+
+func writeRunnerJournal(path string, journal report.CleanupJournal) error {
 	data, err := json.MarshalIndent(journal, "", "  ")
 	if err != nil {
-		return err
-	}
-	path := cleanupJournalPath(c.journal, role)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	tmp := path + ".tmp"
@@ -138,23 +256,11 @@ func (c *cleanup) writeJournalLocked(role string) error {
 	return os.Rename(tmp, path)
 }
 
-// isReplayableDelete keeps crash-recovery journals within the repository's
+// isReplayableTeardown keeps crash-recovery journals within the repository's
 // strict safety contract. Runtime finalizers such as revoke or detach still run
 // in-process, but they are never persisted for later unattended replay.
-func isReplayableDelete(command string) bool {
-	tokens, err := shlex.Split(command)
-	if err != nil || len(tokens) < 2 || tokens[0] != "ecctl" || tokens[1] == "call" {
-		return false
-	}
-	for _, token := range tokens[1:] {
-		if strings.HasPrefix(token, "-") {
-			break
-		}
-		if token == "delete" {
-			return true
-		}
-	}
-	return false
+func isReplayableTeardown(command string) bool {
+	return journalcmd.ValidateDelete(command) == nil
 }
 
 func cleanupJournalPath(base, role string) string {
@@ -183,35 +289,56 @@ func (c *cleanup) run(scope []*cleanupItem) []string {
 		it.done = true
 		c.mu.Unlock()
 
-		itemTimeout := cleanupCommandTimeout(it.cmd)
-		ctx, cancel := context.WithTimeout(context.Background(), itemTimeout)
-		res := execpkg.Run(ctx, c.execCfg[it.role], it.cmd)
-		for attempt, delay := range cleanupRetryDelays {
-			if res.Exit == 0 || res.Exit == exitNotFound || !cleanupRetryable(res) {
-				break
+		var res execpkg.Result
+		var itemTimeout time.Duration
+		var timedOut bool
+		coordinationErr := c.operations.executeKeys(context.Background(), it.lockKeys, func() {
+			itemTimeout = cleanupCommandTimeout(it.cmd)
+			commandCtx, cancel := context.WithTimeout(context.Background(), itemTimeout)
+			res = execpkg.Run(commandCtx, c.execCfg[it.role], it.cmd)
+			for attempt, delay := range cleanupRetryDelays {
+				if res.Exit == 0 || res.Exit == exitNotFound || !cleanupRetryable(res) {
+					break
+				}
+				c.logf("cleanup retry %d/%d after transient resource status: %s", attempt+1, len(cleanupRetryDelays), it.cmd)
+				timer := time.NewTimer(delay)
+				select {
+				case <-commandCtx.Done():
+					timer.Stop()
+				case <-timer.C:
+					res = execpkg.Run(commandCtx, c.execCfg[it.role], it.cmd)
+				}
+				if commandCtx.Err() != nil {
+					break
+				}
 			}
-			c.logf("cleanup retry %d/%d after transient resource status: %s", attempt+1, len(cleanupRetryDelays), it.cmd)
-			timer := time.NewTimer(delay)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-			case <-timer.C:
-				res = execpkg.Run(ctx, c.execCfg[it.role], it.cmd)
-			}
-			if ctx.Err() != nil {
-				break
-			}
+			timedOut = commandCtx.Err() == context.DeadlineExceeded
+			cancel()
+		})
+		if coordinationErr != nil {
+			failure := fmt.Sprintf("cleanup coordination: %s: %v", report.Scrub(it.cmd), coordinationErr)
+			c.logf("cleanup failed: %s", failure)
+			failures = append(failures, failure)
+			continue
 		}
-		timedOut := ctx.Err() == context.DeadlineExceeded
-		cancel()
 		switch {
 		case res.Exit == 0:
 			c.logf("cleanup ok: %s", it.cmd)
+			if err := c.completeJournalItem(it); err != nil {
+				failure := fmt.Sprintf("cleanup journal rewrite: %s: %v", report.Scrub(it.cmd), err)
+				c.logf("cleanup failed: %s", failure)
+				failures = append(failures, failure)
+			}
 		case res.Exit == exitNotFound:
 			// The resource is already gone — typically the case's own delete step
 			// removed it and this teardown is the safety net. That is the desired
 			// end state, not a failure worth flagging.
 			c.logf("cleanup ok (already gone): %s", it.cmd)
+			if err := c.completeJournalItem(it); err != nil {
+				failure := fmt.Sprintf("cleanup journal rewrite: %s: %v", report.Scrub(it.cmd), err)
+				c.logf("cleanup failed: %s", failure)
+				failures = append(failures, failure)
+			}
 		default:
 			failure := cleanupFailure(res, it.cmd, timedOut, itemTimeout)
 			c.logf("cleanup failed: %s", failure)
@@ -219,6 +346,12 @@ func (c *cleanup) run(scope []*cleanupItem) []string {
 		}
 	}
 	return failures
+}
+
+func (c *cleanup) completeJournalItem(item *cleanupItem) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.removeJournalItemLocked(item)
 }
 
 // cleanupCommandTimeout keeps the cleanup process alive long enough for an
@@ -257,10 +390,14 @@ func cleanupRetryable(res execpkg.Result) bool {
 	text := strings.ToLower(strings.Join([]string{res.Stdout, res.Stderr, firstActionCode(res.JSON)}, " "))
 	for _, marker := range []string{
 		"status does not support this operation",
+		"cannot operate cluster where state is updating",
 		"incorrectinstancestatus",
 		"incorrectdiskstatus",
 		"operationconflict",
 		"taskconflict",
+		// ModifyInstanceChargeType is async: a DeleteInstance issued right after
+		// the conversion request fails while the charge-type token is processing.
+		"the last token request is processing",
 		"there is still instance(s) in the specified security group",
 		"depends on [networkinterface]",
 		"dependencyviolation",

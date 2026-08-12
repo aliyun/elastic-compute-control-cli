@@ -94,7 +94,8 @@ ecctl ack node attach [flags]
 |---|---|---|
 | `AttachInstances` | 每次执行命令时 | 执行资源操作。 |
 | `DescribeTaskInfo` | 未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
-| `DescribeClusterNodes` | 未指定 `--no-wait` 时 | 读取资源视图。 |
+| `DescribeClusterNodes` | 未指定 `--no-wait` 时 | 轮询等待资源达到目标状态。（重复调用） |
+| `DescribeClusterNodes` | 未指定 `--no-wait` 时 | 返回最终资源视图。（复用等待结果，不额外请求） |
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|

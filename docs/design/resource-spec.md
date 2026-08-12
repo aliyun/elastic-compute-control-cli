@@ -87,6 +87,7 @@ operations: {}
 | 字段 | 含义 |
 | --- | --- |
 | `api_product` | OpenAPI 产品代码；为空时使用 `product`。用于 CLI 产品名和云产品代码不一致的治理产品，例如 `rg` -> `ResourceManager`。 |
+| `fixed_region` | 固定资源生效区域；为空时使用用户配置区域。用于仅部署在单一区域的 API 族（如 `tag/associated-resource-rule` 仅杭州）。设置后所有操作的 `RegionId` 参数与 endpoint 都解析为该区域，忽略用户配置。 |
 | `aliases` | 资源子命令别名 |
 | `display_name` | 展示名称 |
 | `description` | 资源命令说明 |
