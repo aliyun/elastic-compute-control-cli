@@ -1,13 +1,44 @@
 package aliyun
 
 import (
+	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
 )
+
+func TestRegionVerifierRecordsLocationRequest(t *testing.T) {
+	executor := &fakeOpenAPIExecutor{response: `{"Endpoints":{"Endpoint":[{"RegionId":"cn-hangzhou"}]}}`}
+	verifier := newRegionVerifierWithExecutor(executor)
+	exporter := tracetest.NewInMemoryExporter()
+	ctx, session := telemetry.Start(telemetry.WithExporterForTest(context.Background(), exporter), telemetry.Options{
+		Enabled: true, Surface: "public", Version: "test", ConfigPath: filepath.Join(t.TempDir(), "config.json"),
+	})
+	if err := verifier.VerifyContext(ctx, "cn-hangzhou", ""); err != nil {
+		t.Fatal(err)
+	}
+	session.Finish("ecctl configure set region", 0)
+	apiSpans := 0
+	for _, span := range exporter.GetSpans() {
+		if span.Name == "ecctl.cloud.api.request" {
+			apiSpans++
+			attrs := testSpanAttributes(span.Attributes)
+			if attrs["ecctl.cloud.transport"] != "location" || attrs["ecctl.cloud.api"] != "DescribeEndpoints" {
+				t.Fatalf("location attributes = %#v", attrs)
+			}
+		}
+	}
+	if apiSpans != 1 {
+		t.Fatalf("location API spans = %d, want 1", apiSpans)
+	}
+}
 
 func TestRegionVerifierAcceptsKnownRegion(t *testing.T) {
 	processor := &fakeOpenAPIExecutor{response: `{"Endpoints":{"Endpoint":[{"RegionId":"cn-hangzhou","Endpoint":"ecs.cn-hangzhou.aliyuncs.com","Type":"openAPI","SerivceCode":"ecs"}]},"RequestId":"req-1"}`}

@@ -52,6 +52,7 @@ var configItems = []ConfigItem{
 	{Key: "security-token", StoredAs: "sts_token", Description: "Optional STS security token.", Type: "string", Sensitive: true, SetExample: "ecctl configure set security-token <value>"},
 	{Key: "lang", StoredAs: "language", Description: "Default display language.", Type: "string", Allowed: []string{"en", "zh-CN"}, SetExample: "ecctl configure set lang zh-CN"},
 	{Key: "output", StoredAs: "output_format", Description: "Default output format.", Type: "string", Allowed: []string{"json", "text"}, SetExample: "ecctl configure set output text"},
+	{Key: "telemetry.enabled", StoredAs: "telemetry.enabled", Description: "Enable best-effort pseudonymous product telemetry.", Type: "boolean", Allowed: []string{"true", "false"}, SetExample: "ecctl configure set telemetry.enabled false"},
 }
 
 var configKeyAliases = map[string]string{
@@ -65,6 +66,7 @@ var configKeyAliases = map[string]string{
 	"language":          "lang",
 	"output-format":     "output",
 	"output_format":     "output",
+	"telemetry-enabled": "telemetry.enabled",
 }
 
 func ResolveRegion(explicit string, getenv func(string) string) (string, *ecerrors.AppError) {
@@ -299,6 +301,13 @@ func EffectiveProfile(name string, ecctlConfigPath string, aliyunConfigPath stri
 }
 
 func EffectiveValue(name string, key string, showSecret bool, ecctlConfigPath string, aliyunConfigPath string) (ConfigValue, error) {
+	if item, ok := lookupConfigItem(key); ok && item.Key == "telemetry.enabled" {
+		store, err := LoadStore(ecctlConfigPath)
+		if err != nil {
+			return ConfigValue{}, err
+		}
+		return store.GetValue("", item.Key, showSecret)
+	}
 	profile, _, err := EffectiveProfile(name, ecctlConfigPath, aliyunConfigPath)
 	if err != nil {
 		return ConfigValue{}, err
@@ -313,6 +322,18 @@ func EffectiveItems(name string, showSecret bool, ecctlConfigPath string, aliyun
 	}
 	items := SupportedItems()
 	for i := range items {
+		if items[i].Key == "telemetry.enabled" {
+			store, loadErr := LoadStore(ecctlConfigPath)
+			if loadErr != nil {
+				return nil, loadErr
+			}
+			value, valueErr := store.GetValue("", items[i].Key, showSecret)
+			if valueErr != nil {
+				return nil, valueErr
+			}
+			items[i].Value = value.Value
+			continue
+		}
 		value, err := ConfigValueFromProfile(profile, items[i].Key, showSecret)
 		if err != nil {
 			return nil, err
@@ -328,6 +349,9 @@ func ConfigValueFromProfile(profile Profile, key string, showSecret bool) (Confi
 		return ConfigValue{}, fmt.Errorf("unknown config key %s", key)
 	}
 	value := profileField(profile, item.Key)
+	if item.Key == "telemetry.enabled" {
+		value = "true"
+	}
 	if item.Key == "output" && value == "" {
 		value = "json"
 	}
@@ -360,6 +384,13 @@ func (s *Store) GetValue(name string, key string, showSecret bool) (ConfigValue,
 	if name == "" {
 		name = s.Current()
 	}
+	if item.Key == "telemetry.enabled" {
+		enabled, err := telemetryEnabledValue(s.data)
+		if err != nil {
+			return ConfigValue{}, err
+		}
+		return ConfigValue{Key: item.Key, Value: fmt.Sprintf("%t", enabled)}, nil
+	}
 	profile := s.profileMap(name)
 	value := stringField(profile, item.StoredAs)
 	if item.Key == "output" && value == "" {
@@ -375,6 +406,20 @@ func (s *Store) SetValue(name string, key string, value string) (ConfigValue, er
 	}
 	if err := validateConfigValue(item, value); err != nil {
 		return ConfigValue{}, err
+	}
+	if item.Key == "telemetry.enabled" {
+		enabled := value == "true"
+		rawTelemetry, exists := s.data["telemetry"]
+		if !exists {
+			s.data["telemetry"] = map[string]any{"enabled": enabled}
+			return ConfigValue{Key: item.Key, Value: value}, nil
+		}
+		telemetryMap, ok := rawTelemetry.(map[string]any)
+		if !ok || telemetryMap == nil {
+			return ConfigValue{}, fmt.Errorf("telemetry must be an object")
+		}
+		telemetryMap["enabled"] = enabled
+		return ConfigValue{Key: item.Key, Value: value}, nil
 	}
 	if name == "" {
 		name = s.Current()
@@ -493,8 +538,44 @@ func validateConfigValue(item ConfigItem, value string) error {
 		if value != "json" && value != "text" {
 			return fmt.Errorf("output mode %s is not supported", value)
 		}
+	case "telemetry.enabled":
+		if value != "true" && value != "false" {
+			return fmt.Errorf("telemetry.enabled must be true or false")
+		}
 	}
 	return nil
+}
+
+// TelemetryEnabled reads the global, profile-independent telemetry switch.
+// Missing configuration defaults to true; malformed configuration fails
+// closed so telemetry can never make an otherwise usable CLI fail.
+func TelemetryEnabled(path string) bool {
+	store, err := LoadStore(path)
+	if err != nil {
+		return false
+	}
+	value, err := store.GetValue("", "telemetry.enabled", false)
+	return err == nil && value.Value != "false"
+}
+
+func telemetryEnabledValue(data map[string]any) (bool, error) {
+	rawTelemetry, exists := data["telemetry"]
+	if !exists {
+		return true, nil
+	}
+	telemetryMap, ok := rawTelemetry.(map[string]any)
+	if !ok || telemetryMap == nil {
+		return false, fmt.Errorf("telemetry must be an object")
+	}
+	rawEnabled, exists := telemetryMap["enabled"]
+	if !exists {
+		return true, nil
+	}
+	enabled, ok := rawEnabled.(bool)
+	if !ok {
+		return false, fmt.Errorf("telemetry.enabled must be a boolean")
+	}
+	return enabled, nil
 }
 
 func displayConfigValue(item ConfigItem, value string, showSecret bool) string {

@@ -15,16 +15,317 @@ import (
 	"testing"
 	"unicode"
 
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"github.com/aliyun/elastic-compute-control-cli/pkg/aliyun"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/config"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/schema"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/updater"
 )
+
+func TestRunEmitsExactlyOneSanitizedCommandRootSpan(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		wantCode    int
+		wantCommand string
+	}{
+		{name: "success", args: []string{"capabilities", "--output", "json"}, wantCode: 0, wantCommand: "ecctl capabilities"},
+		{name: "version", args: []string{"--version"}, wantCode: 0, wantCommand: "ecctl"},
+		{name: "early validation", args: []string{"capabilities", "--output", "yaml"}, wantCode: 1, wantCommand: "ecctl capabilities"},
+		{name: "unknown", args: []string{"not-a-command", "sensitive-positional"}, wantCode: 1, wantCommand: "unknown"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			exporter := tracetest.NewInMemoryExporter()
+			ctx := telemetry.WithExporterForTest(context.Background(), exporter)
+			var stdout, stderr bytes.Buffer
+			if code := Run(ctx, tc.args, &stdout, &stderr); code != tc.wantCode {
+				t.Fatalf("Run code = %d, want %d; stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
+			}
+			spans := exporter.GetSpans()
+			if len(spans) != 1 || spans[0].Name != "ecctl.command" {
+				t.Fatalf("spans = %#v, want one command root", spans)
+			}
+			attrs := map[string]any{}
+			for _, value := range spans[0].Attributes {
+				attrs[string(value.Key)] = value.Value.AsInterface()
+			}
+			if attrs["ecctl.command.name"] != tc.wantCommand {
+				t.Fatalf("command attribute = %#v, want %q", attrs["ecctl.command.name"], tc.wantCommand)
+			}
+			if strings.Contains(fmt.Sprint(attrs), "sensitive-positional") {
+				t.Fatalf("span attributes contain command argument: %#v", attrs)
+			}
+		})
+	}
+}
+
+func TestRunCreatesIndependentSessionForEachInvocation(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	base := telemetry.WithExporterForTest(context.Background(), exporter)
+	for i := 0; i < 2; i++ {
+		var stdout, stderr bytes.Buffer
+		if code := Run(base, []string{"capabilities", "--output", "json"}, &stdout, &stderr); code != 0 {
+			t.Fatalf("Run %d code = %d; stdout=%s stderr=%s", i+1, code, stdout.String(), stderr.String())
+		}
+	}
+	spans := exporter.GetSpans()
+	if len(spans) != 2 {
+		t.Fatalf("root span count = %d, want 2", len(spans))
+	}
+	if spans[0].SpanContext.TraceID() == spans[1].SpanContext.TraceID() {
+		t.Fatalf("consecutive Run calls shared a trace: %s", spans[0].SpanContext.TraceID())
+	}
+	for _, span := range spans {
+		if span.Name != "ecctl.command" || span.Parent.IsValid() {
+			t.Fatalf("Run root inherited an ambient parent: %#v", span)
+		}
+	}
+}
+
+func TestRunTopLevelNullConfigKeepsTelemetryEnabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte("null"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ECCTL_CONFIG_PATH", path)
+	exporter := tracetest.NewInMemoryExporter()
+	ctx := telemetry.WithExporterForTest(context.Background(), exporter)
+	var stdout, stderr bytes.Buffer
+	if code := Run(ctx, []string{"capabilities", "--output", "json"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("Run code = %d; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if spans := exporter.GetSpans(); len(spans) != 1 || spans[0].Name != "ecctl.command" {
+		t.Fatalf("top-level null config telemetry spans = %#v", spans)
+	}
+}
+
+func TestRunMalformedTelemetryDisablesTelemetryWithoutBreakingCommand(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"telemetry":{"enabled":"invalid"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ECCTL_CONFIG_PATH", path)
+	exporter := tracetest.NewInMemoryExporter()
+	ctx := telemetry.WithExporterForTest(context.Background(), exporter)
+	var stdout, stderr bytes.Buffer
+	if code := Run(ctx, []string{"capabilities", "--output", "json"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("Run code = %d; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if spans := exporter.GetSpans(); len(spans) != 0 {
+		t.Fatalf("malformed telemetry config emitted spans: %#v", spans)
+	}
+}
+
+func TestRunCustomSpecDisablesTelemetryAndDoesNotLeakCommandName(t *testing.T) {
+	const sentinel = "private-telemetry-sentinel"
+	specDir := t.TempDir()
+	writeRootTestSpec(t, filepath.Join(specDir, sentinel, "product.yaml"), `schema_version: 1
+product: private-telemetry-sentinel
+description:
+  en: Private product
+examples:
+  - ecctl private-telemetry-sentinel list
+`)
+	writeRootTestSpec(t, filepath.Join(specDir, sentinel, sentinel+".yaml"), `schema_version: 2
+product: private-telemetry-sentinel
+resource: private-telemetry-sentinel
+kind: regional
+schema:
+  fields:
+    id:
+      type: string
+operations:
+  list:
+    workflow: []
+`)
+	t.Setenv("ECCTL_SPEC_DIR", specDir)
+	spec.ResetCacheForTest()
+	t.Cleanup(spec.ResetCacheForTest)
+
+	parentExporter := tracetest.NewInMemoryExporter()
+	parentCtx, parent := telemetry.Start(telemetry.WithExporterForTest(context.Background(), parentExporter), telemetry.Options{
+		Enabled: true, Surface: "public", ConfigPath: filepath.Join(t.TempDir(), "config.json"),
+	})
+	childExporter := tracetest.NewInMemoryExporter()
+	ctx := telemetry.WithExporterForTest(parentCtx, childExporter)
+	var stdout, stderr bytes.Buffer
+	if code := Run(ctx, []string{sentinel, "--help"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("custom spec help code = %d; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if spans := childExporter.GetSpans(); len(spans) != 0 {
+		t.Fatalf("custom spec emitted telemetry: %#v", spans)
+	}
+	if len(parentExporter.GetSpans()) != 0 {
+		t.Fatal("custom Run unexpectedly used or ended ambient session")
+	}
+	parent.Finish("ecctl parent", 0)
+	for _, span := range parentExporter.GetSpans() {
+		if strings.Contains(fmt.Sprint(span.Attributes), sentinel) {
+			t.Fatalf("private custom command leaked to ambient telemetry: %#v", span.Attributes)
+		}
+	}
+}
+
+func TestConfigureTelemetryEnabledIsGlobal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("ECCTL_CONFIG_PATH", path)
+	stdout, stderr, code := runCLI("--profile", "profile-a", "configure", "set", "telemetry.enabled", "false")
+	if code != 0 {
+		t.Fatalf("configure set telemetry.enabled exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	stdout, stderr, code = runCLI("--profile", "profile-b", "configure", "get", "telemetry.enabled")
+	if code != 0 {
+		t.Fatalf("configure get telemetry.enabled exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["key"] != "telemetry.enabled" || payload["value"] != "false" {
+		t.Fatalf("telemetry config payload = %#v", payload)
+	}
+}
+
+func TestConfigureTelemetryOptOutDoesNotEmitOrCreateInstallationState(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), ".ecctl", "config.json")
+	t.Setenv("ECCTL_CONFIG_PATH", configPath)
+	exporter := tracetest.NewInMemoryExporter()
+	ctx := telemetry.WithExporterForTest(context.Background(), exporter)
+	var stdout, stderr bytes.Buffer
+	if code := Run(ctx, []string{"--profile", "ignored", "config", "set", "telemetry-enabled", "false"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("opt-out exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if config.TelemetryEnabled(configPath) {
+		t.Fatal("opt-out did not disable telemetry")
+	}
+	if spans := exporter.GetSpans(); len(spans) != 0 {
+		t.Fatalf("opt-out emitted telemetry: %#v", spans)
+	}
+	if _, err := os.Lstat(filepath.Join(filepath.Dir(configPath), "telemetry")); !os.IsNotExist(err) {
+		t.Fatalf("opt-out created installation state: %v", err)
+	}
+}
+
+func TestConfigureTreatsTopLevelNullAsEmptyConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte("null"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ECCTL_CONFIG_PATH", path)
+	stdout, stderr, code := runCLI("--lang", "en", "configure", "get", "telemetry.enabled")
+	if code != 0 {
+		t.Fatalf("configure get exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if value := decodeObject(t, stdout)["value"]; value != "true" {
+		t.Fatalf("default telemetry value = %#v, want true", value)
+	}
+	stdout, stderr, code = runCLI("--lang", "en", "configure", "list")
+	if code != 0 {
+		t.Fatalf("configure list exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	stdout, stderr, code = runCLI("--lang", "en", "configure", "set", "telemetry.enabled", "false")
+	if code != 0 {
+		t.Fatalf("configure set exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	telemetryConfig, _ := document["telemetry"].(map[string]any)
+	if telemetryConfig["enabled"] != false {
+		t.Fatalf("saved telemetry config = %#v", telemetryConfig)
+	}
+}
+
+func TestConfigureSetTelemetryRejectsNonObjectWithoutChangingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	before := []byte(`{"telemetry":["keep"]}`)
+	if err := os.WriteFile(path, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ECCTL_CONFIG_PATH", path)
+	stdout, stderr, code := runCLI("--lang", "en", "configure", "set", "telemetry.enabled", "false")
+	if code == 0 || errorCode(t, stdout) != "InvalidConfig" {
+		t.Fatalf("configure set non-object exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("config changed on error: before=%s after=%s", before, after)
+	}
+}
+
+func TestConfigureGetAndListRejectMalformedTelemetryConfig(t *testing.T) {
+	for _, raw := range []string{
+		`{"telemetry":null}`,
+		`{"telemetry":{"enabled":"false"}}`,
+	} {
+		for _, args := range [][]string{
+			{"--lang", "en", "configure", "get", "telemetry.enabled"},
+			{"--lang", "en", "configure", "list"},
+		} {
+			t.Run(fmt.Sprintf("%s/%s", strings.Join(args[2:], "-"), raw), func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "config.json")
+				if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("ECCTL_CONFIG_PATH", path)
+				stdout, stderr, code := runCLI(args...)
+				if code == 0 {
+					t.Fatalf("malformed config succeeded; stdout=%s stderr=%s", stdout, stderr)
+				}
+				if got := errorCode(t, stdout); got != "InvalidConfig" {
+					t.Fatalf("error code = %q, want InvalidConfig; stdout=%s", got, stdout)
+				}
+			})
+		}
+	}
+}
+
+func TestCallWithFakeAPISurvivesNullOrMalformedTelemetryConfig(t *testing.T) {
+	for _, raw := range []string{
+		`null`,
+		`{"telemetry":null}`,
+		`{"telemetry":{"enabled":"invalid"}}`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("ECCTL_CONFIG_PATH", path)
+			fake := &fakeAPICaller{response: map[string]any{"RequestId": "req-telemetry-config"}}
+			factory := func(string, string, string, string, func(string) string) (engine.Caller, error) {
+				return fake, nil
+			}
+			stdout, stderr, code := runCLIWithAPI(factory,
+				"--lang", "en", "call", "ecs", "DescribeInstances",
+				"--region", "cn-hangzhou", "--request", `{}`,
+			)
+			if code != 0 {
+				t.Fatalf("call exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+			}
+			if fake.operation != "DescribeInstances" {
+				t.Fatalf("fake API operation = %q", fake.operation)
+			}
+		})
+	}
+}
 
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "ecctl-cli-test-*")
@@ -5647,14 +5948,75 @@ type fakeVerifyCall struct {
 	serviceCode string
 }
 
-func (f *fakeRegionVerifier) Verify(region, serviceCode string) error {
+type legacyOnlyRegionVerifier struct {
+	calls []fakeVerifyCall
+}
+
+func (f *legacyOnlyRegionVerifier) Verify(region, serviceCode string) error {
+	f.calls = append(f.calls, fakeVerifyCall{region: region, serviceCode: serviceCode})
+	return nil
+}
+
+type contextAwareRegionVerifier struct {
+	legacyCalls  int
+	contextCalls int
+	contextValue string
+}
+
+func (f *contextAwareRegionVerifier) Verify(string, string) error {
+	f.legacyCalls++
+	return nil
+}
+
+func (f *contextAwareRegionVerifier) VerifyContext(ctx context.Context, _, _ string) error {
+	f.contextCalls++
+	f.contextValue, _ = ctx.Value(regionVerifierContextKey{}).(string)
+	return nil
+}
+
+type regionVerifierContextKey struct{}
+
+func (f *fakeRegionVerifier) VerifyContext(_ context.Context, region, serviceCode string) error {
 	f.calls = append(f.calls, fakeVerifyCall{region: region, serviceCode: serviceCode})
 	return f.err
+}
+
+func (f *fakeRegionVerifier) Verify(region, serviceCode string) error {
+	return f.VerifyContext(context.Background(), region, serviceCode)
 }
 
 func swapRegionVerifier(t *testing.T, factory RegionVerifierFactory) {
 	t.Helper()
 	t.Cleanup(SetRegionVerifierFactoryForTest(factory))
+}
+
+func TestVerifyRegionForConfigSupportsLegacyVerifier(t *testing.T) {
+	verifier := &legacyOnlyRegionVerifier{}
+	swapRegionVerifier(t, func(string, string, func(string) string) (RegionVerifier, error) {
+		return verifier, nil
+	})
+	warning, err := verifyRegionForConfig(context.Background(), "", "cn-hangzhou")
+	if err != nil || warning != "" {
+		t.Fatalf("verifyRegionForConfig = warning %q, err %v", warning, err)
+	}
+	if len(verifier.calls) != 1 || verifier.calls[0] != (fakeVerifyCall{region: "cn-hangzhou"}) {
+		t.Fatalf("legacy verifier calls = %#v", verifier.calls)
+	}
+}
+
+func TestVerifyRegionForConfigPrefersContextAwareVerifier(t *testing.T) {
+	verifier := &contextAwareRegionVerifier{}
+	swapRegionVerifier(t, func(string, string, func(string) string) (RegionVerifier, error) {
+		return verifier, nil
+	})
+	ctx := context.WithValue(context.Background(), regionVerifierContextKey{}, "preserved")
+	warning, err := verifyRegionForConfig(ctx, "", "cn-hangzhou")
+	if err != nil || warning != "" {
+		t.Fatalf("verifyRegionForConfig = warning %q, err %v", warning, err)
+	}
+	if verifier.contextCalls != 1 || verifier.legacyCalls != 0 || verifier.contextValue != "preserved" {
+		t.Fatalf("context verifier = %#v", verifier)
+	}
 }
 
 func TestConfigSetRegionVerifiesViaLocationService(t *testing.T) {

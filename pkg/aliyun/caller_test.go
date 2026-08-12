@@ -14,9 +14,13 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
 	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
 	_ "github.com/aliyun/elastic-compute-control-cli/specs/ecs"
 )
 
@@ -1440,8 +1444,12 @@ func TestOpenAPICallerRejectsUnsuccessfulBusinessResponse(t *testing.T) {
 		Region:   "cn-hangzhou",
 		executor: fake,
 	}
+	exporter := tracetest.NewInMemoryExporter()
+	ctx, session := telemetry.Start(telemetry.WithExporterForTest(context.Background(), exporter), telemetry.Options{
+		Enabled: true, Surface: "public", Version: "test", ConfigPath: filepath.Join(t.TempDir(), "config.json"),
+	})
 
-	_, err := caller.Call(context.Background(), "CreateVcc", map[string]any{"RegionId": "cn-hangzhou"})
+	_, err := caller.Call(ctx, "CreateVcc", map[string]any{"RegionId": "cn-hangzhou"})
 	if err == nil {
 		t.Fatal("Call succeeded, want unsuccessful business response error")
 	}
@@ -1456,6 +1464,16 @@ func TestOpenAPICallerRejectsUnsuccessfulBusinessResponse(t *testing.T) {
 	if action.Code != "1006" || action.Message != "zoneId 参数为空" || action.RequestID != "req-business" {
 		t.Fatalf("action = %#v", action)
 	}
+	session.Finish("ecctl eflo vcc create", 1)
+	for _, span := range exporter.GetSpans() {
+		if span.Name == "ecctl.cloud.api.request" {
+			if outcome := testSpanAttributes(span.Attributes)["ecctl.cloud.outcome"]; outcome != "error" {
+				t.Fatalf("business error API span outcome = %#v, want error", outcome)
+			}
+			return
+		}
+	}
+	t.Fatal("business error did not emit an API span")
 }
 
 func TestOpenAPICallerLeavesBusinessResponseVisibleForGenericCall(t *testing.T) {
@@ -1727,7 +1745,11 @@ func TestCallRawRetriesThenSucceedsOnThrottling(t *testing.T) {
 		sleepFn: func(context.Context, time.Duration) error { return nil },
 	}
 
-	resp, err := caller.Call(context.Background(), "DescribeInstances", map[string]any{"RegionId": "cn-beijing"})
+	exporter := tracetest.NewInMemoryExporter()
+	ctx, session := telemetry.Start(telemetry.WithExporterForTest(context.Background(), exporter), telemetry.Options{
+		Enabled: true, Surface: "public", Version: "test", ConfigPath: filepath.Join(t.TempDir(), "config.json"),
+	})
+	resp, err := caller.Call(ctx, "DescribeInstances", map[string]any{"RegionId": "cn-beijing"})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
@@ -1737,6 +1759,35 @@ func TestCallRawRetriesThenSucceedsOnThrottling(t *testing.T) {
 	if len(fake.requests) != 3 {
 		t.Fatalf("attempts = %d, want 3 (2 throttled + 1 success)", len(fake.requests))
 	}
+	session.Finish("ecctl call ecs DescribeInstances", 0)
+	var operationID string
+	apiSpans := 0
+	for _, span := range exporter.GetSpans() {
+		if span.Name != "ecctl.cloud.api.request" {
+			continue
+		}
+		apiSpans++
+		attrs := testSpanAttributes(span.Attributes)
+		if attrs["ecctl.cloud.attempt"] != int64(apiSpans) {
+			t.Fatalf("attempt attribute = %#v, want %d", attrs["ecctl.cloud.attempt"], apiSpans)
+		}
+		if apiSpans == 1 {
+			operationID, _ = attrs["ecctl.cloud.operation_id"].(string)
+		} else if attrs["ecctl.cloud.operation_id"] != operationID {
+			t.Fatalf("operation ID changed: %#v", attrs)
+		}
+	}
+	if apiSpans != 3 {
+		t.Fatalf("API spans = %d, want 3", apiSpans)
+	}
+}
+
+func testSpanAttributes(attributes []attribute.KeyValue) map[string]any {
+	out := make(map[string]any, len(attributes))
+	for _, value := range attributes {
+		out[string(value.Key)] = value.Value.AsInterface()
+	}
+	return out
 }
 
 func TestCallRawExhaustsThrottlingRetries(t *testing.T) {

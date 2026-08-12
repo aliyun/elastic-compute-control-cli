@@ -18,6 +18,7 @@ import (
 
 	ecconfig "github.com/aliyun/elastic-compute-control-cli/pkg/config"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
 )
 
 // Throttle-retry defaults: Alibaba Cloud throttles per-API per-account, so any
@@ -259,8 +260,27 @@ func (c *OpenAPICaller) executeOpenAPIRequest(ctx context.Context, operation str
 	}
 
 	var lastErr error
+	session := telemetry.FromContext(ctx)
+	operationID := session.NextOperationID()
 	for attempt := 0; attempt < attempts; attempt++ {
+		if session != nil {
+			session.RegisterIdentity(c.Profile.AccessKeyID, identityResolver(c.Profile, c.executor))
+		}
+		endSpan := session.StartAPI(telemetry.APIRequest{
+			Service:         req.Product,
+			API:             req.ApiName,
+			APIVersion:      req.Version,
+			Transport:       "darabonba",
+			OperationID:     operationID,
+			Attempt:         attempt + 1,
+			RetryObservable: true,
+		})
 		resp, err := c.executor.ExecuteOpenAPI(ctx, req)
+		spanErr := err
+		if spanErr == nil && c.Resource != "" {
+			spanErr = openAPIBusinessError(resp)
+		}
+		endSpan(spanErr)
 		if err == nil {
 			return resp, nil
 		}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -282,7 +283,7 @@ func TestRootFlagRenderingCoversOptionalForms(t *testing.T) {
 }
 
 func TestVerifyRegionForConfigFallbacks(t *testing.T) {
-	if warning, err := verifyRegionForConfig("Default", ""); warning != "" || err != nil {
+	if warning, err := verifyRegionForConfig(context.Background(), "Default", ""); warning != "" || err != nil {
 		t.Fatalf("empty region verify = warning %q err %v, want empty nil", warning, err)
 	}
 	if code, message, ok := appErrorCodeMessage(nil); ok || code != "" || message != "" {
@@ -297,7 +298,7 @@ func TestVerifyRegionForConfigFallbacks(t *testing.T) {
 	})
 	defer restore()
 
-	warning, err := verifyRegionForConfig("Default", "cn-hangzhou")
+	warning, err := verifyRegionForConfig(context.Background(), "Default", "cn-hangzhou")
 	if warning != "" || err == nil || err.Payload().Code != "InvalidConfig" {
 		t.Fatalf("factory error verify = warning %q err %#v", warning, err)
 	}

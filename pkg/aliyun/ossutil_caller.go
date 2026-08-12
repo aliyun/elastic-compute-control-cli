@@ -17,6 +17,7 @@ import (
 
 	ecconfig "github.com/aliyun/elastic-compute-control-cli/pkg/config"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
 )
 
 var (
@@ -90,18 +91,37 @@ func (c *OSSUtilCaller) CallWithArgs(ctx context.Context, operation string, requ
 	if err := c.requireOperation(ctx, runtimePath, metadata, env); err != nil {
 		return nil, err
 	}
+	session := telemetry.FromContext(ctx)
+	operationID := session.NextOperationID()
+	if session != nil {
+		session.RegisterIdentity(c.Profile.AccessKeyID, identityResolver(c.Profile, nil))
+	}
+	endSpan := session.StartAPI(telemetry.APIRequest{
+		Service:         "Oss",
+		API:             operation,
+		APIVersion:      "ossutil-v2",
+		Transport:       "ossutil",
+		OperationID:     operationID,
+		Attempt:         1,
+		RetryObservable: false,
+	})
 	stdout, stderr, runErr := c.runner.Run(ctx, "aliyun", args, env)
 	if runErr != nil {
+		endSpan(runErr)
 		return nil, c.commandError(runErr, stdout, stderr, request)
 	}
 	if metadata.transfer != "" {
-		return map[string]any{
+		response := map[string]any{
 			"Bucket": callerStringMapValue(request, "Bucket"),
 			"Key":    callerStringMapValue(request, "Key"),
 			"File":   callerStringMapValue(request, "File"),
-		}, nil
+		}
+		endSpan(nil)
+		return response, nil
 	}
-	return decodeOSSUtilResponse(stdout, metadata.mutation)
+	response, decodeErr := decodeOSSUtilResponse(stdout, metadata.mutation)
+	endSpan(decodeErr)
+	return response, decodeErr
 }
 
 func (c *OSSUtilCaller) requireVersion2(ctx context.Context, runtimePath string, env []string) error {

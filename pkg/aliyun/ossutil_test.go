@@ -12,7 +12,10 @@ import (
 	"strings"
 	"testing"
 
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
 )
 
 type ossUtilRunnerResult struct {
@@ -129,7 +132,14 @@ func TestOSSUtilCallerMapsRequestAndUsesCredentialEnvironment(t *testing.T) {
 		{stdout: []byte("{\"RequestId\":\"req-1\"}\n0.001234(s) elapsed\n")},
 	}}
 	caller := newTestOSSUtilCaller(t, runner, "")
-	response, err := caller.CallWithArgs(context.Background(), "PutBucket", map[string]any{
+	exporter := tracetest.NewInMemoryExporter()
+	ctx, session := telemetry.Start(telemetry.WithExporterForTest(context.Background(), exporter), telemetry.Options{
+		Enabled: true, Surface: "public", Version: "test", ConfigPath: filepath.Join(t.TempDir(), "config.json"),
+	})
+	session.RegisterIdentity("test-ak", func(context.Context) (telemetry.Identity, error) {
+		return telemetry.Identity{Hash: "test-hash", Type: "RAMUser"}, nil
+	})
+	response, err := caller.CallWithArgs(ctx, "PutBucket", map[string]any{
 		"Bucket":          "ecctl-test-bucket",
 		"ACL":             "private",
 		"ResourceGroupId": "rg-1",
@@ -196,6 +206,21 @@ func TestOSSUtilCallerMapsRequestAndUsesCredentialEnvironment(t *testing.T) {
 		if environmentHasKey(runner.calls[2].env, key) {
 			t.Fatalf("ambient identity key %s leaked into child environment", key)
 		}
+	}
+	session.Finish("ecctl call oss PutBucket", 0)
+	apiSpans := 0
+	for _, span := range exporter.GetSpans() {
+		if span.Name != "ecctl.cloud.api.request" {
+			continue
+		}
+		apiSpans++
+		attrs := testSpanAttributes(span.Attributes)
+		if attrs["ecctl.cloud.transport"] != "ossutil" || attrs["ecctl.cloud.retry_observable"] != false {
+			t.Fatalf("OSS API attributes = %#v", attrs)
+		}
+	}
+	if apiSpans != 1 {
+		t.Fatalf("OSS API spans = %d, want only final api subprocess", apiSpans)
 	}
 }
 
