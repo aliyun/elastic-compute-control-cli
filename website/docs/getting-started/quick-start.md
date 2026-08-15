@@ -5,8 +5,9 @@ description: Discover resources and inspect a command before running it.
 
 # Quick Start
 
-This quick start uses local discovery commands. It does not create, update, or
-delete cloud resources.
+Start with the local discovery commands, then use the common resource workflows
+below. Replace values in angle brackets before running a command. Some examples
+mutate cloud resources; inspect their schema and account context first.
 
 ## Build and Check the CLI
 
@@ -28,6 +29,93 @@ ecctl configure set output json
 
 Set the AccessKey or STS credentials you intend to use for cloud operations with
 `ecctl configure set`. See [Configuration](./configuration.md) for details.
+
+## Common Commands
+
+These commands are curated for common operator and Agent workflows. Together
+they show where ecctl differs from Alibaba Cloud CLI's API-operation-oriented
+interface: resource verbs, machine-readable command details, normalized
+filters, concise inputs, multi-API workflows, built-in waiters, and readback.
+
+### Check several commands before use
+
+```bash
+ecctl schema ecs.instance.list ecs.instance.create ecs.disk.create --brief
+```
+
+One call returns required flags, risk, dry-run, idempotency, and waiter behavior.
+
+### Find running production instances
+
+```bash
+ecctl ecs instance list --region cn-hangzhou --filter status=Running --filter tag.env=prod
+```
+
+The consistent filter syntax returns normalized JSON without OpenAPI response wrappers.
+
+### Validate ECS creation
+
+```bash
+ecctl ecs instance create --region cn-hangzhou --type <instance-type> --image <image-id-or-name> --sg <sg-id> --vswitch <vswitch-id> --tag env=prod --dry-run
+```
+
+Short resource fields send a server-side validation request without creating an instance.
+
+### Create an ECS instance
+
+```bash
+ecctl ecs instance create --region cn-hangzhou --type <instance-type> --image <image-id-or-name> --sg <sg-id> --vswitch <vswitch-id> --name web-01 --tag env=prod
+```
+
+ecctl supplies ClientToken-compatible idempotency, waits for `Running`, and reads the instance back.
+
+### Update and tag an instance
+
+```bash
+ecctl ecs instance update <instance-id> --region cn-hangzhou --name web-02 --tag env=prod
+```
+
+ecctl selects the required OpenAPIs from the requested resource changes and reads the instance back.
+
+### Create a cloud disk
+
+```bash
+ecctl ecs disk create --region cn-hangzhou --zone <zone-id> --size 100 --category cloud_essd --name data-01 --tag env=prod
+```
+
+The command supplies idempotency, waits for `Available`, and returns the normalized disk view.
+
+### Attach a key pair
+
+```bash
+ecctl ecs instance update <instance-id> --region cn-hangzhou --key-pair <key-pair-name>
+```
+
+The resource update maps to the required key-pair API and reads the instance back.
+
+### Run a command on an instance
+
+```bash
+ecctl ecs instance exec <instance-id> --region cn-hangzhou --command 'uname -a'
+```
+
+One command runs Cloud Assistant, waits for completion, and reads the invocation result.
+
+### Authorize an HTTPS security-group rule
+
+```bash
+ecctl ecs sg authorize <sg-id> --region cn-hangzhou --rule tcp:443@0.0.0.0/0
+```
+
+A compact rule replaces verbose OpenAPI fields, and ecctl reads the security group back.
+
+### Get an ACK kubeconfig
+
+```bash
+ecctl ack kubeconfig get --region cn-hangzhou --cluster <cluster-id> --private-ip
+```
+
+The resource intent is explicit; callers do not need to know the OpenAPI operation or response shape.
 
 ## List Products
 
@@ -56,7 +144,7 @@ The response lists ECS resources such as `instance`, `disk`, `sg`, `image`,
 `eni`, `keypair`, `launch-template`, `snapshot`, `region`, and `zone`, each with
 its supported actions.
 
-## Inspect a Command Contract
+## Inspect Command Details
 
 Before running a mutating command, inspect its schema:
 

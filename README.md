@@ -43,53 +43,96 @@ go install github.com/aliyun/elastic-compute-control-cli/cmd/ecctl@latest
 
 See the [installation guide](https://aliyun.github.io/elastic-compute-control-cli/docs/getting-started/installation) for requirements and other installation options.
 
-## Usage
+## Common Commands
 
-Inspect the command surface before running cloud operations:
+These commands are a curated set of common workflows for users and agents.
+Unlike Alibaba Cloud CLI's API-operation-oriented interface, they demonstrate
+ecctl's resource verbs, machine-readable command details, normalized filters,
+concise inputs, multi-API workflows, built-in waiters, and readback. Replace
+values in angle brackets before running a command. Several examples change
+cloud resources; inspect their schema first.
+
+### Check several commands before use
 
 ```bash
-ecctl schema --list
-ecctl schema --list ecs
-ecctl schema ecs.instance.create --brief
+ecctl schema ecs.instance.list ecs.instance.create ecs.disk.create --brief
 ```
 
-Run resource commands with the regular product/resource/action shape:
+One call returns required flags, risk, dry-run, idempotency, and waiter behavior.
+
+### Find running production instances
 
 ```bash
-ecctl vpc list
-ecctl ecs instance list --filter status=Running
+ecctl ecs instance list --region cn-hangzhou --filter status=Running --filter tag.env=prod
 ```
+
+The consistent filter syntax returns normalized JSON without OpenAPI response wrappers.
+
+### Validate ECS creation
+
+```bash
+ecctl ecs instance create --region cn-hangzhou --type <instance-type> --image <image-id-or-name> --sg <sg-id> --vswitch <vswitch-id> --tag env=prod --dry-run
+```
+
+Short resource fields send a server-side validation request without creating an instance.
+
+### Create an ECS instance
+
+```bash
+ecctl ecs instance create --region cn-hangzhou --type <instance-type> --image <image-id-or-name> --sg <sg-id> --vswitch <vswitch-id> --name web-01 --tag env=prod
+```
+
+ecctl supplies ClientToken-compatible idempotency, waits for `Running`, and reads the instance back.
+
+### Update and tag an instance
+
+```bash
+ecctl ecs instance update <instance-id> --region cn-hangzhou --name web-02 --tag env=prod
+```
+
+ecctl selects the required OpenAPIs from the requested resource changes and reads the instance back.
+
+### Create a cloud disk
+
+```bash
+ecctl ecs disk create --region cn-hangzhou --zone <zone-id> --size 100 --category cloud_essd --name data-01 --tag env=prod
+```
+
+The command supplies idempotency, waits for `Available`, and returns the normalized disk view.
+
+### Attach a key pair
+
+```bash
+ecctl ecs instance update <instance-id> --region cn-hangzhou --key-pair <key-pair-name>
+```
+
+The resource update maps to the required key-pair API and reads the instance back.
+
+### Run a command on an instance
+
+```bash
+ecctl ecs instance exec <instance-id> --region cn-hangzhou --command 'uname -a'
+```
+
+One command runs Cloud Assistant, waits for completion, and reads the invocation result.
+
+### Authorize an HTTPS security-group rule
+
+```bash
+ecctl ecs sg authorize <sg-id> --region cn-hangzhou --rule tcp:443@0.0.0.0/0
+```
+
+A compact rule replaces verbose OpenAPI fields, and ecctl reads the security group back.
+
+### Get an ACK kubeconfig
+
+```bash
+ecctl ack kubeconfig get --region cn-hangzhou --cluster <cluster-id> --private-ip
+```
+
+The resource intent is explicit; callers do not need to know the OpenAPI operation or response shape.
 
 Learn more in the [Quick Start](https://aliyun.github.io/elastic-compute-control-cli/docs/getting-started/quick-start), [Concepts](https://aliyun.github.io/elastic-compute-control-cli/docs/user-guide/concepts), [Command Discovery](https://aliyun.github.io/elastic-compute-control-cli/docs/user-guide/discovery), and [Resource Coverage](https://aliyun.github.io/elastic-compute-control-cli/docs/reference/resource-coverage) guides.
-
-## Telemetry
-
-Official release binaries send best-effort OpenTelemetry traces directly to
-Alibaba Cloud ARMS/SLS to measure command executions, Alibaba Cloud API request
-attempts, pseudonymous active cloud identities, and pseudonymous active
-installations. An installation is counted only after that installation runs
-ecctl during the selected reporting period; it is not a download count. ecctl
-never includes command arguments, resource IDs, regions, profile names, host
-names, AccessKeys, RequestIds, or error messages. Identity values are one-way
-SHA-256 hashes of the stable account, RAM user, or assumed-role identifier
-returned by STS.
-Installation values are one-way SHA-256 hashes derived from a locally generated
-random token and cannot be used to recover machine or user identifiers.
-Installation persistence is disabled on Windows because ecctl does not create a
-private Windows DACL for this state; Windows commands therefore omit the
-installation hash.
-
-Disable telemetry globally with:
-
-```bash
-ecctl configure set telemetry.enabled false
-```
-
-`ECCTL_DISABLE_TELEMETRY=1` and `DO_NOT_TRACK=1` also disable it. Source builds,
-test builds, and full-surface development builds do not contain a telemetry
-destination. Because the reporting endpoint is embedded in public release
-binaries, this data is forgeable best-effort product analytics and must not be
-used for billing, security auditing, or other trusted decisions.
 
 ## Contributing
 

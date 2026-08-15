@@ -1,11 +1,12 @@
 ---
 title: 快速开始
-description: 发现资源，并在执行前检查命令契约。
+description: 发现资源，并在执行前检查命令参数和执行行为。
 ---
 
 # 快速开始
 
-本快速开始只使用本地发现命令，不创建、更新或删除云资源。
+先用本地命令发现能力，再参考下面的常用资源操作。执行前请替换尖括号中的值。
+部分示例会修改云资源，应先检查命令 schema 和当前账号环境。
 
 ## 构建并检查 CLI
 
@@ -26,6 +27,92 @@ ecctl configure set output json
 ```
 
 通过 `ecctl configure set` 设置准备用于云操作的 AccessKey 或 STS 凭证。详见 [配置](./configuration.md)。
+
+## 常用命令
+
+这些命令覆盖运维人员和 Agent 的常见工作流，也集中体现 ecctl 与以 OpenAPI
+操作为中心的 aliyun CLI 的区别：资源化动词、机器可读的命令说明、统一过滤、
+简化输入、跨 API 工作流、内置等待和结果回读。
+
+### 执行前检查多个命令
+
+```bash
+ecctl schema ecs.instance.list ecs.instance.create ecs.disk.create --brief
+```
+
+一次返回必填参数、风险、dry-run、幂等和等待行为。
+
+### 查找运行中的生产实例
+
+```bash
+ecctl ecs instance list --region cn-hangzhou --filter status=Running --filter tag.env=prod
+```
+
+使用统一的过滤语法，返回去除 OpenAPI 包装层后的规范化 JSON。
+
+### 校验 ECS 创建请求
+
+```bash
+ecctl ecs instance create --region cn-hangzhou --type <instance-type> --image <image-id-or-name> --sg <sg-id> --vswitch <vswitch-id> --tag env=prod --dry-run
+```
+
+使用简短的资源字段，并发送服务端校验请求而不创建实例。
+
+### 创建 ECS 实例
+
+```bash
+ecctl ecs instance create --region cn-hangzhou --type <instance-type> --image <image-id-or-name> --sg <sg-id> --vswitch <vswitch-id> --name web-01 --tag env=prod
+```
+
+自动提供兼容 ClientToken 的幂等键，等待 `Running` 后回读实例。
+
+### 更新实例并添加标签
+
+```bash
+ecctl ecs instance update <instance-id> --region cn-hangzhou --name web-02 --tag env=prod
+```
+
+根据资源变更自动选择所需 OpenAPI，最后回读实例。
+
+### 创建云盘
+
+```bash
+ecctl ecs disk create --region cn-hangzhou --zone <zone-id> --size 100 --category cloud_essd --name data-01 --tag env=prod
+```
+
+自动提供幂等键，等待 `Available` 后返回规范化的云盘视图。
+
+### 绑定密钥对
+
+```bash
+ecctl ecs instance update <instance-id> --region cn-hangzhou --key-pair <key-pair-name>
+```
+
+资源更新会映射到对应的密钥对 API，并在完成后回读实例。
+
+### 在实例上执行命令
+
+```bash
+ecctl ecs instance exec <instance-id> --region cn-hangzhou --command 'uname -a'
+```
+
+一条命令完成云助手执行、等待和执行结果回读。
+
+### 放行 HTTPS 安全组规则
+
+```bash
+ecctl ecs sg authorize <sg-id> --region cn-hangzhou --rule tcp:443@0.0.0.0/0
+```
+
+用紧凑规则替代冗长的 OpenAPI 字段，并回读安全组。
+
+### 获取 ACK kubeconfig
+
+```bash
+ecctl ack kubeconfig get --region cn-hangzhou --cluster <cluster-id> --private-ip
+```
+
+直接表达资源意图，不要求调用者记住 OpenAPI 操作名和响应结构。
 
 ## 列出产品
 
@@ -52,7 +139,7 @@ ecctl schema --list ecs
 
 响应会列出 ECS 资源，例如 `instance`、`disk`、`sg`、`image`、`eni`、`keypair`、`launch-template`、`snapshot`、`region` 和 `zone`，以及各自支持的动作。
 
-## 检查命令契约
+## 查看命令参数和执行行为
 
 执行 mutation 命令前，先查看 schema：
 
