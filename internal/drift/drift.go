@@ -180,8 +180,7 @@ func CollectBaseline(specDir string, opts Options) (Baseline, error) {
 	}
 	lang := normalizeLanguage(opts.Language)
 	baseline := Baseline{Language: lang}
-	products := map[string]aliyun.OpenAPIProduct{}
-	productFor := productResolver(products, lang)
+	productFor := productIndex(lang)
 
 	for _, resource := range resources {
 		code := resource.APIProduct
@@ -239,8 +238,7 @@ func Detect(specDir, baselinePath string, opts Options) (Report, error) {
 func DetectResources(resources []spec.ResourceSpec, baseline Baseline, opts Options) (Report, error) {
 	lang := normalizeLanguage(opts.Language)
 	report := Report{Language: lang}
-	products := map[string]aliyun.OpenAPIProduct{}
-	productFor := productResolver(products, lang)
+	productFor := productIndex(lang)
 
 	for _, resource := range resources {
 		code := resource.APIProduct
@@ -437,15 +435,19 @@ func loadResources(specDir string) ([]spec.ResourceSpec, error) {
 	return resources, nil
 }
 
-func productResolver(products map[string]aliyun.OpenAPIProduct, lang string) func(string) (aliyun.OpenAPIProduct, bool) {
+// productIndex resolves product codes against a single OpenAPIProducts parse,
+// so detection does not re-read and re-merge the full metadata catalog once per
+// distinct product code. If the catalog cannot be loaded the index is empty and
+// every lookup misses, matching the previous skip-on-unresolvable behavior.
+func productIndex(lang string) func(string) (aliyun.OpenAPIProduct, bool) {
+	index := map[string]aliyun.OpenAPIProduct{}
+	if products, err := aliyun.OpenAPIProducts(lang); err == nil {
+		for _, product := range products {
+			index[strings.ToLower(product.Code)] = product
+		}
+	}
 	return func(code string) (aliyun.OpenAPIProduct, bool) {
-		if product, ok := products[code]; ok {
-			return product, true
-		}
-		product, ok := aliyun.OpenAPIProductByCode(code, lang)
-		if ok {
-			products[code] = product
-		}
+		product, ok := index[strings.ToLower(strings.TrimSpace(code))]
 		return product, ok
 	}
 }
