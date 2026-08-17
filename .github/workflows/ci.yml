@@ -64,6 +64,9 @@ jobs:
       - name: Lint
         run: make lint
 
+      - name: Drift check
+        run: make drift-check
+
       - name: Test
         run: make test
 
