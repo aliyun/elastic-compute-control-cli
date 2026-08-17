@@ -206,6 +206,58 @@ func TestDetectCleanAgainstCurrentBaseline(t *testing.T) {
 	}
 }
 
+func TestFrameworkHandledRegionIdNotReported(t *testing.T) {
+	intact := loadInstanceSpec(t)
+	entry := baselineEntryFor(t, intact, "create_to_running", "ecs", "RunInstances")
+
+	// Drop the explicit RegionId mapping: the caller injects RegionId from the
+	// resolved region, so the lost mapping is not a real coverage regression.
+	modified := loadInstanceSpec(t)
+	binding := modified.Bindings["create_to_running"]
+	delete(binding.Request, "RegionId")
+	modified.Bindings["create_to_running"] = binding
+
+	report, err := DetectResources([]spec.ResourceSpec{modified}, baselineOf(entry), Options{})
+	if err != nil {
+		t.Fatalf("DetectResources: %v", err)
+	}
+	if uncovered := report.Uncovered(); len(uncovered) != 0 {
+		t.Fatalf("expected RegionId to be framework-exempt, uncovered: %#v", uncovered)
+	}
+	if missing := report.Missing(); len(missing) != 0 {
+		t.Fatalf("unexpected missing parameters: %#v", missing)
+	}
+}
+
+func TestRemovedSkipsCollapsedGroup(t *testing.T) {
+	resource := spec.ResourceSpec{Product: "ecs", Resource: "instance"}
+	binding := spec.Binding{API: "RunInstances", Request: map[string]any{"Tag": "$.tag"}}
+
+	// The metadata folded Tag.Key/Tag.Value into a bare Tag group: removed must
+	// not report the folded children as dropped.
+	report := &Report{}
+	report.diffBinding(resource, "create", binding, "RunInstances",
+		[]aliyun.OpenAPIParameter{{Name: "Tag"}},
+		[]string{"Tag.Key", "Tag.Value"},
+		[]string{"Tag"},
+	)
+	if removed := report.Removed(); len(removed) != 0 {
+		t.Fatalf("collapsed group reported removed: %#v", removed)
+	}
+
+	// With no live Tag group, the children were genuinely removed.
+	report = &Report{}
+	report.diffBinding(resource, "create", binding, "RunInstances",
+		nil,
+		[]string{"Tag.Key", "Tag.Value"},
+		[]string{"Tag"},
+	)
+	removed := report.Removed()
+	if len(removed) != 2 {
+		t.Fatalf("genuinely removed children = %#v, want 2", removed)
+	}
+}
+
 func TestRepoSpecsHaveNoDrift(t *testing.T) {
 	report, err := Detect("../../specs", "../../drift-baseline.json", Options{})
 	if err != nil {

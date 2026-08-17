@@ -87,3 +87,20 @@ func TestFlattenOpenAPIParametersFallbackShape(t *testing.T) {
 	// An opaque Struct with no child information contributes itself.
 	requireLeaf(t, names, "ClockOptions")
 }
+
+func TestFlattenOpenAPIParametersMultiLevelAncestors(t *testing.T) {
+	// A bare a Struct placeholder whose descendants are declared as a dotted
+	// flat name several levels deep must be suppressed at every ancestor level,
+	// not just the immediate parent.
+	detail := OpenAPIOperationDetail{
+		Parameters: []OpenAPIParameter{
+			{Name: "a", Type: "Struct"},
+			{Name: "a.b.c", Type: "String"},
+		},
+	}
+	leaves := flattenOpenAPIParameters(detail)
+	names := leafNames(leaves)
+	requireNoLeaf(t, names, "a")
+	requireNoLeaf(t, names, "a.b")
+	requireLeaf(t, names, "a.b.c")
+}

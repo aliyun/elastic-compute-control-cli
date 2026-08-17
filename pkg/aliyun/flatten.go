@@ -31,11 +31,15 @@ func OpenAPIOperationLeaves(lang string, product OpenAPIProduct, operation strin
 func flattenOpenAPIParameters(detail OpenAPIOperationDetail) []OpenAPIParameter {
 	// ancestors records every dotted prefix that appears in the flat parameter
 	// list, so a bare parent placeholder is skipped when its children are
-	// declared as dotted leaves elsewhere in the same operation detail.
+	// declared as dotted leaves elsewhere in the same operation detail. Every
+	// ancestor level is registered so multi-level names such as a.b.c also
+	// suppress bare a and a.b placeholders.
 	ancestors := map[string]bool{}
 	for _, param := range detail.Parameters {
-		if index := strings.LastIndex(param.Name, "."); index >= 0 {
-			ancestors[param.Name[:index]] = true
+		name := param.Name
+		for index := strings.LastIndex(name, "."); index >= 0; index = strings.LastIndex(name, ".") {
+			name = name[:index]
+			ancestors[name] = true
 		}
 	}
 

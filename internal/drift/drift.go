@@ -334,7 +334,7 @@ func (r *Report) diffBinding(resource spec.ResourceSpec, bindingName string, bin
 	}
 
 	for _, name := range sortedKeys(baselineSet) {
-		if liveSet[name] || !leafCovered(name, covered) || frameworkHandled(name, binding) {
+		if liveSet[name] || !leafCovered(name, covered) || frameworkHandled(name, binding) || liveHasAncestor(name, liveSet) {
 			continue
 		}
 		r.Items = append(r.Items, Item{
@@ -390,11 +390,34 @@ func leafCovered(name string, covered map[string]bool) bool {
 	return false
 }
 
+// liveHasAncestor reports whether the live metadata declares an ancestor group
+// of name. A parameter disappears from the leaf list both when it is genuinely
+// removed and when the snapshot folds its children into a bare parent group
+// (for example Tag.Key/Tag.Value collapsing into a bare Tag). The latter keeps
+// the parameter covered, so a removed report on any descendant with a live
+// ancestor would be a representation-change false positive.
+func liveHasAncestor(name string, liveSet map[string]bool) bool {
+	for {
+		index := strings.LastIndex(name, ".")
+		if index < 0 {
+			return false
+		}
+		name = name[:index]
+		if liveSet[name] {
+			return true
+		}
+	}
+}
+
 // frameworkHandled reports whether the parameter is set by the execution
-// framework rather than the binding request mapping. The idempotency token is
-// generated from binding.Idempotency.Field and injected by the executor, so it
-// must not be reported as uncovered.
+// framework rather than the binding request mapping, so it must not be
+// reported as uncovered. RegionId is injected by the caller from the resolved
+// region when absent from the request (pkg/aliyun/caller.go); the idempotency
+// token is generated from binding.Idempotency.Field.
 func frameworkHandled(name string, binding spec.Binding) bool {
+	if name == "RegionId" {
+		return true
+	}
 	return binding.Idempotency.Field != "" && name == binding.Idempotency.Field
 }
 
