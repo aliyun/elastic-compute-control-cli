@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -22,6 +23,10 @@ func main() {
 	opts := drift.Options{Language: *lang}
 
 	if *writeBaseline {
+		if err := validateWriteBaselineFlags(*check, *format); err != nil {
+			fmt.Fprintf(os.Stderr, "specdrift: %v\n", err)
+			os.Exit(2)
+		}
 		baseline, err := drift.CollectBaseline(*specDir, opts)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "specdrift: %v\n", err)
@@ -68,6 +73,18 @@ type jsonReport struct {
 	Missing   int `json:"missing"`
 	Removed   int `json:"removed"`
 	Uncovered int `json:"uncovered"`
+}
+
+// validateWriteBaselineFlags rejects report-only flags that -write-baseline
+// would silently ignore.
+func validateWriteBaselineFlags(check bool, format string) error {
+	if check {
+		return errors.New("-check cannot be combined with -write-baseline")
+	}
+	if format != "table" {
+		return errors.New("-format cannot be combined with -write-baseline")
+	}
+	return nil
 }
 
 func writeJSON(report drift.Report) error {

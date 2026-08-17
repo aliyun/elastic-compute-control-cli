@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -128,15 +129,36 @@ func LoadBaseline(path string) (Baseline, error) {
 	return baseline, nil
 }
 
-// WriteBaseline persists a baseline file.
+// WriteBaseline persists a baseline file atomically: it writes a temporary
+// file in the target directory and renames it over the destination, so an
+// interrupted write never leaves a truncated baseline.
 func WriteBaseline(path string, baseline Baseline) error {
 	raw, err := json.MarshalIndent(baseline, "", "  ")
 	if err != nil {
 		return err
 	}
 	raw = append(raw, '\n')
-	if err := os.WriteFile(path, raw, 0o644); err != nil {
-		return fmt.Errorf("write baseline %s: %w", path, err)
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".drift-baseline-*.json")
+	if err != nil {
+		return fmt.Errorf("create baseline temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after a successful rename
+
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write baseline temp file: %w", err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return fmt.Errorf("chmod baseline temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close baseline temp file: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("replace baseline %s: %w", path, err)
 	}
 	return nil
 }
