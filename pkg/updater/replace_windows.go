@@ -246,11 +246,12 @@ func startWindowsCleanup(targetPath, helperPath string) error {
 }
 
 func waitForProcess(pid int) {
-	process, err := os.FindProcess(pid)
+	handle, err := syscall.OpenProcess(syscall.SYNCHRONIZE, false, uint32(pid))
 	if err != nil {
 		return
 	}
-	_, _ = process.Wait()
+	defer syscall.CloseHandle(handle)
+	_, _ = syscall.WaitForSingleObject(handle, syscall.INFINITE)
 }
 
 func parseProcessID(raw string) (int, error) {
