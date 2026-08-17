@@ -56,7 +56,7 @@ jobs:
           role-to-assume: acs:ram::${{ vars.ALI_ACCOUNT_ID }}:role/ecctl-e2e-ci
           oidc-provider-arn: acs:ram::${{ vars.ALI_ACCOUNT_ID }}:oidc-provider/github-actions
           audience: sts.aliyuncs.com
-          role-session-duration: 21600 # 6h; role MaxSessionDuration must match
+          role-session-expiration: 21600 # 6h; role MaxSessionDuration must match
 
       - name: run e2e
         working-directory: e2e
