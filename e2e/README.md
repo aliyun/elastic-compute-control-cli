@@ -493,6 +493,24 @@ case/config lint, coverage-registry consistency check, sweep-coverage check,
 and release snapshot build. It does not require Alibaba Cloud credentials and
 does not require every registry operation to have live-pass evidence.
 
+Live CI uses GitHub OIDC to exchange a job identity for temporary Alibaba Cloud
+STS credentials. Keep the following controls in place together:
+
+- The RAM role trust policy must match the actual GitHub `oidc:sub` values for
+  this repository's `live-e2e` and `live-e2e-sweeper` Environments with
+  `StringEquals`; issuer and audience checks alone trust jobs from other GitHub
+  repositories.
+- Both GitHub Environments must restrict deployments to the default branch.
+  `live-e2e` uses required reviewers for manually dispatched broad-permission
+  runs; `live-e2e-sweeper` has no secrets and remains approval-free so cleanup
+  can follow a completed nightly run automatically.
+- The RAM role must carry only the API actions and resources required by the
+  selected E2E surface. The automatic sweeper uses the separate
+  `ecctl-e2e-sweeper-ci` delete-focused role instead of weakening the nightly
+  role or Environment protection rules.
+- Actions in jobs that obtain cloud credentials stay pinned to full commit
+  SHAs, and STS sessions stay bounded by the corresponding job timeout.
+
 Manually dispatched live CI materializes the protected `live-e2e` environment secret
 `ECCTL_E2E_CONFIG_YAML` as ignored `e2e.local.yaml`, validates that file, and
 runs the selected suite using its ordered region profiles. The secret contains
