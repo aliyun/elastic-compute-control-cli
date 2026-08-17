@@ -55,6 +55,8 @@ type openAPINewRequestParameter struct {
 	Required    bool   `json:"required"`
 }
 
+type openAPINewMetadataReader func(language string, path string) ([]byte, error)
+
 func readOpenAPINewAPI(language string, code string, name string) (*openAPINewAPI, error) {
 	content, err := readOpenAPINewMetadata(language, "/"+strings.ToLower(code)+"/version.json")
 	if err != nil {
@@ -72,7 +74,11 @@ func readOpenAPINewAPI(language string, code string, name string) (*openAPINewAP
 }
 
 func readOpenAPINewAPIDetail(language string, code string, name string) (*openAPINewDetail, error) {
-	content, err := readOpenAPINewMetadata(language, "/"+strings.ToLower(code)+"/"+name+".json")
+	return readOpenAPINewAPIDetailWithReader(language, code, name, readOpenAPINewMetadata)
+}
+
+func readOpenAPINewAPIDetailWithReader(language string, code string, name string, read openAPINewMetadataReader) (*openAPINewDetail, error) {
+	content, err := read(language, "/"+strings.ToLower(code)+"/"+name+".json")
 	if err != nil {
 		return nil, err
 	}

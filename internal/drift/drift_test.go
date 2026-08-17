@@ -171,6 +171,49 @@ func TestDetectReportsUncoveredRegression(t *testing.T) {
 	}
 }
 
+func TestUnrelatedBaselineCoverageDoesNotReportUncovered(t *testing.T) {
+	resource := spec.ResourceSpec{Product: "lingjun", Resource: "node-group"}
+	binding := spec.Binding{API: "UpdateNodeGroup", Request: map[string]any{}}
+	report := &Report{}
+
+	report.diffBinding(
+		resource,
+		"update_node_group",
+		binding,
+		"UpdateNodeGroup",
+		[]aliyun.OpenAPIParameter{{Name: "NodeGroupName"}},
+		[]string{"NodeGroupName"},
+		[]string{"RamRoleName"},
+	)
+
+	if uncovered := report.Uncovered(); len(uncovered) != 0 {
+		t.Fatalf("unrelated stale mapping reported uncovered: %#v", uncovered)
+	}
+}
+
+func TestEffectiveCoveredFiltersUnrelatedAndFrameworkManagedPaths(t *testing.T) {
+	binding := spec.Binding{Idempotency: spec.Idempotency{Field: "ClientToken"}}
+	leaves := []aliyun.OpenAPIParameter{
+		{Name: "ZoneId"},
+		{Name: "Tag.Key"},
+		{Name: "RegionId"},
+		{Name: "ClientToken"},
+	}
+	covered := map[string]bool{
+		"ZoneId":      true,
+		"Tag":         true,
+		"RamRoleName": true,
+		"RegionId":    true,
+		"ClientToken": true,
+	}
+
+	got := effectiveCovered(leaves, covered, binding)
+	want := []string{"Tag", "ZoneId"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("effectiveCovered = %v, want %v", got, want)
+	}
+}
+
 func TestDetectReportsMissingBaselineEntry(t *testing.T) {
 	loaded := loadInstanceSpec(t)
 	// A diffable binding with no baseline entry escapes the diff entirely: it

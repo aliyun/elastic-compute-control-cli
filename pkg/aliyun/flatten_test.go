@@ -83,6 +83,31 @@ func TestOpenAPIOperationLeavesPrefersCurrentMetadata(t *testing.T) {
 	t.Fatal("RunInstances Affinity parameter missing")
 }
 
+func TestOpenAPIOperationLeavesStrictUsesCurrentMetadata(t *testing.T) {
+	products, err := OpenAPIProductsStrict("en", "ecs")
+	if err != nil {
+		t.Fatalf("OpenAPIProductsStrict: %v", err)
+	}
+	var product OpenAPIProduct
+	for _, candidate := range products {
+		if candidate.Code == "Ecs" {
+			product = candidate
+			break
+		}
+	}
+	if product.Code == "" {
+		t.Fatal("OpenAPIProductsStrict did not find Ecs")
+	}
+	leaves, err := OpenAPIOperationLeavesStrict("en", product, "RunInstances")
+	if err != nil {
+		t.Fatalf("OpenAPIOperationLeavesStrict(RunInstances): %v", err)
+	}
+	names := leafNames(leaves)
+	requireLeaf(t, names, "ZoneId")
+	requireLeaf(t, names, "DataDisk.Category")
+	requireNoLeaf(t, names, "DataDisk")
+}
+
 func TestEnrichCurrentParametersUsesLegacyStructureWithoutRestoringLegacyOnlyParameters(t *testing.T) {
 	current := []OpenAPIParameter{
 		{Name: "Group", Type: "RepeatList", Description: "current group"},

@@ -87,9 +87,10 @@ func (r Report) itemsByKind(kind string) []Item {
 }
 
 // BaselineBinding records both sides of a binding's state when the baseline
-// was written: the OpenAPI metadata parameter leaves, and the request keys the
-// binding actually covered. Freezing both lets the detector observe coverage
-// regressions (mapped before, not mapped now) in addition to metadata change.
+// was written: the OpenAPI metadata parameter leaves, and the related request
+// keys the binding actually covered. Freezing both lets the detector observe
+// coverage regressions (mapped before, not mapped now) in addition to metadata
+// change without treating spec-only bookkeeping as OpenAPI coverage.
 type BaselineBinding struct {
 	Product    string   `json:"product"`
 	Resource   string   `json:"resource"`
@@ -180,7 +181,7 @@ func CollectBaseline(specDir string, opts Options) (Baseline, error) {
 	}
 	lang := normalizeLanguage(opts.Language)
 	baseline := Baseline{Language: lang}
-	productFor, err := productIndex(lang)
+	productFor, err := productIndex(lang, resourceProductCodes(resources))
 	if err != nil {
 		return Baseline{}, err
 	}
@@ -191,18 +192,19 @@ func CollectBaseline(specDir string, opts Options) (Baseline, error) {
 			code = resource.Product
 		}
 		for bindingName, binding := range resource.Bindings {
-			leaves, _, ok := resolveLeaves(productFor, code, binding.API, lang)
-			if !ok {
-				return Baseline{}, fmt.Errorf("resolve metadata for %s/%s binding %s (%s): %s",
-					resource.Product, resource.Resource, bindingName, binding.API, reasonNoMetadata(code, binding.API))
+			leaves, _, err := resolveLeaves(productFor, code, binding.API, lang)
+			if err != nil {
+				return Baseline{}, fmt.Errorf("resolve metadata for %s/%s binding %s (%s): %w",
+					resource.Product, resource.Resource, bindingName, binding.API, err)
 			}
+			covered := spec.BindingRequestCoverage(binding.Request)
 			baseline.Bindings = append(baseline.Bindings, BaselineBinding{
 				Product:    resource.Product,
 				Resource:   resource.Resource,
 				Binding:    bindingName,
 				API:        binding.API,
 				Parameters: leafNames(leaves),
-				Covered:    sortedKeys(spec.BindingRequestCoverage(binding.Request)),
+				Covered:    effectiveCovered(leaves, covered, binding),
 			})
 		}
 	}
@@ -242,7 +244,7 @@ func Detect(specDir, baselinePath string, opts Options) (Report, error) {
 func DetectResources(resources []spec.ResourceSpec, baseline Baseline, opts Options) (Report, error) {
 	lang := normalizeLanguage(opts.Language)
 	report := Report{Language: lang}
-	productFor, err := productIndex(lang)
+	productFor, err := productIndex(lang, resourceProductCodes(resources))
 	if err != nil {
 		return Report{}, err
 	}
@@ -259,10 +261,10 @@ func DetectResources(resources []spec.ResourceSpec, baseline Baseline, opts Opti
 				report.addSkipped(resource, bindingName, binding, "no drift baseline entry; refresh the baseline")
 				continue
 			}
-			leaves, operation, ok := resolveLeaves(productFor, code, binding.API, lang)
-			if !ok {
-				return Report{}, fmt.Errorf("resolve metadata for baseline binding %s/%s %s (%s): %s",
-					resource.Product, resource.Resource, bindingName, binding.API, reasonNoMetadata(code, binding.API))
+			leaves, operation, err := resolveLeaves(productFor, code, binding.API, lang)
+			if err != nil {
+				return Report{}, fmt.Errorf("resolve metadata for baseline binding %s/%s %s (%s): %w",
+					resource.Product, resource.Resource, bindingName, binding.API, err)
 			}
 			report.BindingsChecked++
 			report.diffBinding(resource, bindingName, binding, operation, leaves, entry.Parameters, entry.Covered)
@@ -353,7 +355,7 @@ func (r *Report) diffBinding(resource spec.ResourceSpec, bindingName string, bin
 	}
 
 	for _, name := range sortedKeys(stringSet(baselineCovered, func(key string) string { return key })) {
-		if leafCovered(name, covered) || frameworkHandled(name, binding) {
+		if !pathRelatedToParameters(name, baselineSet) || leafCovered(name, covered) || frameworkHandled(name, binding) {
 			continue
 		}
 		r.Items = append(r.Items, Item{
@@ -365,6 +367,31 @@ func (r *Report) diffBinding(resource spec.ResourceSpec, bindingName string, bin
 			Kind:     KindUncovered,
 		})
 	}
+}
+
+// effectiveCovered retains only request paths related to an OpenAPI metadata
+// parameter. Spec-only bookkeeping and framework-managed parameters do not
+// belong in the symmetric coverage baseline because removing them is not an
+// OpenAPI coverage regression.
+func effectiveCovered(leaves []aliyun.OpenAPIParameter, covered map[string]bool, binding spec.Binding) []string {
+	parameters := stringSet(leaves, func(leaf aliyun.OpenAPIParameter) string { return leaf.Name })
+	effective := map[string]bool{}
+	for name := range covered {
+		if frameworkHandled(name, binding) || !pathRelatedToParameters(name, parameters) {
+			continue
+		}
+		effective[name] = true
+	}
+	return sortedKeys(effective)
+}
+
+func pathRelatedToParameters(path string, parameters map[string]bool) bool {
+	for parameter := range parameters {
+		if path == parameter || strings.HasPrefix(path, parameter+".") || strings.HasPrefix(parameter, path+".") {
+			return true
+		}
+	}
+	return false
 }
 
 // leafCovered reports whether a metadata leaf is covered by the binding
@@ -447,8 +474,10 @@ type productLookup func(string) (aliyun.OpenAPIProduct, bool)
 // productIndex resolves product codes against a single OpenAPIProducts parse.
 // Catalog failures are fatal: treating them as ordinary misses would let both
 // drift checks and baseline generation succeed with incomplete coverage.
-func productIndex(lang string) (productLookup, error) {
-	return productIndexWithLoader(lang, aliyun.OpenAPIProducts)
+func productIndex(lang string, requiredCodes []string) (productLookup, error) {
+	return productIndexWithLoader(lang, func(lang string) ([]aliyun.OpenAPIProduct, error) {
+		return aliyun.OpenAPIProductsStrict(lang, requiredCodes...)
+	})
 }
 
 func productIndexWithLoader(lang string, load func(string) ([]aliyun.OpenAPIProduct, error)) (productLookup, error) {
@@ -466,24 +495,32 @@ func productIndexWithLoader(lang string, load func(string) ([]aliyun.OpenAPIProd
 	}, nil
 }
 
-func resolveLeaves(productFor productLookup, code, api, lang string) ([]aliyun.OpenAPIParameter, string, bool) {
+func resourceProductCodes(resources []spec.ResourceSpec) []string {
+	codes := map[string]bool{}
+	for _, resource := range resources {
+		code := resource.APIProduct
+		if code == "" {
+			code = resource.Product
+		}
+		codes[code] = true
+	}
+	return sortedKeys(codes)
+}
+
+func resolveLeaves(productFor productLookup, code, api, lang string) ([]aliyun.OpenAPIParameter, string, error) {
 	product, ok := productFor(code)
 	if !ok {
-		return nil, "", false
+		return nil, "", fmt.Errorf("OpenAPI product %q not found", code)
 	}
 	operation, ok := aliyun.OpenAPIOperationName(product, api)
 	if !ok {
-		return nil, "", false
+		return nil, "", fmt.Errorf("OpenAPI operation %s.%s not found", code, api)
 	}
-	leaves, ok := aliyun.OpenAPIOperationLeaves(lang, product, operation)
-	if !ok {
-		return nil, "", false
+	leaves, err := aliyun.OpenAPIOperationLeavesStrict(lang, product, operation)
+	if err != nil {
+		return nil, "", err
 	}
-	return leaves, operation, true
-}
-
-func reasonNoMetadata(code, api string) string {
-	return "OpenAPI metadata unavailable for " + code + "." + api
+	return leaves, operation, nil
 }
 
 func normalizeLanguage(lang string) string {

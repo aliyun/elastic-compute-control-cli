@@ -24,10 +24,25 @@ func OpenAPIOperationLeaves(lang string, product OpenAPIProduct, operation strin
 	if !ok {
 		return nil, false
 	}
+	return enrichedOpenAPIOperationLeaves(lang, product, operation, detail), true
+}
+
+// OpenAPIOperationLeavesStrict returns the same flattened metadata view as
+// OpenAPIOperationLeaves, but propagates current-manifest and current-detail
+// failures instead of silently substituting legacy metadata.
+func OpenAPIOperationLeavesStrict(lang string, product OpenAPIProduct, operation string) ([]OpenAPIParameter, error) {
+	detail, err := OpenAPIOperationDetailForStrict(lang, product, operation)
+	if err != nil {
+		return nil, err
+	}
+	return enrichedOpenAPIOperationLeaves(lang, product, operation, detail), nil
+}
+
+func enrichedOpenAPIOperationLeaves(lang string, product OpenAPIProduct, operation string, detail OpenAPIOperationDetail) []OpenAPIParameter {
 	if legacy, legacyOK := legacyOpenAPIOperationDetail(lang, product, operation); legacyOK {
 		detail.Parameters = enrichCurrentParameters(detail.Parameters, legacy.Parameters)
 	}
-	return flattenOpenAPIParameters(detail), true
+	return flattenOpenAPIParameters(detail)
 }
 
 func enrichCurrentParameters(current, legacy []OpenAPIParameter) []OpenAPIParameter {

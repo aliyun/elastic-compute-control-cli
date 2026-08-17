@@ -258,10 +258,7 @@
         "body"
       ],
       "covered": [
-        "ClusterId",
-        "alert_rule_group_name",
-        "alert_rule_name",
-        "contact_group_ids"
+        "ClusterId"
       ]
     },
     {
@@ -532,7 +529,6 @@
       ],
       "covered": [
         "ClusterId",
-        "RegionId",
         "body.instances",
         "body.nodepool_id"
       ]
@@ -548,7 +544,6 @@
       ],
       "covered": [
         "ClusterId",
-        "RegionId",
         "body.nodes",
         "body.release_node"
       ]
@@ -708,8 +703,7 @@
       "covered": [
         "body",
         "cluster_id",
-        "nodepool_id",
-        "vulnerabilities"
+        "nodepool_id"
       ]
     },
     {
@@ -985,8 +979,7 @@
         "RegionId"
       ],
       "covered": [
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -1003,7 +996,6 @@
         "SlsDeliveryConfig"
       ],
       "covered": [
-        "RegionId",
         "SettingType"
       ]
     },
@@ -1062,12 +1054,9 @@
         "ResourceGroupId",
         "Tag",
         "autoSnapshotPolicyName",
-        "copiedSnapshotsRetentionDays",
-        "enableCrossRegionCopy",
         "regionId",
         "repeatWeekdays",
         "retentionDays",
-        "targetCopyRegions",
         "timePoints"
       ]
     },
@@ -1105,12 +1094,9 @@
       "covered": [
         "autoSnapshotPolicyId",
         "autoSnapshotPolicyName",
-        "copiedSnapshotsRetentionDays",
-        "enableCrossRegionCopy",
         "regionId",
         "repeatWeekdays",
         "retentionDays",
-        "targetCopyRegions",
         "timePoints"
       ]
     },
@@ -1142,7 +1128,6 @@
         "EnableParameter",
         "Launcher",
         "Name",
-        "RegionId",
         "ResourceGroupId",
         "Tag",
         "Timeout",
@@ -1160,8 +1145,7 @@
         "RegionId"
       ],
       "covered": [
-        "CommandId",
-        "RegionId"
+        "CommandId"
       ]
     },
     {
@@ -1200,7 +1184,6 @@
         "Frequency",
         "InstanceId",
         "Parameters",
-        "RegionId",
         "RepeatMode",
         "ResourceGroupId",
         "Tag",
@@ -1220,10 +1203,8 @@
         "RegionId"
       ],
       "covered": [
-        "Force",
         "InstanceId",
-        "InvokeId",
-        "RegionId"
+        "InvokeId"
       ]
     },
     {
@@ -1247,7 +1228,6 @@
         "Description",
         "Launcher",
         "Name",
-        "RegionId",
         "Timeout",
         "WorkingDir"
       ]
@@ -1270,10 +1250,7 @@
       ],
       "covered": [
         "Frequency",
-        "InvokeId",
-        "RegionId",
-        "RepeatMode",
-        "Timed"
+        "InvokeId"
       ]
     },
     {
@@ -1296,8 +1273,7 @@
         "Device",
         "DiskId",
         "Force",
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -1335,7 +1311,6 @@
         "MultiAttach",
         "PerformanceLevel",
         "ProvisionedIops",
-        "RegionId",
         "ResourceGroupId",
         "Size",
         "SourceDiskId",
@@ -1386,7 +1361,6 @@
         "KMSKeyId",
         "PerformanceLevel",
         "ProvisionedIops",
-        "RegionId",
         "ResourceGroupId",
         "Size",
         "SnapshotId",
@@ -1403,8 +1377,7 @@
         "DiskId"
       ],
       "covered": [
-        "DiskId",
-        "RegionId"
+        "DiskId"
       ]
     },
     {
@@ -1420,8 +1393,7 @@
       "covered": [
         "DeleteWithInstance",
         "DiskId",
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -1432,9 +1404,7 @@
       "parameters": [
         "RegionId"
       ],
-      "covered": [
-        "RegionId"
-      ]
+      "covered": []
     },
     {
       "product": "ecs",
@@ -1444,9 +1414,7 @@
       "parameters": [
         "RegionId"
       ],
-      "covered": [
-        "RegionId"
-      ]
+      "covered": []
     },
     {
       "product": "ecs",
@@ -1465,8 +1433,7 @@
         "AutoPay",
         "DiskChargeType",
         "DiskIds",
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -1479,8 +1446,7 @@
         "RegionId"
       ],
       "covered": [
-        "KMSKeyId",
-        "RegionId"
+        "KMSKeyId"
       ]
     },
     {
@@ -1497,7 +1463,6 @@
       ],
       "covered": [
         "DiskId",
-        "RegionId",
         "StorageClusterId"
       ]
     },
@@ -1516,12 +1481,10 @@
         "ProvisionedIops"
       ],
       "covered": [
-        "BurstingEnabled",
         "DiskCategory",
         "DiskId",
         "PerformanceLevel",
-        "ProvisionedIops",
-        "RegionId"
+        "ProvisionedIops"
       ]
     },
     {
@@ -1537,8 +1500,7 @@
         "SecurityEnhancementStrategy"
       ],
       "covered": [
-        "DiskId",
-        "RegionId"
+        "DiskId"
       ]
     },
     {
@@ -1549,9 +1511,7 @@
       "parameters": [
         "RegionId"
       ],
-      "covered": [
-        "RegionId"
-      ]
+      "covered": []
     },
     {
       "product": "ecs",
@@ -1565,7 +1525,6 @@
       ],
       "covered": [
         "DiskId",
-        "RegionId",
         "SnapshotId"
       ]
     },
@@ -1583,7 +1542,6 @@
       "covered": [
         "DiskId",
         "NewSize",
-        "RegionId",
         "Type"
       ]
     },
@@ -1608,8 +1566,7 @@
         "DeleteWithInstance",
         "Description",
         "DiskId",
-        "DiskName",
-        "RegionId"
+        "DiskName"
       ]
     },
     {
@@ -1631,8 +1588,7 @@
         "Ipv6AddressCount",
         "Ipv6Prefix",
         "Ipv6PrefixCount",
-        "NetworkInterfaceId",
-        "RegionId"
+        "NetworkInterfaceId"
       ]
     },
     {
@@ -1654,7 +1610,6 @@
         "Ipv4PrefixCount",
         "NetworkInterfaceId",
         "PrivateIpAddress",
-        "RegionId",
         "SecondaryPrivateIpAddressCount"
       ]
     },
@@ -1675,7 +1630,6 @@
         "InstanceId",
         "NetworkCardIndex",
         "NetworkInterfaceId",
-        "RegionId",
         "TrunkNetworkInstanceId",
         "WaitForNetworkConfigurationReady"
       ]
@@ -1747,7 +1701,6 @@
         "PrivateIpAddress",
         "QueueNumber",
         "QueuePairNumber",
-        "RegionId",
         "ResourceGroupId",
         "RxQueueSize",
         "SecondaryPrivateIpAddressCount",
@@ -1769,8 +1722,7 @@
         "RegionId"
       ],
       "covered": [
-        "NetworkInterfaceId",
-        "RegionId"
+        "NetworkInterfaceId"
       ]
     },
     {
@@ -1787,7 +1739,6 @@
       "covered": [
         "InstanceId",
         "NetworkInterfaceId",
-        "RegionId",
         "TrunkNetworkInstanceId"
       ]
     },
@@ -1801,8 +1752,7 @@
         "RegionId"
       ],
       "covered": [
-        "NetworkInterfaceId",
-        "RegionId"
+        "NetworkInterfaceId"
       ]
     },
     {
@@ -1821,8 +1771,7 @@
         "QoS.BandwidthTx",
         "QoS.ConcurrentConnections",
         "QoS.PpsRx",
-        "QoS.PpsTx",
-        "RegionId"
+        "QoS.PpsTx"
       ]
     },
     {
@@ -1839,8 +1788,7 @@
       "covered": [
         "Ipv6Address",
         "Ipv6Prefix",
-        "NetworkInterfaceId",
-        "RegionId"
+        "NetworkInterfaceId"
       ]
     },
     {
@@ -1857,8 +1805,7 @@
       "covered": [
         "Ipv4Prefix",
         "NetworkInterfaceId",
-        "PrivateIpAddress",
-        "RegionId"
+        "PrivateIpAddress"
       ]
     },
     {
@@ -1899,9 +1846,7 @@
         "NetworkInterfaceTrafficConfig.RxQueueSize",
         "NetworkInterfaceTrafficConfig.TxQueueSize",
         "QueueNumber",
-        "RegionId",
         "RxQueueSize",
-        "SecurityGroupIds",
         "SourceDestCheck",
         "TxQueueSize"
       ]
@@ -1916,8 +1861,7 @@
         "RegionId"
       ],
       "covered": [
-        "ImageId",
-        "RegionId"
+        "ImageId"
       ]
     },
     {
@@ -1947,7 +1891,6 @@
         "Encrypted",
         "ImageId",
         "KMSKeyId",
-        "RegionId",
         "ResourceGroupId",
         "Tag"
       ]
@@ -1997,7 +1940,6 @@
         "ImageVersion",
         "InstanceId",
         "Platform",
-        "RegionId",
         "ResourceGroupId",
         "SnapshotId",
         "Tag"
@@ -2016,8 +1958,7 @@
       ],
       "covered": [
         "Force",
-        "ImageId",
-        "RegionId"
+        "ImageId"
       ]
     },
     {
@@ -2035,12 +1976,10 @@
         "RoleName"
       ],
       "covered": [
-        "ExportFormat",
         "ImageFormat",
         "ImageId",
         "OSSBucket",
         "OSSPrefix",
-        "RegionId",
         "RoleName"
       ]
     },
@@ -2082,17 +2021,13 @@
         "DiskDeviceMapping.Device",
         "DiskDeviceMapping.DiskImSize",
         "DiskDeviceMapping.DiskImageSize",
-        "DiskDeviceMapping.DiskType",
         "DiskDeviceMapping.Format",
         "DiskDeviceMapping.OSSBucket",
         "DiskDeviceMapping.OSSObject",
-        "ImageFamily",
         "ImageName",
-        "ImageVersion",
         "LicenseType",
         "OSType",
         "Platform",
-        "RegionId",
         "ResourceGroupId",
         "RoleName",
         "Tag"
@@ -2123,7 +2058,6 @@
         "ImageId",
         "ImageName",
         "LicenseType",
-        "RegionId",
         "Status"
       ]
     },
@@ -2145,7 +2079,6 @@
         "AddAccount",
         "ImageId",
         "LaunchPermission",
-        "RegionId",
         "RemoveAccount"
       ]
     },
@@ -2160,8 +2093,7 @@
         "VlanId"
       ],
       "covered": [
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -2176,8 +2108,7 @@
       ],
       "covered": [
         "InstanceIds",
-        "KeyPairName",
-        "RegionId"
+        "KeyPairName"
       ]
     },
     {
@@ -2193,8 +2124,7 @@
       ],
       "covered": [
         "InstanceIds",
-        "RamRoleName",
-        "RegionId"
+        "RamRoleName"
       ]
     },
     {
@@ -2415,7 +2345,6 @@
         "PrivatePoolOptions.Id",
         "PrivatePoolOptions.MatchCriteria",
         "RamRoleName",
-        "RegionId",
         "ResourceGroupId",
         "SchedulerOptions.DedicatedHostClusterId",
         "SecurityEnhancementStrategy",
@@ -2459,8 +2388,7 @@
       ],
       "covered": [
         "Force",
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -2477,8 +2405,7 @@
       ],
       "covered": [
         "Force",
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -2492,8 +2419,7 @@
         "RegionId"
       ],
       "covered": [
-        "InstanceIds",
-        "RegionId"
+        "InstanceIds"
       ]
     },
     {
@@ -2507,8 +2433,7 @@
         "RegionId"
       ],
       "covered": [
-        "InstanceIds",
-        "RegionId"
+        "InstanceIds"
       ]
     },
     {
@@ -2523,7 +2448,6 @@
         "ResourceType"
       ],
       "covered": [
-        "RegionId",
         "ResourceGroupId",
         "ResourceId",
         "ResourceType"
@@ -2542,7 +2466,6 @@
       ],
       "covered": [
         "InstanceId",
-        "RegionId",
         "SecurityGroupId"
       ]
     },
@@ -2559,7 +2482,6 @@
       ],
       "covered": [
         "InstanceId",
-        "RegionId",
         "SecurityGroupId"
       ]
     },
@@ -2576,8 +2498,7 @@
         "RegionId"
       ],
       "covered": [
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -2591,8 +2512,7 @@
         "InstanceId"
       ],
       "covered": [
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -2610,8 +2530,7 @@
       "covered": [
         "InstanceId",
         "Period",
-        "PeriodUnit",
-        "RegionId"
+        "PeriodUnit"
       ]
     },
     {
@@ -2642,9 +2561,6 @@
       "covered": [
         "ImageId",
         "InstanceId",
-        "RegionId",
-        "SystemDisk.Category",
-        "SystemDisk.PerformanceLevel",
         "SystemDisk.Size"
       ]
     },
@@ -2686,7 +2602,6 @@
       "covered": [
         "CommandContent",
         "InstanceId",
-        "RegionId",
         "Timeout",
         "Type",
         "WorkingDir"
@@ -2718,11 +2633,8 @@
       "covered": [
         "Content",
         "FileMode",
-        "Group",
         "InstanceId",
         "Name",
-        "Owner",
-        "RegionId",
         "TargetDir"
       ]
     },
@@ -2738,8 +2650,7 @@
         "RegionId"
       ],
       "covered": [
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -2753,8 +2664,7 @@
         "InstanceId"
       ],
       "covered": [
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -2771,8 +2681,7 @@
         "StoppedMode"
       ],
       "covered": [
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -2789,8 +2698,7 @@
         "StoppedMode"
       ],
       "covered": [
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -2806,7 +2714,6 @@
         "Tag.Value"
       ],
       "covered": [
-        "RegionId",
         "ResourceId",
         "ResourceType",
         "Tag"
@@ -2825,7 +2732,6 @@
         "TagKey"
       ],
       "covered": [
-        "RegionId",
         "ResourceId",
         "ResourceType",
         "TagKey"
@@ -2860,8 +2766,7 @@
         "Description",
         "HostName",
         "InstanceId",
-        "InstanceName",
-        "RegionId"
+        "InstanceName"
       ]
     },
     {
@@ -2876,8 +2781,7 @@
       ],
       "covered": [
         "AutoReleaseTime",
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -2896,8 +2800,7 @@
       "covered": [
         "AutoRenew",
         "Duration",
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -2922,8 +2825,7 @@
         "InstanceChargeType",
         "InstanceIds",
         "Period",
-        "PeriodUnit",
-        "RegionId"
+        "PeriodUnit"
       ]
     },
     {
@@ -2940,8 +2842,7 @@
       ],
       "covered": [
         "InstanceId",
-        "PtpStatus",
-        "RegionId"
+        "PtpStatus"
       ]
     },
     {
@@ -2962,8 +2863,7 @@
         "InstanceId",
         "MaintenanceWindow.EndTime",
         "MaintenanceWindow.StartTime",
-        "NotifyOnMaintenance",
-        "RegionId"
+        "NotifyOnMaintenance"
       ]
     },
     {
@@ -2983,8 +2883,7 @@
         "HttpEndpoint",
         "HttpPutResponseHopLimit",
         "HttpTokens",
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -2997,9 +2896,7 @@
         "InstanceId"
       ],
       "covered": [
-        "InstanceId",
-        "NetworkOptions",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -3021,10 +2918,8 @@
       ],
       "covered": [
         "InstanceId",
-        "InternetChargeType",
         "InternetMaxBandwidthIn",
-        "InternetMaxBandwidthOut",
-        "RegionId"
+        "InternetMaxBandwidthOut"
       ]
     },
     {
@@ -3054,8 +2949,7 @@
         "InstanceId",
         "InstanceType",
         "InternetMaxBandwidthIn",
-        "InternetMaxBandwidthOut",
-        "RegionId"
+        "InternetMaxBandwidthOut"
       ]
     },
     {
@@ -3083,9 +2977,7 @@
       "covered": [
         "AutoPay",
         "InstanceId",
-        "InstanceType",
-        "Period",
-        "RegionId"
+        "InstanceType"
       ]
     },
     {
@@ -3100,7 +2992,6 @@
       ],
       "covered": [
         "InstanceId",
-        "RegionId",
         "VncPassword"
       ]
     },
@@ -3119,7 +3010,6 @@
       "covered": [
         "InstanceId",
         "PrivateIpAddress",
-        "RegionId",
         "VSwitchId"
       ]
     },
@@ -3137,7 +3027,6 @@
       ],
       "covered": [
         "KeyPairName",
-        "RegionId",
         "ResourceGroupId",
         "Tag"
       ]
@@ -3152,8 +3041,7 @@
         "RegionId"
       ],
       "covered": [
-        "KeyPairNames",
-        "RegionId"
+        "KeyPairNames"
       ]
     },
     {
@@ -3172,7 +3060,6 @@
       "covered": [
         "KeyPairName",
         "PublicKeyBody",
-        "RegionId",
         "ResourceGroupId",
         "Tag"
       ]
@@ -3274,7 +3161,6 @@
         "InstanceType",
         "KeyPairName",
         "LaunchTemplateName",
-        "RegionId",
         "ResourceGroupId",
         "SecurityGroupId",
         "SecurityGroupIds",
@@ -3381,7 +3267,6 @@
         "KeyPairName",
         "LaunchTemplateId",
         "LaunchTemplateName",
-        "RegionId",
         "ResourceGroupId",
         "SecurityGroupId",
         "SecurityGroupIds",
@@ -3402,8 +3287,7 @@
       ],
       "covered": [
         "LaunchTemplateId",
-        "LaunchTemplateName",
-        "RegionId"
+        "LaunchTemplateName"
       ]
     },
     {
@@ -3420,8 +3304,7 @@
       "covered": [
         "DeleteVersion",
         "LaunchTemplateId",
-        "LaunchTemplateName",
-        "RegionId"
+        "LaunchTemplateName"
       ]
     },
     {
@@ -3438,8 +3321,7 @@
       "covered": [
         "DefaultVersionNumber",
         "LaunchTemplateId",
-        "LaunchTemplateName",
-        "RegionId"
+        "LaunchTemplateName"
       ]
     },
     {
@@ -3465,7 +3347,6 @@
         "Entry.PortRange",
         "MaxEntries",
         "PortRangeListName",
-        "RegionId",
         "ResourceGroupId",
         "Tag"
       ]
@@ -3480,8 +3361,7 @@
         "RegionId"
       ],
       "covered": [
-        "PortRangeListId",
-        "RegionId"
+        "PortRangeListId"
       ]
     },
     {
@@ -3505,7 +3385,6 @@
         "Description",
         "PortRangeListId",
         "PortRangeListName",
-        "RegionId",
         "RemoveEntry.PortRange"
       ]
     },
@@ -3534,7 +3413,6 @@
         "Entry.Description",
         "MaxEntries",
         "PrefixListName",
-        "RegionId",
         "ResourceGroupId",
         "Tag"
       ]
@@ -3549,8 +3427,7 @@
         "RegionId"
       ],
       "covered": [
-        "PrefixListId",
-        "RegionId"
+        "PrefixListId"
       ]
     },
     {
@@ -3573,7 +3450,6 @@
         "Description",
         "PrefixListId",
         "PrefixListName",
-        "RegionId",
         "RemoveEntry.Cidr"
       ]
     },
@@ -3609,7 +3485,6 @@
         "Permissions.PortRange",
         "Permissions.Priority",
         "Permissions.SourceCidrIp",
-        "RegionId",
         "SecurityGroupId"
       ]
     },
@@ -3645,7 +3520,6 @@
         "Permissions.Policy",
         "Permissions.PortRange",
         "Permissions.Priority",
-        "RegionId",
         "SecurityGroupId"
       ]
     },
@@ -3670,7 +3544,6 @@
       ],
       "covered": [
         "Description",
-        "RegionId",
         "ResourceGroupId",
         "SecurityGroupName",
         "SecurityGroupType",
@@ -3688,7 +3561,6 @@
         "SecurityGroupId"
       ],
       "covered": [
-        "RegionId",
         "SecurityGroupId"
       ]
     },
@@ -3725,7 +3597,6 @@
         "Permissions.PortRange",
         "Permissions.Priority",
         "Permissions.SourceCidrIp",
-        "RegionId",
         "SecurityGroupId",
         "SecurityGroupRuleId"
       ]
@@ -3763,7 +3634,6 @@
         "Permissions.Policy",
         "Permissions.PortRange",
         "Permissions.Priority",
-        "RegionId",
         "SecurityGroupId",
         "SecurityGroupRuleId"
       ]
@@ -3781,7 +3651,6 @@
       ],
       "covered": [
         "Description",
-        "RegionId",
         "SecurityGroupId",
         "SecurityGroupName"
       ]
@@ -3799,7 +3668,6 @@
       ],
       "covered": [
         "InnerAccessPolicy",
-        "RegionId",
         "SecurityGroupId"
       ]
     },
@@ -3835,7 +3703,6 @@
         "Policy",
         "PortRange",
         "Priority",
-        "RegionId",
         "SecurityGroupId",
         "SecurityGroupRuleId",
         "SourceCidrIp"
@@ -3874,7 +3741,6 @@
         "Policy",
         "PortRange",
         "Priority",
-        "RegionId",
         "SecurityGroupId",
         "SecurityGroupRuleId"
       ]
@@ -3908,7 +3774,6 @@
         "DestinationSnapshotName",
         "Encrypted",
         "KMSKeyId",
-        "RegionId",
         "ResourceGroupId",
         "RetentionDays",
         "SnapshotId",
@@ -3942,7 +3807,6 @@
         "DiskId",
         "InstantAccess",
         "InstantAccessRetentionDays",
-        "RegionId",
         "ResourceGroupId",
         "RetentionDays",
         "SnapshotName",
@@ -3960,7 +3824,6 @@
       ],
       "covered": [
         "Force",
-        "RegionId",
         "SnapshotId"
       ]
     },
@@ -3979,7 +3842,6 @@
         "SnapshotId"
       ],
       "covered": [
-        "RegionId",
         "SnapshotId"
       ]
     },
@@ -3995,7 +3857,6 @@
       ],
       "covered": [
         "Category",
-        "RegionId",
         "SnapshotId"
       ]
     },
@@ -4007,9 +3868,7 @@
       "parameters": [
         "RegionId"
       ],
-      "covered": [
-        "RegionId"
-      ]
+      "covered": []
     },
     {
       "product": "ecs",
@@ -4023,7 +3882,6 @@
         "SnapshotId"
       ],
       "covered": [
-        "RegionId",
         "SnapshotId"
       ]
     },
@@ -4042,7 +3900,6 @@
       "covered": [
         "Description",
         "DisableInstantAccess",
-        "RegionId",
         "SnapshotId",
         "SnapshotName"
       ]
@@ -4074,9 +3931,7 @@
         "InstanceId",
         "InstantAccess",
         "InstantAccessRetentionDays",
-        "RegionId",
         "ResourceGroupId",
-        "SnapshotGroupName",
         "Tag"
       ]
     },
@@ -4090,7 +3945,6 @@
         "SnapshotGroupId"
       ],
       "covered": [
-        "RegionId",
         "SnapshotGroupId"
       ]
     },
@@ -4108,7 +3962,6 @@
       "covered": [
         "Description",
         "Name",
-        "RegionId",
         "SnapshotGroupId"
       ]
     },
@@ -4242,8 +4095,7 @@
       ],
       "covered": [
         "ElasticNetworkInterfaceId",
-        "PrivateIpAddress",
-        "RegionId"
+        "PrivateIpAddress"
       ]
     },
     {
@@ -4258,8 +4110,7 @@
       ],
       "covered": [
         "ElasticNetworkInterfaceId",
-        "NodeId",
-        "RegionId"
+        "NodeId"
       ]
     },
     {
@@ -4285,7 +4136,6 @@
         "Description",
         "EnableJumboFrame",
         "NodeId",
-        "RegionId",
         "ResourceGroupId",
         "SecurityGroupId",
         "Tag.Key",
@@ -4306,8 +4156,7 @@
         "RegionId"
       ],
       "covered": [
-        "ElasticNetworkInterfaceId",
-        "RegionId"
+        "ElasticNetworkInterfaceId"
       ]
     },
     {
@@ -4322,8 +4171,7 @@
       ],
       "covered": [
         "ElasticNetworkInterfaceId",
-        "NodeId",
-        "RegionId"
+        "NodeId"
       ]
     },
     {
@@ -4339,8 +4187,7 @@
       ],
       "covered": [
         "ElasticNetworkInterfaceId",
-        "IpName",
-        "RegionId"
+        "IpName"
       ]
     },
     {
@@ -4358,7 +4205,6 @@
       "covered": [
         "Description",
         "ElasticNetworkInterfaceId",
-        "RegionId",
         "SecurityGroupId"
       ]
     },
@@ -4382,7 +4228,6 @@
         "ErId",
         "InstanceId",
         "InstanceType",
-        "RegionId",
         "ResourceTenantId"
       ]
     },
@@ -4412,7 +4257,6 @@
         "ReceptionInstanceId",
         "ReceptionInstanceOwner",
         "ReceptionInstanceType",
-        "RegionId",
         "RouteMapAction",
         "RouteMapNum",
         "TransmissionInstanceId",
@@ -4438,7 +4282,6 @@
         "Description",
         "ErName",
         "MasterZoneId",
-        "RegionId",
         "ResourceGroupId",
         "Tag.Key",
         "Tag.Value"
@@ -4454,8 +4297,7 @@
         "RegionId"
       ],
       "covered": [
-        "ErId",
-        "RegionId"
+        "ErId"
       ]
     },
     {
@@ -4470,8 +4312,7 @@
       ],
       "covered": [
         "ErAttachmentId",
-        "ErId",
-        "RegionId"
+        "ErId"
       ]
     },
     {
@@ -4487,8 +4328,7 @@
       ],
       "covered": [
         "ErId",
-        "ErRouteMapId",
-        "RegionId"
+        "ErRouteMapId"
       ]
     },
     {
@@ -4505,8 +4345,7 @@
       "covered": [
         "Description",
         "ErId",
-        "ErName",
-        "RegionId"
+        "ErName"
       ]
     },
     {
@@ -4527,7 +4366,6 @@
       "covered": [
         "NetworkInterfaceId",
         "PrivateIpAddress",
-        "RegionId",
         "SubnetId"
       ]
     },
@@ -4547,7 +4385,6 @@
       "covered": [
         "IpName",
         "NetworkInterfaceId",
-        "RegionId",
         "SubnetId"
       ]
     },
@@ -4842,7 +4679,6 @@
         "LoginPassword",
         "NewNodeGroupName",
         "NodeGroupId",
-        "RamRoleName",
         "UserData"
       ]
     },
@@ -4863,7 +4699,6 @@
       ],
       "covered": [
         "Cidr",
-        "RegionId",
         "SubnetName",
         "Tag",
         "Type",
@@ -4883,7 +4718,6 @@
         "ZoneId"
       ],
       "covered": [
-        "RegionId",
         "SubnetId",
         "VpdId",
         "ZoneId"
@@ -4902,7 +4736,6 @@
         "ZoneId"
       ],
       "covered": [
-        "RegionId",
         "SubnetId",
         "SubnetName",
         "VpdId",
@@ -4923,8 +4756,7 @@
       "covered": [
         "ErId",
         "GrantTenantId",
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -4939,7 +4771,6 @@
       ],
       "covered": [
         "DestinationCidrBlock",
-        "RegionId",
         "VccId"
       ]
     },
@@ -4977,7 +4808,6 @@
         "CenOwnerId",
         "ConnectionType",
         "Description",
-        "RegionId",
         "ResourceGroupId",
         "Tag.Key",
         "Tag.Value",
@@ -4998,7 +4828,6 @@
         "VccId"
       ],
       "covered": [
-        "RegionId",
         "VccId"
       ]
     },
@@ -5016,8 +4845,7 @@
       "covered": [
         "ErId",
         "GrantRuleId",
-        "InstanceId",
-        "RegionId"
+        "InstanceId"
       ]
     },
     {
@@ -5033,7 +4861,6 @@
       ],
       "covered": [
         "DestinationCidrBlock",
-        "RegionId",
         "VccId",
         "VccRouteEntryId"
       ]
@@ -5053,7 +4880,6 @@
       "covered": [
         "Bandwidth",
         "OrderId",
-        "RegionId",
         "VccId",
         "VccName"
       ]
@@ -5069,7 +4895,6 @@
         "VpdId"
       ],
       "covered": [
-        "RegionId",
         "SecondaryCidrBlock",
         "VpdId"
       ]
@@ -5094,7 +4919,6 @@
       ],
       "covered": [
         "Cidr",
-        "RegionId",
         "ResourceGroupId",
         "Subnets.Cidr",
         "Subnets.RegionId",
@@ -5115,7 +4939,6 @@
         "VpdId"
       ],
       "covered": [
-        "RegionId",
         "VpdId"
       ]
     },
@@ -5130,7 +4953,6 @@
         "VpdId"
       ],
       "covered": [
-        "RegionId",
         "SecondaryCidrBlock",
         "VpdId"
       ]
@@ -5146,7 +4968,6 @@
         "VpdName"
       ],
       "covered": [
-        "RegionId",
         "VpdId",
         "VpdName"
       ]
@@ -5229,8 +5050,7 @@
         "RuleSettings.AssociatedService",
         "RuleSettings.MasterResourceType",
         "RuleSettings.MasterService",
-        "RuleSettings.Status",
-        "Status"
+        "RuleSettings.Status"
       ]
     },
     {
@@ -5492,7 +5312,6 @@
         "VersionId"
       ],
       "covered": [
-        "DeleteTargetVersionId",
         "PolicyName",
         "VersionId"
       ]
@@ -5527,8 +5346,7 @@
         "CreateRulesList.ExistingStatus",
         "CreateRulesList.SettingName",
         "CreateRulesList.Status",
-        "CreateRulesList.TagKeys",
-        "RegionId"
+        "CreateRulesList.TagKeys"
       ]
     },
     {
@@ -5541,7 +5359,6 @@
         "SettingName"
       ],
       "covered": [
-        "RegionId",
         "SettingName"
       ]
     },
@@ -5559,7 +5376,6 @@
       ],
       "covered": [
         "ExistingStatus",
-        "RegionId",
         "SettingName",
         "Status",
         "TagKeys"
@@ -5578,7 +5394,6 @@
       ],
       "covered": [
         "PolicyId",
-        "RegionId",
         "TargetId",
         "TargetType"
       ]
@@ -5601,7 +5416,6 @@
         "PolicyContent",
         "PolicyDesc",
         "PolicyName",
-        "RegionId",
         "UserType"
       ]
     },
@@ -5615,8 +5429,7 @@
         "RegionId"
       ],
       "covered": [
-        "PolicyId",
-        "RegionId"
+        "PolicyId"
       ]
     },
     {
@@ -5632,7 +5445,6 @@
       ],
       "covered": [
         "PolicyId",
-        "RegionId",
         "TargetId",
         "TargetType"
       ]
@@ -5655,8 +5467,7 @@
         "PolicyContent",
         "PolicyDesc",
         "PolicyId",
-        "PolicyName",
-        "RegionId"
+        "PolicyName"
       ]
     },
     {
@@ -5670,7 +5481,6 @@
         "Tags"
       ],
       "covered": [
-        "RegionId",
         "ResourceARN",
         "Tags"
       ]
@@ -5686,7 +5496,6 @@
         "TagKey"
       ],
       "covered": [
-        "RegionId",
         "ResourceARN",
         "TagKey"
       ]
@@ -5728,7 +5537,6 @@
         "Ipv6CidrMask",
         "Ipv6IpamPoolId",
         "Ipv6Isp",
-        "RegionId",
         "ResourceGroupId",
         "Tag",
         "UserCidr",
@@ -5750,7 +5558,6 @@
       "covered": [
         "DryRun",
         "ForceDelete",
-        "RegionId",
         "VpcId"
       ]
     },
@@ -5777,7 +5584,6 @@
         "EnableIPv6",
         "Ipv6CidrBlock",
         "Ipv6Isp",
-        "RegionId",
         "VpcId",
         "VpcName"
       ]
@@ -5804,8 +5610,6 @@
         "CidrBlock",
         "Description",
         "Ipv6CidrBlock",
-        "RegionId",
-        "ResourceGroupId",
         "Tag",
         "VSwitchName",
         "VpcId",
@@ -5825,7 +5629,6 @@
       ],
       "covered": [
         "DryRun",
-        "RegionId",
         "VSwitchId"
       ]
     },
@@ -5847,7 +5650,6 @@
         "Description",
         "EnableIPv6",
         "Ipv6CidrBlock",
-        "RegionId",
         "VSwitchId",
         "VSwitchName",
         "VpcIpv6CidrBlock"
