@@ -53,7 +53,7 @@ jobs:
       - name: configure Alibaba Cloud credentials (OIDC)
         uses: aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6 # v1.1.0
         with:
-          role-to-assume: acs:ram::${{ vars.ALI_ACCOUNT_ID }}:role/ecctl-e2e-ci
+          role-to-assume: acs:ram::${{ vars.ALI_ACCOUNT_ID }}:role/ecctl-e2e-sweeper-ci
           oidc-provider-arn: acs:ram::${{ vars.ALI_ACCOUNT_ID }}:oidc-provider/github-actions
           audience: sts.aliyuncs.com
           role-session-name: ecctl-sweeper-${{ github.run_id }}-${{ github.run_attempt }}

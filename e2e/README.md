@@ -505,9 +505,9 @@ STS credentials. Keep the following controls in place together:
   runs; `live-e2e-sweeper` has no secrets and remains approval-free so cleanup
   can follow a completed nightly run automatically.
 - The RAM role must carry only the API actions and resources required by the
-  selected E2E surface. Keep the automatic sweeper in its separate Environment
-  and move it to a delete-focused role instead of weakening the nightly
-  Environment protection rules.
+  selected E2E surface. The automatic sweeper uses the separate
+  `ecctl-e2e-sweeper-ci` delete-focused role instead of weakening the nightly
+  role or Environment protection rules.
 - Actions in jobs that obtain cloud credentials stay pinned to full commit
   SHAs, and STS sessions stay bounded by the corresponding job timeout.
 

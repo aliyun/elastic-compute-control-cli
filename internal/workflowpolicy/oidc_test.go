@@ -17,18 +17,21 @@ func TestLiveE2EWorkflowsUseBoundedOIDCCredentials(t *testing.T) {
 	tests := []struct {
 		path        string
 		environment string
+		role        string
 		expiration  string
 		session     string
 	}{
 		{
 			path:        "e2e-nightly.yml",
 			environment: "live-e2e",
+			role:        "ecctl-e2e-ci",
 			expiration:  "role-session-expiration: 18000",
 			session:     "role-session-name: ecctl-e2e-${{ github.run_id }}-${{ github.run_attempt }}",
 		},
 		{
 			path:        "e2e-sweeper.yml",
 			environment: "live-e2e-sweeper",
+			role:        "ecctl-e2e-sweeper-ci",
 			expiration:  "role-session-expiration: 7200",
 			session:     "role-session-name: ecctl-sweeper-${{ github.run_id }}-${{ github.run_attempt }}",
 		},
@@ -45,7 +48,7 @@ func TestLiveE2EWorkflowsUseBoundedOIDCCredentials(t *testing.T) {
 				t.Fatalf("read %s: %v", path, err)
 			}
 			for _, violation := range liveE2EWorkflowPolicyViolations(
-				tt.path, string(contents), tt.environment, tt.expiration, tt.session,
+				tt.path, string(contents), tt.environment, tt.role, tt.expiration, tt.session,
 			) {
 				t.Error(violation)
 			}
@@ -73,6 +76,7 @@ jobs:
 		"legacy.yml",
 		legacy,
 		"live-e2e",
+		"ecctl-e2e-ci",
 		"role-session-expiration: 18000",
 		"role-session-name: ecctl-e2e-${{ github.run_id }}-${{ github.run_attempt }}",
 	), "\n")
@@ -89,11 +93,12 @@ jobs:
 	}
 }
 
-func liveE2EWorkflowPolicyViolations(name, workflow, environment, expiration, session string) []string {
+func liveE2EWorkflowPolicyViolations(name, workflow, environment, role, expiration, session string) []string {
 	var violations []string
 	for _, required := range []string{
 		"id-token: write",
 		"environment: " + environment,
+		"role/" + role,
 		"audience: sts.aliyuncs.com",
 		expiration,
 		session,
