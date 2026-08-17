@@ -15,19 +15,22 @@ func TestLiveE2EWorkflowsUseBoundedOIDCCredentials(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		path       string
-		expiration string
-		session    string
+		path        string
+		environment string
+		expiration  string
+		session     string
 	}{
 		{
-			path:       "e2e-nightly.yml",
-			expiration: "role-session-expiration: 18000",
-			session:    "role-session-name: ecctl-e2e-${{ github.run_id }}-${{ github.run_attempt }}",
+			path:        "e2e-nightly.yml",
+			environment: "live-e2e",
+			expiration:  "role-session-expiration: 18000",
+			session:     "role-session-name: ecctl-e2e-${{ github.run_id }}-${{ github.run_attempt }}",
 		},
 		{
-			path:       "e2e-sweeper.yml",
-			expiration: "role-session-expiration: 7200",
-			session:    "role-session-name: ecctl-sweeper-${{ github.run_id }}-${{ github.run_attempt }}",
+			path:        "e2e-sweeper.yml",
+			environment: "live-e2e-sweeper",
+			expiration:  "role-session-expiration: 7200",
+			session:     "role-session-name: ecctl-sweeper-${{ github.run_id }}-${{ github.run_attempt }}",
 		},
 	}
 
@@ -42,7 +45,7 @@ func TestLiveE2EWorkflowsUseBoundedOIDCCredentials(t *testing.T) {
 				t.Fatalf("read %s: %v", path, err)
 			}
 			for _, violation := range liveE2EWorkflowPolicyViolations(
-				tt.path, string(contents), tt.expiration, tt.session,
+				tt.path, string(contents), tt.environment, tt.expiration, tt.session,
 			) {
 				t.Error(violation)
 			}
@@ -69,6 +72,7 @@ jobs:
 	violations := strings.Join(liveE2EWorkflowPolicyViolations(
 		"legacy.yml",
 		legacy,
+		"live-e2e",
 		"role-session-expiration: 18000",
 		"role-session-name: ecctl-e2e-${{ github.run_id }}-${{ github.run_attempt }}",
 	), "\n")
@@ -85,11 +89,11 @@ jobs:
 	}
 }
 
-func liveE2EWorkflowPolicyViolations(name, workflow, expiration, session string) []string {
+func liveE2EWorkflowPolicyViolations(name, workflow, environment, expiration, session string) []string {
 	var violations []string
 	for _, required := range []string{
 		"id-token: write",
-		"environment: live-e2e",
+		"environment: " + environment,
 		"audience: sts.aliyuncs.com",
 		expiration,
 		session,

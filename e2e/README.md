@@ -496,16 +496,18 @@ does not require every registry operation to have live-pass evidence.
 Live CI uses GitHub OIDC to exchange a job identity for temporary Alibaba Cloud
 STS credentials. Keep the following controls in place together:
 
-- The RAM role trust policy must match the actual GitHub `oidc:sub` for this
-  repository and environment with `StringEquals`; issuer and audience checks
-  alone trust jobs from other GitHub repositories.
-- The `live-e2e` GitHub Environment must restrict deployment branches. Use
-  required reviewers for manually dispatched destructive or broad-permission
-  runs.
+- The RAM role trust policy must match the actual GitHub `oidc:sub` values for
+  this repository's `live-e2e` and `live-e2e-sweeper` Environments with
+  `StringEquals`; issuer and audience checks alone trust jobs from other GitHub
+  repositories.
+- Both GitHub Environments must restrict deployments to the default branch.
+  `live-e2e` uses required reviewers for manually dispatched broad-permission
+  runs; `live-e2e-sweeper` has no secrets and remains approval-free so cleanup
+  can follow a completed nightly run automatically.
 - The RAM role must carry only the API actions and resources required by the
-  selected E2E surface. If the sweeper must remain automatic, give it a
-  separate Environment and delete-focused role instead of weakening the
-  nightly Environment protection rules.
+  selected E2E surface. Keep the automatic sweeper in its separate Environment
+  and move it to a delete-focused role instead of weakening the nightly
+  Environment protection rules.
 - Actions in jobs that obtain cloud credentials stay pinned to full commit
   SHAs, and STS sessions stay bounded by the corresponding job timeout.
 
