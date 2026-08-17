@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/aliyun/elastic-compute-control-cli/internal/drift"
+)
 
 func TestValidateWriteBaselineFlags(t *testing.T) {
 	tests := []struct {
@@ -21,5 +25,19 @@ func TestValidateWriteBaselineFlags(t *testing.T) {
 					tt.check, tt.format, err, tt.wantOK)
 			}
 		})
+	}
+}
+
+func TestBlockingDriftCountsIncludesRemoved(t *testing.T) {
+	report := drift.Report{Items: []drift.Item{
+		{Kind: drift.KindMissing},
+		{Kind: drift.KindRemoved},
+		{Kind: drift.KindUncovered},
+	}, BaselineGaps: 2}
+
+	missing, removed, uncovered, gaps := blockingDriftCounts(report)
+	if missing != 1 || removed != 1 || uncovered != 1 || gaps != 2 {
+		t.Fatalf("blockingDriftCounts = %d/%d/%d/%d, want 1/1/1/2",
+			missing, removed, uncovered, gaps)
 	}
 }

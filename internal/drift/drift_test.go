@@ -1,7 +1,6 @@
 package drift
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -244,7 +243,7 @@ func TestDetectFailsWhenBaselineMetadataDisappears(t *testing.T) {
 	}}}
 
 	_, err := DetectResources([]spec.ResourceSpec{resource}, baseline, Options{})
-	if err == nil || !strings.Contains(err.Error(), "resolve metadata for baseline binding") {
+	if err == nil || !strings.Contains(err.Error(), "required OpenAPI product") {
 		t.Fatalf("DetectResources error = %v, want missing baseline metadata error", err)
 	}
 }
@@ -274,18 +273,17 @@ operations: {}
 	}
 
 	_, err := CollectBaseline(dir, Options{})
-	if err == nil || !strings.Contains(err.Error(), "resolve metadata for missing-product/thing binding create") {
+	if err == nil || !strings.Contains(err.Error(), "required OpenAPI product") {
 		t.Fatalf("CollectBaseline error = %v, want unresolved binding error", err)
 	}
 }
 
-func TestProductIndexPropagatesCatalogError(t *testing.T) {
-	want := errors.New("broken catalog")
-	_, err := productIndexWithLoader("en", func(string) ([]aliyun.OpenAPIProduct, error) {
-		return nil, want
-	})
-	if !errors.Is(err, want) {
-		t.Fatalf("productIndexWithLoader error = %v, want %v", err, want)
+func TestLegacyOnlyOperationAllowlistIsNarrow(t *testing.T) {
+	if !legacyOnlyOperationAllowed("ecs", "CloneDisks") {
+		t.Fatal("ecs.CloneDisks must remain explicitly allowlisted")
+	}
+	if legacyOnlyOperationAllowed("ecs", "RunInstances") {
+		t.Fatal("current ecs.RunInstances unexpectedly allowlisted as legacy-only")
 	}
 }
 
@@ -365,14 +363,15 @@ func TestRepoSpecsHaveNoDrift(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}
-	missing, uncovered := report.Missing(), report.Uncovered()
-	if len(missing) == 0 && len(uncovered) == 0 && report.BaselineGaps == 0 {
+	missing, removed, uncovered := report.Missing(), report.Removed(), report.Uncovered()
+	if len(missing) == 0 && len(removed) == 0 && len(uncovered) == 0 && report.BaselineGaps == 0 {
 		return
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "bindings checked: %d, skipped: %d, missing: %d, uncovered: %d, baseline gaps: %d (first 20):\n",
-		report.BindingsChecked, len(report.Skipped), len(missing), len(uncovered), report.BaselineGaps)
-	for i, item := range append(append([]Item{}, missing...), uncovered...) {
+	fmt.Fprintf(&b, "bindings checked: %d, skipped: %d, missing: %d, removed: %d, uncovered: %d, baseline gaps: %d (first 20):\n",
+		report.BindingsChecked, len(report.Skipped), len(missing), len(removed), len(uncovered), report.BaselineGaps)
+	items := append(append(append([]Item{}, missing...), removed...), uncovered...)
+	for i, item := range items {
 		if i == 20 {
 			break
 		}

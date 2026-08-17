@@ -3,6 +3,7 @@ package drift
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -57,6 +58,26 @@ func TestWriteBaselineAtomic(t *testing.T) {
 		t.Fatalf("overwritten baseline has %d bindings, want 0", len(loaded.Bindings))
 	}
 	assertSingleFile(t, dir)
+}
+
+func TestValidateBaselineRejectsDuplicateBindings(t *testing.T) {
+	entry := BaselineBinding{
+		Product: "ecs", Resource: "instance", Binding: "create", API: "RunInstances",
+	}
+	err := validateBaseline(Baseline{
+		Language: "en",
+		Bindings: []BaselineBinding{entry, entry},
+	}, "en")
+	if err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("validateBaseline error = %v, want duplicate binding error", err)
+	}
+}
+
+func TestValidateBaselineRejectsLanguageMismatch(t *testing.T) {
+	err := validateBaseline(Baseline{Language: "zh-CN"}, "en")
+	if err == nil || !strings.Contains(err.Error(), "language") {
+		t.Fatalf("validateBaseline error = %v, want language mismatch", err)
+	}
 }
 
 func assertSingleFile(t *testing.T, dir string) {

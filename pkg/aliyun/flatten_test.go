@@ -84,23 +84,16 @@ func TestOpenAPIOperationLeavesPrefersCurrentMetadata(t *testing.T) {
 }
 
 func TestOpenAPIOperationLeavesStrictUsesCurrentMetadata(t *testing.T) {
-	products, err := OpenAPIProductsStrict("en", "ecs")
+	resolver, err := NewOpenAPIMetadataResolver("en", []string{"ecs"})
 	if err != nil {
-		t.Fatalf("OpenAPIProductsStrict: %v", err)
+		t.Fatalf("NewOpenAPIMetadataResolver: %v", err)
 	}
-	var product OpenAPIProduct
-	for _, candidate := range products {
-		if candidate.Code == "Ecs" {
-			product = candidate
-			break
-		}
-	}
-	if product.Code == "" {
-		t.Fatal("OpenAPIProductsStrict did not find Ecs")
-	}
-	leaves, err := OpenAPIOperationLeavesStrict("en", product, "RunInstances")
+	leaves, operation, err := resolver.OperationLeaves("ecs", "RunInstances", false)
 	if err != nil {
-		t.Fatalf("OpenAPIOperationLeavesStrict(RunInstances): %v", err)
+		t.Fatalf("OperationLeaves(RunInstances): %v", err)
+	}
+	if operation != "RunInstances" {
+		t.Fatalf("OperationLeaves operation = %q, want RunInstances", operation)
 	}
 	names := leafNames(leaves)
 	requireLeaf(t, names, "ZoneId")

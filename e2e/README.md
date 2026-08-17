@@ -500,10 +500,10 @@ STS credentials. Keep the following controls in place together:
   this repository's `live-e2e` and `live-e2e-sweeper` Environments with
   `StringEquals`; issuer and audience checks alone trust jobs from other GitHub
   repositories.
-- Both GitHub Environments must restrict deployments to the default branch.
-  `live-e2e` uses required reviewers for manually dispatched broad-permission
-  runs; `live-e2e-sweeper` has no secrets and remains approval-free so cleanup
-  can follow a completed nightly run automatically.
+- Both GitHub Environments must restrict deployments to the default branch and
+  require a reviewer. The sweeper's `workflow_run` trigger remains automatic,
+  but its deployment must wait for approval because the cloud APIs do not
+  provide a uniform tag condition for every delete action in its role.
 - The RAM role must carry only the API actions and resources required by the
   selected E2E surface. The automatic sweeper uses the separate
   `ecctl-e2e-sweeper-ci` delete-focused role instead of weakening the nightly

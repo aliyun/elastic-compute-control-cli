@@ -2,6 +2,7 @@ package drift
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,8 +23,8 @@ const (
 	// KindRemoved marks a request parameter the binding still maps although the
 	// OpenAPI metadata no longer declares it after the baseline was recorded.
 	// This can indicate a renamed or dropped parameter, or simply that the
-	// embedded metadata snapshot lags the live API, so it is reported without
-	// failing the check.
+	// embedded metadata snapshot is incomplete. It blocks the check until the
+	// removal is investigated and intentionally recorded in a fresh baseline.
 	KindRemoved = "removed"
 	// KindUncovered marks a request parameter the binding covered when the
 	// baseline was recorded but no longer maps. It catches coverage
@@ -127,7 +128,30 @@ func LoadBaseline(path string) (Baseline, error) {
 	if err := json.Unmarshal(raw, &baseline); err != nil {
 		return Baseline{}, fmt.Errorf("parse baseline %s: %w", path, err)
 	}
+	if err := validateBaseline(baseline, ""); err != nil {
+		return Baseline{}, fmt.Errorf("validate baseline %s: %w", path, err)
+	}
 	return baseline, nil
+}
+
+func validateBaseline(baseline Baseline, expectedLanguage string) error {
+	if strings.TrimSpace(baseline.Language) == "" {
+		return errors.New("baseline language is required")
+	}
+	actualLanguage := normalizeLanguage(baseline.Language)
+	if expectedLanguage != "" && actualLanguage != normalizeLanguage(expectedLanguage) {
+		return fmt.Errorf("baseline language %q does not match requested language %q", actualLanguage, normalizeLanguage(expectedLanguage))
+	}
+
+	seen := map[string]bool{}
+	for _, entry := range baseline.Bindings {
+		key := strings.Join([]string{entry.Product, entry.Resource, entry.Binding, entry.API}, "\x00")
+		if seen[key] {
+			return fmt.Errorf("duplicate baseline binding %s/%s %s (%s)", entry.Product, entry.Resource, entry.Binding, entry.API)
+		}
+		seen[key] = true
+	}
+	return nil
 }
 
 // WriteBaseline persists a baseline file atomically: it writes a temporary
@@ -181,9 +205,9 @@ func CollectBaseline(specDir string, opts Options) (Baseline, error) {
 	}
 	lang := normalizeLanguage(opts.Language)
 	baseline := Baseline{Language: lang}
-	productFor, err := productIndex(lang, resourceProductCodes(resources))
+	resolver, err := aliyun.NewOpenAPIMetadataResolver(lang, resourceProductCodes(resources))
 	if err != nil {
-		return Baseline{}, err
+		return Baseline{}, fmt.Errorf("load OpenAPI metadata: %w", err)
 	}
 
 	for _, resource := range resources {
@@ -192,7 +216,7 @@ func CollectBaseline(specDir string, opts Options) (Baseline, error) {
 			code = resource.Product
 		}
 		for bindingName, binding := range resource.Bindings {
-			leaves, _, err := resolveLeaves(productFor, code, binding.API, lang)
+			leaves, _, err := resolveLeaves(resolver, code, binding.API)
 			if err != nil {
 				return Baseline{}, fmt.Errorf("resolve metadata for %s/%s binding %s (%s): %w",
 					resource.Product, resource.Resource, bindingName, binding.API, err)
@@ -243,10 +267,13 @@ func Detect(specDir, baselinePath string, opts Options) (Report, error) {
 // relative to the recorded baseline.
 func DetectResources(resources []spec.ResourceSpec, baseline Baseline, opts Options) (Report, error) {
 	lang := normalizeLanguage(opts.Language)
+	if err := validateBaseline(baseline, lang); err != nil {
+		return Report{}, fmt.Errorf("validate drift baseline: %w", err)
+	}
 	report := Report{Language: lang}
-	productFor, err := productIndex(lang, resourceProductCodes(resources))
+	resolver, err := aliyun.NewOpenAPIMetadataResolver(lang, resourceProductCodes(resources))
 	if err != nil {
-		return Report{}, err
+		return Report{}, fmt.Errorf("load OpenAPI metadata: %w", err)
 	}
 
 	for _, resource := range resources {
@@ -261,7 +288,7 @@ func DetectResources(resources []spec.ResourceSpec, baseline Baseline, opts Opti
 				report.addSkipped(resource, bindingName, binding, "no drift baseline entry; refresh the baseline")
 				continue
 			}
-			leaves, operation, err := resolveLeaves(productFor, code, binding.API, lang)
+			leaves, operation, err := resolveLeaves(resolver, code, binding.API)
 			if err != nil {
 				return Report{}, fmt.Errorf("resolve metadata for baseline binding %s/%s %s (%s): %w",
 					resource.Product, resource.Resource, bindingName, binding.API, err)
@@ -469,32 +496,6 @@ func loadResources(specDir string) ([]spec.ResourceSpec, error) {
 	return resources, nil
 }
 
-type productLookup func(string) (aliyun.OpenAPIProduct, bool)
-
-// productIndex resolves product codes against a single OpenAPIProducts parse.
-// Catalog failures are fatal: treating them as ordinary misses would let both
-// drift checks and baseline generation succeed with incomplete coverage.
-func productIndex(lang string, requiredCodes []string) (productLookup, error) {
-	return productIndexWithLoader(lang, func(lang string) ([]aliyun.OpenAPIProduct, error) {
-		return aliyun.OpenAPIProductsStrict(lang, requiredCodes...)
-	})
-}
-
-func productIndexWithLoader(lang string, load func(string) ([]aliyun.OpenAPIProduct, error)) (productLookup, error) {
-	index := map[string]aliyun.OpenAPIProduct{}
-	products, err := load(lang)
-	if err != nil {
-		return nil, fmt.Errorf("load OpenAPI product catalog: %w", err)
-	}
-	for _, product := range products {
-		index[strings.ToLower(product.Code)] = product
-	}
-	return func(code string) (aliyun.OpenAPIProduct, bool) {
-		product, ok := index[strings.ToLower(strings.TrimSpace(code))]
-		return product, ok
-	}, nil
-}
-
 func resourceProductCodes(resources []spec.ResourceSpec) []string {
 	codes := map[string]bool{}
 	for _, resource := range resources {
@@ -507,28 +508,26 @@ func resourceProductCodes(resources []spec.ResourceSpec) []string {
 	return sortedKeys(codes)
 }
 
-func resolveLeaves(productFor productLookup, code, api, lang string) ([]aliyun.OpenAPIParameter, string, error) {
-	product, ok := productFor(code)
-	if !ok {
-		return nil, "", fmt.Errorf("OpenAPI product %q not found", code)
-	}
-	operation, ok := aliyun.OpenAPIOperationName(product, api)
-	if !ok {
-		return nil, "", fmt.Errorf("OpenAPI operation %s.%s not found", code, api)
-	}
-	leaves, err := aliyun.OpenAPIOperationLeavesStrict(lang, product, operation)
-	if err != nil {
-		return nil, "", err
-	}
-	return leaves, operation, nil
+func resolveLeaves(resolver *aliyun.OpenAPIMetadataResolver, code, api string) ([]aliyun.OpenAPIParameter, string, error) {
+	return resolver.OperationLeaves(code, api, legacyOnlyOperationAllowed(code, api))
+}
+
+var legacyOnlyOpenAPIOperations = map[string]bool{
+	// CloneDisks exists in the legacy ECS metadata but is intentionally absent
+	// from the current ECS version manifest in the pinned metadata module.
+	"ecs.clonedisks": true,
+}
+
+func legacyOnlyOperationAllowed(code, api string) bool {
+	key := strings.ToLower(strings.TrimSpace(code)) + "." + strings.ToLower(strings.TrimSpace(api))
+	return legacyOnlyOpenAPIOperations[key]
 }
 
 func normalizeLanguage(lang string) string {
-	lang = strings.TrimSpace(lang)
-	if lang == "" {
-		return "en"
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(lang)), "zh") {
+		return "zh-CN"
 	}
-	return lang
+	return "en"
 }
 
 func leafNames(leaves []aliyun.OpenAPIParameter) []string {

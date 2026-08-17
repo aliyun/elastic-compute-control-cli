@@ -48,11 +48,12 @@ type openAPINewDetail struct {
 }
 
 type openAPINewRequestParameter struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Position    string `json:"position"`
-	Type        string `json:"type"`
-	Required    bool   `json:"required"`
+	Name          string                       `json:"name"`
+	Description   string                       `json:"description"`
+	Position      string                       `json:"position"`
+	Type          string                       `json:"type"`
+	Required      bool                         `json:"required"`
+	SubParameters []openAPINewRequestParameter `json:"sub_parameters,omitempty"`
 }
 
 type openAPINewMetadataReader func(language string, path string) ([]byte, error)

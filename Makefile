@@ -51,7 +51,7 @@ drift: specdrift ## Report OpenAPI metadata changes unmatched by resource bindin
 drift-baseline: specdrift ## Record the current OpenAPI metadata as the drift baseline
 	bin/specdrift -spec-dir specs -write-baseline
 
-drift-check: specdrift ## Fail when a binding misses an OpenAPI parameter added after the baseline
+drift-check: specdrift ## Fail on unacknowledged OpenAPI metadata or binding coverage drift
 	bin/specdrift -spec-dir specs -check
 
 specdrift: ## Build the specdrift CLI into bin/

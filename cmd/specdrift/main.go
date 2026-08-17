@@ -16,7 +16,7 @@ func main() {
 	baselinePath := flag.String("baseline", "drift-baseline.json", "path to the drift baseline file")
 	lang := flag.String("lang", "en", "OpenAPI metadata language for descriptions")
 	format := flag.String("format", "table", "output format: table or json")
-	check := flag.Bool("check", false, "exit non-zero when a binding misses an OpenAPI parameter")
+	check := flag.Bool("check", false, "exit non-zero on unacknowledged OpenAPI metadata or binding coverage drift")
 	writeBaseline := flag.Bool("write-baseline", false, "record the current OpenAPI metadata as the drift baseline and exit")
 	flag.Parse()
 
@@ -60,12 +60,16 @@ func main() {
 	}
 
 	if *check {
-		missing, uncovered, gaps := len(report.Missing()), len(report.Uncovered()), report.BaselineGaps
-		if missing > 0 || uncovered > 0 || gaps > 0 {
-			fmt.Fprintf(os.Stderr, "specdrift: drift detected (missing=%d, uncovered=%d, baseline gaps=%d); adapt the resource specs or investigate the metadata snapshot, then refresh the baseline\n", missing, uncovered, gaps)
+		missing, removed, uncovered, gaps := blockingDriftCounts(report)
+		if missing > 0 || removed > 0 || uncovered > 0 || gaps > 0 {
+			fmt.Fprintf(os.Stderr, "specdrift: drift detected (missing=%d, removed=%d, uncovered=%d, baseline gaps=%d); adapt the resource specs or investigate the metadata snapshot, then refresh the baseline\n", missing, removed, uncovered, gaps)
 			os.Exit(1)
 		}
 	}
+}
+
+func blockingDriftCounts(report drift.Report) (missing, removed, uncovered, gaps int) {
+	return len(report.Missing()), len(report.Removed()), len(report.Uncovered()), report.BaselineGaps
 }
 
 type jsonReport struct {

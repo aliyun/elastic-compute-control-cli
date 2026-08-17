@@ -3989,7 +3989,6 @@
         "NodeGroups.NodeGroupDescription",
         "NodeGroups.NodeGroupName",
         "NodeGroups.Nodes",
-        "NodeGroups.RamRoleName",
         "NodeGroups.SystemDisk",
         "NodeGroups.UserData",
         "NodeGroups.VirtualGpuEnabled",

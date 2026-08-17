@@ -62,18 +62,57 @@ func OpenAPIProducts(lang string) ([]OpenAPIProduct, error) {
 	return openAPIProductsWithReader(lang, false, readOpenAPINewMetadata, nil)
 }
 
-// OpenAPIProductsStrict loads the current product catalog without falling
-// back when the current metadata snapshot is unreadable or when a required
-// product's version manifest is incomplete. The optional requiredCodes scope
-// prevents unrelated incomplete upstream products from blocking validation.
-// Interactive discovery should continue to use OpenAPIProducts and its
-// best-effort compatibility.
-func OpenAPIProductsStrict(lang string, requiredCodes ...string) ([]OpenAPIProduct, error) {
-	return openAPIProductsStrictWithReader(lang, readOpenAPINewMetadata, requiredCodes...)
+// OpenAPIMetadataResolver is an immutable, fail-closed view of the current
+// OpenAPI metadata for a declared product set. Construct it with
+// NewOpenAPIMetadataResolver so current-versus-legacy provenance cannot be
+// lost by copying or reconstructing individual OpenAPIProduct values.
+type OpenAPIMetadataResolver struct {
+	language string
+	products map[string]OpenAPIProduct
 }
 
-func openAPIProductsStrictWithReader(lang string, read openAPINewMetadataReader, requiredCodes ...string) ([]OpenAPIProduct, error) {
-	return openAPIProductsWithReader(lang, true, read, requiredCodes)
+// NewOpenAPIMetadataResolver loads every required product from the current
+// catalog. Missing products and broken current version manifests are fatal;
+// unrelated incomplete catalog entries are not read.
+func NewOpenAPIMetadataResolver(lang string, requiredCodes []string) (*OpenAPIMetadataResolver, error) {
+	return newOpenAPIMetadataResolverWithReader(lang, requiredCodes, readOpenAPINewMetadata)
+}
+
+func newOpenAPIMetadataResolverWithReader(lang string, requiredCodes []string, read openAPINewMetadataReader) (*OpenAPIMetadataResolver, error) {
+	products, err := openAPIProductsWithReader(lang, true, read, requiredCodes)
+	if err != nil {
+		return nil, err
+	}
+	index := make(map[string]OpenAPIProduct, len(products))
+	for _, product := range products {
+		index[strings.ToLower(strings.TrimSpace(product.Code))] = product
+	}
+	return &OpenAPIMetadataResolver{language: lang, products: index}, nil
+}
+
+// OperationLeaves resolves and flattens one operation from the immutable
+// snapshot. allowLegacy must be true only for an explicitly reviewed
+// legacy-only operation; an unapproved omission from the current manifest is
+// treated as metadata corruption.
+func (r *OpenAPIMetadataResolver) OperationLeaves(productCode, operation string, allowLegacy bool) ([]OpenAPIParameter, string, error) {
+	if r == nil {
+		return nil, "", fmt.Errorf("OpenAPI metadata resolver is nil")
+	}
+	product, ok := r.products[strings.ToLower(strings.TrimSpace(productCode))]
+	if !ok {
+		return nil, "", fmt.Errorf("OpenAPI product %q not found", productCode)
+	}
+	canonical, ok := OpenAPIOperationName(product, operation)
+	if !ok {
+		return nil, "", fmt.Errorf("OpenAPI operation %s.%s not found", productCode, operation)
+	}
+	detail, err := openAPIOperationDetailForStrictWithReaders(
+		r.language, product, canonical, allowLegacy, readOpenAPINewMetadata, legacyOpenAPIOperationDetail,
+	)
+	if err != nil {
+		return nil, "", err
+	}
+	return enrichedOpenAPIOperationLeaves(r.language, product, canonical, detail), canonical, nil
 }
 
 func openAPIProductsWithReader(lang string, strict bool, read openAPINewMetadataReader, requiredCodes []string) ([]OpenAPIProduct, error) {
@@ -98,14 +137,28 @@ func openAPIProductsWithReader(lang string, strict bool, read openAPINewMetadata
 	if err := json.Unmarshal(content, &set); err != nil {
 		return nil, fmt.Errorf("parse current OpenAPI product catalog: %w", err)
 	}
-	legacy := legacyOpenAPIProducts(lang)
-	products := make([]OpenAPIProduct, 0, len(set.Products))
 	required := map[string]bool{}
 	for _, code := range requiredCodes {
-		required[strings.ToLower(strings.TrimSpace(code))] = true
+		code = strings.ToLower(strings.TrimSpace(code))
+		if code != "" {
+			required[code] = true
+		}
 	}
+	currentCodes := make(map[string]bool, len(set.Products))
 	for _, product := range set.Products {
-		if strict && len(required) > 0 && !required[strings.ToLower(product.Code)] {
+		currentCodes[strings.ToLower(strings.TrimSpace(product.Code))] = true
+	}
+	if strict {
+		for code := range required {
+			if code != ossUtilProductCode && !currentCodes[code] {
+				return nil, fmt.Errorf("required OpenAPI product %q is absent from the current catalog", code)
+			}
+		}
+	}
+	legacy := legacyOpenAPIProducts(lang)
+	products := make([]OpenAPIProduct, 0, len(set.Products))
+	for _, product := range set.Products {
+		if strict && !required[strings.ToLower(strings.TrimSpace(product.Code))] {
 			continue
 		}
 		converted, err := openAPIProductFromNewMetaWithReader(metadataLang, product, read)
@@ -115,17 +168,20 @@ func openAPIProductsWithReader(lang string, strict bool, read openAPINewMetadata
 			}
 			continue
 		}
-		if legacyProduct, ok := legacy[strings.ToLower(converted.Code)]; ok {
+		convertedCode := strings.ToLower(strings.TrimSpace(converted.Code))
+		if legacyProduct, ok := legacy[convertedCode]; ok {
 			converted.APINames = mergeSortedStrings(converted.APINames, legacyProduct.APINames)
 			if converted.Style == "" {
 				converted.Style = legacyProduct.Style
 			}
 		}
 		products = append(products, converted)
-		delete(legacy, strings.ToLower(converted.Code))
+		delete(legacy, convertedCode)
 	}
-	for _, product := range openAPIProductMapValues(legacy) {
-		products = append(products, product)
+	if !strict {
+		for _, product := range openAPIProductMapValues(legacy) {
+			products = append(products, product)
+		}
 	}
 	products = withoutOpenAPIProduct(products, ossUtilProductCode)
 	products = append(products, ossUtilProduct(lang))
@@ -186,19 +242,11 @@ func OpenAPIOperationDetailFor(lang string, product OpenAPIProduct, operation st
 	return openAPIOperationDetailFromNewMeta(product, detail), true
 }
 
-// OpenAPIOperationDetailForStrict resolves an operation without masking a
-// failure in metadata that declares the operation as current. Legacy fallback
-// is allowed only when the current version manifest explicitly omits it.
-func OpenAPIOperationDetailForStrict(lang string, product OpenAPIProduct, operation string) (OpenAPIOperationDetail, error) {
-	return openAPIOperationDetailForStrictWithReaders(
-		lang, product, operation, readOpenAPINewMetadata, legacyOpenAPIOperationDetail,
-	)
-}
-
 func openAPIOperationDetailForStrictWithReaders(
 	lang string,
 	product OpenAPIProduct,
 	operation string,
+	allowLegacy bool,
 	read openAPINewMetadataReader,
 	loadLegacy func(string, OpenAPIProduct, string) (OpenAPIOperationDetail, bool),
 ) (OpenAPIOperationDetail, error) {
@@ -212,6 +260,9 @@ func openAPIOperationDetailForStrictWithReaders(
 
 	metadataLang := openAPIMetadataLanguage(lang)
 	if !product.currentMetadata || !product.currentAPINames[operation] {
+		if !allowLegacy {
+			return OpenAPIOperationDetail{}, fmt.Errorf("operation %s.%s is absent from the current OpenAPI manifest", product.Code, operation)
+		}
 		detail, ok := loadLegacy(lang, product, operation)
 		if !ok {
 			return OpenAPIOperationDetail{}, fmt.Errorf("operation %s.%s is absent from current and legacy OpenAPI metadata", product.Code, operation)
@@ -228,6 +279,9 @@ func openAPIOperationDetailForStrictWithReaders(
 	}
 	if detail.Name != operation {
 		return OpenAPIOperationDetail{}, fmt.Errorf("current OpenAPI detail for %s.%s names operation %q", product.Code, operation, detail.Name)
+	}
+	if detail.Parameters == nil {
+		return OpenAPIOperationDetail{}, fmt.Errorf("current OpenAPI detail for %s.%s omits the parameters array", product.Code, operation)
 	}
 	return openAPIOperationDetailFromNewMeta(product, detail), nil
 }
@@ -337,13 +391,7 @@ func openAPIProductFromNewMetaWithReader(metadataLang string, product openAPINew
 func openAPIOperationDetailFromNewMeta(product OpenAPIProduct, detail *openAPINewDetail) OpenAPIOperationDetail {
 	params := make([]OpenAPIParameter, 0, len(detail.Parameters))
 	for _, param := range detail.Parameters {
-		params = append(params, OpenAPIParameter{
-			Name:        param.Name,
-			Description: strings.TrimSpace(param.Description),
-			Position:    param.Position,
-			Type:        param.Type,
-			Required:    param.Required,
-		})
+		params = append(params, openAPIParameterFromNewMeta(param))
 	}
 	return OpenAPIOperationDetail{
 		Name:        detail.Name,
@@ -354,6 +402,23 @@ func openAPIOperationDetailFromNewMeta(product OpenAPIProduct, detail *openAPINe
 		Style:       product.Style,
 		Parameters:  params,
 	}
+}
+
+func openAPIParameterFromNewMeta(param openAPINewRequestParameter) OpenAPIParameter {
+	out := OpenAPIParameter{
+		Name:        param.Name,
+		Description: strings.TrimSpace(param.Description),
+		Position:    param.Position,
+		Type:        param.Type,
+		Required:    param.Required,
+	}
+	if len(param.SubParameters) > 0 {
+		out.SubParameters = make([]OpenAPIParameter, 0, len(param.SubParameters))
+		for _, sub := range param.SubParameters {
+			out.SubParameters = append(out.SubParameters, openAPIParameterFromNewMeta(sub))
+		}
+	}
+	return out
 }
 
 func openAPIMetadataLanguage(lang string) string {

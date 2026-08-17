@@ -66,19 +66,19 @@ func TestOpenAPIDetailFindParameterMatchesLegacyNestedParameter(t *testing.T) {
 	}
 }
 
-func TestOpenAPIProductsStrictRejectsCurrentCatalogReadFailure(t *testing.T) {
+func TestOpenAPIMetadataResolverRejectsCurrentCatalogReadFailure(t *testing.T) {
 	want := errors.New("broken current catalog")
-	_, err := openAPIProductsStrictWithReader("en", func(language, path string) ([]byte, error) {
+	_, err := newOpenAPIMetadataResolverWithReader("en", []string{"ecs"}, func(language, path string) ([]byte, error) {
 		return nil, want
 	})
 	if !errors.Is(err, want) {
-		t.Fatalf("openAPIProductsStrictWithReader error = %v, want %v", err, want)
+		t.Fatalf("newOpenAPIMetadataResolverWithReader error = %v, want %v", err, want)
 	}
 }
 
-func TestOpenAPIProductsStrictRejectsProductManifestFailure(t *testing.T) {
+func TestOpenAPIMetadataResolverRejectsProductManifestFailure(t *testing.T) {
 	want := errors.New("broken product manifest")
-	_, err := openAPIProductsStrictWithReader("en", func(language, path string) ([]byte, error) {
+	_, err := newOpenAPIMetadataResolverWithReader("en", []string{"Broken"}, func(language, path string) ([]byte, error) {
 		switch path {
 		case "/products.json":
 			return []byte(`{"products":[{"code":"Broken"}]}`), nil
@@ -88,14 +88,14 @@ func TestOpenAPIProductsStrictRejectsProductManifestFailure(t *testing.T) {
 			t.Fatalf("unexpected metadata path %q", path)
 			return nil, nil
 		}
-	}, "Broken")
+	})
 	if !errors.Is(err, want) {
-		t.Fatalf("openAPIProductsStrictWithReader error = %v, want %v", err, want)
+		t.Fatalf("newOpenAPIMetadataResolverWithReader error = %v, want %v", err, want)
 	}
 }
 
-func TestOpenAPIProductsStrictRejectsProductManifestWithoutAPIs(t *testing.T) {
-	_, err := openAPIProductsStrictWithReader("en", func(language, path string) ([]byte, error) {
+func TestOpenAPIMetadataResolverRejectsProductManifestWithoutAPIs(t *testing.T) {
+	_, err := newOpenAPIMetadataResolverWithReader("en", []string{"Broken"}, func(language, path string) ([]byte, error) {
 		switch path {
 		case "/products.json":
 			return []byte(`{"products":[{"code":"Broken"}]}`), nil
@@ -105,14 +105,26 @@ func TestOpenAPIProductsStrictRejectsProductManifestWithoutAPIs(t *testing.T) {
 			t.Fatalf("unexpected metadata path %q", path)
 			return nil, nil
 		}
-	}, "Broken")
+	})
 	if err == nil {
 		t.Fatal("product manifest without APIs unexpectedly succeeded")
 	}
 }
 
-func TestOpenAPIProductsStrictValidatesOnlyRequiredProductManifests(t *testing.T) {
-	products, err := openAPIProductsStrictWithReader("en", func(language, path string) ([]byte, error) {
+func TestOpenAPIMetadataResolverRejectsRequiredProductMissingFromCurrentCatalog(t *testing.T) {
+	_, err := newOpenAPIMetadataResolverWithReader("en", []string{"Ecs"}, func(language, path string) ([]byte, error) {
+		if path != "/products.json" {
+			t.Fatalf("unexpected metadata path %q", path)
+		}
+		return []byte(`{"products":[{"code":"Other"}]}`), nil
+	})
+	if err == nil {
+		t.Fatal("required product missing from current catalog unexpectedly succeeded")
+	}
+}
+
+func TestOpenAPIMetadataResolverValidatesOnlyRequiredProductManifests(t *testing.T) {
+	resolver, err := newOpenAPIMetadataResolverWithReader("en", []string{"Required"}, func(language, path string) ([]byte, error) {
 		switch path {
 		case "/products.json":
 			return []byte(`{"products":[{"code":"Required"},{"code":"Unrelated"}]}`), nil
@@ -125,19 +137,29 @@ func TestOpenAPIProductsStrictValidatesOnlyRequiredProductManifests(t *testing.T
 			t.Fatalf("unexpected metadata path %q", path)
 			return nil, nil
 		}
-	}, "Required")
+	})
 	if err != nil {
-		t.Fatalf("openAPIProductsStrictWithReader: %v", err)
+		t.Fatalf("newOpenAPIMetadataResolverWithReader: %v", err)
 	}
-	found := false
-	for _, product := range products {
-		if product.Code == "Required" {
-			found = true
-			break
-		}
+	if resolver == nil {
+		t.Fatal("strict loader returned a nil resolver")
 	}
-	if !found {
-		t.Fatal("strict loader omitted required product")
+}
+
+func TestOpenAPIMetadataResolverRequiresExplicitLegacyOperationApproval(t *testing.T) {
+	resolver, err := NewOpenAPIMetadataResolver("en", []string{"ecs"})
+	if err != nil {
+		t.Fatalf("NewOpenAPIMetadataResolver: %v", err)
+	}
+	if _, _, err := resolver.OperationLeaves("ecs", "CloneDisks", false); err == nil {
+		t.Fatal("legacy-only ecs.CloneDisks succeeded without approval")
+	}
+	leaves, operation, err := resolver.OperationLeaves("ecs", "CloneDisks", true)
+	if err != nil {
+		t.Fatalf("approved legacy-only ecs.CloneDisks: %v", err)
+	}
+	if operation != "CloneDisks" || len(leaves) == 0 {
+		t.Fatalf("approved legacy-only operation = %q with %d leaves", operation, len(leaves))
 	}
 }
 
@@ -165,6 +187,12 @@ func TestOpenAPIOperationDetailStrictRejectsBrokenCurrentDetail(t *testing.T) {
 			},
 		},
 		{
+			name: "missing parameters",
+			detail: func() ([]byte, error) {
+				return []byte(`{"name":"Current"}`), nil
+			},
+		},
+		{
 			name: "mismatched detail",
 			detail: func() ([]byte, error) {
 				return []byte(`{"name":"Other"}`), nil
@@ -184,6 +212,7 @@ func TestOpenAPIOperationDetailStrictRejectsBrokenCurrentDetail(t *testing.T) {
 					currentAPINames: map[string]bool{"Current": true},
 				},
 				"Current",
+				false,
 				func(language, path string) ([]byte, error) {
 					switch path {
 					case "/test/Current.json":
@@ -219,6 +248,7 @@ func TestOpenAPIOperationDetailStrictAllowsExplicitLegacyOnlyOperation(t *testin
 			currentAPINames: map[string]bool{},
 		},
 		"LegacyOnly",
+		true,
 		func(language, path string) ([]byte, error) {
 			t.Fatalf("legacy-only operation unexpectedly read current detail %q", path)
 			return nil, nil
@@ -232,5 +262,74 @@ func TestOpenAPIOperationDetailStrictAllowsExplicitLegacyOnlyOperation(t *testin
 	}
 	if got.Name != want.Name {
 		t.Fatalf("strict legacy-only detail = %#v, want %#v", got, want)
+	}
+}
+
+func TestOpenAPIOperationDetailStrictRejectsUnapprovedLegacyFallback(t *testing.T) {
+	_, err := openAPIOperationDetailForStrictWithReaders(
+		"en",
+		OpenAPIProduct{
+			Code:            "Test",
+			APINames:        []string{"LegacyOnly"},
+			currentMetadata: true,
+			currentAPINames: map[string]bool{},
+		},
+		"LegacyOnly",
+		false,
+		func(language, path string) ([]byte, error) {
+			t.Fatalf("unapproved legacy operation unexpectedly read current detail %q", path)
+			return nil, nil
+		},
+		func(string, OpenAPIProduct, string) (OpenAPIOperationDetail, bool) {
+			return OpenAPIOperationDetail{Name: "LegacyOnly"}, true
+		},
+	)
+	if err == nil {
+		t.Fatal("unapproved legacy operation unexpectedly succeeded")
+	}
+}
+
+func TestOpenAPIOperationDetailStrictAllowsExplicitEmptyParameterList(t *testing.T) {
+	detail, err := openAPIOperationDetailForStrictWithReaders(
+		"en",
+		OpenAPIProduct{
+			Code:            "Test",
+			APINames:        []string{"NoParameters"},
+			currentMetadata: true,
+			currentAPINames: map[string]bool{"NoParameters": true},
+		},
+		"NoParameters",
+		false,
+		func(language, path string) ([]byte, error) {
+			return []byte(`{"name":"NoParameters","parameters":[]}`), nil
+		},
+		func(string, OpenAPIProduct, string) (OpenAPIOperationDetail, bool) {
+			t.Fatal("current operation unexpectedly fell back to legacy")
+			return OpenAPIOperationDetail{}, false
+		},
+	)
+	if err != nil {
+		t.Fatalf("explicit empty parameter list failed: %v", err)
+	}
+	if detail.Parameters == nil || len(detail.Parameters) != 0 {
+		t.Fatalf("explicit empty parameters = %#v, want non-nil empty slice", detail.Parameters)
+	}
+}
+
+func TestOpenAPIOperationDetailFromNewMetaPreservesSubParameters(t *testing.T) {
+	detail := openAPIOperationDetailFromNewMeta(OpenAPIProduct{}, &openAPINewDetail{
+		Name: "Nested",
+		Parameters: []openAPINewRequestParameter{{
+			Name: "Group",
+			Type: "RepeatList",
+			SubParameters: []openAPINewRequestParameter{{
+				Name: "CurrentOnlyChild",
+				Type: "String",
+			}},
+		}},
+	})
+	if len(detail.Parameters) != 1 || len(detail.Parameters[0].SubParameters) != 1 ||
+		detail.Parameters[0].SubParameters[0].Name != "CurrentOnlyChild" {
+		t.Fatalf("converted nested parameters = %#v", detail.Parameters)
 	}
 }
