@@ -10,10 +10,6 @@ on:
         description: "Optional single-region override; empty uses protected config candidates"
         default: ""
 
-permissions:
-  id-token: write # required to mint the OIDC token
-  contents: read
-
 concurrency:
   group: ecctl-e2e-live
   cancel-in-progress: false
@@ -21,12 +17,15 @@ concurrency:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    environment: live-e2e # protection rules; fork PRs cannot reach secrets
-    timeout-minutes: 300 # < STS session duration (DESIGN §12.2)
+    environment: live-e2e
+    timeout-minutes: 300
+    permissions:
+      id-token: write # mint the GitHub OIDC token only for this job
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
 
@@ -51,12 +50,13 @@ jobs:
           bin/ecctl-e2e lint cases --config e2e.local.yaml
 
       - name: configure Alibaba Cloud credentials (OIDC)
-        uses: aliyun/configure-aliyun-credentials-action@v1
+        uses: aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6 # v1.1.0
         with:
           role-to-assume: acs:ram::${{ vars.ALI_ACCOUNT_ID }}:role/ecctl-e2e-ci
           oidc-provider-arn: acs:ram::${{ vars.ALI_ACCOUNT_ID }}:oidc-provider/github-actions
           audience: sts.aliyuncs.com
-          role-session-duration: 21600 # 6h; role MaxSessionDuration must match
+          role-session-name: ecctl-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          role-session-expiration: 18000 # no longer than the 5h job timeout
 
       - name: run e2e
         working-directory: e2e
@@ -78,7 +78,7 @@ jobs:
         working-directory: e2e
         run: rm -f e2e.local.yaml
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: ${{ always() && hashFiles('e2e/reports/e2e-report.*') != '' }}
         with:
           name: e2e-reports

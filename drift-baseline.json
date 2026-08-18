@@ -1,0 +1,5658 @@
+{
+  "language": "en",
+  "bindings": [
+    {
+      "product": "ack",
+      "resource": "ack",
+      "binding": "create_cluster",
+      "api": "CreateCluster",
+      "parameters": [
+        "body"
+      ],
+      "covered": [
+        "body.auto_mode.enable",
+        "body.cluster_spec",
+        "body.cluster_type",
+        "body.container_cidr",
+        "body.deletion_protection",
+        "body.endpoint_public_access",
+        "body.kubernetes_version",
+        "body.name",
+        "body.pod_vswitch_ids",
+        "body.profile",
+        "body.region_id",
+        "body.resource_group_id",
+        "body.service_cidr",
+        "body.snat_entry",
+        "body.tags",
+        "body.vpcid",
+        "body.vswitch_ids",
+        "body.zone_ids"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "ack",
+      "binding": "delete_cluster",
+      "api": "DeleteCluster",
+      "parameters": [
+        "ClusterId",
+        "delete_options.delete_mode",
+        "delete_options.resource_type",
+        "keep_slb",
+        "retain_all_resources",
+        "retain_resources"
+      ],
+      "covered": [
+        "ClusterId",
+        "delete_options",
+        "retain_all_resources",
+        "retain_resources"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "ack",
+      "binding": "migrate_cluster",
+      "api": "MigrateCluster",
+      "parameters": [
+        "body",
+        "cluster_id"
+      ],
+      "covered": [
+        "body.cluster_spec",
+        "cluster_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "ack",
+      "binding": "modify_cluster",
+      "api": "ModifyCluster",
+      "parameters": [
+        "ClusterId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId",
+        "body.api_server_eip",
+        "body.api_server_eip_id",
+        "body.cluster_name",
+        "body.maintenance_window",
+        "body.resource_group_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "ack",
+      "binding": "replace_tags",
+      "api": "ModifyClusterTags",
+      "parameters": [
+        "ClusterId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId",
+        "body"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "ack",
+      "binding": "tag_resources",
+      "api": "TagResources",
+      "parameters": [
+        "body"
+      ],
+      "covered": [
+        "body.region_id",
+        "body.resource_ids",
+        "body.resource_type",
+        "body.tags"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "ack",
+      "binding": "untag_resources",
+      "api": "UntagResources",
+      "parameters": [
+        "all",
+        "region_id",
+        "resource_ids",
+        "resource_type",
+        "tag_keys"
+      ],
+      "covered": [
+        "region_id",
+        "resource_ids",
+        "resource_type",
+        "tag_keys"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "ack",
+      "binding": "upgrade_cluster",
+      "api": "UpgradeCluster",
+      "parameters": [
+        "ClusterId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId",
+        "body.master_only",
+        "body.next_version",
+        "body.rolling_policy",
+        "body.rolling_policy.max_parallelism"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "addon",
+      "binding": "install",
+      "api": "InstallClusterAddons",
+      "parameters": [
+        "ClusterId",
+        "body.config",
+        "body.name",
+        "body.version"
+      ],
+      "covered": [
+        "ClusterId",
+        "body.config",
+        "body.name",
+        "body.version"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "addon",
+      "binding": "modify_config",
+      "api": "ModifyClusterAddon",
+      "parameters": [
+        "body",
+        "cluster_id",
+        "component_id"
+      ],
+      "covered": [
+        "body",
+        "cluster_id",
+        "component_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "addon",
+      "binding": "uninstall",
+      "api": "UnInstallClusterAddons",
+      "parameters": [
+        "ClusterId",
+        "addons.cleanup_cloud_resources",
+        "addons.name"
+      ],
+      "covered": [
+        "ClusterId",
+        "addons.cleanup_cloud_resources",
+        "addons.name"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "addon",
+      "binding": "upgrade",
+      "api": "UpgradeClusterAddons",
+      "parameters": [
+        "ClusterId",
+        "body.component_name",
+        "body.config",
+        "body.next_version",
+        "body.policy",
+        "body.version"
+      ],
+      "covered": [
+        "ClusterId",
+        "body.component_name",
+        "body.config",
+        "body.next_version",
+        "body.policy"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "alert",
+      "binding": "start_alert",
+      "api": "StartAlert",
+      "parameters": [
+        "ClusterId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId",
+        "body.alert_rule_group_name",
+        "body.alert_rule_name"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "alert",
+      "binding": "stop_alert",
+      "api": "StopAlert",
+      "parameters": [
+        "ClusterId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId",
+        "body.alert_rule_group_name",
+        "body.alert_rule_name"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "alert",
+      "binding": "update_contact_groups",
+      "api": "UpdateContactGroupForAlert",
+      "parameters": [
+        "ClusterId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "audit",
+      "binding": "disable_audit_log",
+      "api": "UpdateClusterAuditLogConfig",
+      "parameters": [
+        "body",
+        "clusterid"
+      ],
+      "covered": [
+        "body.disable",
+        "body.sls_project_name",
+        "clusterid"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "audit",
+      "binding": "enable_audit_log",
+      "api": "UpdateClusterAuditLogConfig",
+      "parameters": [
+        "body",
+        "clusterid"
+      ],
+      "covered": [
+        "body.disable",
+        "body.sls_project_name",
+        "clusterid"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "audit",
+      "binding": "update_audit_log_config",
+      "api": "UpdateClusterAuditLogConfig",
+      "parameters": [
+        "body",
+        "clusterid"
+      ],
+      "covered": [
+        "body.sls_project_name",
+        "clusterid"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "auto-repair-policy",
+      "binding": "create_policy",
+      "api": "CreateAutoRepairPolicy",
+      "parameters": [
+        "body",
+        "cluster_id"
+      ],
+      "covered": [
+        "body",
+        "cluster_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "auto-repair-policy",
+      "binding": "delete_policy",
+      "api": "DeleteAutoRepairPolicy",
+      "parameters": [
+        "cluster_id",
+        "policy_id"
+      ],
+      "covered": [
+        "cluster_id",
+        "policy_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "auto-repair-policy",
+      "binding": "update_policy",
+      "api": "ModifyAutoRepairPolicy",
+      "parameters": [
+        "body",
+        "cluster_id",
+        "policy_id"
+      ],
+      "covered": [
+        "body",
+        "cluster_id",
+        "policy_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "check",
+      "binding": "create_check",
+      "api": "RunClusterCheck",
+      "parameters": [
+        "body",
+        "cluster_id"
+      ],
+      "covered": [
+        "body.target",
+        "body.type",
+        "cluster_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "config",
+      "binding": "create_config",
+      "api": "CreateClusterInspectConfig",
+      "parameters": [
+        "body",
+        "clusterId"
+      ],
+      "covered": [
+        "body.disabledCheckItems",
+        "body.enabled",
+        "body.recurrence",
+        "clusterId"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "config",
+      "binding": "delete_config",
+      "api": "DeleteClusterInspectConfig",
+      "parameters": [
+        "clusterId"
+      ],
+      "covered": [
+        "clusterId"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "config",
+      "binding": "update_config",
+      "api": "UpdateClusterInspectConfig",
+      "parameters": [
+        "body",
+        "clusterId"
+      ],
+      "covered": [
+        "body.disabledCheckItems",
+        "body.enabled",
+        "body.recurrence",
+        "clusterId"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "control-plane-log",
+      "binding": "disable_control_plane_log",
+      "api": "UpdateControlPlaneLog",
+      "parameters": [
+        "ClusterId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "control-plane-log",
+      "binding": "update_control_plane_log",
+      "api": "UpdateControlPlaneLog",
+      "parameters": [
+        "ClusterId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId",
+        "body.aliuid",
+        "body.components",
+        "body.log_project",
+        "body.log_ttl"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "diagnosis",
+      "binding": "create_diagnosis",
+      "api": "CreateClusterDiagnosis",
+      "parameters": [
+        "body",
+        "cluster_id"
+      ],
+      "covered": [
+        "body.target",
+        "body.type",
+        "cluster_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "instance",
+      "binding": "delete_policy_instance",
+      "api": "DeletePolicyInstance",
+      "parameters": [
+        "cluster_id",
+        "instance_name",
+        "policy_name"
+      ],
+      "covered": [
+        "cluster_id",
+        "instance_name",
+        "policy_name"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "instance",
+      "binding": "deploy_policy_instance",
+      "api": "DeployPolicyInstance",
+      "parameters": [
+        "body",
+        "cluster_id",
+        "policy_name"
+      ],
+      "covered": [
+        "body.action",
+        "body.namespaces",
+        "body.parameters",
+        "cluster_id",
+        "policy_name"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "instance",
+      "binding": "modify_policy_instance",
+      "api": "ModifyPolicyInstance",
+      "parameters": [
+        "body",
+        "cluster_id",
+        "policy_name"
+      ],
+      "covered": [
+        "body.action",
+        "body.instance_name",
+        "body.namespaces",
+        "body.parameters",
+        "cluster_id",
+        "policy_name"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "kubeconfig",
+      "binding": "revoke_current_user",
+      "api": "RevokeK8sClusterKubeConfig",
+      "parameters": [
+        "ClusterId"
+      ],
+      "covered": [
+        "ClusterId"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "node",
+      "binding": "attach_to_ready",
+      "api": "AttachInstances",
+      "parameters": [
+        "ClusterId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId",
+        "body.instances",
+        "body.nodepool_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "node",
+      "binding": "delete_to_absent",
+      "api": "DeleteClusterNodes",
+      "parameters": [
+        "ClusterId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId",
+        "body.nodes",
+        "body.release_node"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "nodepool",
+      "binding": "attach_instances",
+      "api": "AttachInstancesToNodePool",
+      "parameters": [
+        "ClusterId",
+        "NodepoolId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId",
+        "NodepoolId",
+        "body",
+        "body.instances"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "nodepool",
+      "binding": "create_from_fields",
+      "api": "CreateClusterNodePool",
+      "parameters": [
+        "ClusterId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId",
+        "body.kubernetes_config.runtime",
+        "body.kubernetes_config.runtime_version",
+        "body.nodepool_info.name",
+        "body.scaling_group.desired_size",
+        "body.scaling_group.instance_types",
+        "body.scaling_group.internet_max_bandwidth_out",
+        "body.scaling_group.system_disk_category",
+        "body.scaling_group.system_disk_size",
+        "body.scaling_group.vswitch_ids"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "nodepool",
+      "binding": "create_to_active",
+      "api": "CreateClusterNodePool",
+      "parameters": [
+        "ClusterId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId",
+        "body"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "nodepool",
+      "binding": "delete_to_absent",
+      "api": "DeleteClusterNodepool",
+      "parameters": [
+        "ClusterId",
+        "NodepoolId",
+        "force"
+      ],
+      "covered": [
+        "ClusterId",
+        "NodepoolId",
+        "force"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "nodepool",
+      "binding": "detach_nodes",
+      "api": "RemoveNodePoolNodes",
+      "parameters": [
+        "ClusterId",
+        "NodepoolId",
+        "concurrency",
+        "drain_node",
+        "instance_ids",
+        "nodes",
+        "release_node"
+      ],
+      "covered": [
+        "ClusterId",
+        "NodepoolId",
+        "concurrency",
+        "drain_node",
+        "instance_ids",
+        "nodes",
+        "release_node"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "nodepool",
+      "binding": "modify_config",
+      "api": "ModifyClusterNodePool",
+      "parameters": [
+        "ClusterId",
+        "NodepoolId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId",
+        "NodepoolId",
+        "body"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "nodepool",
+      "binding": "modify_node_config",
+      "api": "ModifyNodePoolNodeConfig",
+      "parameters": [
+        "ClusterId",
+        "NodepoolId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId",
+        "NodepoolId",
+        "body"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "nodepool",
+      "binding": "repair_nodes",
+      "api": "RepairClusterNodePool",
+      "parameters": [
+        "body",
+        "cluster_id",
+        "nodepool_id"
+      ],
+      "covered": [
+        "body",
+        "body.nodes",
+        "cluster_id",
+        "nodepool_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "nodepool",
+      "binding": "repair_vuls",
+      "api": "FixNodePoolVuls",
+      "parameters": [
+        "body",
+        "cluster_id",
+        "nodepool_id"
+      ],
+      "covered": [
+        "body",
+        "cluster_id",
+        "nodepool_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "nodepool",
+      "binding": "scale",
+      "api": "ScaleClusterNodePool",
+      "parameters": [
+        "ClusterId",
+        "NodepoolId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId",
+        "NodepoolId",
+        "body.desired_size"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "nodepool",
+      "binding": "upgrade_to_active",
+      "api": "UpgradeClusterNodepool",
+      "parameters": [
+        "ClusterId",
+        "NodepoolId",
+        "body"
+      ],
+      "covered": [
+        "ClusterId",
+        "NodepoolId",
+        "body"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "operation-plan",
+      "binding": "cancel_plan",
+      "api": "CancelOperationPlan",
+      "parameters": [
+        "plan_id"
+      ],
+      "covered": [
+        "plan_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "permission",
+      "binding": "clean_cluster_user_permissions",
+      "api": "CleanClusterUserPermissions",
+      "parameters": [
+        "ClusterId",
+        "Force",
+        "Uid"
+      ],
+      "covered": [
+        "ClusterId",
+        "Force",
+        "Uid"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "permission",
+      "binding": "clean_user_permissions",
+      "api": "CleanUserPermissions",
+      "parameters": [
+        "ClusterIds",
+        "Force",
+        "Uid"
+      ],
+      "covered": [
+        "Force",
+        "Uid"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "permission",
+      "binding": "grant_permissions",
+      "api": "GrantPermissions",
+      "parameters": [
+        "body.cluster",
+        "body.is_custom",
+        "body.is_ram_role",
+        "body.namespace",
+        "body.role_name",
+        "body.role_type",
+        "uid"
+      ],
+      "covered": [
+        "body.cluster",
+        "body.is_custom",
+        "body.is_ram_role",
+        "body.namespace",
+        "body.role_name",
+        "body.role_type",
+        "uid"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "permission",
+      "binding": "update_user_permissions",
+      "api": "UpdateUserPermissions",
+      "parameters": [
+        "body.cluster",
+        "body.is_custom",
+        "body.is_ram_role",
+        "body.namespace",
+        "body.role_name",
+        "body.role_type",
+        "mode",
+        "uid"
+      ],
+      "covered": [
+        "body.cluster",
+        "body.is_custom",
+        "body.is_ram_role",
+        "body.namespace",
+        "body.role_name",
+        "body.role_type",
+        "mode",
+        "uid"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "report",
+      "binding": "run",
+      "api": "RunClusterInspect",
+      "parameters": [
+        "body",
+        "clusterId"
+      ],
+      "covered": [
+        "clusterId"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "task",
+      "binding": "cancel",
+      "api": "CancelTask",
+      "parameters": [
+        "task_id"
+      ],
+      "covered": [
+        "task_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "task",
+      "binding": "pause",
+      "api": "PauseTask",
+      "parameters": [
+        "task_id"
+      ],
+      "covered": [
+        "task_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "task",
+      "binding": "resume",
+      "api": "ResumeTask",
+      "parameters": [
+        "task_id"
+      ],
+      "covered": [
+        "task_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "template",
+      "binding": "create_template",
+      "api": "CreateTemplate",
+      "parameters": [
+        "body"
+      ],
+      "covered": [
+        "body.description",
+        "body.name",
+        "body.tags",
+        "body.template",
+        "body.template_type"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "template",
+      "binding": "delete_template",
+      "api": "DeleteTemplate",
+      "parameters": [
+        "TemplateId"
+      ],
+      "covered": [
+        "TemplateId"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "template",
+      "binding": "update_template",
+      "api": "UpdateTemplate",
+      "parameters": [
+        "TemplateId",
+        "body"
+      ],
+      "covered": [
+        "TemplateId",
+        "body.description",
+        "body.name",
+        "body.tags",
+        "body.template",
+        "body.template_type"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "trigger",
+      "binding": "create_trigger",
+      "api": "CreateTrigger",
+      "parameters": [
+        "body",
+        "cluster_id"
+      ],
+      "covered": [
+        "body.action",
+        "body.cluster_id",
+        "body.project_id",
+        "body.type",
+        "cluster_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "trigger",
+      "binding": "delete_trigger",
+      "api": "DeleteTrigger",
+      "parameters": [
+        "Id",
+        "cluster_id"
+      ],
+      "covered": [
+        "Id",
+        "cluster_id"
+      ]
+    },
+    {
+      "product": "ack",
+      "resource": "vuls",
+      "binding": "scan_cluster",
+      "api": "ScanClusterVuls",
+      "parameters": [
+        "cluster_id"
+      ],
+      "covered": [
+        "cluster_id"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "assistant",
+      "binding": "install_agent",
+      "api": "InstallCloudAssistant",
+      "parameters": [
+        "InstanceId",
+        "RegionId"
+      ],
+      "covered": [
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "assistant",
+      "binding": "update_settings",
+      "api": "ModifyCloudAssistantSettings",
+      "parameters": [
+        "AgentUpgradeConfig",
+        "OssDeliveryConfig",
+        "RegionId",
+        "SessionManagerConfig",
+        "SettingType",
+        "SlsDeliveryConfig"
+      ],
+      "covered": [
+        "SettingType"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "auto-snapshot-policy",
+      "binding": "apply_to_disks",
+      "api": "ApplyAutoSnapshotPolicy",
+      "parameters": [
+        "autoSnapshotPolicyId",
+        "diskIds",
+        "regionId"
+      ],
+      "covered": [
+        "autoSnapshotPolicyId",
+        "diskIds",
+        "regionId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "auto-snapshot-policy",
+      "binding": "cancel_from_disks",
+      "api": "CancelAutoSnapshotPolicy",
+      "parameters": [
+        "autoSnapshotPolicyId",
+        "diskIds",
+        "regionId"
+      ],
+      "covered": [
+        "diskIds",
+        "regionId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "auto-snapshot-policy",
+      "binding": "create_to_available",
+      "api": "CreateAutoSnapshotPolicy",
+      "parameters": [
+        "CopiedSnapshotsRetentionDays",
+        "CopyEncryptionConfiguration",
+        "EnableCrossRegionCopy",
+        "ResourceGroupId",
+        "StorageLocationArn",
+        "Tag.Key",
+        "Tag.Value",
+        "TargetCopyRegions",
+        "autoSnapshotPolicyName",
+        "regionId",
+        "repeatWeekdays",
+        "retentionDays",
+        "timePoints"
+      ],
+      "covered": [
+        "ResourceGroupId",
+        "Tag",
+        "autoSnapshotPolicyName",
+        "regionId",
+        "repeatWeekdays",
+        "retentionDays",
+        "timePoints"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "auto-snapshot-policy",
+      "binding": "delete_to_absent",
+      "api": "DeleteAutoSnapshotPolicy",
+      "parameters": [
+        "autoSnapshotPolicyId",
+        "regionId"
+      ],
+      "covered": [
+        "autoSnapshotPolicyId",
+        "regionId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "auto-snapshot-policy",
+      "binding": "update_attributes",
+      "api": "ModifyAutoSnapshotPolicyEx",
+      "parameters": [
+        "CopiedSnapshotsRetentionDays",
+        "CopyEncryptionConfiguration",
+        "EnableCrossRegionCopy",
+        "TargetCopyRegions",
+        "autoSnapshotPolicyId",
+        "autoSnapshotPolicyName",
+        "regionId",
+        "repeatWeekdays",
+        "retentionDays",
+        "timePoints"
+      ],
+      "covered": [
+        "autoSnapshotPolicyId",
+        "autoSnapshotPolicyName",
+        "regionId",
+        "repeatWeekdays",
+        "retentionDays",
+        "timePoints"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "command",
+      "binding": "create_to_available",
+      "api": "CreateCommand",
+      "parameters": [
+        "ClientToken",
+        "CommandContent",
+        "ContentEncoding",
+        "Description",
+        "EnableParameter",
+        "Launcher",
+        "Name",
+        "RegionId",
+        "ResourceGroupId",
+        "Tag.Key",
+        "Tag.Value",
+        "Timeout",
+        "Type",
+        "WorkingDir"
+      ],
+      "covered": [
+        "CommandContent",
+        "ContentEncoding",
+        "Description",
+        "EnableParameter",
+        "Launcher",
+        "Name",
+        "ResourceGroupId",
+        "Tag",
+        "Timeout",
+        "Type",
+        "WorkingDir"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "command",
+      "binding": "delete_to_absent",
+      "api": "DeleteCommand",
+      "parameters": [
+        "CommandId",
+        "RegionId"
+      ],
+      "covered": [
+        "CommandId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "command",
+      "binding": "invoke_command",
+      "api": "InvokeCommand",
+      "parameters": [
+        "ClientToken",
+        "CommandId",
+        "ContainerId",
+        "ContainerName",
+        "Frequency",
+        "InstanceId",
+        "Launcher",
+        "OssOutputDelivery",
+        "Parameters",
+        "RegionId",
+        "RepeatMode",
+        "ResourceGroupId",
+        "ResourceTag.Key",
+        "ResourceTag.Value",
+        "Tag.Key",
+        "Tag.Value",
+        "TerminationMode",
+        "Timed",
+        "Timeout",
+        "Username",
+        "WindowsPasswordName",
+        "WorkingDir"
+      ],
+      "covered": [
+        "CommandId",
+        "ContainerId",
+        "ContainerName",
+        "Frequency",
+        "InstanceId",
+        "Parameters",
+        "RepeatMode",
+        "ResourceGroupId",
+        "Tag",
+        "Timed",
+        "Username",
+        "WindowsPasswordName"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "command",
+      "binding": "stop_invocation",
+      "api": "StopInvocation",
+      "parameters": [
+        "InstanceId",
+        "InvokeId",
+        "RegionId"
+      ],
+      "covered": [
+        "InstanceId",
+        "InvokeId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "command",
+      "binding": "update_attributes",
+      "api": "ModifyCommand",
+      "parameters": [
+        "CommandContent",
+        "CommandId",
+        "Description",
+        "Launcher",
+        "Name",
+        "RegionId",
+        "Timeout",
+        "WorkingDir"
+      ],
+      "covered": [
+        "CommandContent",
+        "CommandId",
+        "Description",
+        "Launcher",
+        "Name",
+        "Timeout",
+        "WorkingDir"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "command",
+      "binding": "update_invocation_attribute",
+      "api": "ModifyInvocationAttribute",
+      "parameters": [
+        "ClientToken",
+        "CommandContent",
+        "ContentEncoding",
+        "EnableParameter",
+        "Frequency",
+        "InstanceId",
+        "InvokeId",
+        "Parameters",
+        "RegionId"
+      ],
+      "covered": [
+        "Frequency",
+        "InvokeId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "disk",
+      "binding": "attach_to_instance",
+      "api": "AttachDisk",
+      "parameters": [
+        "Bootable",
+        "DeleteWithInstance",
+        "Device",
+        "DiskId",
+        "Force",
+        "InstanceId",
+        "KeyPairName",
+        "Password"
+      ],
+      "covered": [
+        "DeleteWithInstance",
+        "Device",
+        "DiskId",
+        "Force",
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "disk",
+      "binding": "clone_to_available",
+      "api": "CloneDisks",
+      "parameters": [
+        "Arn.AssumeRoleFor",
+        "Arn.RoleType",
+        "Arn.Rolearn",
+        "BurstingEnabled",
+        "ClientToken",
+        "DiskCategory",
+        "DiskName",
+        "DryRun",
+        "Encrypted",
+        "KmsKeyId",
+        "MultiAttach",
+        "PerformanceLevel",
+        "ProvisionedIops",
+        "RegionId",
+        "ResourceGroupId",
+        "Size",
+        "SourceDiskId",
+        "Tag.Key",
+        "Tag.Value"
+      ],
+      "covered": [
+        "BurstingEnabled",
+        "DiskCategory",
+        "DiskName",
+        "Encrypted",
+        "KmsKeyId",
+        "MultiAttach",
+        "PerformanceLevel",
+        "ProvisionedIops",
+        "ResourceGroupId",
+        "Size",
+        "SourceDiskId",
+        "Tag"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "disk",
+      "binding": "create_to_available",
+      "api": "CreateDisk",
+      "parameters": [
+        "AdvancedFeatures",
+        "Arn.AssumeRoleFor",
+        "Arn.RoleType",
+        "Arn.Rolearn",
+        "BurstingEnabled",
+        "ClientToken",
+        "Description",
+        "DiskCategory",
+        "DiskName",
+        "EncryptAlgorithm",
+        "Encrypted",
+        "InstanceId",
+        "KMSKeyId",
+        "MultiAttach",
+        "PerformanceLevel",
+        "ProvisionedIops",
+        "RegionId",
+        "ResourceGroupId",
+        "Size",
+        "SnapshotId",
+        "StorageClusterId",
+        "StorageSetId",
+        "StorageSetPartitionNumber",
+        "Tag.Key",
+        "Tag.Value",
+        "Tag.key",
+        "Tag.value",
+        "ZoneId"
+      ],
+      "covered": [
+        "BurstingEnabled",
+        "Description",
+        "DiskCategory",
+        "DiskName",
+        "Encrypted",
+        "KMSKeyId",
+        "PerformanceLevel",
+        "ProvisionedIops",
+        "ResourceGroupId",
+        "Size",
+        "SnapshotId",
+        "Tag",
+        "ZoneId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "disk",
+      "binding": "delete_to_absent",
+      "api": "DeleteDisk",
+      "parameters": [
+        "DiskId"
+      ],
+      "covered": [
+        "DiskId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "disk",
+      "binding": "detach_from_instance",
+      "api": "DetachDisk",
+      "parameters": [
+        "DeleteWithInstance",
+        "DiskId",
+        "InstanceId"
+      ],
+      "covered": [
+        "DeleteWithInstance",
+        "DiskId",
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "disk",
+      "binding": "disable_encryption_default",
+      "api": "DisableDiskEncryptionByDefault",
+      "parameters": [
+        "RegionId"
+      ],
+      "covered": []
+    },
+    {
+      "product": "ecs",
+      "resource": "disk",
+      "binding": "enable_encryption_default",
+      "api": "EnableDiskEncryptionByDefault",
+      "parameters": [
+        "RegionId"
+      ],
+      "covered": []
+    },
+    {
+      "product": "ecs",
+      "resource": "disk",
+      "binding": "modify_charge_type",
+      "api": "ModifyDiskChargeType",
+      "parameters": [
+        "AutoPay",
+        "ClientToken",
+        "DiskChargeType",
+        "DiskIds",
+        "InstanceId",
+        "RegionId"
+      ],
+      "covered": [
+        "AutoPay",
+        "DiskChargeType",
+        "DiskIds",
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "disk",
+      "binding": "modify_default_kms_key",
+      "api": "ModifyDiskDefaultKMSKeyId",
+      "parameters": [
+        "KMSKeyId",
+        "RegionId"
+      ],
+      "covered": [
+        "KMSKeyId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "disk",
+      "binding": "modify_deployment",
+      "api": "ModifyDiskDeployment",
+      "parameters": [
+        "DiskCategory",
+        "DiskId",
+        "DryRun",
+        "PerformanceLevel",
+        "StorageClusterId"
+      ],
+      "covered": [
+        "DiskId",
+        "StorageClusterId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "disk",
+      "binding": "modify_spec",
+      "api": "ModifyDiskSpec",
+      "parameters": [
+        "DestinationZoneId",
+        "DiskCategory",
+        "DiskId",
+        "DryRun",
+        "PerformanceControlOptions",
+        "PerformanceLevel",
+        "ProvisionedIops"
+      ],
+      "covered": [
+        "DiskCategory",
+        "DiskId",
+        "PerformanceLevel",
+        "ProvisionedIops"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "disk",
+      "binding": "reinit_to_target",
+      "api": "ReInitDisk",
+      "parameters": [
+        "AutoStartInstance",
+        "DiskId",
+        "KeyPairName",
+        "Password",
+        "SecurityEnhancementStrategy"
+      ],
+      "covered": [
+        "DiskId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "disk",
+      "binding": "reset_default_kms_key",
+      "api": "ResetDiskDefaultKMSKeyId",
+      "parameters": [
+        "RegionId"
+      ],
+      "covered": []
+    },
+    {
+      "product": "ecs",
+      "resource": "disk",
+      "binding": "reset_to_target",
+      "api": "ResetDisk",
+      "parameters": [
+        "DiskId",
+        "DryRun",
+        "SnapshotId"
+      ],
+      "covered": [
+        "DiskId",
+        "SnapshotId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "disk",
+      "binding": "resize",
+      "api": "ResizeDisk",
+      "parameters": [
+        "ClientToken",
+        "DiskId",
+        "NewSize",
+        "Type"
+      ],
+      "covered": [
+        "DiskId",
+        "NewSize",
+        "Type"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "disk",
+      "binding": "update_attributes",
+      "api": "ModifyDiskAttribute",
+      "parameters": [
+        "BurstingEnabled",
+        "DeleteAutoSnapshot",
+        "DeleteWithInstance",
+        "Description",
+        "DiskId",
+        "DiskIds",
+        "DiskName",
+        "EnableAutoSnapshot",
+        "RegionId"
+      ],
+      "covered": [
+        "DeleteAutoSnapshot",
+        "DeleteWithInstance",
+        "Description",
+        "DiskId",
+        "DiskName"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "eni",
+      "binding": "assign_ipv6_addresses",
+      "api": "AssignIpv6Addresses",
+      "parameters": [
+        "ClientToken",
+        "Ipv6Address",
+        "Ipv6AddressCount",
+        "Ipv6Prefix",
+        "Ipv6PrefixCount",
+        "NetworkInterfaceId",
+        "RegionId"
+      ],
+      "covered": [
+        "Ipv6Address",
+        "Ipv6AddressCount",
+        "Ipv6Prefix",
+        "Ipv6PrefixCount",
+        "NetworkInterfaceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "eni",
+      "binding": "assign_private_ips",
+      "api": "AssignPrivateIpAddresses",
+      "parameters": [
+        "ClientToken",
+        "Ipv4Prefix",
+        "Ipv4PrefixCount",
+        "NetworkInterfaceId",
+        "PrivateIpAddress",
+        "RegionId",
+        "SecondaryPrivateIpAddressCount"
+      ],
+      "covered": [
+        "Ipv4Prefix",
+        "Ipv4PrefixCount",
+        "NetworkInterfaceId",
+        "PrivateIpAddress",
+        "SecondaryPrivateIpAddressCount"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "eni",
+      "binding": "attach_to_instance",
+      "api": "AttachNetworkInterface",
+      "parameters": [
+        "InstanceId",
+        "NetworkCardIndex",
+        "NetworkInterfaceId",
+        "RegionId",
+        "TrunkNetworkInstanceId",
+        "WaitForNetworkConfigurationReady"
+      ],
+      "covered": [
+        "InstanceId",
+        "NetworkCardIndex",
+        "NetworkInterfaceId",
+        "TrunkNetworkInstanceId",
+        "WaitForNetworkConfigurationReady"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "eni",
+      "binding": "create_to_available",
+      "api": "CreateNetworkInterface",
+      "parameters": [
+        "BusinessType",
+        "ClientToken",
+        "ConnectionTrackingConfiguration",
+        "DeleteOnRelease",
+        "Description",
+        "EnhancedNetwork",
+        "InstanceType",
+        "Ipv4Prefix",
+        "Ipv4PrefixCount",
+        "Ipv6Address",
+        "Ipv6AddressCount",
+        "Ipv6Prefix",
+        "Ipv6PrefixCount",
+        "NetworkInterfaceName",
+        "NetworkInterfaceTrafficConfig",
+        "NetworkInterfaceTrafficMode",
+        "PrimaryIpAddress",
+        "PrivateIpAddress",
+        "QueueNumber",
+        "QueuePairNumber",
+        "RegionId",
+        "ResourceGroupId",
+        "RxQueueSize",
+        "SecondaryPrivateIpAddressCount",
+        "SecurityGroupId",
+        "SecurityGroupIds",
+        "SourceDestCheck",
+        "Tag.Key",
+        "Tag.Value",
+        "TxQueueSize",
+        "VSwitchId",
+        "Visible"
+      ],
+      "covered": [
+        "ConnectionTrackingConfiguration.TcpClosedAndTimeWaitTimeout",
+        "ConnectionTrackingConfiguration.TcpEstablishedTimeout",
+        "ConnectionTrackingConfiguration.UdpTimeout",
+        "DeleteOnRelease",
+        "Description",
+        "EnhancedNetwork.EnableRss",
+        "EnhancedNetwork.EnableSriov",
+        "EnhancedNetwork.VirtualFunctionQuantity",
+        "EnhancedNetwork.VirtualFunctionTotalQueueNumber",
+        "InstanceType",
+        "Ipv4Prefix",
+        "Ipv4PrefixCount",
+        "Ipv6Address",
+        "Ipv6AddressCount",
+        "Ipv6Prefix",
+        "Ipv6PrefixCount",
+        "NetworkInterfaceName",
+        "NetworkInterfaceTrafficConfig.NetworkInterfaceTrafficMode",
+        "NetworkInterfaceTrafficConfig.QueueNumber",
+        "NetworkInterfaceTrafficConfig.QueuePairNumber",
+        "NetworkInterfaceTrafficConfig.RxQueueSize",
+        "NetworkInterfaceTrafficConfig.TxQueueSize",
+        "NetworkInterfaceTrafficMode",
+        "PrimaryIpAddress",
+        "PrivateIpAddress",
+        "QueueNumber",
+        "QueuePairNumber",
+        "ResourceGroupId",
+        "RxQueueSize",
+        "SecondaryPrivateIpAddressCount",
+        "SecurityGroupIds",
+        "SourceDestCheck",
+        "Tag",
+        "TxQueueSize",
+        "VSwitchId",
+        "Visible"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "eni",
+      "binding": "delete_to_absent",
+      "api": "DeleteNetworkInterface",
+      "parameters": [
+        "NetworkInterfaceId",
+        "RegionId"
+      ],
+      "covered": [
+        "NetworkInterfaceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "eni",
+      "binding": "detach_from_instance",
+      "api": "DetachNetworkInterface",
+      "parameters": [
+        "InstanceId",
+        "NetworkInterfaceId",
+        "RegionId",
+        "TrunkNetworkInstanceId"
+      ],
+      "covered": [
+        "InstanceId",
+        "NetworkInterfaceId",
+        "TrunkNetworkInstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "eni",
+      "binding": "disable_qos",
+      "api": "DisableNetworkInterfaceQoS",
+      "parameters": [
+        "NetworkInterfaceId",
+        "RegionId"
+      ],
+      "covered": [
+        "NetworkInterfaceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "eni",
+      "binding": "enable_qos",
+      "api": "EnableNetworkInterfaceQoS",
+      "parameters": [
+        "NetworkInterfaceId",
+        "QoS",
+        "RegionId"
+      ],
+      "covered": [
+        "NetworkInterfaceId",
+        "QoS.BandwidthRx",
+        "QoS.BandwidthTx",
+        "QoS.ConcurrentConnections",
+        "QoS.PpsRx",
+        "QoS.PpsTx"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "eni",
+      "binding": "unassign_ipv6_addresses",
+      "api": "UnassignIpv6Addresses",
+      "parameters": [
+        "Ipv6Address",
+        "Ipv6Prefix",
+        "NetworkInterfaceId",
+        "RegionId"
+      ],
+      "covered": [
+        "Ipv6Address",
+        "Ipv6Prefix",
+        "NetworkInterfaceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "eni",
+      "binding": "unassign_private_ips",
+      "api": "UnassignPrivateIpAddresses",
+      "parameters": [
+        "Ipv4Prefix",
+        "NetworkInterfaceId",
+        "PrivateIpAddress",
+        "RegionId"
+      ],
+      "covered": [
+        "Ipv4Prefix",
+        "NetworkInterfaceId",
+        "PrivateIpAddress"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "eni",
+      "binding": "update_attributes",
+      "api": "ModifyNetworkInterfaceAttribute",
+      "parameters": [
+        "ConnectionTrackingConfiguration",
+        "DeleteOnRelease",
+        "Description",
+        "EnhancedNetwork",
+        "NetworkInterfaceId",
+        "NetworkInterfaceName",
+        "NetworkInterfaceTrafficConfig",
+        "QueueNumber",
+        "RegionId",
+        "RxQueueSize",
+        "SecurityGroupId",
+        "SourceDestCheck",
+        "TxQueueSize"
+      ],
+      "covered": [
+        "ConnectionTrackingConfiguration.TcpClosedAndTimeWaitTimeout",
+        "ConnectionTrackingConfiguration.TcpEstablishedTimeout",
+        "ConnectionTrackingConfiguration.UdpTimeout",
+        "DeleteOnRelease",
+        "Description",
+        "EnhancedNetwork.EnableRss",
+        "EnhancedNetwork.EnableSriov",
+        "EnhancedNetwork.VirtualFunctionQuantity",
+        "EnhancedNetwork.VirtualFunctionTotalQueueNumber",
+        "NetworkInterfaceId",
+        "NetworkInterfaceName",
+        "NetworkInterfaceTrafficConfig.NetworkInterfaceTrafficMode",
+        "NetworkInterfaceTrafficConfig.QueueNumber",
+        "NetworkInterfaceTrafficConfig.QueuePairNumber",
+        "NetworkInterfaceTrafficConfig.RxQueueSize",
+        "NetworkInterfaceTrafficConfig.TxQueueSize",
+        "QueueNumber",
+        "RxQueueSize",
+        "SourceDestCheck",
+        "TxQueueSize"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "image",
+      "binding": "cancel_copy",
+      "api": "CancelCopyImage",
+      "parameters": [
+        "ImageId",
+        "RegionId"
+      ],
+      "covered": [
+        "ImageId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "image",
+      "binding": "copy_to_destination",
+      "api": "CopyImage",
+      "parameters": [
+        "ClientToken",
+        "DestinationDescription",
+        "DestinationImageName",
+        "DestinationRegionId",
+        "DryRun",
+        "EncryptAlgorithm",
+        "Encrypted",
+        "ImageId",
+        "KMSKeyId",
+        "RegionId",
+        "ResourceGroupId",
+        "Tag.Key",
+        "Tag.Value"
+      ],
+      "covered": [
+        "DestinationDescription",
+        "DestinationImageName",
+        "DestinationRegionId",
+        "Encrypted",
+        "ImageId",
+        "KMSKeyId",
+        "ResourceGroupId",
+        "Tag"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "image",
+      "binding": "create_to_available",
+      "api": "CreateImage",
+      "parameters": [
+        "Architecture",
+        "BootMode",
+        "ClientToken",
+        "Description",
+        "DetectionStrategy",
+        "DiskDeviceMapping.Device",
+        "DiskDeviceMapping.DiskType",
+        "DiskDeviceMapping.Size",
+        "DiskDeviceMapping.SnapshotId",
+        "DryRun",
+        "Features",
+        "ImageFamily",
+        "ImageName",
+        "ImageVersion",
+        "InstanceId",
+        "Platform",
+        "RegionId",
+        "ResourceGroupId",
+        "SnapshotId",
+        "Tag.Key",
+        "Tag.Value",
+        "Tag.key",
+        "Tag.value"
+      ],
+      "covered": [
+        "Architecture",
+        "BootMode",
+        "Description",
+        "DetectionStrategy",
+        "DiskDeviceMapping.Device",
+        "DiskDeviceMapping.DiskType",
+        "DiskDeviceMapping.Size",
+        "DiskDeviceMapping.SnapshotId",
+        "DryRun",
+        "ImageFamily",
+        "ImageName",
+        "ImageVersion",
+        "InstanceId",
+        "Platform",
+        "ResourceGroupId",
+        "SnapshotId",
+        "Tag"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "image",
+      "binding": "delete_to_absent",
+      "api": "DeleteImage",
+      "parameters": [
+        "DryRun",
+        "Force",
+        "ImageId",
+        "RegionId"
+      ],
+      "covered": [
+        "Force",
+        "ImageId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "image",
+      "binding": "export_to_oss",
+      "api": "ExportImage",
+      "parameters": [
+        "DryRun",
+        "ImageFormat",
+        "ImageId",
+        "OSSBucket",
+        "OSSPrefix",
+        "RegionId",
+        "RoleName"
+      ],
+      "covered": [
+        "ImageFormat",
+        "ImageId",
+        "OSSBucket",
+        "OSSPrefix",
+        "RoleName"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "image",
+      "binding": "import_from_oss",
+      "api": "ImportImage",
+      "parameters": [
+        "Architecture",
+        "BootMode",
+        "ClientToken",
+        "Description",
+        "DetectionStrategy",
+        "DiskDeviceMapping.Device",
+        "DiskDeviceMapping.DiskImSize",
+        "DiskDeviceMapping.DiskImageSize",
+        "DiskDeviceMapping.Format",
+        "DiskDeviceMapping.OSSBucket",
+        "DiskDeviceMapping.OSSObject",
+        "DryRun",
+        "Features",
+        "ImageName",
+        "LicenseType",
+        "OSType",
+        "Platform",
+        "RegionId",
+        "ResourceGroupId",
+        "RoleName",
+        "StorageLocationArn",
+        "Tag.Key",
+        "Tag.Value"
+      ],
+      "covered": [
+        "Architecture",
+        "BootMode",
+        "Description",
+        "DetectionStrategy",
+        "DiskDeviceMapping.Device",
+        "DiskDeviceMapping.DiskImSize",
+        "DiskDeviceMapping.DiskImageSize",
+        "DiskDeviceMapping.Format",
+        "DiskDeviceMapping.OSSBucket",
+        "DiskDeviceMapping.OSSObject",
+        "ImageName",
+        "LicenseType",
+        "OSType",
+        "Platform",
+        "ResourceGroupId",
+        "RoleName",
+        "Tag"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "image",
+      "binding": "update_attributes",
+      "api": "ModifyImageAttribute",
+      "parameters": [
+        "BootMode",
+        "Description",
+        "DryRun",
+        "Features",
+        "ImageFamily",
+        "ImageId",
+        "ImageName",
+        "LicenseType",
+        "RegionId",
+        "Status"
+      ],
+      "covered": [
+        "BootMode",
+        "Description",
+        "Features.NvmeSupport",
+        "ImageFamily",
+        "ImageId",
+        "ImageName",
+        "LicenseType",
+        "Status"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "image",
+      "binding": "update_share_permission",
+      "api": "ModifyImageSharePermission",
+      "parameters": [
+        "AddAccount",
+        "DryRun",
+        "ImageId",
+        "IsPublic",
+        "LaunchPermission",
+        "RegionId",
+        "RemoveAccount"
+      ],
+      "covered": [
+        "AddAccount",
+        "ImageId",
+        "LaunchPermission",
+        "RemoveAccount"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "allocate_public_ip",
+      "api": "AllocatePublicIpAddress",
+      "parameters": [
+        "InstanceId",
+        "IpAddress",
+        "VlanId"
+      ],
+      "covered": [
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "attach_key_pair",
+      "api": "AttachKeyPair",
+      "parameters": [
+        "InstanceIds",
+        "KeyPairName",
+        "RegionId"
+      ],
+      "covered": [
+        "InstanceIds",
+        "KeyPairName"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "attach_ram_role",
+      "api": "AttachInstanceRamRole",
+      "parameters": [
+        "InstanceIds",
+        "Policy",
+        "RamRoleName",
+        "RegionId"
+      ],
+      "covered": [
+        "InstanceIds",
+        "RamRoleName"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "create_to_running",
+      "api": "RunInstances",
+      "parameters": [
+        "Affinity",
+        "Amount",
+        "Arn.AssumeRoleFor",
+        "Arn.RoleType",
+        "Arn.Rolearn",
+        "AutoPay",
+        "AutoReleaseTime",
+        "AutoRenew",
+        "AutoRenewPeriod",
+        "ClientToken",
+        "ClockOptions",
+        "CpuOptions.Core",
+        "CpuOptions.Numa",
+        "CpuOptions.ThreadsPerCore",
+        "CpuOptions.TopologyType",
+        "CreditSpecification",
+        "DataDisk.AutoSnapshotPolicyId",
+        "DataDisk.BurstingEnabled",
+        "DataDisk.Category",
+        "DataDisk.DeleteWithInstance",
+        "DataDisk.Description",
+        "DataDisk.Device",
+        "DataDisk.DiskName",
+        "DataDisk.EncryptAlgorithm",
+        "DataDisk.Encrypted",
+        "DataDisk.KMSKeyId",
+        "DataDisk.PerformanceLevel",
+        "DataDisk.ProvisionedIops",
+        "DataDisk.Size",
+        "DataDisk.SnapshotId",
+        "DataDisk.StorageClusterId",
+        "DedicatedHostId",
+        "DeletionProtection",
+        "DeploymentSetGroupNo",
+        "DeploymentSetId",
+        "Description",
+        "DryRun",
+        "HibernationOptions.Configured",
+        "HostName",
+        "HostNames",
+        "HpcClusterId",
+        "HttpEndpoint",
+        "HttpPutResponseHopLimit",
+        "HttpTokens",
+        "ImageFamily",
+        "ImageId",
+        "ImageOptions",
+        "InstanceChargeType",
+        "InstanceName",
+        "InstanceType",
+        "InternetChargeType",
+        "InternetMaxBandwidthIn",
+        "InternetMaxBandwidthOut",
+        "IoOptimized",
+        "Ipv6Address",
+        "Ipv6AddressCount",
+        "Isp",
+        "KeyPairName",
+        "LaunchTemplateId",
+        "LaunchTemplateName",
+        "LaunchTemplateVersion",
+        "MinAmount",
+        "NetworkInterface.DeleteOnRelease",
+        "NetworkInterface.Description",
+        "NetworkInterface.InstanceType",
+        "NetworkInterface.Ipv6Address",
+        "NetworkInterface.Ipv6AddressCount",
+        "NetworkInterface.NetworkCardIndex",
+        "NetworkInterface.NetworkInterfaceId",
+        "NetworkInterface.NetworkInterfaceName",
+        "NetworkInterface.NetworkInterfaceTrafficMode",
+        "NetworkInterface.PrimaryIpAddress",
+        "NetworkInterface.QueueNumber",
+        "NetworkInterface.QueuePairNumber",
+        "NetworkInterface.RxQueueSize",
+        "NetworkInterface.SecondaryPrivateIpAddressCount",
+        "NetworkInterface.SecurityGroupId",
+        "NetworkInterface.SecurityGroupIds",
+        "NetworkInterface.SourceDestCheck",
+        "NetworkInterface.TxQueueSize",
+        "NetworkInterface.VSwitchId",
+        "NetworkInterfaceQueueNumber",
+        "NetworkOptions",
+        "Password",
+        "PasswordInherit",
+        "Period",
+        "PeriodUnit",
+        "PrivateDnsNameOptions",
+        "PrivateIpAddress",
+        "PrivatePoolOptions.Id",
+        "PrivatePoolOptions.MatchCriteria",
+        "RamRoleName",
+        "RegionId",
+        "ResourceGroupId",
+        "SchedulerOptions.DedicatedHostClusterId",
+        "SecurityEnhancementStrategy",
+        "SecurityGroupId",
+        "SecurityGroupIds",
+        "SecurityOptions.ConfidentialComputingMode",
+        "SecurityOptions.TrustedSystemMode",
+        "SpotDuration",
+        "SpotInterruptionBehavior",
+        "SpotPriceLimit",
+        "SpotStrategy",
+        "StorageSetId",
+        "StorageSetPartitionNumber",
+        "SystemDisk.AutoSnapshotPolicyId",
+        "SystemDisk.Category",
+        "SystemDisk.Description",
+        "SystemDisk.DiskName",
+        "SystemDisk.PerformanceLevel",
+        "SystemDisk.Size",
+        "Tag.Key",
+        "Tag.Value",
+        "Tenancy",
+        "UniqueSuffix",
+        "UserData",
+        "VSwitchId",
+        "ZoneId"
+      ],
+      "covered": [
+        "Affinity",
+        "Amount",
+        "Arn.AssumeRoleFor",
+        "Arn.RoleType",
+        "Arn.Rolearn",
+        "AutoPay",
+        "AutoReleaseTime",
+        "AutoRenew",
+        "AutoRenewPeriod",
+        "ClockOptions",
+        "CpuOptions.Core",
+        "CpuOptions.Numa",
+        "CpuOptions.ThreadsPerCore",
+        "CpuOptions.TopologyType",
+        "CreditSpecification",
+        "DataDisk.AutoSnapshotPolicyId",
+        "DataDisk.BurstingEnabled",
+        "DataDisk.Category",
+        "DataDisk.DeleteWithInstance",
+        "DataDisk.Description",
+        "DataDisk.Device",
+        "DataDisk.DiskName",
+        "DataDisk.EncryptAlgorithm",
+        "DataDisk.Encrypted",
+        "DataDisk.KMSKeyId",
+        "DataDisk.PerformanceLevel",
+        "DataDisk.ProvisionedIops",
+        "DataDisk.Size",
+        "DataDisk.SnapshotId",
+        "DataDisk.StorageClusterId",
+        "DedicatedHostId",
+        "DeletionProtection",
+        "DeploymentSetGroupNo",
+        "DeploymentSetId",
+        "Description",
+        "DryRun",
+        "HibernationOptions.Configured",
+        "HostName",
+        "HostNames",
+        "HpcClusterId",
+        "HttpEndpoint",
+        "HttpPutResponseHopLimit",
+        "HttpTokens",
+        "ImageFamily",
+        "ImageId",
+        "ImageOptions",
+        "InstanceChargeType",
+        "InstanceName",
+        "InstanceType",
+        "InternetChargeType",
+        "InternetMaxBandwidthIn",
+        "InternetMaxBandwidthOut",
+        "IoOptimized",
+        "Ipv6Address",
+        "Ipv6AddressCount",
+        "Isp",
+        "KeyPairName",
+        "LaunchTemplateId",
+        "LaunchTemplateName",
+        "LaunchTemplateVersion",
+        "MinAmount",
+        "NetworkInterface.DeleteOnRelease",
+        "NetworkInterface.Description",
+        "NetworkInterface.InstanceType",
+        "NetworkInterface.Ipv6Address",
+        "NetworkInterface.Ipv6AddressCount",
+        "NetworkInterface.NetworkCardIndex",
+        "NetworkInterface.NetworkInterfaceId",
+        "NetworkInterface.NetworkInterfaceName",
+        "NetworkInterface.NetworkInterfaceTrafficMode",
+        "NetworkInterface.PrimaryIpAddress",
+        "NetworkInterface.QueueNumber",
+        "NetworkInterface.QueuePairNumber",
+        "NetworkInterface.RxQueueSize",
+        "NetworkInterface.SecondaryPrivateIpAddressCount",
+        "NetworkInterface.SecurityGroupId",
+        "NetworkInterface.SecurityGroupIds",
+        "NetworkInterface.SourceDestCheck",
+        "NetworkInterface.TxQueueSize",
+        "NetworkInterface.VSwitchId",
+        "NetworkInterfaceQueueNumber",
+        "NetworkOptions",
+        "Password",
+        "PasswordInherit",
+        "Period",
+        "PeriodUnit",
+        "PrivateDnsNameOptions",
+        "PrivateIpAddress",
+        "PrivatePoolOptions.Id",
+        "PrivatePoolOptions.MatchCriteria",
+        "RamRoleName",
+        "ResourceGroupId",
+        "SchedulerOptions.DedicatedHostClusterId",
+        "SecurityEnhancementStrategy",
+        "SecurityGroupId",
+        "SecurityGroupIds",
+        "SecurityOptions.ConfidentialComputingMode",
+        "SecurityOptions.TrustedSystemMode",
+        "SpotDuration",
+        "SpotInterruptionBehavior",
+        "SpotPriceLimit",
+        "SpotStrategy",
+        "StorageSetId",
+        "StorageSetPartitionNumber",
+        "SystemDisk.AutoSnapshotPolicyId",
+        "SystemDisk.Category",
+        "SystemDisk.Description",
+        "SystemDisk.DiskName",
+        "SystemDisk.PerformanceLevel",
+        "SystemDisk.Size",
+        "Tag",
+        "Tenancy",
+        "UniqueSuffix",
+        "UserData",
+        "VSwitchId",
+        "ZoneId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "delete_many_to_absent",
+      "api": "DeleteInstances",
+      "parameters": [
+        "ClientToken",
+        "DryRun",
+        "Force",
+        "ForceStop",
+        "InstanceId",
+        "RegionId",
+        "TerminateSubscription"
+      ],
+      "covered": [
+        "Force",
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "delete_to_absent",
+      "api": "DeleteInstance",
+      "parameters": [
+        "DryRun",
+        "Force",
+        "ForceStop",
+        "InstanceId",
+        "TerminateSubscription"
+      ],
+      "covered": [
+        "Force",
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "detach_key_pair",
+      "api": "DetachKeyPair",
+      "parameters": [
+        "InstanceIds",
+        "KeyPairName",
+        "RegionId"
+      ],
+      "covered": [
+        "InstanceIds"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "detach_ram_role",
+      "api": "DetachInstanceRamRole",
+      "parameters": [
+        "InstanceIds",
+        "RamRoleName",
+        "RegionId"
+      ],
+      "covered": [
+        "InstanceIds"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "join_resource_group",
+      "api": "JoinResourceGroup",
+      "parameters": [
+        "RegionId",
+        "ResourceGroupId",
+        "ResourceId",
+        "ResourceType"
+      ],
+      "covered": [
+        "ResourceGroupId",
+        "ResourceId",
+        "ResourceType"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "join_security_group",
+      "api": "JoinSecurityGroup",
+      "parameters": [
+        "InstanceId",
+        "NetworkInterfaceId",
+        "RegionId",
+        "SecurityGroupId"
+      ],
+      "covered": [
+        "InstanceId",
+        "SecurityGroupId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "leave_security_group",
+      "api": "LeaveSecurityGroup",
+      "parameters": [
+        "InstanceId",
+        "NetworkInterfaceId",
+        "RegionId",
+        "SecurityGroupId"
+      ],
+      "covered": [
+        "InstanceId",
+        "SecurityGroupId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "reboot_many",
+      "api": "RebootInstances",
+      "parameters": [
+        "BatchOptimization",
+        "DryRun",
+        "ForceReboot",
+        "InstanceId",
+        "RegionId"
+      ],
+      "covered": [
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "reboot_one",
+      "api": "RebootInstance",
+      "parameters": [
+        "DryRun",
+        "ForceStop",
+        "InstanceId"
+      ],
+      "covered": [
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "renew_instance",
+      "api": "RenewInstance",
+      "parameters": [
+        "ClientToken",
+        "ExpectedRenewDay",
+        "InstanceId",
+        "Period",
+        "PeriodUnit"
+      ],
+      "covered": [
+        "InstanceId",
+        "Period",
+        "PeriodUnit"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "replace_system_disk",
+      "api": "ReplaceSystemDisk",
+      "parameters": [
+        "Architecture",
+        "Arn.AssumeRoleFor",
+        "Arn.RoleType",
+        "Arn.Rolearn",
+        "ClientToken",
+        "DiskId",
+        "EncryptAlgorithm",
+        "Encrypted",
+        "ImageId",
+        "InstanceId",
+        "KMSKeyId",
+        "KeyPairName",
+        "Password",
+        "PasswordInherit",
+        "Platform",
+        "SecurityEnhancementStrategy",
+        "SystemDisk.Size",
+        "UseAdditionalService"
+      ],
+      "covered": [
+        "ImageId",
+        "InstanceId",
+        "SystemDisk.Size"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "run_command",
+      "api": "RunCommand",
+      "parameters": [
+        "ClientToken",
+        "CommandContent",
+        "ContainerId",
+        "ContainerName",
+        "ContentEncoding",
+        "Description",
+        "EnableParameter",
+        "Frequency",
+        "InstanceId",
+        "KeepCommand",
+        "Launcher",
+        "Name",
+        "OssOutputDelivery",
+        "Parameters",
+        "RegionId",
+        "RepeatMode",
+        "ResourceGroupId",
+        "ResourceTag.Key",
+        "ResourceTag.Value",
+        "Tag.Key",
+        "Tag.Value",
+        "TerminationMode",
+        "Timed",
+        "Timeout",
+        "Type",
+        "Username",
+        "WindowsPasswordName",
+        "WorkingDir"
+      ],
+      "covered": [
+        "CommandContent",
+        "InstanceId",
+        "Timeout",
+        "Type",
+        "WorkingDir"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "send_file",
+      "api": "SendFile",
+      "parameters": [
+        "ClientToken",
+        "Content",
+        "ContentType",
+        "Description",
+        "FileGroup",
+        "FileMode",
+        "FileOwner",
+        "InstanceId",
+        "Name",
+        "Overwrite",
+        "RegionId",
+        "ResourceGroupId",
+        "Tag.Key",
+        "Tag.Value",
+        "TargetDir",
+        "Timeout"
+      ],
+      "covered": [
+        "Content",
+        "FileMode",
+        "InstanceId",
+        "Name",
+        "TargetDir"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "start_many",
+      "api": "StartInstances",
+      "parameters": [
+        "BatchOptimization",
+        "DryRun",
+        "InstanceId",
+        "RegionId"
+      ],
+      "covered": [
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "start_one",
+      "api": "StartInstance",
+      "parameters": [
+        "DryRun",
+        "InitLocalDisk",
+        "InstanceId"
+      ],
+      "covered": [
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "stop_many",
+      "api": "StopInstances",
+      "parameters": [
+        "BatchOptimization",
+        "DryRun",
+        "ForceStop",
+        "InstanceId",
+        "RegionId",
+        "StoppedMode"
+      ],
+      "covered": [
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "stop_one",
+      "api": "StopInstance",
+      "parameters": [
+        "ConfirmStop",
+        "DryRun",
+        "ForceStop",
+        "Hibernate",
+        "InstanceId",
+        "StoppedMode"
+      ],
+      "covered": [
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "tag_resources",
+      "api": "TagResources",
+      "parameters": [
+        "RegionId",
+        "ResourceId",
+        "ResourceType",
+        "Tag.Key",
+        "Tag.Value"
+      ],
+      "covered": [
+        "ResourceId",
+        "ResourceType",
+        "Tag"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "untag_resources",
+      "api": "UntagResources",
+      "parameters": [
+        "All",
+        "RegionId",
+        "ResourceId",
+        "ResourceType",
+        "TagKey"
+      ],
+      "covered": [
+        "ResourceId",
+        "ResourceType",
+        "TagKey"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "update_attributes",
+      "api": "ModifyInstanceAttribute",
+      "parameters": [
+        "CpuOptions.Core",
+        "CpuOptions.ThreadsPerCore",
+        "CpuOptions.TopologyType",
+        "CreditSpecification",
+        "DeletionProtection",
+        "Description",
+        "EnableJumboFrame",
+        "EnableNetworkEncryption",
+        "HostName",
+        "InstanceId",
+        "InstanceName",
+        "NetworkInterfaceQueueNumber",
+        "Password",
+        "PrivateDnsNameOptions",
+        "Recyclable",
+        "RemoteConnectionOptions",
+        "SecurityGroupIds",
+        "UserData"
+      ],
+      "covered": [
+        "Description",
+        "HostName",
+        "InstanceId",
+        "InstanceName"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "update_auto_release_time",
+      "api": "ModifyInstanceAutoReleaseTime",
+      "parameters": [
+        "AutoReleaseTime",
+        "InstanceId",
+        "RegionId"
+      ],
+      "covered": [
+        "AutoReleaseTime",
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "update_auto_renew",
+      "api": "ModifyInstanceAutoRenewAttribute",
+      "parameters": [
+        "AutoRenew",
+        "Duration",
+        "InstanceId",
+        "PeriodUnit",
+        "RegionId",
+        "RenewalStatus"
+      ],
+      "covered": [
+        "AutoRenew",
+        "Duration",
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "update_charge_type",
+      "api": "ModifyInstanceChargeType",
+      "parameters": [
+        "AutoPay",
+        "ClientToken",
+        "DryRun",
+        "IncludeDataDisks",
+        "InstanceChargeType",
+        "InstanceIds",
+        "IsDetailFee",
+        "Period",
+        "PeriodUnit",
+        "RegionId"
+      ],
+      "covered": [
+        "AutoPay",
+        "InstanceChargeType",
+        "InstanceIds",
+        "Period",
+        "PeriodUnit"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "update_clock_options",
+      "api": "ModifyInstanceClockOptions",
+      "parameters": [
+        "ClientToken",
+        "DryRun",
+        "InstanceId",
+        "PtpStatus",
+        "RegionId"
+      ],
+      "covered": [
+        "InstanceId",
+        "PtpStatus"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "update_maintenance_attributes",
+      "api": "ModifyInstanceMaintenanceAttributes",
+      "parameters": [
+        "ActionOnMaintenance",
+        "InstanceId",
+        "MaintenanceWindow.EndTime",
+        "MaintenanceWindow.StartTime",
+        "NotifyOnMaintenance",
+        "RegionId"
+      ],
+      "covered": [
+        "ActionOnMaintenance",
+        "InstanceId",
+        "MaintenanceWindow.EndTime",
+        "MaintenanceWindow.StartTime",
+        "NotifyOnMaintenance"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "update_metadata_options",
+      "api": "ModifyInstanceMetadataOptions",
+      "parameters": [
+        "HttpEndpoint",
+        "HttpPutResponseHopLimit",
+        "HttpTokens",
+        "InstanceId",
+        "InstanceMetadataTags",
+        "RegionId"
+      ],
+      "covered": [
+        "HttpEndpoint",
+        "HttpPutResponseHopLimit",
+        "HttpTokens",
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "update_network_options",
+      "api": "ModifyInstanceNetworkOptions",
+      "parameters": [
+        "BandwidthWeighting",
+        "InstanceId"
+      ],
+      "covered": [
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "update_network_spec",
+      "api": "ModifyInstanceNetworkSpec",
+      "parameters": [
+        "AllocatePublicIp",
+        "AutoPay",
+        "ClientToken",
+        "EndTime",
+        "ISP",
+        "InstanceId",
+        "InternetMaxBandwidthIn",
+        "InternetMaxBandwidthOut",
+        "NetworkChargeType",
+        "StartTime"
+      ],
+      "covered": [
+        "InstanceId",
+        "InternetMaxBandwidthIn",
+        "InternetMaxBandwidthOut"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "update_postpaid_spec",
+      "api": "ModifyInstanceSpec",
+      "parameters": [
+        "AllowMigrateAcrossZone",
+        "Async",
+        "ClientToken",
+        "Disk.Category",
+        "Disk.DiskId",
+        "Disk.PerformanceLevel",
+        "DryRun",
+        "InstanceId",
+        "InstanceType",
+        "InternetMaxBandwidthIn",
+        "InternetMaxBandwidthOut",
+        "ModifyMode",
+        "SystemDisk.Category",
+        "Temporary.EndTime",
+        "Temporary.InternetMaxBandwidthOut",
+        "Temporary.StartTime"
+      ],
+      "covered": [
+        "InstanceId",
+        "InstanceType",
+        "InternetMaxBandwidthIn",
+        "InternetMaxBandwidthOut"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "update_prepay_spec",
+      "api": "ModifyPrepayInstanceSpec",
+      "parameters": [
+        "AutoPay",
+        "ClientToken",
+        "Disk.Category",
+        "Disk.DiskId",
+        "Disk.PerformanceLevel",
+        "EndTime",
+        "InstanceId",
+        "InstanceType",
+        "MigrateAcrossZone",
+        "ModifyMode",
+        "OperatorType",
+        "RebootTime",
+        "RebootWhenFinished",
+        "RegionId",
+        "SystemDisk.Category"
+      ],
+      "covered": [
+        "AutoPay",
+        "InstanceId",
+        "InstanceType"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "update_vnc_password",
+      "api": "ModifyInstanceVncPasswd",
+      "parameters": [
+        "InstanceId",
+        "RegionId",
+        "VncPassword"
+      ],
+      "covered": [
+        "InstanceId",
+        "VncPassword"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "instance",
+      "binding": "update_vpc_attribute",
+      "api": "ModifyInstanceVpcAttribute",
+      "parameters": [
+        "InstanceId",
+        "PrivateIpAddress",
+        "SecurityGroupId",
+        "VSwitchId",
+        "VpcId"
+      ],
+      "covered": [
+        "InstanceId",
+        "PrivateIpAddress",
+        "VSwitchId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "keypair",
+      "binding": "create_to_available",
+      "api": "CreateKeyPair",
+      "parameters": [
+        "KeyPairName",
+        "RegionId",
+        "ResourceGroupId",
+        "Tag.Key",
+        "Tag.Value"
+      ],
+      "covered": [
+        "KeyPairName",
+        "ResourceGroupId",
+        "Tag"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "keypair",
+      "binding": "delete_keypairs",
+      "api": "DeleteKeyPairs",
+      "parameters": [
+        "KeyPairNames",
+        "RegionId"
+      ],
+      "covered": [
+        "KeyPairNames"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "keypair",
+      "binding": "import_to_available",
+      "api": "ImportKeyPair",
+      "parameters": [
+        "KeyPairName",
+        "PublicKeyBody",
+        "RegionId",
+        "ResourceGroupId",
+        "Tag.Key",
+        "Tag.Value"
+      ],
+      "covered": [
+        "KeyPairName",
+        "PublicKeyBody",
+        "ResourceGroupId",
+        "Tag"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "launch-template",
+      "binding": "create_to_available",
+      "api": "CreateLaunchTemplate",
+      "parameters": [
+        "AutoReleaseTime",
+        "AutoRenew",
+        "AutoRenewPeriod",
+        "CreditSpecification",
+        "DataDisk.AutoSnapshotPolicyId",
+        "DataDisk.BurstingEnabled",
+        "DataDisk.Category",
+        "DataDisk.DeleteWithInstance",
+        "DataDisk.Description",
+        "DataDisk.Device",
+        "DataDisk.DiskName",
+        "DataDisk.Encrypted",
+        "DataDisk.KMSKeyId",
+        "DataDisk.PerformanceLevel",
+        "DataDisk.ProvisionedIops",
+        "DataDisk.Size",
+        "DataDisk.SnapshotId",
+        "DeletionProtection",
+        "DeploymentSetId",
+        "Description",
+        "EnableVmOsConfig",
+        "HostName",
+        "HttpEndpoint",
+        "HttpPutResponseHopLimit",
+        "HttpTokens",
+        "ImageId",
+        "ImageOptions",
+        "ImageOwnerAlias",
+        "InstanceChargeType",
+        "InstanceName",
+        "InstanceType",
+        "InternetChargeType",
+        "InternetMaxBandwidthIn",
+        "InternetMaxBandwidthOut",
+        "IoOptimized",
+        "Ipv6AddressCount",
+        "KeyPairName",
+        "LaunchTemplateName",
+        "NetworkInterface.DeleteOnRelease",
+        "NetworkInterface.Description",
+        "NetworkInterface.InstanceType",
+        "NetworkInterface.NetworkInterfaceName",
+        "NetworkInterface.NetworkInterfaceTrafficMode",
+        "NetworkInterface.PrimaryIpAddress",
+        "NetworkInterface.SecurityGroupId",
+        "NetworkInterface.SecurityGroupIds",
+        "NetworkInterface.VSwitchId",
+        "NetworkType",
+        "PasswordInherit",
+        "Period",
+        "PeriodUnit",
+        "PrivateIpAddress",
+        "RamRoleName",
+        "RegionId",
+        "ResourceGroupId",
+        "SecurityEnhancementStrategy",
+        "SecurityGroupId",
+        "SecurityGroupIds",
+        "SecurityOptions",
+        "SpotDuration",
+        "SpotPriceLimit",
+        "SpotStrategy",
+        "SystemDisk.AutoSnapshotPolicyId",
+        "SystemDisk.BurstingEnabled",
+        "SystemDisk.Category",
+        "SystemDisk.DeleteWithInstance",
+        "SystemDisk.Description",
+        "SystemDisk.DiskName",
+        "SystemDisk.Encrypted",
+        "SystemDisk.Iops",
+        "SystemDisk.KMSKeyId",
+        "SystemDisk.PerformanceLevel",
+        "SystemDisk.ProvisionedIops",
+        "SystemDisk.Size",
+        "Tag.Key",
+        "Tag.Value",
+        "TemplateResourceGroupId",
+        "TemplateTag.Key",
+        "TemplateTag.Value",
+        "UserData",
+        "VSwitchId",
+        "VersionDescription",
+        "VpcId",
+        "ZoneId"
+      ],
+      "covered": [
+        "Description",
+        "ImageId",
+        "InstanceType",
+        "KeyPairName",
+        "LaunchTemplateName",
+        "ResourceGroupId",
+        "SecurityGroupId",
+        "SecurityGroupIds",
+        "Tag",
+        "TemplateResourceGroupId",
+        "TemplateTag",
+        "VSwitchId",
+        "VersionDescription"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "launch-template",
+      "binding": "create_version",
+      "api": "CreateLaunchTemplateVersion",
+      "parameters": [
+        "AutoReleaseTime",
+        "AutoRenew",
+        "AutoRenewPeriod",
+        "CreditSpecification",
+        "DataDisk.AutoSnapshotPolicyId",
+        "DataDisk.BurstingEnabled",
+        "DataDisk.Category",
+        "DataDisk.DeleteWithInstance",
+        "DataDisk.Description",
+        "DataDisk.Device",
+        "DataDisk.DiskName",
+        "DataDisk.Encrypted",
+        "DataDisk.KMSKeyId",
+        "DataDisk.PerformanceLevel",
+        "DataDisk.ProvisionedIops",
+        "DataDisk.Size",
+        "DataDisk.SnapshotId",
+        "DeletionProtection",
+        "DeploymentSetId",
+        "Description",
+        "EnableVmOsConfig",
+        "HostName",
+        "HttpEndpoint",
+        "HttpPutResponseHopLimit",
+        "HttpTokens",
+        "ImageId",
+        "ImageOptions",
+        "ImageOwnerAlias",
+        "InstanceChargeType",
+        "InstanceName",
+        "InstanceType",
+        "InternetChargeType",
+        "InternetMaxBandwidthIn",
+        "InternetMaxBandwidthOut",
+        "IoOptimized",
+        "Ipv6AddressCount",
+        "KeyPairName",
+        "LaunchTemplateId",
+        "LaunchTemplateName",
+        "NetworkInterface.DeleteOnRelease",
+        "NetworkInterface.Description",
+        "NetworkInterface.InstanceType",
+        "NetworkInterface.NetworkInterfaceName",
+        "NetworkInterface.NetworkInterfaceTrafficMode",
+        "NetworkInterface.PrimaryIpAddress",
+        "NetworkInterface.SecurityGroupId",
+        "NetworkInterface.SecurityGroupIds",
+        "NetworkInterface.VSwitchId",
+        "NetworkType",
+        "PasswordInherit",
+        "Period",
+        "PeriodUnit",
+        "PrivateIpAddress",
+        "RamRoleName",
+        "RegionId",
+        "ResourceGroupId",
+        "SecurityEnhancementStrategy",
+        "SecurityGroupId",
+        "SecurityGroupIds",
+        "SecurityOptions",
+        "SpotDuration",
+        "SpotPriceLimit",
+        "SpotStrategy",
+        "SystemDisk.AutoSnapshotPolicyId",
+        "SystemDisk.BurstingEnabled",
+        "SystemDisk.Category",
+        "SystemDisk.DeleteWithInstance",
+        "SystemDisk.Description",
+        "SystemDisk.DiskName",
+        "SystemDisk.Encrypted",
+        "SystemDisk.Iops",
+        "SystemDisk.KMSKeyId",
+        "SystemDisk.PerformanceLevel",
+        "SystemDisk.ProvisionedIops",
+        "SystemDisk.Size",
+        "Tag.Key",
+        "Tag.Value",
+        "UserData",
+        "VSwitchId",
+        "VersionDescription",
+        "VpcId",
+        "ZoneId"
+      ],
+      "covered": [
+        "Description",
+        "ImageId",
+        "InstanceType",
+        "KeyPairName",
+        "LaunchTemplateId",
+        "LaunchTemplateName",
+        "ResourceGroupId",
+        "SecurityGroupId",
+        "SecurityGroupIds",
+        "Tag",
+        "VSwitchId",
+        "VersionDescription"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "launch-template",
+      "binding": "delete_template",
+      "api": "DeleteLaunchTemplate",
+      "parameters": [
+        "LaunchTemplateId",
+        "LaunchTemplateName",
+        "RegionId"
+      ],
+      "covered": [
+        "LaunchTemplateId",
+        "LaunchTemplateName"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "launch-template",
+      "binding": "delete_version",
+      "api": "DeleteLaunchTemplateVersion",
+      "parameters": [
+        "DeleteVersion",
+        "LaunchTemplateId",
+        "LaunchTemplateName",
+        "RegionId"
+      ],
+      "covered": [
+        "DeleteVersion",
+        "LaunchTemplateId",
+        "LaunchTemplateName"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "launch-template",
+      "binding": "set_default_version",
+      "api": "ModifyLaunchTemplateDefaultVersion",
+      "parameters": [
+        "DefaultVersionNumber",
+        "LaunchTemplateId",
+        "LaunchTemplateName",
+        "RegionId"
+      ],
+      "covered": [
+        "DefaultVersionNumber",
+        "LaunchTemplateId",
+        "LaunchTemplateName"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "port-range-list",
+      "binding": "create_to_available",
+      "api": "CreatePortRangeList",
+      "parameters": [
+        "ClientToken",
+        "Description",
+        "Entry.Description",
+        "Entry.PortRange",
+        "MaxEntries",
+        "PortRangeListName",
+        "RegionId",
+        "ResourceGroupId",
+        "Tag.Key",
+        "Tag.Value"
+      ],
+      "covered": [
+        "Description",
+        "Entry.Description",
+        "Entry.PortRange",
+        "MaxEntries",
+        "PortRangeListName",
+        "ResourceGroupId",
+        "Tag"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "port-range-list",
+      "binding": "delete_to_absent",
+      "api": "DeletePortRangeList",
+      "parameters": [
+        "PortRangeListId",
+        "RegionId"
+      ],
+      "covered": [
+        "PortRangeListId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "port-range-list",
+      "binding": "update_attributes",
+      "api": "ModifyPortRangeList",
+      "parameters": [
+        "AddEntry.Description",
+        "AddEntry.PortRange",
+        "ClientToken",
+        "Description",
+        "PortRangeListId",
+        "PortRangeListName",
+        "RegionId",
+        "RemoveEntry.PortRange"
+      ],
+      "covered": [
+        "AddEntry.Description",
+        "AddEntry.PortRange",
+        "Description",
+        "PortRangeListId",
+        "PortRangeListName",
+        "RemoveEntry.PortRange"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "prefix-list",
+      "binding": "create_to_available",
+      "api": "CreatePrefixList",
+      "parameters": [
+        "AddressFamily",
+        "ClientToken",
+        "Description",
+        "Entry.Cidr",
+        "Entry.Description",
+        "MaxEntries",
+        "PrefixListName",
+        "RegionId",
+        "ResourceGroupId",
+        "Tag.Key",
+        "Tag.Value"
+      ],
+      "covered": [
+        "AddressFamily",
+        "Description",
+        "Entry.Cidr",
+        "Entry.Description",
+        "MaxEntries",
+        "PrefixListName",
+        "ResourceGroupId",
+        "Tag"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "prefix-list",
+      "binding": "delete_to_absent",
+      "api": "DeletePrefixList",
+      "parameters": [
+        "PrefixListId",
+        "RegionId"
+      ],
+      "covered": [
+        "PrefixListId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "prefix-list",
+      "binding": "update_attributes",
+      "api": "ModifyPrefixList",
+      "parameters": [
+        "AddEntry.Cidr",
+        "AddEntry.Description",
+        "Description",
+        "PrefixListId",
+        "PrefixListName",
+        "RegionId",
+        "RemoveEntry.Cidr"
+      ],
+      "covered": [
+        "AddEntry.Cidr",
+        "AddEntry.Description",
+        "Description",
+        "PrefixListId",
+        "PrefixListName",
+        "RemoveEntry.Cidr"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "sg",
+      "binding": "authorize_rules",
+      "api": "AuthorizeSecurityGroup",
+      "parameters": [
+        "ClientToken",
+        "Description",
+        "DestCidrIp",
+        "IpProtocol",
+        "Ipv6DestCidrIp",
+        "Ipv6SourceCidrIp",
+        "NicType",
+        "Permissions",
+        "Policy",
+        "PortRange",
+        "Priority",
+        "RegionId",
+        "SecurityGroupId",
+        "SourceCidrIp",
+        "SourceGroupId",
+        "SourceGroupOwnerAccount",
+        "SourceGroupOwnerId",
+        "SourcePortRange",
+        "SourcePrefixListId"
+      ],
+      "covered": [
+        "Permissions.IpProtocol",
+        "Permissions.Policy",
+        "Permissions.PortRange",
+        "Permissions.Priority",
+        "Permissions.SourceCidrIp",
+        "SecurityGroupId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "sg",
+      "binding": "authorize_rules_egress",
+      "api": "AuthorizeSecurityGroupEgress",
+      "parameters": [
+        "ClientToken",
+        "Description",
+        "DestCidrIp",
+        "DestGroupId",
+        "DestGroupOwnerAccount",
+        "DestGroupOwnerId",
+        "DestPrefixListId",
+        "IpProtocol",
+        "Ipv6DestCidrIp",
+        "Ipv6SourceCidrIp",
+        "NicType",
+        "Permissions",
+        "Policy",
+        "PortRange",
+        "Priority",
+        "RegionId",
+        "SecurityGroupId",
+        "SourceCidrIp",
+        "SourcePortRange"
+      ],
+      "covered": [
+        "Permissions.DestCidrIp",
+        "Permissions.IpProtocol",
+        "Permissions.Policy",
+        "Permissions.PortRange",
+        "Permissions.Priority",
+        "SecurityGroupId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "sg",
+      "binding": "create_to_available",
+      "api": "CreateSecurityGroup",
+      "parameters": [
+        "ClientToken",
+        "Description",
+        "RegionId",
+        "ResourceGroupId",
+        "SecurityGroupName",
+        "SecurityGroupType",
+        "ServiceManaged",
+        "Tag.Key",
+        "Tag.Value",
+        "Tag.key",
+        "Tag.value",
+        "VpcId"
+      ],
+      "covered": [
+        "Description",
+        "ResourceGroupId",
+        "SecurityGroupName",
+        "SecurityGroupType",
+        "Tag",
+        "VpcId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "sg",
+      "binding": "delete_to_absent",
+      "api": "DeleteSecurityGroup",
+      "parameters": [
+        "RegionId",
+        "SecurityGroupId"
+      ],
+      "covered": [
+        "SecurityGroupId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "sg",
+      "binding": "revoke_rules",
+      "api": "RevokeSecurityGroup",
+      "parameters": [
+        "ClientToken",
+        "Description",
+        "DestCidrIp",
+        "IpProtocol",
+        "Ipv6DestCidrIp",
+        "Ipv6SourceCidrIp",
+        "NicType",
+        "Permissions",
+        "Policy",
+        "PortRange",
+        "Priority",
+        "RegionId",
+        "SecurityGroupId",
+        "SecurityGroupRuleId",
+        "SourceCidrIp",
+        "SourceGroupId",
+        "SourceGroupOwnerAccount",
+        "SourceGroupOwnerId",
+        "SourcePortRange",
+        "SourcePrefixListId"
+      ],
+      "covered": [
+        "Permissions.IpProtocol",
+        "Permissions.Policy",
+        "Permissions.PortRange",
+        "Permissions.Priority",
+        "Permissions.SourceCidrIp",
+        "SecurityGroupId",
+        "SecurityGroupRuleId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "sg",
+      "binding": "revoke_rules_egress",
+      "api": "RevokeSecurityGroupEgress",
+      "parameters": [
+        "ClientToken",
+        "Description",
+        "DestCidrIp",
+        "DestGroupId",
+        "DestGroupOwnerAccount",
+        "DestGroupOwnerId",
+        "DestPrefixListId",
+        "IpProtocol",
+        "Ipv6DestCidrIp",
+        "Ipv6SourceCidrIp",
+        "NicType",
+        "Permissions",
+        "Policy",
+        "PortRange",
+        "Priority",
+        "RegionId",
+        "SecurityGroupId",
+        "SecurityGroupRuleId",
+        "SourceCidrIp",
+        "SourcePortRange"
+      ],
+      "covered": [
+        "Permissions.DestCidrIp",
+        "Permissions.IpProtocol",
+        "Permissions.Policy",
+        "Permissions.PortRange",
+        "Permissions.Priority",
+        "SecurityGroupId",
+        "SecurityGroupRuleId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "sg",
+      "binding": "update_attributes",
+      "api": "ModifySecurityGroupAttribute",
+      "parameters": [
+        "Description",
+        "RegionId",
+        "SecurityGroupId",
+        "SecurityGroupName"
+      ],
+      "covered": [
+        "Description",
+        "SecurityGroupId",
+        "SecurityGroupName"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "sg",
+      "binding": "update_policy",
+      "api": "ModifySecurityGroupPolicy",
+      "parameters": [
+        "ClientToken",
+        "InnerAccessPolicy",
+        "RegionId",
+        "SecurityGroupId"
+      ],
+      "covered": [
+        "InnerAccessPolicy",
+        "SecurityGroupId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "sg",
+      "binding": "update_rule",
+      "api": "ModifySecurityGroupRule",
+      "parameters": [
+        "ClientToken",
+        "Description",
+        "DestCidrIp",
+        "IpProtocol",
+        "Ipv6DestCidrIp",
+        "Ipv6SourceCidrIp",
+        "NicType",
+        "Policy",
+        "PortRange",
+        "PortRangeListId",
+        "Priority",
+        "RegionId",
+        "SecurityGroupId",
+        "SecurityGroupRuleId",
+        "SourceCidrIp",
+        "SourceGroupId",
+        "SourceGroupOwnerAccount",
+        "SourceGroupOwnerId",
+        "SourcePortRange",
+        "SourcePrefixListId"
+      ],
+      "covered": [
+        "IpProtocol",
+        "Policy",
+        "PortRange",
+        "Priority",
+        "SecurityGroupId",
+        "SecurityGroupRuleId",
+        "SourceCidrIp"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "sg",
+      "binding": "update_rule_egress",
+      "api": "ModifySecurityGroupEgressRule",
+      "parameters": [
+        "ClientToken",
+        "Description",
+        "DestCidrIp",
+        "DestGroupId",
+        "DestGroupOwnerAccount",
+        "DestGroupOwnerId",
+        "DestPrefixListId",
+        "IpProtocol",
+        "Ipv6DestCidrIp",
+        "Ipv6SourceCidrIp",
+        "NicType",
+        "Policy",
+        "PortRange",
+        "PortRangeListId",
+        "Priority",
+        "RegionId",
+        "SecurityGroupId",
+        "SecurityGroupRuleId",
+        "SourceCidrIp",
+        "SourcePortRange"
+      ],
+      "covered": [
+        "DestCidrIp",
+        "IpProtocol",
+        "Policy",
+        "PortRange",
+        "Priority",
+        "SecurityGroupId",
+        "SecurityGroupRuleId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "snapshot",
+      "binding": "copy_to_destination",
+      "api": "CopySnapshot",
+      "parameters": [
+        "Arn.AssumeRoleFor",
+        "Arn.RoleType",
+        "Arn.Rolearn",
+        "ClientToken",
+        "DestinationRegionId",
+        "DestinationSnapshotDescription",
+        "DestinationSnapshotName",
+        "DestinationStorageLocationArn",
+        "Encrypted",
+        "KMSKeyId",
+        "RegionId",
+        "ResourceGroupId",
+        "RetentionDays",
+        "SnapshotId",
+        "Tag.Key",
+        "Tag.Value"
+      ],
+      "covered": [
+        "DestinationRegionId",
+        "DestinationSnapshotDescription",
+        "DestinationSnapshotName",
+        "Encrypted",
+        "KMSKeyId",
+        "ResourceGroupId",
+        "RetentionDays",
+        "SnapshotId",
+        "Tag"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "snapshot",
+      "binding": "create_to_accomplished",
+      "api": "CreateSnapshot",
+      "parameters": [
+        "Category",
+        "ClientToken",
+        "Description",
+        "DiskId",
+        "InstantAccess",
+        "InstantAccessRetentionDays",
+        "ResourceGroupId",
+        "RetentionDays",
+        "SnapshotName",
+        "StorageLocationArn",
+        "Tag.Key",
+        "Tag.Value",
+        "Tag.key",
+        "Tag.value"
+      ],
+      "covered": [
+        "Category",
+        "Description",
+        "DiskId",
+        "InstantAccess",
+        "InstantAccessRetentionDays",
+        "ResourceGroupId",
+        "RetentionDays",
+        "SnapshotName",
+        "Tag"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "snapshot",
+      "binding": "delete_to_absent",
+      "api": "DeleteSnapshot",
+      "parameters": [
+        "Force",
+        "SnapshotId"
+      ],
+      "covered": [
+        "Force",
+        "SnapshotId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "snapshot",
+      "binding": "lock_snapshot",
+      "api": "LockSnapshot",
+      "parameters": [
+        "ClientToken",
+        "CoolOffPeriod",
+        "DryRun",
+        "LockDuration",
+        "LockMode",
+        "RegionId",
+        "SnapshotId"
+      ],
+      "covered": [
+        "SnapshotId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "snapshot",
+      "binding": "modify_category",
+      "api": "ModifySnapshotCategory",
+      "parameters": [
+        "Category",
+        "RetentionDays",
+        "SnapshotId"
+      ],
+      "covered": [
+        "Category",
+        "SnapshotId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "snapshot",
+      "binding": "open_snapshot_service",
+      "api": "OpenSnapshotService",
+      "parameters": [
+        "RegionId"
+      ],
+      "covered": []
+    },
+    {
+      "product": "ecs",
+      "resource": "snapshot",
+      "binding": "unlock_snapshot",
+      "api": "UnlockSnapshot",
+      "parameters": [
+        "ClientToken",
+        "DryRun",
+        "RegionId",
+        "SnapshotId"
+      ],
+      "covered": [
+        "SnapshotId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "snapshot",
+      "binding": "update_attributes",
+      "api": "ModifySnapshotAttribute",
+      "parameters": [
+        "Description",
+        "DisableInstantAccess",
+        "RetentionDays",
+        "SnapshotId",
+        "SnapshotName"
+      ],
+      "covered": [
+        "Description",
+        "DisableInstantAccess",
+        "SnapshotId",
+        "SnapshotName"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "snapshot-group",
+      "binding": "create_to_accomplished",
+      "api": "CreateSnapshotGroup",
+      "parameters": [
+        "ClientToken",
+        "Description",
+        "DiskId",
+        "ExcludeDiskId",
+        "InstanceId",
+        "InstantAccess",
+        "InstantAccessRetentionDays",
+        "Name",
+        "RegionId",
+        "ResourceGroupId",
+        "StorageLocationArn",
+        "Tag.Key",
+        "Tag.Value"
+      ],
+      "covered": [
+        "Description",
+        "DiskId",
+        "ExcludeDiskId",
+        "InstanceId",
+        "InstantAccess",
+        "InstantAccessRetentionDays",
+        "ResourceGroupId",
+        "Tag"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "snapshot-group",
+      "binding": "delete_to_absent",
+      "api": "DeleteSnapshotGroup",
+      "parameters": [
+        "RegionId",
+        "SnapshotGroupId"
+      ],
+      "covered": [
+        "SnapshotGroupId"
+      ]
+    },
+    {
+      "product": "ecs",
+      "resource": "snapshot-group",
+      "binding": "update_attributes",
+      "api": "ModifySnapshotGroup",
+      "parameters": [
+        "Description",
+        "Name",
+        "RegionId",
+        "SnapshotGroupId"
+      ],
+      "covered": [
+        "Description",
+        "Name",
+        "SnapshotGroupId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "cluster",
+      "binding": "create_cluster",
+      "api": "CreateCluster",
+      "parameters": [
+        "ClusterDescription",
+        "ClusterName",
+        "ClusterType",
+        "Components.ComponentConfig",
+        "Components.ComponentType",
+        "HpnZone",
+        "IgnoreFailedNodeTasks",
+        "Networks",
+        "NimizVSwitches",
+        "NodeGroups.FileSystemMountEnabled",
+        "NodeGroups.HyperNodes",
+        "NodeGroups.ImageId",
+        "NodeGroups.KeyPairName",
+        "NodeGroups.LoginPassword",
+        "NodeGroups.MachineType",
+        "NodeGroups.NodeGroupDescription",
+        "NodeGroups.NodeGroupName",
+        "NodeGroups.Nodes",
+        "NodeGroups.SystemDisk",
+        "NodeGroups.UserData",
+        "NodeGroups.VirtualGpuEnabled",
+        "NodeGroups.ZoneId",
+        "OpenEniJumboFrame",
+        "ResourceGroupId",
+        "Tag.Key",
+        "Tag.Value"
+      ],
+      "covered": [
+        "ClusterDescription",
+        "ClusterName",
+        "ClusterType",
+        "Components",
+        "HpnZone",
+        "IgnoreFailedNodeTasks",
+        "Networks",
+        "NimizVSwitches",
+        "NodeGroups",
+        "OpenEniJumboFrame",
+        "ResourceGroupId",
+        "Tag"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "cluster",
+      "binding": "delete_cluster",
+      "api": "DeleteCluster",
+      "parameters": [
+        "ClusterId"
+      ],
+      "covered": [
+        "ClusterId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "cluster",
+      "binding": "extend_cluster",
+      "api": "ExtendCluster",
+      "parameters": [
+        "ClusterId",
+        "IgnoreFailedNodeTasks",
+        "IpAllocationPolicy.BondPolicy",
+        "IpAllocationPolicy.MachineTypePolicy",
+        "IpAllocationPolicy.NodePolicy",
+        "NodeGroups.Amount",
+        "NodeGroups.AutoRenew",
+        "NodeGroups.ChargeType",
+        "NodeGroups.Hostnames",
+        "NodeGroups.HyperNodes",
+        "NodeGroups.LoginPassword",
+        "NodeGroups.NodeGroupId",
+        "NodeGroups.NodeTag",
+        "NodeGroups.Nodes",
+        "NodeGroups.Period",
+        "NodeGroups.UserData",
+        "NodeGroups.VSwitchId",
+        "NodeGroups.VpcId",
+        "NodeGroups.ZoneId",
+        "VSwitchZoneId",
+        "VpdSubnets"
+      ],
+      "covered": [
+        "ClusterId",
+        "IgnoreFailedNodeTasks",
+        "IpAllocationPolicy",
+        "NodeGroups",
+        "VSwitchZoneId",
+        "VpdSubnets"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "cluster",
+      "binding": "shrink_cluster",
+      "api": "ShrinkCluster",
+      "parameters": [
+        "ClusterId",
+        "IgnoreFailedNodeTasks",
+        "NodeGroups.HyperNodes",
+        "NodeGroups.NodeGroupId",
+        "NodeGroups.Nodes"
+      ],
+      "covered": [
+        "ClusterId",
+        "IgnoreFailedNodeTasks",
+        "NodeGroups"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "eni",
+      "binding": "assign_private_ip",
+      "api": "AssignLeniPrivateIpAddress",
+      "parameters": [
+        "ClientToken",
+        "Description",
+        "ElasticNetworkInterfaceId",
+        "PrivateIpAddress",
+        "RegionId"
+      ],
+      "covered": [
+        "ElasticNetworkInterfaceId",
+        "PrivateIpAddress"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "eni",
+      "binding": "attach_to_node",
+      "api": "AttachElasticNetworkInterface",
+      "parameters": [
+        "ElasticNetworkInterfaceId",
+        "NodeId",
+        "RegionId"
+      ],
+      "covered": [
+        "ElasticNetworkInterfaceId",
+        "NodeId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "eni",
+      "binding": "create_to_available",
+      "api": "CreateElasticNetworkInterface",
+      "parameters": [
+        "ClientToken",
+        "Description",
+        "EnableJumboFrame",
+        "NodeId",
+        "RegionId",
+        "ResourceGroupId",
+        "SecurityGroupId",
+        "Tag.Key",
+        "Tag.Value",
+        "VSwitchId",
+        "VpcId",
+        "ZoneId"
+      ],
+      "covered": [
+        "Description",
+        "EnableJumboFrame",
+        "NodeId",
+        "ResourceGroupId",
+        "SecurityGroupId",
+        "Tag.Key",
+        "Tag.Value",
+        "VSwitchId",
+        "VpcId",
+        "ZoneId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "eni",
+      "binding": "delete_to_absent",
+      "api": "DeleteElasticNetworkInterface",
+      "parameters": [
+        "ClientToken",
+        "ElasticNetworkInterfaceId",
+        "RegionId"
+      ],
+      "covered": [
+        "ElasticNetworkInterfaceId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "eni",
+      "binding": "detach_from_node",
+      "api": "DetachElasticNetworkInterface",
+      "parameters": [
+        "ElasticNetworkInterfaceId",
+        "NodeId",
+        "RegionId"
+      ],
+      "covered": [
+        "ElasticNetworkInterfaceId",
+        "NodeId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "eni",
+      "binding": "unassign_private_ip",
+      "api": "UnassignLeniPrivateIpAddress",
+      "parameters": [
+        "ClientToken",
+        "ElasticNetworkInterfaceId",
+        "IpName",
+        "RegionId"
+      ],
+      "covered": [
+        "ElasticNetworkInterfaceId",
+        "IpName"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "eni",
+      "binding": "update_attributes",
+      "api": "UpdateElasticNetworkInterface",
+      "parameters": [
+        "ClientToken",
+        "Description",
+        "ElasticNetworkInterfaceId",
+        "RegionId",
+        "SecurityGroupId"
+      ],
+      "covered": [
+        "Description",
+        "ElasticNetworkInterfaceId",
+        "SecurityGroupId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "er",
+      "binding": "add_attachment",
+      "api": "CreateErAttachment",
+      "parameters": [
+        "AutoReceiveAllRoute",
+        "ErAttachmentName",
+        "ErId",
+        "InstanceId",
+        "InstanceType",
+        "RegionId",
+        "ResourceTenantId"
+      ],
+      "covered": [
+        "AutoReceiveAllRoute",
+        "ErAttachmentName",
+        "ErId",
+        "InstanceId",
+        "InstanceType",
+        "ResourceTenantId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "er",
+      "binding": "add_route_map",
+      "api": "CreateErRouteMap",
+      "parameters": [
+        "Description",
+        "DestinationCidrBlock",
+        "ErId",
+        "ReceptionInstanceId",
+        "ReceptionInstanceOwner",
+        "ReceptionInstanceType",
+        "RegionId",
+        "RouteMapAction",
+        "RouteMapNum",
+        "TransmissionInstanceId",
+        "TransmissionInstanceOwner",
+        "TransmissionInstanceType"
+      ],
+      "covered": [
+        "Description",
+        "DestinationCidrBlock",
+        "ErId",
+        "ReceptionInstanceId",
+        "ReceptionInstanceOwner",
+        "ReceptionInstanceType",
+        "RouteMapAction",
+        "RouteMapNum",
+        "TransmissionInstanceId",
+        "TransmissionInstanceOwner",
+        "TransmissionInstanceType"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "er",
+      "binding": "create_to_available",
+      "api": "CreateEr",
+      "parameters": [
+        "Description",
+        "ErName",
+        "MasterZoneId",
+        "RegionId",
+        "ResourceGroupId",
+        "Tag.Key",
+        "Tag.Value"
+      ],
+      "covered": [
+        "Description",
+        "ErName",
+        "MasterZoneId",
+        "ResourceGroupId",
+        "Tag.Key",
+        "Tag.Value"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "er",
+      "binding": "delete_to_absent",
+      "api": "DeleteEr",
+      "parameters": [
+        "ErId",
+        "RegionId"
+      ],
+      "covered": [
+        "ErId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "er",
+      "binding": "remove_attachment",
+      "api": "DeleteErAttachment",
+      "parameters": [
+        "ErAttachmentId",
+        "ErId",
+        "RegionId"
+      ],
+      "covered": [
+        "ErAttachmentId",
+        "ErId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "er",
+      "binding": "remove_route_map",
+      "api": "DeleteErRouteMap",
+      "parameters": [
+        "ErId",
+        "ErRouteMapId",
+        "ErRouteMapIds",
+        "RegionId"
+      ],
+      "covered": [
+        "ErId",
+        "ErRouteMapId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "er",
+      "binding": "update_er",
+      "api": "UpdateEr",
+      "parameters": [
+        "Description",
+        "ErId",
+        "ErName",
+        "RegionId"
+      ],
+      "covered": [
+        "Description",
+        "ErId",
+        "ErName"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "lni",
+      "binding": "assign_private_ip",
+      "api": "AssignPrivateIpAddress",
+      "parameters": [
+        "AssignMac",
+        "ClientToken",
+        "Description",
+        "NetworkInterfaceId",
+        "PrivateIpAddress",
+        "RegionId",
+        "SkipConfig",
+        "SubnetId"
+      ],
+      "covered": [
+        "NetworkInterfaceId",
+        "PrivateIpAddress",
+        "SubnetId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "lni",
+      "binding": "unassign_private_ip",
+      "api": "UnAssignPrivateIpAddress",
+      "parameters": [
+        "ClientToken",
+        "IpName",
+        "NetworkInterfaceId",
+        "PrivateIpAddress",
+        "RegionId",
+        "SubnetId"
+      ],
+      "covered": [
+        "IpName",
+        "NetworkInterfaceId",
+        "SubnetId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "net-test",
+      "binding": "create_comm_test",
+      "api": "CreateNetTestTask",
+      "parameters": [
+        "ClusterId",
+        "ClusterName",
+        "CommTest",
+        "DelayTest",
+        "NetTestType",
+        "NetworkMode",
+        "Port",
+        "TrafficTest"
+      ],
+      "covered": [
+        "ClusterId",
+        "ClusterName",
+        "CommTest.GPUNum",
+        "CommTest.Hosts.NodeId",
+        "CommTest.Model",
+        "CommTest.Type",
+        "NetTestType",
+        "NetworkMode",
+        "Port"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "net-test",
+      "binding": "create_delay_test",
+      "api": "CreateNetTestTask",
+      "parameters": [
+        "ClusterId",
+        "ClusterName",
+        "CommTest",
+        "DelayTest",
+        "NetTestType",
+        "NetworkMode",
+        "Port",
+        "TrafficTest"
+      ],
+      "covered": [
+        "ClusterId",
+        "ClusterName",
+        "DelayTest.Hosts.NodeId",
+        "NetTestType",
+        "NetworkMode",
+        "Port"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "net-test",
+      "binding": "create_traffic_test",
+      "api": "CreateNetTestTask",
+      "parameters": [
+        "ClusterId",
+        "ClusterName",
+        "CommTest",
+        "DelayTest",
+        "NetTestType",
+        "NetworkMode",
+        "Port",
+        "TrafficTest"
+      ],
+      "covered": [
+        "ClusterId",
+        "ClusterName",
+        "NetTestType",
+        "NetworkMode",
+        "Port",
+        "TrafficTest.Clients.NodeId",
+        "TrafficTest.Duration",
+        "TrafficTest.GDR",
+        "TrafficTest.Protocol",
+        "TrafficTest.QP",
+        "TrafficTest.Servers.NodeId",
+        "TrafficTest.TrafficModel"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "node",
+      "binding": "delete_hyper_node",
+      "api": "DeleteHyperNode",
+      "parameters": [
+        "HyperNodeId"
+      ],
+      "covered": [
+        "HyperNodeId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "node",
+      "binding": "delete_node",
+      "api": "DeleteNode",
+      "parameters": [
+        "NodeId"
+      ],
+      "covered": [
+        "NodeId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "node",
+      "binding": "reboot_nodes",
+      "api": "RebootNodes",
+      "parameters": [
+        "ClusterId",
+        "IgnoreFailedNodeTasks",
+        "Nodes"
+      ],
+      "covered": [
+        "ClusterId",
+        "IgnoreFailedNodeTasks",
+        "Nodes"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "node",
+      "binding": "run_command",
+      "api": "RunCommand",
+      "parameters": [
+        "ClientToken",
+        "CommandContent",
+        "CommandId",
+        "ContentEncoding",
+        "Description",
+        "EnableParameter",
+        "Frequency",
+        "Launcher",
+        "Name",
+        "NodeIdList",
+        "Parameters",
+        "RepeatMode",
+        "TerminationMode",
+        "Timeout",
+        "Username",
+        "WorkingDir"
+      ],
+      "covered": [
+        "CommandContent",
+        "CommandId",
+        "ContentEncoding",
+        "Description",
+        "EnableParameter",
+        "Frequency",
+        "Launcher",
+        "Name",
+        "NodeIdList",
+        "Parameters",
+        "RepeatMode",
+        "TerminationMode",
+        "Timeout",
+        "Username",
+        "WorkingDir"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "node",
+      "binding": "send_file_target",
+      "api": "SendFile",
+      "parameters": [
+        "Content",
+        "ContentType",
+        "Description",
+        "FileGroup",
+        "FileMode",
+        "FileOwner",
+        "Name",
+        "NodeIdList",
+        "Overwrite",
+        "TargetDir",
+        "Timeout"
+      ],
+      "covered": [
+        "Content",
+        "ContentType",
+        "Description",
+        "FileGroup",
+        "FileMode",
+        "FileOwner",
+        "Name",
+        "NodeIdList",
+        "Overwrite",
+        "TargetDir",
+        "Timeout"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "node",
+      "binding": "send_file_target_dir",
+      "api": "SendFile",
+      "parameters": [
+        "Content",
+        "ContentType",
+        "Description",
+        "FileGroup",
+        "FileMode",
+        "FileOwner",
+        "Name",
+        "NodeIdList",
+        "Overwrite",
+        "TargetDir",
+        "Timeout"
+      ],
+      "covered": [
+        "Content",
+        "ContentType",
+        "Description",
+        "FileGroup",
+        "FileMode",
+        "FileOwner",
+        "Name",
+        "NodeIdList",
+        "Overwrite",
+        "TargetDir",
+        "Timeout"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "node",
+      "binding": "stop_nodes",
+      "api": "StopNodes",
+      "parameters": [
+        "IgnoreFailedNodeTasks",
+        "Nodes"
+      ],
+      "covered": [
+        "IgnoreFailedNodeTasks",
+        "Nodes"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "node-group",
+      "binding": "create_node_group",
+      "api": "CreateNodeGroup",
+      "parameters": [
+        "ClusterId",
+        "NodeGroup",
+        "NodeUnit"
+      ],
+      "covered": [
+        "ClusterId",
+        "NodeGroup",
+        "NodeUnit"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "node-group",
+      "binding": "delete_to_absent",
+      "api": "DeleteNodeGroup",
+      "parameters": [
+        "ClusterId",
+        "NodeGroupId"
+      ],
+      "covered": [
+        "ClusterId",
+        "NodeGroupId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "node-group",
+      "binding": "update_node_group",
+      "api": "UpdateNodeGroup",
+      "parameters": [
+        "FileSystemMountEnabled",
+        "ImageId",
+        "KeyPairName",
+        "LoginPassword",
+        "NewNodeGroupName",
+        "NodeGroupId",
+        "UserData"
+      ],
+      "covered": [
+        "FileSystemMountEnabled",
+        "ImageId",
+        "KeyPairName",
+        "LoginPassword",
+        "NewNodeGroupName",
+        "NodeGroupId",
+        "UserData"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "subnet",
+      "binding": "create_subnet",
+      "api": "CreateSubnet",
+      "parameters": [
+        "Cidr",
+        "RegionId",
+        "SubnetName",
+        "Tag.Key",
+        "Tag.Value",
+        "Type",
+        "VpdId",
+        "ZoneId"
+      ],
+      "covered": [
+        "Cidr",
+        "SubnetName",
+        "Tag",
+        "Type",
+        "VpdId",
+        "ZoneId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "subnet",
+      "binding": "delete_subnet",
+      "api": "DeleteSubnet",
+      "parameters": [
+        "RegionId",
+        "SubnetId",
+        "VpdId",
+        "ZoneId"
+      ],
+      "covered": [
+        "SubnetId",
+        "VpdId",
+        "ZoneId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "subnet",
+      "binding": "update_subnet",
+      "api": "UpdateSubnet",
+      "parameters": [
+        "RegionId",
+        "SubnetId",
+        "SubnetName",
+        "VpdId",
+        "ZoneId"
+      ],
+      "covered": [
+        "SubnetId",
+        "SubnetName",
+        "VpdId",
+        "ZoneId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "vcc",
+      "binding": "add_grant",
+      "api": "CreateVccGrantRule",
+      "parameters": [
+        "ErId",
+        "GrantTenantId",
+        "InstanceId",
+        "RegionId"
+      ],
+      "covered": [
+        "ErId",
+        "GrantTenantId",
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "vcc",
+      "binding": "add_route",
+      "api": "CreateVccRouteEntry",
+      "parameters": [
+        "DestinationCidrBlock",
+        "RegionId",
+        "VccId"
+      ],
+      "covered": [
+        "DestinationCidrBlock",
+        "VccId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "vcc",
+      "binding": "create_to_available",
+      "api": "CreateVcc",
+      "parameters": [
+        "AccessCouldService",
+        "Bandwidth",
+        "BgpAsn",
+        "BgpCidr",
+        "CenId",
+        "CenOwnerId",
+        "ConnectionType",
+        "Description",
+        "RegionId",
+        "ResourceGroupId",
+        "Tag.Key",
+        "Tag.Value",
+        "VSwitchId",
+        "VccId",
+        "VccName",
+        "VpcId",
+        "VpdId",
+        "ZoneId"
+      ],
+      "covered": [
+        "AccessCouldService",
+        "Bandwidth",
+        "BgpAsn",
+        "BgpCidr",
+        "CenId",
+        "CenOwnerId",
+        "ConnectionType",
+        "Description",
+        "ResourceGroupId",
+        "Tag.Key",
+        "Tag.Value",
+        "VSwitchId",
+        "VccName",
+        "VpcId",
+        "VpdId",
+        "ZoneId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "vcc",
+      "binding": "delete_to_absent",
+      "api": "RefundVcc",
+      "parameters": [
+        "RegionId",
+        "VccId"
+      ],
+      "covered": [
+        "VccId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "vcc",
+      "binding": "remove_grant",
+      "api": "DeleteVccGrantRule",
+      "parameters": [
+        "ErId",
+        "GrantRuleId",
+        "InstanceId",
+        "RegionId"
+      ],
+      "covered": [
+        "ErId",
+        "GrantRuleId",
+        "InstanceId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "vcc",
+      "binding": "remove_route",
+      "api": "DeleteVccRouteEntry",
+      "parameters": [
+        "DestinationCidrBlock",
+        "RegionId",
+        "VccId",
+        "VccRouteEntryId"
+      ],
+      "covered": [
+        "DestinationCidrBlock",
+        "VccId",
+        "VccRouteEntryId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "vcc",
+      "binding": "update_attributes",
+      "api": "UpdateVcc",
+      "parameters": [
+        "Bandwidth",
+        "OrderId",
+        "RegionId",
+        "VccId",
+        "VccName"
+      ],
+      "covered": [
+        "Bandwidth",
+        "OrderId",
+        "VccId",
+        "VccName"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "vpd",
+      "binding": "associate_cidr",
+      "api": "AssociateVpdCidrBlock",
+      "parameters": [
+        "RegionId",
+        "SecondaryCidrBlock",
+        "VpdId"
+      ],
+      "covered": [
+        "SecondaryCidrBlock",
+        "VpdId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "vpd",
+      "binding": "create_vpd",
+      "api": "CreateVpd",
+      "parameters": [
+        "Cidr",
+        "RegionId",
+        "ResourceGroupId",
+        "Subnets.Cidr",
+        "Subnets.RegionId",
+        "Subnets.SubnetName",
+        "Subnets.Type",
+        "Subnets.ZoneId",
+        "Tag.Key",
+        "Tag.Value",
+        "VpdName"
+      ],
+      "covered": [
+        "Cidr",
+        "ResourceGroupId",
+        "Subnets.Cidr",
+        "Subnets.RegionId",
+        "Subnets.SubnetName",
+        "Subnets.Type",
+        "Subnets.ZoneId",
+        "Tag",
+        "VpdName"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "vpd",
+      "binding": "delete_vpd",
+      "api": "DeleteVpd",
+      "parameters": [
+        "RegionId",
+        "VpdId"
+      ],
+      "covered": [
+        "VpdId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "vpd",
+      "binding": "unassociate_cidr",
+      "api": "UnAssociateVpdCidrBlock",
+      "parameters": [
+        "RegionId",
+        "SecondaryCidrBlock",
+        "VpdId"
+      ],
+      "covered": [
+        "SecondaryCidrBlock",
+        "VpdId"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "vpd",
+      "binding": "update_vpd",
+      "api": "UpdateVpd",
+      "parameters": [
+        "RegionId",
+        "VpdId",
+        "VpdName"
+      ],
+      "covered": [
+        "VpdId",
+        "VpdName"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "vsc",
+      "binding": "create_vsc",
+      "api": "CreateVsc",
+      "parameters": [
+        "ClientToken",
+        "NodeId",
+        "ResourceGroupId",
+        "Tag.Key",
+        "Tag.Value",
+        "VscName",
+        "VscType"
+      ],
+      "covered": [
+        "NodeId",
+        "ResourceGroupId",
+        "Tag",
+        "VscName",
+        "VscType"
+      ]
+    },
+    {
+      "product": "lingjun",
+      "resource": "vsc",
+      "binding": "delete_vsc",
+      "api": "DeleteVsc",
+      "parameters": [
+        "ClientToken",
+        "VscId"
+      ],
+      "covered": [
+        "VscId"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "admin-setting",
+      "binding": "update_setting",
+      "api": "UpdateResourceGroupAdminSetting",
+      "parameters": [
+        "CreatorAsAdmin"
+      ],
+      "covered": [
+        "CreatorAsAdmin"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "associated-transfer",
+      "binding": "disable_transfer",
+      "api": "DisableAssociatedTransfer",
+      "parameters": [],
+      "covered": []
+    },
+    {
+      "product": "rg",
+      "resource": "associated-transfer",
+      "binding": "enable_transfer",
+      "api": "EnableAssociatedTransfer",
+      "parameters": [],
+      "covered": []
+    },
+    {
+      "product": "rg",
+      "resource": "associated-transfer",
+      "binding": "update_setting",
+      "api": "UpdateAssociatedTransferSetting",
+      "parameters": [
+        "EnableExistingResourcesTransfer",
+        "RuleSettings"
+      ],
+      "covered": [
+        "EnableExistingResourcesTransfer",
+        "RuleSettings.AssociatedResourceType",
+        "RuleSettings.AssociatedService",
+        "RuleSettings.MasterResourceType",
+        "RuleSettings.MasterService",
+        "RuleSettings.Status"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "group",
+      "binding": "create_group",
+      "api": "CreateResourceGroup",
+      "parameters": [
+        "DisplayName",
+        "Name",
+        "Tag"
+      ],
+      "covered": [
+        "DisplayName",
+        "Name",
+        "Tag"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "group",
+      "binding": "delete_group",
+      "api": "DeleteResourceGroup",
+      "parameters": [
+        "ResourceGroupId"
+      ],
+      "covered": [
+        "ResourceGroupId"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "group",
+      "binding": "update_group",
+      "api": "UpdateResourceGroup",
+      "parameters": [
+        "NewDisplayName",
+        "ResourceGroupId"
+      ],
+      "covered": [
+        "NewDisplayName",
+        "ResourceGroupId"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "notification",
+      "binding": "disable_notification",
+      "api": "DisableResourceGroupNotification",
+      "parameters": [],
+      "covered": []
+    },
+    {
+      "product": "rg",
+      "resource": "notification",
+      "binding": "enable_notification",
+      "api": "EnableResourceGroupNotification",
+      "parameters": [],
+      "covered": []
+    },
+    {
+      "product": "rg",
+      "resource": "policy",
+      "binding": "attach_policy",
+      "api": "AttachPolicy",
+      "parameters": [
+        "PolicyName",
+        "PolicyType",
+        "PrincipalName",
+        "PrincipalType",
+        "ResourceGroupId"
+      ],
+      "covered": [
+        "PolicyName",
+        "PolicyType",
+        "PrincipalName",
+        "PrincipalType",
+        "ResourceGroupId"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "policy",
+      "binding": "create_policy",
+      "api": "CreatePolicy",
+      "parameters": [
+        "Description",
+        "PolicyDocument",
+        "PolicyName"
+      ],
+      "covered": [
+        "Description",
+        "PolicyDocument",
+        "PolicyName"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "policy",
+      "binding": "delete_policy",
+      "api": "DeletePolicy",
+      "parameters": [
+        "PolicyName"
+      ],
+      "covered": [
+        "PolicyName"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "policy",
+      "binding": "detach_policy",
+      "api": "DetachPolicy",
+      "parameters": [
+        "PolicyName",
+        "PolicyType",
+        "PrincipalName",
+        "PrincipalType",
+        "ResourceGroupId"
+      ],
+      "covered": [
+        "PolicyName",
+        "PolicyType",
+        "PrincipalName",
+        "PrincipalType",
+        "ResourceGroupId"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "resource",
+      "binding": "move_resources",
+      "api": "MoveResources",
+      "parameters": [
+        "ResourceGroupId",
+        "Resources"
+      ],
+      "covered": [
+        "ResourceGroupId",
+        "Resources.RegionId",
+        "Resources.ResourceId",
+        "Resources.ResourceType",
+        "Resources.Service"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "role",
+      "binding": "create_role",
+      "api": "CreateRole",
+      "parameters": [
+        "AssumeRolePolicyDocument",
+        "Description",
+        "MaxSessionDuration",
+        "RoleName"
+      ],
+      "covered": [
+        "AssumeRolePolicyDocument",
+        "Description",
+        "MaxSessionDuration",
+        "RoleName"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "role",
+      "binding": "delete_role",
+      "api": "DeleteRole",
+      "parameters": [
+        "RoleName"
+      ],
+      "covered": [
+        "RoleName"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "role",
+      "binding": "update_role",
+      "api": "UpdateRole",
+      "parameters": [
+        "NewAssumeRolePolicyDocument",
+        "NewDescription",
+        "NewMaxSessionDuration",
+        "RoleName"
+      ],
+      "covered": [
+        "NewAssumeRolePolicyDocument",
+        "NewDescription",
+        "NewMaxSessionDuration",
+        "RoleName"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "service-linked-role",
+      "binding": "create_role",
+      "api": "CreateServiceLinkedRole",
+      "parameters": [
+        "CustomSuffix",
+        "Description",
+        "ServiceName"
+      ],
+      "covered": [
+        "CustomSuffix",
+        "Description",
+        "ServiceName"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "service-linked-role",
+      "binding": "delete_role",
+      "api": "DeleteServiceLinkedRole",
+      "parameters": [
+        "RoleName"
+      ],
+      "covered": [
+        "RoleName"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "version",
+      "binding": "create_version",
+      "api": "CreatePolicyVersion",
+      "parameters": [
+        "PolicyDocument",
+        "PolicyName",
+        "SetAsDefault"
+      ],
+      "covered": [
+        "PolicyDocument",
+        "PolicyName",
+        "SetAsDefault"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "version",
+      "binding": "delete_version",
+      "api": "DeletePolicyVersion",
+      "parameters": [
+        "PolicyName",
+        "VersionId"
+      ],
+      "covered": [
+        "PolicyName",
+        "VersionId"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "version",
+      "binding": "restore_default",
+      "api": "SetDefaultPolicyVersion",
+      "parameters": [
+        "PolicyName",
+        "VersionId"
+      ],
+      "covered": [
+        "PolicyName",
+        "VersionId"
+      ]
+    },
+    {
+      "product": "rg",
+      "resource": "version",
+      "binding": "set_default",
+      "api": "SetDefaultPolicyVersion",
+      "parameters": [
+        "PolicyName",
+        "VersionId"
+      ],
+      "covered": [
+        "PolicyName",
+        "VersionId"
+      ]
+    },
+    {
+      "product": "tag",
+      "resource": "associated-resource-rule",
+      "binding": "create_rule",
+      "api": "CreateAssociatedResourceRules",
+      "parameters": [
+        "CreateRulesList.ExistingStatus",
+        "CreateRulesList.SettingName",
+        "CreateRulesList.Status",
+        "CreateRulesList.TagKeys",
+        "RegionId"
+      ],
+      "covered": [
+        "CreateRulesList.ExistingStatus",
+        "CreateRulesList.SettingName",
+        "CreateRulesList.Status",
+        "CreateRulesList.TagKeys"
+      ]
+    },
+    {
+      "product": "tag",
+      "resource": "associated-resource-rule",
+      "binding": "delete_rule",
+      "api": "DeleteAssociatedResourceRule",
+      "parameters": [
+        "RegionId",
+        "SettingName"
+      ],
+      "covered": [
+        "SettingName"
+      ]
+    },
+    {
+      "product": "tag",
+      "resource": "associated-resource-rule",
+      "binding": "update_rule",
+      "api": "UpdateAssociatedResourceRule",
+      "parameters": [
+        "ExistingStatus",
+        "RegionId",
+        "SettingName",
+        "Status",
+        "TagKeys"
+      ],
+      "covered": [
+        "ExistingStatus",
+        "SettingName",
+        "Status",
+        "TagKeys"
+      ]
+    },
+    {
+      "product": "tag",
+      "resource": "policy",
+      "binding": "attach_policy",
+      "api": "AttachPolicy",
+      "parameters": [
+        "PolicyId",
+        "RegionId",
+        "TargetId",
+        "TargetType"
+      ],
+      "covered": [
+        "PolicyId",
+        "TargetId",
+        "TargetType"
+      ]
+    },
+    {
+      "product": "tag",
+      "resource": "policy",
+      "binding": "create_policy",
+      "api": "CreatePolicy",
+      "parameters": [
+        "DryRun",
+        "PolicyContent",
+        "PolicyDesc",
+        "PolicyName",
+        "RegionId",
+        "UserType"
+      ],
+      "covered": [
+        "DryRun",
+        "PolicyContent",
+        "PolicyDesc",
+        "PolicyName",
+        "UserType"
+      ]
+    },
+    {
+      "product": "tag",
+      "resource": "policy",
+      "binding": "delete_policy",
+      "api": "DeletePolicy",
+      "parameters": [
+        "PolicyId",
+        "RegionId"
+      ],
+      "covered": [
+        "PolicyId"
+      ]
+    },
+    {
+      "product": "tag",
+      "resource": "policy",
+      "binding": "detach_policy",
+      "api": "DetachPolicy",
+      "parameters": [
+        "PolicyId",
+        "RegionId",
+        "TargetId",
+        "TargetType"
+      ],
+      "covered": [
+        "PolicyId",
+        "TargetId",
+        "TargetType"
+      ]
+    },
+    {
+      "product": "tag",
+      "resource": "policy",
+      "binding": "update_policy",
+      "api": "ModifyPolicy",
+      "parameters": [
+        "DryRun",
+        "PolicyContent",
+        "PolicyDesc",
+        "PolicyId",
+        "PolicyName",
+        "RegionId"
+      ],
+      "covered": [
+        "DryRun",
+        "PolicyContent",
+        "PolicyDesc",
+        "PolicyId",
+        "PolicyName"
+      ]
+    },
+    {
+      "product": "tag",
+      "resource": "resource",
+      "binding": "apply_tags",
+      "api": "TagResources",
+      "parameters": [
+        "RegionId",
+        "ResourceARN",
+        "Tags"
+      ],
+      "covered": [
+        "ResourceARN",
+        "Tags"
+      ]
+    },
+    {
+      "product": "tag",
+      "resource": "resource",
+      "binding": "remove_tags",
+      "api": "UntagResources",
+      "parameters": [
+        "RegionId",
+        "ResourceARN",
+        "TagKey"
+      ],
+      "covered": [
+        "ResourceARN",
+        "TagKey"
+      ]
+    },
+    {
+      "product": "vpc",
+      "resource": "vpc",
+      "binding": "create_to_available",
+      "api": "CreateVpc",
+      "parameters": [
+        "CidrBlock",
+        "ClientToken",
+        "Description",
+        "DryRun",
+        "EnableDnsHostname",
+        "EnableIpv6",
+        "Ipv4CidrMask",
+        "Ipv4IpamPoolId",
+        "Ipv6CidrBlock",
+        "Ipv6CidrMask",
+        "Ipv6IpamPoolId",
+        "Ipv6Isp",
+        "RegionId",
+        "ResourceGroupId",
+        "Tag.Key",
+        "Tag.Value",
+        "UserCidr",
+        "VpcName"
+      ],
+      "covered": [
+        "CidrBlock",
+        "Description",
+        "DryRun",
+        "EnableDnsHostname",
+        "EnableIpv6",
+        "Ipv4CidrMask",
+        "Ipv4IpamPoolId",
+        "Ipv6CidrBlock",
+        "Ipv6CidrMask",
+        "Ipv6IpamPoolId",
+        "Ipv6Isp",
+        "ResourceGroupId",
+        "Tag",
+        "UserCidr",
+        "VpcName"
+      ]
+    },
+    {
+      "product": "vpc",
+      "resource": "vpc",
+      "binding": "delete_to_absent",
+      "api": "DeleteVpc",
+      "parameters": [
+        "ClientToken",
+        "DryRun",
+        "ForceDelete",
+        "RegionId",
+        "VpcId"
+      ],
+      "covered": [
+        "DryRun",
+        "ForceDelete",
+        "VpcId"
+      ]
+    },
+    {
+      "product": "vpc",
+      "resource": "vpc",
+      "binding": "update_attributes",
+      "api": "ModifyVpcAttribute",
+      "parameters": [
+        "CidrBlock",
+        "Description",
+        "EnableDnsHostname",
+        "EnableIPv6",
+        "Ipv6CidrBlock",
+        "Ipv6Isp",
+        "RegionId",
+        "VpcId",
+        "VpcName"
+      ],
+      "covered": [
+        "CidrBlock",
+        "Description",
+        "EnableDnsHostname",
+        "EnableIPv6",
+        "Ipv6CidrBlock",
+        "Ipv6Isp",
+        "VpcId",
+        "VpcName"
+      ]
+    },
+    {
+      "product": "vpc",
+      "resource": "vswitch",
+      "binding": "create_to_available",
+      "api": "CreateVSwitch",
+      "parameters": [
+        "CidrBlock",
+        "ClientToken",
+        "Description",
+        "Ipv6CidrBlock",
+        "RegionId",
+        "Tag.Key",
+        "Tag.Value",
+        "VSwitchName",
+        "VpcId",
+        "VpcIpv6CidrBlock",
+        "ZoneId"
+      ],
+      "covered": [
+        "CidrBlock",
+        "Description",
+        "Ipv6CidrBlock",
+        "Tag",
+        "VSwitchName",
+        "VpcId",
+        "VpcIpv6CidrBlock",
+        "ZoneId"
+      ]
+    },
+    {
+      "product": "vpc",
+      "resource": "vswitch",
+      "binding": "delete_to_absent",
+      "api": "DeleteVSwitch",
+      "parameters": [
+        "DryRun",
+        "RegionId",
+        "VSwitchId"
+      ],
+      "covered": [
+        "DryRun",
+        "VSwitchId"
+      ]
+    },
+    {
+      "product": "vpc",
+      "resource": "vswitch",
+      "binding": "update_attributes",
+      "api": "ModifyVSwitchAttribute",
+      "parameters": [
+        "Description",
+        "EnableIPv6",
+        "Ipv6CidrBlock",
+        "RegionId",
+        "VSwitchId",
+        "VSwitchName",
+        "VpcIpv6CidrBlock"
+      ],
+      "covered": [
+        "Description",
+        "EnableIPv6",
+        "Ipv6CidrBlock",
+        "VSwitchId",
+        "VSwitchName",
+        "VpcIpv6CidrBlock"
+      ]
+    }
+  ]
+}

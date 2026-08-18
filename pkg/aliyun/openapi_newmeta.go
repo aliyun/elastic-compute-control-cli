@@ -48,12 +48,15 @@ type openAPINewDetail struct {
 }
 
 type openAPINewRequestParameter struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Position    string `json:"position"`
-	Type        string `json:"type"`
-	Required    bool   `json:"required"`
+	Name          string                       `json:"name"`
+	Description   string                       `json:"description"`
+	Position      string                       `json:"position"`
+	Type          string                       `json:"type"`
+	Required      bool                         `json:"required"`
+	SubParameters []openAPINewRequestParameter `json:"sub_parameters,omitempty"`
 }
+
+type openAPINewMetadataReader func(language string, path string) ([]byte, error)
 
 func readOpenAPINewAPI(language string, code string, name string) (*openAPINewAPI, error) {
 	content, err := readOpenAPINewMetadata(language, "/"+strings.ToLower(code)+"/version.json")
@@ -72,7 +75,11 @@ func readOpenAPINewAPI(language string, code string, name string) (*openAPINewAP
 }
 
 func readOpenAPINewAPIDetail(language string, code string, name string) (*openAPINewDetail, error) {
-	content, err := readOpenAPINewMetadata(language, "/"+strings.ToLower(code)+"/"+name+".json")
+	return readOpenAPINewAPIDetailWithReader(language, code, name, readOpenAPINewMetadata)
+}
+
+func readOpenAPINewAPIDetailWithReader(language string, code string, name string, read openAPINewMetadataReader) (*openAPINewDetail, error) {
+	content, err := read(language, "/"+strings.ToLower(code)+"/"+name+".json")
 	if err != nil {
 		return nil, err
 	}

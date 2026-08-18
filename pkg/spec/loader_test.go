@@ -1654,47 +1654,6 @@ func TestLoadECSInstanceResourceLifecycleSpec(t *testing.T) {
 	}
 }
 
-func TestECSInstanceCreateCoversRunInstancesParameters(t *testing.T) {
-	loaded, err := LoadFile("../../specs/ecs/instance.yaml")
-	if err != nil {
-		t.Fatalf("LoadFile: %v", err)
-	}
-	create := loaded.Bindings["create_to_running"]
-	covered := bindingRequestCoverage(create.Request)
-	for _, name := range []string{
-		"Affinity", "Amount", "Arn.AssumeRoleFor", "Arn.RoleType", "Arn.Rolearn", "AutoPay", "AutoReleaseTime", "AutoRenew", "AutoRenewPeriod",
-		"ClockOptions", "CpuOptions.Core", "CpuOptions.Numa", "CpuOptions.ThreadsPerCore", "CpuOptions.TopologyType",
-		"CreditSpecification", "DataDisk.AutoSnapshotPolicyId", "DataDisk.BurstingEnabled", "DataDisk.Category",
-		"DataDisk.DeleteWithInstance", "DataDisk.Description", "DataDisk.Device", "DataDisk.DiskName",
-		"DataDisk.EncryptAlgorithm", "DataDisk.Encrypted", "DataDisk.KMSKeyId", "DataDisk.PerformanceLevel",
-		"DataDisk.ProvisionedIops", "DataDisk.Size", "DataDisk.SnapshotId", "DataDisk.StorageClusterId",
-		"DedicatedHostId", "DeletionProtection", "DeploymentSetGroupNo", "DeploymentSetId", "Description", "DryRun",
-		"HibernationOptions.Configured", "HostName", "HostNames", "HpcClusterId", "HttpEndpoint",
-		"HttpPutResponseHopLimit", "HttpTokens", "ImageFamily", "ImageId", "ImageOptions", "InstanceChargeType",
-		"InstanceName", "InstanceType", "InternetChargeType", "InternetMaxBandwidthIn", "InternetMaxBandwidthOut",
-		"IoOptimized", "Ipv6Address", "Ipv6AddressCount", "Isp", "KeyPairName", "LaunchTemplateId",
-		"LaunchTemplateName", "LaunchTemplateVersion", "MinAmount", "NetworkInterface.DeleteOnRelease",
-		"NetworkInterface.Description", "NetworkInterface.InstanceType", "NetworkInterface.Ipv6Address",
-		"NetworkInterface.Ipv6AddressCount", "NetworkInterface.NetworkCardIndex", "NetworkInterface.NetworkInterfaceId",
-		"NetworkInterface.NetworkInterfaceName", "NetworkInterface.NetworkInterfaceTrafficMode",
-		"NetworkInterface.PrimaryIpAddress", "NetworkInterface.QueueNumber", "NetworkInterface.QueuePairNumber",
-		"NetworkInterface.RxQueueSize", "NetworkInterface.SecondaryPrivateIpAddressCount", "NetworkInterface.SecurityGroupId",
-		"NetworkInterface.SecurityGroupIds", "NetworkInterface.SourceDestCheck", "NetworkInterface.TxQueueSize",
-		"NetworkInterface.VSwitchId", "NetworkInterfaceQueueNumber", "NetworkOptions", "Password", "PasswordInherit",
-		"Period", "PeriodUnit", "PrivateDnsNameOptions", "PrivateIpAddress", "PrivatePoolOptions.Id",
-		"PrivatePoolOptions.MatchCriteria", "RamRoleName", "ResourceGroupId", "SchedulerOptions.DedicatedHostClusterId",
-		"SecurityEnhancementStrategy", "SecurityGroupId", "SecurityGroupIds",
-		"SecurityOptions.ConfidentialComputingMode", "SecurityOptions.TrustedSystemMode", "SpotDuration",
-		"SpotInterruptionBehavior", "SpotPriceLimit", "SpotStrategy", "StorageSetId", "StorageSetPartitionNumber",
-		"SystemDisk.AutoSnapshotPolicyId", "SystemDisk.Category", "SystemDisk.Description", "SystemDisk.DiskName",
-		"SystemDisk.PerformanceLevel", "SystemDisk.Size", "Tag", "Tenancy", "UniqueSuffix", "UserData", "VSwitchId", "ZoneId",
-	} {
-		if !covered[name] {
-			t.Fatalf("RunInstances parameter %s is not covered by ecs instance create", name)
-		}
-	}
-}
-
 func TestBuiltInListAndGetProbesCoverQueryResponseResourceFields(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -2043,45 +2002,6 @@ func operationFieldPositionalMany(fields OperationFields, name string) bool {
 		}
 	}
 	return false
-}
-
-func bindingRequestCoverage(request map[string]any) map[string]bool {
-	covered := map[string]bool{}
-	collectBindingRequestCoverage(covered, "", request)
-	return covered
-}
-
-func collectBindingRequestCoverage(covered map[string]bool, prefix string, request map[string]any) {
-	for key, value := range request {
-		if key == "capture" || key == "raw" {
-			continue
-		}
-		nextPrefix := key
-		if prefix != "" {
-			nextPrefix = prefix + "." + key
-		}
-		node, ok := value.(map[string]any)
-		if !ok {
-			covered[nextPrefix] = true
-			continue
-		}
-		if _, ok := node["raw"]; ok {
-			continue
-		}
-		if fields, ok := node["fields"].(map[string]any); ok {
-			collectBindingRequestCoverage(covered, nextPrefix, fields)
-			continue
-		}
-		if _, ok := node["from"]; ok {
-			covered[nextPrefix] = true
-			continue
-		}
-		if _, ok := node["each"]; ok {
-			covered[nextPrefix] = true
-			continue
-		}
-		collectBindingRequestCoverage(covered, nextPrefix, node)
-	}
 }
 
 func hasLocalizedText(text LocalizedText) bool {

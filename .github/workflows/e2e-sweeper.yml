@@ -19,11 +19,6 @@ on:
         description: "Optional single-region override; empty uses e2e.yaml candidates"
         default: ""
 
-permissions:
-  id-token: write
-  contents: read
-  actions: read # read run status for --mode finished-run
-
 concurrency:
   group: ecctl-e2e-live
   cancel-in-progress: false
@@ -34,14 +29,18 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
-    environment: live-e2e
+    environment: live-e2e-sweeper
     timeout-minutes: 120
+    permissions:
+      id-token: write # mint the GitHub OIDC token only for this job
+      contents: read
+      actions: read # read run status for --mode finished-run
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.repository.default_branch }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
 
@@ -52,11 +51,13 @@ jobs:
           echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
 
       - name: configure Alibaba Cloud credentials (OIDC)
-        uses: aliyun/configure-aliyun-credentials-action@v1
+        uses: aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6 # v1.1.0
         with:
-          role-to-assume: acs:ram::${{ vars.ALI_ACCOUNT_ID }}:role/ecctl-e2e-ci
+          role-to-assume: acs:ram::${{ vars.ALI_ACCOUNT_ID }}:role/ecctl-e2e-sweeper-ci
           oidc-provider-arn: acs:ram::${{ vars.ALI_ACCOUNT_ID }}:oidc-provider/github-actions
           audience: sts.aliyuncs.com
+          role-session-name: ecctl-sweeper-${{ github.run_id }}-${{ github.run_attempt }}
+          role-session-expiration: 7200 # no longer than the 2h job timeout
 
       - name: check sweep config
         working-directory: e2e
@@ -94,7 +95,7 @@ jobs:
           done
 
       - name: Upload sweeper reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: e2e-sweeper-reports
