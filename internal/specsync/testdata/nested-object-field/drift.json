@@ -1,0 +1,18 @@
+{
+  "language": "en",
+  "bindings_checked": 1,
+  "items": [
+    {
+      "product": "fake",
+      "resource": "fakeres",
+      "binding": "create_fakeres",
+      "api": "CreateFakeres",
+      "param": "ClockOptions.Enabled",
+      "kind": "missing",
+      "type": "Boolean",
+      "required": false,
+      "position": "Query",
+      "description": "Enable clock options."
+    }
+  ]
+}

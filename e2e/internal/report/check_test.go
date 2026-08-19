@@ -70,6 +70,30 @@ func TestCheckFileRejectsFailedOrErroredReport(t *testing.T) {
 	}
 }
 
+func TestCheckFileRejectsZeroCases(t *testing.T) {
+	path := writeReportFixture(t, Run{
+		RunID:  "run-empty",
+		Region: "cn-test",
+		Summary: Summary{
+			Cases:  0,
+			Passed: 0,
+			Failed: 0,
+		},
+		Cases: []Case{},
+	})
+
+	rep, err := CheckFile(path, CheckOptions{Failed: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasReportCheckCode(rep, "zero_cases") {
+		t.Fatalf("expected zero_cases, got %+v", rep.Errors)
+	}
+	if rep.Invalid != 1 {
+		t.Fatalf("invalid = %d, want 1", rep.Invalid)
+	}
+}
+
 func TestRedactScrubsRegionAttemptReasons(t *testing.T) {
 	run := Run{
 		RegionAttempts: []RegionAttempt{{Reason: "AccessKeyId=ak Secret=sk token=abc"}},

@@ -1,0 +1,187 @@
+name: api-sync
+
+# Report-only OpenAPI drift monitor.
+#
+# This workflow intentionally does not modify repository files, create a
+# branch or pull request, or obtain cloud credentials. Mechanical adaptation
+# remains an explicit maintainer action through `specdrift sync` so canonical
+# resource specs, lifecycle cases, fixtures, and cleanup evidence stay under
+# review.
+
+on:
+  schedule:
+    - cron: "17 2 * * 1"
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "go.mod"
+      - "go.sum"
+      - "drift-baseline.json"
+      - "specs/**"
+      - "cmd/specdrift/**"
+      - "internal/drift/**"
+      - "internal/specsync/**"
+
+concurrency:
+  group: api-sync-plan
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    name: detect and report
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: refresh OpenAPI metadata in the isolated runner
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          go get github.com/aliyun/aliyun-openapi-meta@latest
+          go mod tidy
+          version=$(go list -m -f '{{.Version}}' github.com/aliyun/aliyun-openapi-meta)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          git diff -- go.mod go.sum > metadata-dependency.patch
+
+      - name: build specdrift
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bin
+          go build -o bin/specdrift ./cmd/specdrift
+
+      - name: detect drift
+        id: detect
+        shell: bash
+        run: |
+          set +e
+          bin/specdrift detect \
+            -spec-dir specs \
+            -baseline drift-baseline.json \
+            -format json \
+            -check > drift.json 2> drift.err
+          code=$?
+          set -e
+          case "$code" in
+            0)
+              echo "has_drift=false" >> "$GITHUB_OUTPUT"
+              ;;
+            1)
+              echo "has_drift=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              cat drift.err >&2
+              exit "$code"
+              ;;
+          esac
+
+      - name: build dry-run sync plan and bounded issue body
+        if: steps.detect.outputs.has_drift == 'true'
+        env:
+          METADATA_VERSION: ${{ steps.metadata.outputs.version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin/specdrift sync \
+            -drift drift.json \
+            -spec-dir specs \
+            -dry-run \
+            -plan-out drift-plan.json > specsync.patch
+          bin/specdrift render \
+            -input drift.json \
+            -plan drift-plan.json \
+            -format markdown \
+            -limit 50 > issue.md
+          printf '\n- metadata module: %s\n' "$METADATA_VERSION" >> issue.md
+          printf -- '- workflow run: %s\n' "$RUN_URL" >> issue.md
+
+      - name: upload complete drift evidence
+        if: always() && steps.detect.outputs.has_drift == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: api-sync-drift-${{ github.run_id }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            drift.json
+            drift.err
+            drift-plan.json
+            metadata-dependency.patch
+            specsync.patch
+
+      - name: upsert drift monitor issue
+        if: always() && steps.detect.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HAS_DRIFT: ${{ steps.detect.outputs.has_drift }}
+          METADATA_VERSION: ${{ steps.metadata.outputs.version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="OpenAPI drift monitor"
+          marker="<!-- ecctl-openapi-drift -->"
+          issues=$(gh issue list \
+            --state all \
+            --search '"OpenAPI drift monitor" in:title' \
+            --limit 20 \
+            --json number,title,state,body)
+          number=$(jq -r \
+            --arg title "$title" \
+            --arg marker "$marker" \
+            '[.[] | select(.title == $title and ((.body // "") | contains($marker)))] | sort_by(.number) | last | .number // empty' \
+            <<< "$issues")
+          state=$(jq -r \
+            --argjson number "${number:-0}" \
+            '[.[] | select(.number == $number)] | first | .state // empty' \
+            <<< "$issues")
+
+          if [ "$HAS_DRIFT" = "true" ]; then
+            if ! grep -qF "$marker" issue.md 2>/dev/null; then
+              {
+                printf '%s\n\n' "$marker"
+                printf '# OpenAPI drift monitor\n\n'
+                printf 'Drift detection succeeded, but dry-run planning or bounded rendering failed.\n\n'
+                printf -- '- metadata module: %s\n' "$METADATA_VERSION"
+                printf -- '- workflow run: %s\n' "$RUN_URL"
+                printf '\nDownload the workflow artifact for the complete drift.json and available diagnostics.\n'
+              } > issue.md
+            fi
+            cat issue.md >> "$GITHUB_STEP_SUMMARY"
+            if [ -z "$number" ]; then
+              gh issue create --title "$title" --body-file issue.md
+            else
+              if [ "$state" = "CLOSED" ]; then
+                gh issue reopen "$number"
+              fi
+              gh issue edit "$number" --title "$title" --body-file issue.md
+            fi
+          elif [ -n "$number" ] && [ "$state" = "OPEN" ]; then
+            gh issue comment "$number" \
+              --body "Resolved against aliyun-openapi-meta ${METADATA_VERSION} in run ${RUN_URL}."
+            gh issue close "$number" --reason completed
+          else
+            echo "No OpenAPI drift and no open monitor issue." >> "$GITHUB_STEP_SUMMARY"
+          fi

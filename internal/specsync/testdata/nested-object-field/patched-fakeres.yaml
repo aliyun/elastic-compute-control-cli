@@ -1,0 +1,39 @@
+schema_version: 2
+product: fake
+resource: fakeres
+kind: regional
+schema:
+  fields:
+    id:
+      type: string
+    clock_options:
+      type: object
+      description:
+        en: Clock options.
+      fields:
+        hour:
+          type: string
+        enabled:
+          type: boolean
+          description: 'Enable clock options.'
+bindings:
+  create_fakeres:
+    api: CreateFakeres
+    request:
+      RegionId: $context.region
+      ClockOptions:
+        from: $.clock_options
+        fields:
+          Hour: $.hour
+          Enabled: $.enabled
+      ApiParam:
+        raw: $.api_param
+operations:
+  create:
+    input:
+      fields:
+        - id
+        - clock_options:
+            brief: false
+    workflow:
+      - binding: create_fakeres

@@ -44,6 +44,9 @@ func CheckRun(run *Run, opts CheckOptions) *CheckReport {
 		Failed:  run.Summary.Failed,
 		Skipped: run.Summary.Skipped,
 	}
+	if run.Summary.Cases == 0 {
+		rep.add("", "zero_cases", "report contains zero cases; a vacuous run must not pass")
+	}
 	if run.Summary.Failed > opts.Failed {
 		rep.add("", "too_many_failed", fmt.Sprintf("summary failed=%d exceeds allowed %d", run.Summary.Failed, opts.Failed))
 	}

@@ -744,3 +744,50 @@ loader 必须校验：
 - schema/control field 只能使用支持的类型。
 - `array` 必须有 `items`。
 - `object.fields` 中的子字段必须递归通过 schema 校验。
+
+## 18. OpenAPI drift 处理流程
+
+`.github/workflows/api-sync.yml` 只负责在隔离 runner 中刷新
+`aliyun-openapi-meta`、检测 drift，并维护一个有界的 GitHub issue。它不会修改
+仓库、刷新 baseline、创建分支或 PR，也不会获得云凭证。完整 `drift.json`、
+dry-run patch 和同步计划作为 workflow artifact 保存；issue 只展示前 50 项。
+
+维护者在独立 worktree 中处理 drift：
+
+```bash
+make specdrift
+bin/specdrift detect \
+  -spec-dir specs \
+  -baseline drift-baseline.json \
+  -format json \
+  -check > drift.json
+
+bin/specdrift sync \
+  -drift drift.json \
+  -spec-dir specs \
+  -dry-run \
+  -plan-out drift-plan.json
+```
+
+`detect -check` 发现 drift 时退出码为 `1`，但 `drift.json` 仍是后续同步的完整输入。
+先审阅 dry-run；确认所有 `patched` 项都属于纯请求映射后，才改用 `-write`。
+`required` 参数、复合类型、enum、名称到 ID、计费/权限字段、新父级结构和规范化
+重名都必须保持 `flagged`，由维护者手工建模。
+
+自动 patch 不生成 E2E case。资源验证必须修改现有的
+`e2e/cases/<product>/<resource>-lifecycle.yaml`：复用真实 fixture，传入规范的
+kebab-case flag，独立回读新增字段，并保留 teardown、cleanup journal 与 sweeper
+覆盖。一个资源仍只能有一个 canonical lifecycle case。
+
+只有旧 baseline 下重新执行 `detect -check` 已经得到零 missing、removed、
+uncovered、skipped 和 baseline gap 后，才允许执行：
+
+```bash
+bin/specdrift baseline -spec-dir specs
+make generate
+make lint
+make test
+make -C e2e lint
+```
+
+baseline 表示已经解决并接受的完整状态，不能用来隐藏 deferred 或 flagged drift。

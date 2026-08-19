@@ -1,0 +1,18 @@
+{
+  "language": "en",
+  "bindings_checked": 1,
+  "items": [
+    {
+      "product": "fake",
+      "resource": "fakeres",
+      "binding": "create_fakeres",
+      "api": "CreateFakeres",
+      "param": "Name",
+      "kind": "missing",
+      "type": "String",
+      "required": false,
+      "position": "Query",
+      "description": "The name of the resource."
+    }
+  ]
+}

@@ -9,63 +9,175 @@ import (
 	"text/tabwriter"
 
 	"github.com/aliyun/elastic-compute-control-cli/internal/drift"
+	"github.com/aliyun/elastic-compute-control-cli/internal/specsync"
 )
 
 func main() {
-	specDir := flag.String("spec-dir", "specs", "path to spec YAML directory")
-	baselinePath := flag.String("baseline", "drift-baseline.json", "path to the drift baseline file")
-	lang := flag.String("lang", "en", "OpenAPI metadata language for descriptions")
-	format := flag.String("format", "table", "output format: table or json")
-	check := flag.Bool("check", false, "exit non-zero on unacknowledged OpenAPI metadata or binding coverage drift")
-	writeBaseline := flag.Bool("write-baseline", false, "record the current OpenAPI metadata as the drift baseline and exit")
-	flag.Parse()
+	os.Exit(run(os.Args[1:]))
+}
+
+func run(args []string) int {
+	if len(args) == 0 {
+		usage()
+		return 2
+	}
+	switch args[0] {
+	case "detect":
+		return detect(args[1:])
+	case "baseline":
+		return baseline(args[1:])
+	case "sync":
+		return sync(args[1:])
+	case "render":
+		return render(args[1:])
+	case "help", "-h", "--help":
+		usage()
+		return 0
+	default:
+		usage()
+		return 2
+	}
+}
+
+func usage() {
+	fmt.Fprint(os.Stderr, `usage:
+  specdrift detect [flags]   detect OpenAPI metadata drift
+  specdrift baseline [flags] record the current OpenAPI metadata as the drift baseline
+  specdrift sync [flags]     apply mechanical patches for missing OpenAPI parameters
+  specdrift render [flags]   render a bounded Markdown drift summary
+
+Run "specdrift <command> -h" for command-specific flags.
+`)
+}
+
+func detect(args []string) int {
+	fs := flag.NewFlagSet("detect", flag.ContinueOnError)
+	specDir := fs.String("spec-dir", "specs", "path to spec YAML directory")
+	baselinePath := fs.String("baseline", "drift-baseline.json", "path to the drift baseline file")
+	lang := fs.String("lang", "en", "OpenAPI metadata language for descriptions")
+	format := fs.String("format", "table", "output format: table or json")
+	check := fs.Bool("check", false, "exit non-zero on unacknowledged OpenAPI metadata or binding coverage drift")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
 
 	opts := drift.Options{Language: *lang}
-
-	if *writeBaseline {
-		if err := validateWriteBaselineFlags(*check, *format); err != nil {
-			fmt.Fprintf(os.Stderr, "specdrift: %v\n", err)
-			os.Exit(2)
-		}
-		baseline, err := drift.CollectBaseline(*specDir, opts)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "specdrift: %v\n", err)
-			os.Exit(2)
-		}
-		if err := drift.WriteBaseline(*baselinePath, baseline); err != nil {
-			fmt.Fprintf(os.Stderr, "specdrift: %v\n", err)
-			os.Exit(2)
-		}
-		fmt.Printf("specdrift: recorded %d binding(s) in %s\n", len(baseline.Bindings), *baselinePath)
-		return
-	}
 
 	report, err := drift.Detect(*specDir, *baselinePath, opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "specdrift: %v (run 'make drift-baseline' after intentional spec or metadata changes)\n", err)
-		os.Exit(2)
+		return 2
 	}
 
 	switch *format {
 	case "json":
 		if err := writeJSON(report); err != nil {
 			fmt.Fprintf(os.Stderr, "specdrift: %v\n", err)
-			os.Exit(2)
+			return 2
 		}
 	case "table":
 		writeTable(report)
 	default:
 		fmt.Fprintf(os.Stderr, "specdrift: unsupported format %q\n", *format)
-		os.Exit(2)
+		return 2
 	}
 
 	if *check {
 		missing, removed, uncovered, gaps := blockingDriftCounts(report)
 		if missing > 0 || removed > 0 || uncovered > 0 || gaps > 0 {
 			fmt.Fprintf(os.Stderr, "specdrift: drift detected (missing=%d, removed=%d, uncovered=%d, baseline gaps=%d); adapt the resource specs or investigate the metadata snapshot, then refresh the baseline\n", missing, removed, uncovered, gaps)
-			os.Exit(1)
+			return 1
 		}
 	}
+	return 0
+}
+
+func baseline(args []string) int {
+	fs := flag.NewFlagSet("baseline", flag.ContinueOnError)
+	specDir := fs.String("spec-dir", "specs", "path to spec YAML directory")
+	baselinePath := fs.String("baseline", "drift-baseline.json", "path to the drift baseline file")
+	lang := fs.String("lang", "en", "OpenAPI metadata language for descriptions")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+
+	opts := drift.Options{Language: *lang}
+	if err := runBaseline(*specDir, *baselinePath, opts); err != nil {
+		fmt.Fprintf(os.Stderr, "specdrift: %v\n", err)
+		return 2
+	}
+	return 0
+}
+
+func sync(args []string) int {
+	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
+	driftPath := fs.String("drift", "drift.json", "path to the specdrift JSON report")
+	specDir := fs.String("spec-dir", "specs", "path to spec YAML directory")
+	dryRun := fs.Bool("dry-run", false, "preview the patch each missing item would apply without writing any file")
+	write := fs.Bool("write", false, "apply the deterministic patch to the resource specs in place")
+	planOut := fs.String("plan-out", "", "write the structured per-item sync plan to this JSON path")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+
+	if *dryRun == *write {
+		fmt.Fprintln(os.Stderr, "specdrift sync: exactly one of -dry-run or -write must be set")
+		return 2
+	}
+	if err := specsync.Run(*driftPath, *specDir, *dryRun, *planOut); err != nil {
+		fmt.Fprintf(os.Stderr, "specdrift sync: %v\n", err)
+		return 2
+	}
+	return 0
+}
+
+func render(args []string) int {
+	fs := flag.NewFlagSet("render", flag.ContinueOnError)
+	driftPath := fs.String("input", "drift.json", "path to the specdrift JSON report")
+	planPath := fs.String("plan", "", "optional path to a specdrift sync plan")
+	format := fs.String("format", "markdown", "output format: markdown")
+	limit := fs.Int("limit", 50, "maximum drift rows to include (1-200)")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if *format != "markdown" {
+		fmt.Fprintf(os.Stderr, "specdrift render: unsupported format %q\n", *format)
+		return 2
+	}
+	raw, err := specsync.RenderMarkdown(*driftPath, *planPath, *limit)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "specdrift render: %v\n", err)
+		return 2
+	}
+	if _, err := os.Stdout.Write(raw); err != nil {
+		fmt.Fprintf(os.Stderr, "specdrift render: %v\n", err)
+		return 2
+	}
+	return 0
+}
+
+func runBaseline(specDir, baselinePath string, opts drift.Options) error {
+	baseline, err := drift.CollectBaseline(specDir, opts)
+	if err != nil {
+		return err
+	}
+	if err := drift.WriteBaseline(baselinePath, baseline); err != nil {
+		return err
+	}
+	fmt.Printf("specdrift: recorded %d binding(s) in %s\n", len(baseline.Bindings), baselinePath)
+	return nil
 }
 
 func blockingDriftCounts(report drift.Report) (missing, removed, uncovered, gaps int) {
@@ -77,18 +189,6 @@ type jsonReport struct {
 	Missing   int `json:"missing"`
 	Removed   int `json:"removed"`
 	Uncovered int `json:"uncovered"`
-}
-
-// validateWriteBaselineFlags rejects report-only flags that -write-baseline
-// would silently ignore.
-func validateWriteBaselineFlags(check bool, format string) error {
-	if check {
-		return errors.New("-check cannot be combined with -write-baseline")
-	}
-	if format != "table" {
-		return errors.New("-format cannot be combined with -write-baseline")
-	}
-	return nil
 }
 
 func writeJSON(report drift.Report) error {
