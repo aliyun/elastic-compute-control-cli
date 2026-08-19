@@ -59,6 +59,51 @@ func TestACKKubeconfigLifecycleDoesNotExposeUpdate(t *testing.T) {
 	}
 }
 
+func TestAgentRunLifecyclesUseDeterministicTeardownTargets(t *testing.T) {
+	templateSuite, err := scenario.Load(filepath.Join("..", "..", "cases", "agentrun", "template-lifecycle.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	templateSteps := caseStepsByName(t, templateSuite)
+	templateCreate := templateSteps["create"]
+	if got, want := templateCreate.Teardown, "ecctl agentrun template delete {{.resource_prefix}}-sandbox-template --timeout 10m"; got != want {
+		t.Fatalf("template teardown = %q, want %q", got, want)
+	}
+
+	sandboxSuite, err := scenario.Load(filepath.Join("..", "..", "cases", "agentrun", "sandbox-lifecycle.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sandboxSteps := caseStepsByName(t, sandboxSuite)
+	for _, removed := range []string{"pause", "resume"} {
+		if _, ok := sandboxSteps[removed]; ok {
+			t.Fatalf("sandbox lifecycle still contains removed step %q", removed)
+		}
+	}
+	templateFixture := sandboxSteps["create template fixture"]
+	if got, want := templateFixture.Teardown, "ecctl agentrun template delete {{.resource_prefix}}-sandbox-fixture --timeout 10m"; got != want {
+		t.Fatalf("sandbox fixture teardown = %q, want %q", got, want)
+	}
+	sandboxCreate := sandboxSteps["create"]
+	if !strings.Contains(sandboxCreate.Run, "--id {{.resource_prefix}}-sandbox") {
+		t.Fatalf("sandbox create must use a deterministic ID: %q", sandboxCreate.Run)
+	}
+	if got, want := sandboxCreate.Teardown, "ecctl agentrun sandbox delete {{.resource_prefix}}-sandbox --timeout 10m"; got != want {
+		t.Fatalf("sandbox teardown = %q, want %q", got, want)
+	}
+
+	for _, suite := range []*scenario.Suite{templateSuite, sandboxSuite} {
+		if len(suite.RequiresPrerequisites) != 0 {
+			t.Fatalf("%s prerequisites = %#v, want none", suite.Resource, suite.RequiresPrerequisites)
+		}
+		for _, step := range suite.Steps {
+			if len(step.RequiresPrerequisites) != 0 {
+				t.Fatalf("%s step %q prerequisites = %#v, want none", suite.Resource, step.Name, step.RequiresPrerequisites)
+			}
+		}
+	}
+}
+
 func TestACKAddonLifecycleUsesDiscoveredParameters(t *testing.T) {
 	suite, err := scenario.Load(filepath.Join("..", "..", "cases", "ack", "addon-lifecycle.yaml"))
 	if err != nil {

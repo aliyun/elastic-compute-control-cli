@@ -1,0 +1,13 @@
+schema_version: 1
+product: agentrun
+priority: 6
+resources:
+  - template
+  - sandbox
+description:
+  en: Manage AgentRun sandbox templates and isolated sandbox instances.
+  zh-CN: 管理 AgentRun 沙箱模板和隔离沙箱实例。
+examples:
+  - ecctl agentrun template list
+  - ecctl agentrun sandbox list
+  - ecctl agentrun sandbox create --template-name <template-name>

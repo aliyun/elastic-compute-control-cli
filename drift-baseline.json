@@ -970,6 +970,204 @@
       ]
     },
     {
+      "product": "agentrun",
+      "resource": "sandbox",
+      "binding": "create_sandbox",
+      "api": "CreateSandbox",
+      "parameters": [
+        "body.nasConfig",
+        "body.ossMountConfig",
+        "body.polarFsConfig",
+        "body.sandboxId",
+        "body.sandboxIdleTimeoutInSeconds",
+        "body.sandboxIdleTimeoutSeconds",
+        "body.templateName"
+      ],
+      "covered": [
+        "body.nasConfig",
+        "body.ossMountConfig",
+        "body.polarFsConfig",
+        "body.sandboxId",
+        "body.sandboxIdleTimeoutInSeconds",
+        "body.templateName"
+      ]
+    },
+    {
+      "product": "agentrun",
+      "resource": "sandbox",
+      "binding": "delete_sandbox",
+      "api": "DeleteSandbox",
+      "parameters": [
+        "sandboxId"
+      ],
+      "covered": [
+        "sandboxId"
+      ]
+    },
+    {
+      "product": "agentrun",
+      "resource": "sandbox",
+      "binding": "stop_sandbox",
+      "api": "StopSandbox",
+      "parameters": [
+        "sandboxId"
+      ],
+      "covered": [
+        "sandboxId"
+      ]
+    },
+    {
+      "product": "agentrun",
+      "resource": "template",
+      "binding": "create_template",
+      "api": "CreateTemplate",
+      "parameters": [
+        "body.allowAnonymousManage",
+        "body.armsConfiguration",
+        "body.containerConfiguration",
+        "body.cpu",
+        "body.credentialConfiguration",
+        "body.description",
+        "body.diskSize",
+        "body.enableAgent",
+        "body.enablePreStop",
+        "body.environmentVariables",
+        "body.executionRoleArn",
+        "body.logConfiguration",
+        "body.memory",
+        "body.nasConfig",
+        "body.networkConfiguration",
+        "body.ossConfiguration",
+        "body.preStopTimeoutInSeconds",
+        "body.sandboxIdleTimeoutInSeconds",
+        "body.sandboxTTLInSeconds",
+        "body.scalingConfig",
+        "body.templateConfiguration",
+        "body.templateName",
+        "body.templateType",
+        "body.workspaceId"
+      ],
+      "covered": [
+        "body.allowAnonymousManage",
+        "body.armsConfiguration",
+        "body.containerConfiguration",
+        "body.cpu",
+        "body.credentialConfiguration",
+        "body.description",
+        "body.diskSize",
+        "body.enableAgent",
+        "body.enablePreStop",
+        "body.environmentVariables",
+        "body.executionRoleArn",
+        "body.logConfiguration",
+        "body.memory",
+        "body.nasConfig",
+        "body.networkConfiguration",
+        "body.ossConfiguration",
+        "body.preStopTimeoutInSeconds",
+        "body.sandboxIdleTimeoutInSeconds",
+        "body.scalingConfig",
+        "body.templateConfiguration",
+        "body.templateName",
+        "body.templateType",
+        "body.workspaceId"
+      ]
+    },
+    {
+      "product": "agentrun",
+      "resource": "template",
+      "binding": "delete_template",
+      "api": "DeleteTemplate",
+      "parameters": [
+        "templateName"
+      ],
+      "covered": [
+        "templateName"
+      ]
+    },
+    {
+      "product": "agentrun",
+      "resource": "template",
+      "binding": "disable_mcp",
+      "api": "StopTemplateMCP",
+      "parameters": [
+        "templateName"
+      ],
+      "covered": [
+        "templateName"
+      ]
+    },
+    {
+      "product": "agentrun",
+      "resource": "template",
+      "binding": "enable_mcp",
+      "api": "ActivateTemplateMCP",
+      "parameters": [
+        "body.enabledTools",
+        "body.transport",
+        "templateName"
+      ],
+      "covered": [
+        "body.enabledTools",
+        "body.transport",
+        "templateName"
+      ]
+    },
+    {
+      "product": "agentrun",
+      "resource": "template",
+      "binding": "update_template",
+      "api": "UpdateTemplate",
+      "parameters": [
+        "body.allowAnonymousManage",
+        "body.armsConfiguration",
+        "body.containerConfiguration",
+        "body.cpu",
+        "body.credentialConfiguration",
+        "body.description",
+        "body.enableAgent",
+        "body.enablePreStop",
+        "body.environmentVariables",
+        "body.executionRoleArn",
+        "body.logConfiguration",
+        "body.memory",
+        "body.nasConfig",
+        "body.networkConfiguration",
+        "body.ossConfiguration",
+        "body.preStopTimeoutInSeconds",
+        "body.sandboxIdleTimeoutInSeconds",
+        "body.sandboxTTLInSeconds",
+        "body.scalingConfig",
+        "body.templateConfiguration",
+        "body.workspaceId",
+        "clientToken",
+        "templateName"
+      ],
+      "covered": [
+        "body.allowAnonymousManage",
+        "body.armsConfiguration",
+        "body.containerConfiguration",
+        "body.cpu",
+        "body.credentialConfiguration",
+        "body.description",
+        "body.enableAgent",
+        "body.enablePreStop",
+        "body.environmentVariables",
+        "body.executionRoleArn",
+        "body.logConfiguration",
+        "body.memory",
+        "body.nasConfig",
+        "body.networkConfiguration",
+        "body.ossConfiguration",
+        "body.preStopTimeoutInSeconds",
+        "body.sandboxIdleTimeoutInSeconds",
+        "body.scalingConfig",
+        "body.templateConfiguration",
+        "body.workspaceId",
+        "templateName"
+      ]
+    },
+    {
       "product": "ecs",
       "resource": "assistant",
       "binding": "install_agent",

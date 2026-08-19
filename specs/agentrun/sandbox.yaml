@@ -1,0 +1,344 @@
+schema_version: 2
+product: agentrun
+api_product: AgentRun
+resource: sandbox
+kind: regional
+aliases: [sb]
+display_name:
+  en: sandbox
+  zh-CN: 沙箱
+description:
+  en: Manage isolated AgentRun sandbox instances.
+  zh-CN: 管理隔离的 AgentRun 沙箱实例。
+examples:
+  - ecctl agentrun sandbox list
+  - ecctl agentrun sandbox get <sandbox-id>
+  - ecctl agentrun sandbox create --template-name <template-name>
+
+identity:
+  field: id
+  output_root:
+    one: sandbox
+    many: sandboxes
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: sandbox ID
+        zh-CN: 沙箱 ID
+    template_id:
+      type: string
+      description:
+        en: template ID
+        zh-CN: 模板 ID
+    template_name:
+      type: string
+      description:
+        en: template name
+        zh-CN: 模板名称
+    template_type:
+      type: string
+      description:
+        en: template type filter
+        zh-CN: 模板类型过滤条件
+    status:
+      type: string
+      description:
+        en: sandbox status
+        zh-CN: 沙箱状态
+    created_at:
+      type: string
+      description:
+        en: creation time
+        zh-CN: 创建时间
+    updated_at:
+      type: string
+      description:
+        en: last update time
+        zh-CN: 最后更新时间
+    ended_at:
+      type: string
+      description:
+        en: stop time
+        zh-CN: 停止时间
+    arn:
+      type: string
+      description:
+        en: sandbox ARN
+        zh-CN: 沙箱 ARN
+    idle_timeout:
+      type: integer
+      description:
+        en: sandbox idle timeout in seconds
+        zh-CN: 沙箱空闲超时时间，单位秒
+    metadata:
+      type: object
+      description:
+        en: sandbox metadata
+        zh-CN: 沙箱元数据
+    nas_config:
+      type: object
+      description:
+        en: NAS configuration as a JSON object or @file
+        zh-CN: NAS 配置，使用 JSON 对象或 @file
+    oss_mount_config:
+      type: object
+      description:
+        en: OSS mount configuration as a JSON object or @file
+        zh-CN: OSS 挂载配置，使用 JSON 对象或 @file
+    polar_fs_config:
+      type: object
+      description:
+        en: PolarFS configuration as a JSON object or @file
+        zh-CN: PolarFS 配置，使用 JSON 对象或 @file
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 1000
+    description:
+      en: maximum sandboxes to return
+      zh-CN: 最多返回的沙箱数量
+  next_token:
+    type: string
+    description:
+      en: pagination token from a previous response
+      zh-CN: 上一页响应返回的分页令牌
+  no_wait:
+    type: boolean
+    description:
+      en: return before the sandbox reaches its target state
+      zh-CN: 在沙箱达到目标状态前返回
+  timeout:
+    type: duration
+    default: 600s
+    description:
+      en: sandbox operation wait timeout
+      zh-CN: 沙箱操作等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  detail:
+    api: GetSandbox
+    request:
+      sandboxId: $.id
+    response:
+      item: $.data
+      request_id: $.requestId
+      id: $.sandboxId
+      state: $.status
+      fields:
+        id: $.sandboxId
+        template_id: $.templateId
+        template_name: $.templateName
+        status: $.status
+        created_at: $.createdAt
+        updated_at: $.lastUpdatedAt
+        ended_at: $.endedAt
+        arn: $.sandboxArn
+        idle_timeout: $.sandboxIdleTimeoutSeconds
+        metadata: $.metadata
+  list:
+    api: ListSandboxes
+    request:
+      sandboxId: $.id
+      templateName: $.template_name
+      templateType: $.template_type
+      status: $.status
+      maxResults: $.limit
+      nextToken: $.next_token
+    response:
+      items: $.data.items
+      next_token: $.data.nextToken
+      request_id: $.requestId
+      id: $.sandboxId
+      fields:
+        id: $.sandboxId
+        template_id: $.templateId
+        template_name: $.templateName
+        status: $.status
+        created_at: $.createdAt
+        updated_at: $.lastUpdatedAt
+        ended_at: $.endedAt
+        arn: $.sandboxArn
+        idle_timeout: $.sandboxIdleTimeoutSeconds
+        metadata: $.metadata
+
+waiters:
+  ready_after_create:
+    probe: detail
+    target: READY
+    interval: 2s
+    timeout: 600s
+    failure:
+      states: [FAILED, ERROR, TERMINATED]
+  absent_after_delete:
+    probe: list
+    target: absent
+    interval: 2s
+    timeout: 300s
+  terminated_after_stop:
+    probe: detail
+    target: TERMINATED
+    interval: 2s
+    timeout: 300s
+    failure:
+      states: [FAILED, ERROR]
+
+bindings:
+  create_sandbox:
+    api: CreateSandbox
+    request:
+      body:
+        nasConfig:
+          from: $.nas_config
+        ossMountConfig:
+          from: $.oss_mount_config
+        polarFsConfig:
+          from: $.polar_fs_config
+        sandboxId: $.id
+        sandboxIdleTimeoutInSeconds: $.idle_timeout
+        templateName: $.template_name
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: body.templateName
+    id_from: $.data.sandboxId
+    request_id_from: $.requestId
+    wait: ready_after_create
+  delete_sandbox:
+    api: DeleteSandbox
+    request:
+      sandboxId: $.id
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: sandboxId
+    request_id_from: $.requestId
+    wait: absent_after_delete
+  stop_sandbox:
+    api: StopSandbox
+    request:
+      sandboxId: $.id
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: sandboxId
+    request_id_from: $.requestId
+    wait: terminated_after_stop
+
+operations:
+  create:
+    examples:
+      - ecctl agentrun sandbox create --template-name <template-name>
+    description:
+      en: Create an AgentRun sandbox
+      zh-CN: 创建 AgentRun 沙箱
+    input:
+      fields:
+        - template_name:
+            required: true
+        - id
+        - idle_timeout
+        - nas_config
+        - oss_mount_config
+        - polar_fs_config
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_sandbox
+        wait_unless: input.no_wait
+  delete:
+    examples:
+      - ecctl agentrun sandbox delete <sandbox-id>
+    description:
+      en: Delete an AgentRun sandbox
+      zh-CN: 删除 AgentRun 沙箱
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_sandbox
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $input.id
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get an AgentRun sandbox
+      zh-CN: 获取 AgentRun 沙箱
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+    workflow:
+      - probe: detail
+        ids:
+          - $input.id
+        not_found: error
+  list:
+    examples:
+      - ecctl agentrun sandbox list --filter status=READY --limit 100
+    description:
+      en: List AgentRun sandboxes
+      zh-CN: 列出 AgentRun 沙箱
+    input:
+      controls:
+        - filter
+        - limit
+        - next_token
+    filters:
+      id:
+        target: id
+      status:
+        target: status
+      template-name:
+        target: template_name
+      template-type:
+        target: template_type
+    workflow:
+      - probe: list
+        many: true
+  stop:
+    examples:
+      - ecctl agentrun sandbox stop <sandbox-id>
+    description:
+      en: Stop an AgentRun sandbox
+      zh-CN: 停止 AgentRun 沙箱
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: stop_sandbox
+        wait_unless: input.no_wait

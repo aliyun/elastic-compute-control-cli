@@ -1,0 +1,9 @@
+{
+  "label": "AGENTRUN",
+  "position": 2,
+  "link": {
+    "type": "generated-index",
+    "title": "AGENTRUN resources",
+    "description": "Manage AgentRun sandbox templates and isolated sandbox instances."
+  }
+}

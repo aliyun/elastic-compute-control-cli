@@ -203,6 +203,15 @@ kinds:
     delete: ecctl rg group delete {{.id}}
 
 non_sweepable:
+  # AgentRun template and sandbox APIs do not expose the repository tag-based
+  # sweeper contract. Their explicit teardown and cleanup journals remain the
+  # recovery path.
+  - resource: agentrun/template
+    reason: provider-limitation
+    review_after: "2026-11-18"
+  - resource: agentrun/sandbox
+    reason: provider-limitation
+    review_after: "2026-11-18"
   - resource: ecs/auto-snapshot-policy
     reason: provider-no-list
     review_after: "2026-10-06"

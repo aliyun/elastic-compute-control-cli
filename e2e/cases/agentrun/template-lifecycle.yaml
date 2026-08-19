@@ -1,0 +1,69 @@
+# AgentRun CodeInterpreter templates can use the platform-provided image and a
+# PUBLIC network, so this lifecycle is fully self-contained.
+resource: agentrun/template
+serial: true
+timeout: 20m
+
+steps:
+  - name: create
+    run: >
+      ecctl agentrun template create
+      --name {{.resource_prefix}}-sandbox-template
+      --template-type CodeInterpreter
+      --cpu 2
+      --memory 4096
+      --network-configuration '{"networkMode":"PUBLIC"}'
+      --description "ecctl E2E AgentRun template {{.run_id}}"
+      --timeout 15m
+    at: $.template
+    expect:
+      name: { eq: "{{.resource_prefix}}-sandbox-template" }
+      template_id: { type: string, min_len: 1 }
+      status: { eq: READY }
+    capture:
+      template_name: name
+    teardown: ecctl agentrun template delete {{.resource_prefix}}-sandbox-template --timeout 10m
+
+  - name: get
+    run: ecctl agentrun template get {{.template_name}}
+    at: $.template
+    expect:
+      name: { eq: "{{.template_name}}" }
+      status: { eq: READY }
+
+  - name: list
+    run: ecctl agentrun template list --filter name={{.template_name}} --limit 20 --page 1
+    assert:
+      - len($.templates) >= 1
+
+  - name: update
+    run: >
+      ecctl agentrun template update {{.template_name}}
+      --description "ecctl E2E AgentRun template updated {{.run_id}}"
+      --timeout 15m
+    at: $.template
+    expect:
+      name: { eq: "{{.template_name}}" }
+      status: { eq: READY }
+      description: { eq: "ecctl E2E AgentRun template updated {{.run_id}}" }
+
+  - name: enable MCP
+    run: >
+      ecctl agentrun template enable {{.template_name}}
+      --transport streamable-http
+      --enabled-tools '["execute_code"]'
+    at: $.template
+    expect:
+      name: { eq: "{{.template_name}}" }
+      mcp_state: { type: object }
+
+  - name: disable MCP
+    run: ecctl agentrun template disable {{.template_name}}
+    at: $.template
+    expect:
+      name: { eq: "{{.template_name}}" }
+
+  - name: delete
+    run: ecctl agentrun template delete {{.template_name}} --timeout 10m
+    expect:
+      $.deleted: { eq: true }

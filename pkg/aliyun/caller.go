@@ -400,6 +400,9 @@ func openAPIMethod(methodText string) string {
 	if strings.Contains(method, "PUT") {
 		return "PUT"
 	}
+	if strings.Contains(method, "PATCH") {
+		return "PATCH"
+	}
 	if strings.Contains(method, "DELETE") {
 		return "DELETE"
 	}
@@ -501,7 +504,7 @@ func openAPIRequestBody(api *OpenAPIOperationDetail, values map[string]any) (any
 		}
 		return body, used, nil
 	}
-	body, err := flatOpenAPIBody(values, used, bodyName)
+	body, err := flatOpenAPIBody(values, used, bodyName, bodyParam)
 	if err != nil || isEmptyOpenAPIBody(body) {
 		return nil, used, err
 	}
@@ -527,7 +530,7 @@ func openAPIBodyParameter(api *OpenAPIOperationDetail) *OpenAPIParameter {
 	return nil
 }
 
-func flatOpenAPIBody(values map[string]any, used map[string]bool, bodyName string) (any, error) {
+func flatOpenAPIBody(values map[string]any, used map[string]bool, bodyName string, bodyParam *OpenAPIParameter) (any, error) {
 	var object map[string]any
 	var items []any
 	prefix := bodyName + "."
@@ -540,6 +543,7 @@ func flatOpenAPIBody(values map[string]any, used map[string]bool, bodyName strin
 		if len(parts) == 0 || parts[0] == "" {
 			return nil, fmt.Errorf("invalid body field %q", key)
 		}
+		value = coerceOpenAPIBodyValue(value, openAPIBodyParameterAtPath(bodyParam, parts))
 		index, err := strconv.Atoi(parts[0])
 		if err == nil {
 			if index < 1 {
@@ -575,6 +579,54 @@ func flatOpenAPIBody(values map[string]any, used map[string]bool, bodyName strin
 		return items, nil
 	}
 	return object, nil
+}
+
+func openAPIBodyParameterAtPath(body *OpenAPIParameter, parts []string) *OpenAPIParameter {
+	current := body
+	for _, part := range parts {
+		if _, err := strconv.Atoi(part); err == nil {
+			continue
+		}
+		if current == nil || len(current.SubParameters) == 0 {
+			return current
+		}
+		var next *OpenAPIParameter
+		for i := range current.SubParameters {
+			if current.SubParameters[i].Name == part {
+				next = &current.SubParameters[i]
+				break
+			}
+		}
+		if next == nil {
+			return current
+		}
+		current = next
+	}
+	return current
+}
+
+func coerceOpenAPIBodyValue(value any, parameter *OpenAPIParameter) any {
+	if parameter == nil {
+		return value
+	}
+	switch strings.ToLower(parameter.Type) {
+	case "struct", "repeatlist", "json", "object", "array":
+	default:
+		return value
+	}
+	text, ok := value.(string)
+	if !ok {
+		return value
+	}
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || (trimmed[0] != '{' && trimmed[0] != '[') {
+		return value
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+		return value
+	}
+	return decoded
 }
 
 func assignNestedOpenAPIField(object map[string]any, parts []string, value any) {

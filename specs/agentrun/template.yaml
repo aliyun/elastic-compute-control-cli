@@ -1,0 +1,679 @@
+schema_version: 2
+product: agentrun
+api_product: AgentRun
+resource: template
+kind: regional
+display_name:
+  en: sandbox template
+  zh-CN: 沙箱模板
+description:
+  en: Manage AgentRun sandbox templates and their MCP service.
+  zh-CN: 管理 AgentRun 沙箱模板及其 MCP 服务。
+examples:
+  - ecctl agentrun template list
+  - ecctl agentrun template get <template-name>
+  - ecctl agentrun template create --name code-template --template-type CodeInterpreter --cpu 2 --memory 4096 --network-configuration @network.json
+  - ecctl agentrun template enable <template-name> --transport streamable-http --enabled-tools '["execute_code"]'
+
+identity:
+  field: name
+  output_root:
+    one: template
+    many: templates
+
+schema:
+  fields:
+    name:
+      type: string
+      description:
+        en: template name
+        zh-CN: 模板名称
+    template_id:
+      type: string
+      description:
+        en: provider-assigned template ID
+        zh-CN: 服务端分配的模板 ID
+    template_type:
+      type: string
+      description:
+        en: template type
+        zh-CN: 模板类型
+    template_version:
+      type: string
+      description:
+        en: template version
+        zh-CN: 模板版本
+    status:
+      type: string
+      description:
+        en: template status
+        zh-CN: 模板状态
+    status_reason:
+      type: string
+      description:
+        en: reason for the current template status
+        zh-CN: 当前模板状态原因
+    arn:
+      type: string
+      description:
+        en: template ARN
+        zh-CN: 模板 ARN
+    resource_name:
+      type: string
+      description:
+        en: underlying resource name
+        zh-CN: 底层资源名称
+    created_at:
+      type: string
+      description:
+        en: creation time
+        zh-CN: 创建时间
+    updated_at:
+      type: string
+      description:
+        en: last update time
+        zh-CN: 最后更新时间
+    description:
+      type: string
+      description:
+        en: template description
+        zh-CN: 模板描述
+    cpu:
+      type: number
+      description:
+        en: CPU cores
+        zh-CN: CPU 核数
+    memory:
+      type: integer
+      description:
+        en: memory in MB
+        zh-CN: 内存大小，单位 MB
+    disk_size:
+      type: integer
+      description:
+        en: disk size in MB
+        zh-CN: 磁盘大小，单位 MB
+    execution_role_arn:
+      type: string
+      description:
+        en: execution role ARN
+        zh-CN: 执行角色 ARN
+    container_configuration:
+      type: object
+      description:
+        en: container configuration as a JSON object or @file
+        zh-CN: 容器配置，使用 JSON 对象或 @file
+    network_configuration:
+      type: object
+      description:
+        en: network configuration as a JSON object or @file
+        zh-CN: 网络配置，使用 JSON 对象或 @file
+    credential_configuration:
+      type: object
+      description:
+        en: credential configuration as a JSON object or @file
+        zh-CN: 凭证配置，使用 JSON 对象或 @file
+    log_configuration:
+      type: object
+      description:
+        en: log configuration as a JSON object or @file
+        zh-CN: 日志配置，使用 JSON 对象或 @file
+    arms_configuration:
+      type: object
+      description:
+        en: ARMS configuration as a JSON object or @file
+        zh-CN: ARMS 配置，使用 JSON 对象或 @file
+    nas_config:
+      type: object
+      description:
+        en: NAS mount configuration as a JSON object or @file
+        zh-CN: NAS 挂载配置，使用 JSON 对象或 @file
+    oss_configuration:
+      type: array
+      description:
+        en: OSS mount configuration entries; repeat the flag with one JSON object or @file per mount
+        zh-CN: OSS 挂载配置项；每个挂载使用一个 JSON 对象或 @file，并重复指定该参数
+      items:
+        type: object
+    environment_variables:
+      type: object
+      description:
+        en: environment variables as a JSON object or @file
+        zh-CN: 环境变量，使用 JSON 对象或 @file
+    template_configuration:
+      type: object
+      description:
+        en: template-type-specific configuration as a JSON object or @file
+        zh-CN: 模板类型相关配置，使用 JSON 对象或 @file
+    scaling_config:
+      type: object
+      description:
+        en: scaling configuration as a JSON object or @file
+        zh-CN: 弹性配置，使用 JSON 对象或 @file
+    scaling_status:
+      type: object
+      description:
+        en: current scaling status
+        zh-CN: 当前弹性状态
+    workspace:
+      type: string
+      description:
+        en: workspace ID
+        zh-CN: 工作空间 ID
+    workspace_ids:
+      type: string
+      description:
+        en: workspace IDs filter accepted by AgentRun
+        zh-CN: AgentRun 接受的工作空间 ID 列表过滤值
+    idle_timeout:
+      type: integer
+      description:
+        en: sandbox idle timeout in seconds
+        zh-CN: 沙箱空闲超时时间，单位秒
+    allow_anonymous_manage:
+      type: boolean
+      description:
+        en: allow data-plane create, stop, and delete sandbox calls
+        zh-CN: 允许数据链路调用沙箱创建、停止和删除接口
+    enable_agent:
+      type: boolean
+      description:
+        en: enable the Sandbox Agent
+        zh-CN: 启用 Sandbox Agent
+    enable_pre_stop:
+      type: boolean
+      description:
+        en: enable pre-stop handling
+        zh-CN: 启用停止前处理
+    pre_stop_timeout:
+      type: integer
+      description:
+        en: pre-stop timeout in seconds
+        zh-CN: 停止前处理超时时间，单位秒
+    mcp_options:
+      type: object
+      description:
+        en: MCP service options
+        zh-CN: MCP 服务选项
+    mcp_state:
+      type: object
+      description:
+        en: MCP service state
+        zh-CN: MCP 服务状态
+    enabled_tools:
+      type: array
+      description:
+        en: MCP tools to enable
+        zh-CN: 要启用的 MCP 工具
+      items:
+        type: string
+    transport:
+      type: string
+      description:
+        en: MCP transport protocol
+        zh-CN: MCP 传输协议
+      enum: [streamable-http]
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum templates to return
+      zh-CN: 最多返回的模板数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+  no_wait:
+    type: boolean
+    description:
+      en: return before the template reaches its target state
+      zh-CN: 在模板达到目标状态前返回
+  timeout:
+    type: duration
+    default: 600s
+    description:
+      en: template operation wait timeout
+      zh-CN: 模板操作等待超时时间
+  api_param:
+    type: key_value
+    repeatable: true
+    description:
+      en: additional request parameter key=value
+      zh-CN: 额外请求参数 key=value
+
+probes:
+  detail:
+    api: GetTemplate
+    request:
+      templateName: $.name
+    response:
+      item: $.data
+      request_id: $.requestId
+      id: $.templateName
+      state: $.status
+      fields:
+        name: $.templateName
+        template_id: $.templateId
+        template_type: $.templateType
+        template_version: $.templateVersion
+        status: $.status
+        status_reason: $.statusReason
+        arn: $.templateArn
+        resource_name: $.resourceName
+        created_at: $.createdAt
+        updated_at: $.lastUpdatedAt
+        description: $.description
+        cpu: $.cpu
+        memory: $.memory
+        disk_size: $.diskSize
+        execution_role_arn: $.executionRoleArn
+        container_configuration: $.containerConfiguration
+        network_configuration: $.networkConfiguration
+        credential_configuration: $.credentialConfiguration
+        log_configuration: $.logConfiguration
+        nas_config: $.nasConfig
+        oss_configuration: $.ossConfiguration
+        environment_variables: $.environmentVariables
+        template_configuration: $.templateConfiguration
+        scaling_status: $.scalingStatus
+        workspace: $.workspaceId
+        idle_timeout:
+          int: $.sandboxIdleTimeoutInSeconds
+        allow_anonymous_manage: $.allowAnonymousManage
+        enable_agent: $.enableAgent
+        enable_pre_stop: $.enablePreStop
+        pre_stop_timeout: $.preStopTimeoutInSeconds
+        mcp_options: $.mcpOptions
+        mcp_state: $.mcpState
+  list:
+    api: ListTemplates
+    request:
+      templateName: $.name
+      templateType: $.template_type
+      status: $.status
+      workspaceId: $.workspace
+      workspaceIds: $.workspace_ids
+      pageNumber: $.page
+      pageSize: $.limit
+    response:
+      items: $.data.items
+      total: $.data.total
+      request_id: $.requestId
+      id: $.templateName
+      fields:
+        name: $.templateName
+        template_id: $.templateId
+        template_type: $.templateType
+        template_version: $.templateVersion
+        status: $.status
+        status_reason: $.statusReason
+        arn: $.templateArn
+        description: $.description
+        cpu: $.cpu
+        memory: $.memory
+        disk_size: $.diskSize
+        workspace: $.workspaceId
+        created_at: $.createdAt
+        updated_at: $.lastUpdatedAt
+
+waiters:
+  ready_after_change:
+    probe: detail
+    target: READY
+    interval: 5s
+    timeout: 600s
+    failure:
+      states: [FAILED, ERROR]
+  absent_after_delete:
+    probe: list
+    target: absent
+    interval: 2s
+    timeout: 300s
+
+bindings:
+  create_template:
+    api: CreateTemplate
+    request:
+      body:
+        allowAnonymousManage: $.allow_anonymous_manage
+        armsConfiguration:
+          from: $.arms_configuration
+        containerConfiguration:
+          from: $.container_configuration
+        cpu: $.cpu
+        credentialConfiguration:
+          from: $.credential_configuration
+        description: $.description
+        diskSize: $.disk_size
+        enableAgent: $.enable_agent
+        enablePreStop: $.enable_pre_stop
+        environmentVariables:
+          from: $.environment_variables
+        executionRoleArn: $.execution_role_arn
+        logConfiguration:
+          from: $.log_configuration
+        memory: $.memory
+        nasConfig:
+          from: $.nas_config
+        networkConfiguration:
+          from: $.network_configuration
+        ossConfiguration: $.oss_configuration
+        preStopTimeoutInSeconds: $.pre_stop_timeout
+        sandboxIdleTimeoutInSeconds: $.idle_timeout
+        scalingConfig:
+          from: $.scaling_config
+        templateConfiguration:
+          from: $.template_configuration
+        templateName: $.name
+        templateType: $.template_type
+        workspaceId: $.workspace
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: body.templateName
+      - request: body.templateType
+      - request: body.cpu
+      - request: body.memory
+      - request: body.networkConfiguration
+    id_from: $.data.templateName
+    request_id_from: $.requestId
+    wait: ready_after_change
+  update_template:
+    api: UpdateTemplate
+    request:
+      templateName: $.name
+      body:
+        allowAnonymousManage: $.allow_anonymous_manage
+        armsConfiguration:
+          from: $.arms_configuration
+        containerConfiguration:
+          from: $.container_configuration
+        cpu: $.cpu
+        credentialConfiguration:
+          from: $.credential_configuration
+        description: $.description
+        enableAgent: $.enable_agent
+        enablePreStop: $.enable_pre_stop
+        environmentVariables:
+          from: $.environment_variables
+        executionRoleArn: $.execution_role_arn
+        logConfiguration:
+          from: $.log_configuration
+        memory: $.memory
+        nasConfig:
+          from: $.nas_config
+        networkConfiguration:
+          from: $.network_configuration
+        ossConfiguration: $.oss_configuration
+        preStopTimeoutInSeconds: $.pre_stop_timeout
+        sandboxIdleTimeoutInSeconds: $.idle_timeout
+        scalingConfig:
+          from: $.scaling_config
+        templateConfiguration:
+          from: $.template_configuration
+        workspaceId: $.workspace
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: templateName
+    require_any:
+      - request: body.allowAnonymousManage
+      - request: body.armsConfiguration
+      - request: body.containerConfiguration
+      - request: body.cpu
+      - request: body.credentialConfiguration
+      - request: body.description
+      - request: body.enableAgent
+      - request: body.enablePreStop
+      - request: body.environmentVariables
+      - request: body.executionRoleArn
+      - request: body.logConfiguration
+      - request: body.memory
+      - request: body.nasConfig
+      - request: body.networkConfiguration
+      - request: body.ossConfiguration
+      - request: body.preStopTimeoutInSeconds
+      - request: body.sandboxIdleTimeoutInSeconds
+      - request: body.scalingConfig
+      - request: body.templateConfiguration
+      - request: body.workspaceId
+      - raw: $.api_param
+    idempotency:
+      field: clientToken
+      prefix: ect-template
+    request_id_from: $.requestId
+    wait: ready_after_change
+  delete_template:
+    api: DeleteTemplate
+    request:
+      templateName: $.name
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: templateName
+    request_id_from: $.requestId
+    wait: absent_after_delete
+  enable_mcp:
+    api: ActivateTemplateMCP
+    request:
+      templateName: $.name
+      body:
+        enabledTools: $.enabled_tools
+        transport: $.transport
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: templateName
+    request_id_from: $.requestId
+  disable_mcp:
+    api: StopTemplateMCP
+    retry:
+      policy: initializing_grace
+      errors:
+        - template is not ready for stop, current MCP status is CREATING
+      initial_interval: 1s
+      max_interval: 5s
+      timeout: 30s
+    request:
+      templateName: $.name
+      ApiParam:
+        raw: $.api_param
+    require_all:
+      - request: templateName
+    request_id_from: $.requestId
+
+operations:
+  create:
+    examples:
+      - ecctl agentrun template create --name code-template --template-type CodeInterpreter --cpu 2 --memory 4096 --network-configuration @network.json
+    description:
+      en: Create an AgentRun sandbox template
+      zh-CN: 创建 AgentRun 沙箱模板
+    input:
+      fields:
+        - name:
+            required: true
+        - template_type:
+            required: true
+        - cpu:
+            required: true
+        - memory:
+            required: true
+        - network_configuration:
+            required: true
+        - description
+        - disk_size
+        - execution_role_arn
+        - container_configuration
+        - credential_configuration
+        - log_configuration
+        - arms_configuration
+        - nas_config
+        - oss_configuration
+        - environment_variables
+        - template_configuration
+        - scaling_config
+        - workspace
+        - idle_timeout
+        - allow_anonymous_manage
+        - enable_agent
+        - enable_pre_stop
+        - pre_stop_timeout
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: create_template
+        wait_unless: input.no_wait
+  update:
+    examples:
+      - ecctl agentrun template update <template-name> --description "updated template"
+    description:
+      en: Update an AgentRun sandbox template
+      zh-CN: 更新 AgentRun 沙箱模板
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+        - description
+        - cpu
+        - memory
+        - execution_role_arn
+        - container_configuration
+        - network_configuration
+        - credential_configuration
+        - log_configuration
+        - arms_configuration
+        - nas_config
+        - oss_configuration
+        - environment_variables
+        - template_configuration
+        - scaling_config
+        - workspace
+        - idle_timeout
+        - allow_anonymous_manage
+        - enable_agent
+        - enable_pre_stop
+        - pre_stop_timeout
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: update_template
+        wait_unless: input.no_wait
+  delete:
+    examples:
+      - ecctl agentrun template delete <template-name>
+    description:
+      en: Delete an AgentRun sandbox template
+      zh-CN: 删除 AgentRun 沙箱模板
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+      controls:
+        - no_wait
+        - timeout
+        - api_param
+    workflow:
+      - binding: delete_template
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            name: $input.name
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description:
+      en: Get an AgentRun sandbox template
+      zh-CN: 获取 AgentRun 沙箱模板
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+    workflow:
+      - probe: detail
+        ids:
+          - $input.name
+        not_found: error
+  list:
+    examples:
+      - ecctl agentrun template list --filter status=READY --limit 20 --page 1
+    description:
+      en: List AgentRun sandbox templates
+      zh-CN: 列出 AgentRun 沙箱模板
+    input:
+      fields:
+        - workspace_ids
+      controls:
+        - filter
+        - limit
+        - page
+    filters:
+      name:
+        target: name
+      status:
+        target: status
+      type:
+        target: template_type
+      workspace:
+        target: workspace
+    workflow:
+      - probe: list
+        many: true
+  enable:
+    examples:
+      - ecctl agentrun template enable <template-name> --transport streamable-http --enabled-tools '["execute_code"]'
+    description:
+      en: Enable the MCP service for a sandbox template
+      zh-CN: 启用沙箱模板的 MCP 服务
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+        - enabled_tools
+        - transport
+      controls:
+        - api_param
+    workflow:
+      - binding: enable_mcp
+      - probe: detail
+        ids:
+          - $input.name
+        not_found: error
+  disable:
+    examples:
+      - ecctl agentrun template disable <template-name>
+    description:
+      en: Disable the MCP service for a sandbox template
+      zh-CN: 停用沙箱模板的 MCP 服务
+    input:
+      fields:
+        - name:
+            required: true
+            positional: true
+      controls:
+        - api_param
+    workflow:
+      - binding: disable_mcp
+      - probe: detail
+        ids:
+          - $input.name
+        not_found: error

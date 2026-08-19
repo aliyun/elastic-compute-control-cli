@@ -15,6 +15,9 @@ regions:
     - id: cn-heyuan
     - id: cn-hangzhou
 
+# AgentRun lifecycle cases create temporary CodeInterpreter templates with the
+# platform-provided image and PUBLIC networking; no local prerequisites apply.
+
 # Paths to E2E files in the repository. Relative paths are resolved from this
 # file's directory.
 paths:

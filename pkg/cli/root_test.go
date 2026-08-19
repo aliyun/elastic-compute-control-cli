@@ -1321,6 +1321,36 @@ func TestOpenSourceCommandSurfaceMatchesFullMinusExcludedResources(t *testing.T)
 	}
 }
 
+func TestAgentRunPublicHelpKeepsExamples(t *testing.T) {
+	for _, tt := range []struct {
+		args []string
+		want []string
+	}{
+		{args: []string{"--lang", "en", "agentrun", "--help"}, want: []string{"Examples:", "ecctl agentrun template list", "ecctl agentrun sandbox list"}},
+		{args: []string{"--lang", "en", "agentrun", "template", "--help"}, want: []string{"Examples:", "ecctl agentrun template list", "ecctl agentrun template create"}},
+		{args: []string{"--lang", "en", "agentrun", "sandbox", "--help"}, want: []string{"Examples:", "ecctl agentrun sandbox list", "ecctl agentrun sandbox create"}},
+	} {
+		stdout, stderr, code := runCLI(tt.args...)
+		if code != 0 {
+			t.Fatalf("%v exit %d stderr=%s stdout=%s", tt.args, code, stderr, stdout)
+		}
+		for _, want := range tt.want {
+			if !strings.Contains(stdout, want) {
+				t.Fatalf("%v missing public example %q: %s", tt.args, want, stdout)
+			}
+		}
+	}
+	stdout, stderr, code := runCLI("--lang", "en", "agentrun", "sandbox", "--help")
+	if code != 0 {
+		t.Fatalf("agentrun sandbox help exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	for _, removed := range []string{"pause", "resume"} {
+		if strings.Contains(stdout, "\n  "+removed+" ") || strings.Contains(stdout, "ecctl agentrun sandbox "+removed) {
+			t.Fatalf("public AgentRun sandbox help still exposes removed operation %q: %s", removed, stdout)
+		}
+	}
+}
+
 func TestGovernanceProductsExposeSelectedPublicResources(t *testing.T) {
 	stdout, stderr, code := runCLI("--lang", "en", "schema", "--list")
 	if code != 0 {

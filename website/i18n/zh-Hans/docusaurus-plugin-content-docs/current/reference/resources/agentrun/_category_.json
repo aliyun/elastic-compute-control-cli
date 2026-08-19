@@ -1,0 +1,9 @@
+{
+  "label": "AGENTRUN",
+  "position": 2,
+  "link": {
+    "type": "generated-index",
+    "title": "AGENTRUN 资源",
+    "description": "管理 AgentRun 沙箱模板和隔离沙箱实例。"
+  }
+}

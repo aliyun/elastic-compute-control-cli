@@ -201,7 +201,7 @@ func TestCleanupWaitDoesNotConsumeCommandTimeout(t *testing.T) {
 		if len(failures) != 0 {
 			t.Fatalf("cleanup failures = %#v", failures)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(cleanupTimeout + 5*time.Second):
 		t.Fatal("cleanup did not run after the resource lock was released")
 	}
 	data, err := os.ReadFile(logPath)

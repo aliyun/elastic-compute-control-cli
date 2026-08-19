@@ -1,0 +1,69 @@
+# The case creates and cleans up its own CodeInterpreter template so no
+# account-owned template, image, or network resource is required.
+resource: agentrun/sandbox
+serial: true
+timeout: 20m
+
+steps:
+  - name: create template fixture
+    run: >
+      ecctl agentrun template create
+      --name {{.resource_prefix}}-sandbox-fixture
+      --template-type CodeInterpreter
+      --cpu 2
+      --memory 4096
+      --network-configuration '{"networkMode":"PUBLIC"}'
+      --description "ecctl E2E sandbox fixture {{.run_id}}"
+      --timeout 15m
+    at: $.template
+    expect:
+      name: { eq: "{{.resource_prefix}}-sandbox-fixture" }
+      status: { eq: READY }
+    capture:
+      sandbox_template_name: name
+    teardown: ecctl agentrun template delete {{.resource_prefix}}-sandbox-fixture --timeout 10m
+
+  - name: create
+    run: >
+      ecctl agentrun sandbox create
+      --id {{.resource_prefix}}-sandbox
+      --template-name {{.sandbox_template_name}}
+      --idle-timeout 1800
+      --timeout 10m
+    at: $.sandbox
+    expect:
+      id: { eq: "{{.resource_prefix}}-sandbox" }
+      template_name: { eq: "{{.sandbox_template_name}}" }
+      status: { eq: READY }
+    capture:
+      sandbox_id: id
+    teardown: ecctl agentrun sandbox delete {{.resource_prefix}}-sandbox --timeout 10m
+
+  - name: get
+    run: ecctl agentrun sandbox get {{.sandbox_id}}
+    at: $.sandbox
+    expect:
+      id: { eq: "{{.sandbox_id}}" }
+      status: { eq: READY }
+
+  - name: list
+    run: ecctl agentrun sandbox list --filter id={{.sandbox_id}} --limit 100
+    assert:
+      - len($.sandboxes) >= 1
+
+  - name: stop
+    run: ecctl agentrun sandbox stop {{.sandbox_id}} --timeout 10m
+    at: $.sandbox
+    expect:
+      id: { eq: "{{.sandbox_id}}" }
+      status: { eq: TERMINATED }
+
+  - name: delete
+    run: ecctl agentrun sandbox delete {{.sandbox_id}} --timeout 10m
+    expect:
+      $.deleted: { eq: true }
+
+  - name: delete template fixture
+    run: ecctl agentrun template delete {{.sandbox_template_name}} --timeout 10m
+    expect:
+      $.deleted: { eq: true }
