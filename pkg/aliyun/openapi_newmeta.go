@@ -95,5 +95,12 @@ func readOpenAPINewMetadata(language string, path string) ([]byte, error) {
 	if language == "en" {
 		prefix = "en-US"
 	}
-	return aliyunopenapimeta.Metadatas.ReadFile(prefix + path)
+	content, err := aliyunopenapimeta.Metadatas.ReadFile(prefix + path)
+	if err == nil {
+		return content, nil
+	}
+	if content, ok, manualErr := manualOpenAPIMetadata(language, path); ok {
+		return content, manualErr
+	}
+	return nil, err
 }

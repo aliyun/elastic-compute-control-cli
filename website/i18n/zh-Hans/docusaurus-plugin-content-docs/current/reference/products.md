@@ -41,6 +41,17 @@ description: "浏览 ecctl 支持的全部公开产品和资源。"
 | [version](./resources/ack/version.md) | 查询 ACK Kubernetes 版本元数据 |
 | [vuls](./resources/ack/vuls.md) | 管理 ACK 漏洞扫描和漏洞视图 |
 
+## [AGENTRUN](../category/agentrun)
+
+管理 AgentRun 沙箱模板和隔离沙箱实例。
+
+**2 个资源**
+
+| 资源 | 描述 |
+|---|---|
+| [sandbox](./resources/agentrun/sandbox.md) | 管理隔离的 AgentRun 沙箱实例。 |
+| [template](./resources/agentrun/template.md) | 管理 AgentRun 沙箱模板及其 MCP 服务。 |
+
 ## [ECS](../category/ecs)
 
 管理云服务器 ECS 资源，涵盖实例、块存储云盘与快照、镜像、安全组、弹性网卡（ENI）、密钥对、启动模板以及云助手命令。

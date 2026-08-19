@@ -128,6 +128,7 @@ Public products:
 | Product | Purpose |
 |---|---|
 | `ack` | ACK clusters and cluster lifecycle operations, including access, addons, checks, policies, and tasks |
+| `agentrun` | AgentRun sandbox templates and isolated sandbox instances |
 | `ecs` | ECS instances, disks, images, security groups, ENIs, key pairs, launch templates, snapshots, and Cloud Assistant resources |
 | `lingjun` | Lingjun clusters, node groups, and high-performance network resources |
 | `rg` | Resource groups and governance settings, policies, roles, and notifications |

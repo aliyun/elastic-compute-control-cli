@@ -358,7 +358,7 @@ func publicCLICommandAllowed(args []string) bool {
 		return true
 	case "vpc":
 		return true
-	case "ack", "lingjun", "rg", "tag":
+	case "ack", "agentrun", "lingjun", "rg", "tag":
 		if len(positionals) == 1 {
 			return true
 		}
@@ -441,7 +441,7 @@ func publicCLIExample(example string) bool {
 	switch product {
 	case "ecs", "vpc":
 		return true
-	case "ack", "lingjun", "rg", "tag":
+	case "ack", "agentrun", "lingjun", "rg", "tag":
 		resource, action, ok := publicCLIExampleResourceAction(positionals)
 		if !ok {
 			return false

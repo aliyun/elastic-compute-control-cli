@@ -12,7 +12,7 @@ import (
 )
 
 func TestProductSurfacesStayUnderAgentBudget(t *testing.T) {
-	for _, product := range []string{"ack", "ecs", "lingjun", "rg", "tag", "vpc"} {
+	for _, product := range []string{"ack", "agentrun", "ecs", "lingjun", "rg", "tag", "vpc"} {
 		surface, ok := ProductList(product)
 		if !ok {
 			t.Fatalf("ProductList(%q) not found", product)
@@ -54,7 +54,7 @@ func TestProductSurfacesStayUnderAgentBudget(t *testing.T) {
 
 func TestProductsReturnsSupportedSurfaces(t *testing.T) {
 	got := Products()
-	want := []string{"ack", "ecs", "lingjun", "rg", "tag", "vpc"}
+	want := []string{"ack", "agentrun", "ecs", "lingjun", "rg", "tag", "vpc"}
 	if len(got) != len(want) {
 		t.Fatalf("Products() = %#v, want %#v", got, want)
 	}

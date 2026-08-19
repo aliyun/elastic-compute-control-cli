@@ -4,10 +4,10 @@ generated:
   cases_dir: cases
 summary:
   surface: public
-  resources: 57
-  operations: 253
+  resources: 59
+  operations: 265
   missing_cases: 0
-  passed: 253
+  passed: 265
   not_passed: 0
 resources:
   ack:
@@ -490,6 +490,83 @@ resources:
           case: cases/ack/vuls-lifecycle.yaml
           fingerprint: sha256:df7ae7065a25546ea726cb3339df372919d0ce30b9aecf2d7dcf312ef61c0be3
           time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+  agentrun:
+    sandbox:
+      operations:
+        create:
+          status: live-pass
+          case: cases/agentrun/sandbox-lifecycle.yaml
+          fingerprint: sha256:b6d9dd79f8d387380b0ddd5bbead0a1106d90b4d6b519e3ed29c18c60ae13fa5
+          time: "2026-08-19T15:23:25.36105+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/agentrun/sandbox-lifecycle.yaml
+          fingerprint: sha256:b6d9dd79f8d387380b0ddd5bbead0a1106d90b4d6b519e3ed29c18c60ae13fa5
+          time: "2026-08-19T15:23:25.36105+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/agentrun/sandbox-lifecycle.yaml
+          fingerprint: sha256:b6d9dd79f8d387380b0ddd5bbead0a1106d90b4d6b519e3ed29c18c60ae13fa5
+          time: "2026-08-19T15:23:25.36105+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/agentrun/sandbox-lifecycle.yaml
+          fingerprint: sha256:b6d9dd79f8d387380b0ddd5bbead0a1106d90b4d6b519e3ed29c18c60ae13fa5
+          time: "2026-08-19T15:23:25.36105+08:00"
+          reason: live-verified
+        stop:
+          status: live-pass
+          case: cases/agentrun/sandbox-lifecycle.yaml
+          fingerprint: sha256:b6d9dd79f8d387380b0ddd5bbead0a1106d90b4d6b519e3ed29c18c60ae13fa5
+          time: "2026-08-19T15:23:25.36105+08:00"
+          reason: live-verified
+    template:
+      operations:
+        create:
+          status: live-pass
+          case: cases/agentrun/template-lifecycle.yaml
+          fingerprint: sha256:f74673319a120465baa0b05b45620f33976eba5c18e956d68628286bac144ec3
+          time: "2026-08-19T15:59:01.922329+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/agentrun/template-lifecycle.yaml
+          fingerprint: sha256:f74673319a120465baa0b05b45620f33976eba5c18e956d68628286bac144ec3
+          time: "2026-08-19T15:59:01.922329+08:00"
+          reason: live-verified
+        disable:
+          status: live-pass
+          case: cases/agentrun/template-lifecycle.yaml
+          fingerprint: sha256:f74673319a120465baa0b05b45620f33976eba5c18e956d68628286bac144ec3
+          time: "2026-08-19T15:59:01.922329+08:00"
+          reason: live-verified
+        enable:
+          status: live-pass
+          case: cases/agentrun/template-lifecycle.yaml
+          fingerprint: sha256:f74673319a120465baa0b05b45620f33976eba5c18e956d68628286bac144ec3
+          time: "2026-08-19T15:59:01.922329+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/agentrun/template-lifecycle.yaml
+          fingerprint: sha256:f74673319a120465baa0b05b45620f33976eba5c18e956d68628286bac144ec3
+          time: "2026-08-19T15:59:01.922329+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/agentrun/template-lifecycle.yaml
+          fingerprint: sha256:f74673319a120465baa0b05b45620f33976eba5c18e956d68628286bac144ec3
+          time: "2026-08-19T15:59:01.922329+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/agentrun/template-lifecycle.yaml
+          fingerprint: sha256:f74673319a120465baa0b05b45620f33976eba5c18e956d68628286bac144ec3
+          time: "2026-08-19T15:59:01.922329+08:00"
           reason: live-verified
   ecs:
     assistant:

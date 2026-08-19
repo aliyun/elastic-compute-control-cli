@@ -98,5 +98,17 @@
   "sidebar.docsSidebar.category.TAG.link.generated-index.description": {
     "message": "管理标签治理资源",
     "description": "The generated-index page description for category 'TAG' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.AGENTRUN": {
+    "message": "AGENTRUN",
+    "description": "The label for category 'AGENTRUN' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.AGENTRUN.link.generated-index.title": {
+    "message": "AGENTRUN 资源",
+    "description": "The generated-index page title for category 'AGENTRUN' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.AGENTRUN.link.generated-index.description": {
+    "message": "管理 AgentRun 沙箱模板和隔离沙箱实例。",
+    "description": "The generated-index page description for category 'AGENTRUN' in sidebar 'docsSidebar'"
   }
 }

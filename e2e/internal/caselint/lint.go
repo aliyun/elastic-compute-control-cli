@@ -738,6 +738,8 @@ func checkCreateTags(rep *Report, path, step, run string) {
 		resource == "ack/template" ||
 		resource == "ack/trigger" ||
 		resource == "ack/vuls" ||
+		resource == "agentrun/template" ||
+		resource == "agentrun/sandbox" ||
 		resource == "lingjun/net-test" ||
 		resource == "lingjun/node-group" {
 		return

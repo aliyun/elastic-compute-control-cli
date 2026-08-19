@@ -41,6 +41,17 @@ Manage Container Service for Kubernetes (ACK) clusters across their full lifecyc
 | [version](./resources/ack/version.md) | Query ACK Kubernetes version metadata |
 | [vuls](./resources/ack/vuls.md) | Manage ACK vulnerability scans and vulnerability views |
 
+## [AGENTRUN](../category/agentrun)
+
+Manage AgentRun sandbox templates and isolated sandbox instances.
+
+**2 resources**
+
+| Resource | Description |
+|---|---|
+| [sandbox](./resources/agentrun/sandbox.md) | Manage isolated AgentRun sandbox instances. |
+| [template](./resources/agentrun/template.md) | Manage AgentRun sandbox templates and their MCP service. |
+
 ## [ECS](../category/ecs)
 
 Manage Elastic Compute Service (ECS) resources, including instances, block storage disks and snapshots, images, security groups, elastic network interfaces, key pairs, launch templates, and Cloud Assistant commands.

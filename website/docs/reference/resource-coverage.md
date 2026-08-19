@@ -53,6 +53,17 @@ ecctl ack list --help
 ecctl ack cluster list --help
 ```
 
+## AgentRun
+
+```bash
+ecctl schema --list agentrun
+```
+
+| Resource | Actions |
+|---|---|
+| `sandbox` | `list`, `get`, `create`, `delete`, `stop` |
+| `template` | `list`, `get`, `create`, `update`, `delete`, `disable`, `enable` |
+
 ## ECS
 
 ```bash
