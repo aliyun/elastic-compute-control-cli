@@ -1,10 +1,63 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries and coverage output
+*.test
+*.out
+
+# Go workspace and dependency directories
+go.work
+go.work.sum
+vendor/
+
+# Build and test output
 /bin/
 /dist/
-/.idea/
+/build/
+/reports/
+
+# Project binary
+/ecctl
+
+# IDE, editor, and worktree files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
 /.worktrees/
 /worktrees/
-/reports/
+
+# Debug and log files
+debug
+*.log
+
+# Environment files
+.env
 .envrc
+.env.local
+.env.*.local
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Python
+__pycache__/
+
+# Agent and local tooling files
 .claude/
-eval/
+.cursor/
+.gemini/
 /.qoder/
+eval/
+openspec/
+
+# Node.js dependencies
+node_modules/
