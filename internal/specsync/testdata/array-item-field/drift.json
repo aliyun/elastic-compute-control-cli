@@ -1,0 +1,18 @@
+{
+  "language": "en",
+  "bindings_checked": 1,
+  "items": [
+    {
+      "product": "fake",
+      "resource": "fakeres",
+      "binding": "create_fakeres",
+      "api": "CreateFakeres",
+      "param": "DataDisk.ProvisionedIops",
+      "kind": "missing",
+      "type": "Long",
+      "required": false,
+      "position": "Query",
+      "description": "IOPS provisioned for the data disk."
+    }
+  ]
+}

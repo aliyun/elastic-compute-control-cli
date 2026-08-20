@@ -1,0 +1,41 @@
+schema_version: 2
+product: fake
+resource: fakeres
+kind: regional
+schema:
+  fields:
+    id:
+      type: string
+    data_disks:
+      type: array
+      description:
+        en: Data disks.
+      items:
+        type: object
+        fields:
+          category:
+            type: string
+          provisioned_iops:
+            type: integer
+            description: 'IOPS provisioned for the data disk.'
+bindings:
+  create_fakeres:
+    api: CreateFakeres
+    request:
+      RegionId: $context.region
+      DataDisk:
+        each: $.data_disks
+        fields:
+          Category: $.category
+          ProvisionedIops: $.provisioned_iops
+      ApiParam:
+        raw: $.api_param
+operations:
+  create:
+    input:
+      fields:
+        - id
+        - data_disks:
+            brief: false
+    workflow:
+      - binding: create_fakeres

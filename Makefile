@@ -46,13 +46,13 @@ generate: ## Generate Go catalog from resource specs
 	go run ./cmd/specgen -spec-dir specs -out pkg/spec/catalog_generated.go
 
 drift: specdrift ## Report OpenAPI metadata changes unmatched by resource bindings
-	bin/specdrift -spec-dir specs
+	bin/specdrift detect -spec-dir specs
 
 drift-baseline: specdrift ## Record the current OpenAPI metadata as the drift baseline
-	bin/specdrift -spec-dir specs -write-baseline
+	bin/specdrift baseline -spec-dir specs
 
 drift-check: specdrift ## Fail on unacknowledged OpenAPI metadata or binding coverage drift
-	bin/specdrift -spec-dir specs -check
+	bin/specdrift detect -spec-dir specs -check
 
 specdrift: ## Build the specdrift CLI into bin/
 	@mkdir -p bin
@@ -72,7 +72,7 @@ lint: specdrift ## Run formatting, vet, generated-code, and spec drift checks
 	@test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './bin/*'))"
 	go vet ./...
 	go run ./cmd/specgen -spec-dir specs -out pkg/spec/catalog_generated.go -check
-	bin/specdrift -spec-dir specs -check
+	bin/specdrift detect -spec-dir specs -check
 
 review-final: ## Run the complete offline review gates once for a final candidate SHA
 	@mkdir -p "$(REVIEW_GOPATH)" "$(REVIEW_GOCACHE)" "$(REVIEW_GOMODCACHE)" "$(REVIEW_NPM_CACHE)"
