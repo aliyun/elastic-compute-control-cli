@@ -78,7 +78,7 @@
   flex-direction: column;
   align-items: center;
   min-width: 0;
-  max-width: 760px;
+  max-width: 960px;
 }
 
 .heroCopy h1 {
@@ -102,7 +102,7 @@
 }
 
 .installPanel {
-  width: min(100%, 860px);
+  width: min(100%, 920px);
   margin: 2rem auto 0;
 }
 
@@ -114,7 +114,7 @@
   border: 1px solid var(--hp-border);
   border-radius: 10px;
   background: var(--hp-bg-soft);
-  padding: 0 10px 0 14px;
+  padding: 0.65rem 10px 0.65rem 14px;
   box-shadow: var(--hp-shadow-sm);
   text-align: left;
 }
@@ -127,14 +127,16 @@
 }
 
 .commandBar code {
-  overflow-x: auto;
+  display: block;
+  min-width: 0;
   margin-left: 0.65rem;
   border: 0;
   background: transparent;
   color: var(--hp-text);
   font-size: 0.86rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .commandLine {
