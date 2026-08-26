@@ -18,11 +18,14 @@ description: 用 Homebrew 安装 ecctl、下载预构建版本，或从源码构
 
 ```bash
 brew tap aliyun/ecctl https://github.com/aliyun/elastic-compute-control-cli
-brew install ecctl
+brew install --cask aliyun/ecctl/ecctl
 ecctl --version
 ```
 
-第一条命令会将当前仓库显式添加为 `aliyun/ecctl` Tap。升级已有安装：
+第一条命令会将当前仓库显式添加为 `aliyun/ecctl` Tap。
+自 Homebrew 6.0 起，第三方 Tap 默认不受信任；使用全限定 cask 名安装只会信任该 cask 本身，无需单独执行 `brew trust`。
+
+升级已有安装：
 
 ```bash
 ecctl update
