@@ -46,7 +46,7 @@ type CommandToken = {
 };
 
 const installCommand =
-  'brew tap aliyun/ecctl https://github.com/aliyun/elastic-compute-control-cli && brew install ecctl';
+  'brew tap aliyun/ecctl https://github.com/aliyun/elastic-compute-control-cli && brew install --cask aliyun/ecctl/ecctl';
 
 const terminalResultLines: HomeCopy['terminalLines'] = [
   {kind: 'json', content: '{'},

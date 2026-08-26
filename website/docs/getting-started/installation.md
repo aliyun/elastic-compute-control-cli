@@ -18,11 +18,15 @@ Install the latest public release:
 
 ```bash
 brew tap aliyun/ecctl https://github.com/aliyun/elastic-compute-control-cli
-brew install ecctl
+brew install --cask aliyun/ecctl/ecctl
 ecctl --version
 ```
 
 The first command explicitly uses this repository as the `aliyun/ecctl` Tap.
+Since Homebrew 6.0, third-party taps are not trusted by default; installing
+with the fully qualified cask name trusts only this cask, so a separate
+`brew trust` step is not needed.
+
 To upgrade an existing installation:
 
 ```bash
