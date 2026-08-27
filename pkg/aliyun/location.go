@@ -39,30 +39,23 @@ type RegionVerifier struct {
 	profile  resolvedOpenAPIProfile
 }
 
-// NewRegionVerifier constructs a RegionVerifier using the credentials from the
-// resolved profile. Returns a typed VerificationUnavailable error when no
-// credentials are available — the CLI should treat that as a soft skip rather
-// than a hard failure during initial setup.
+// NewRegionVerifier constructs a RegionVerifier using the dynamic credential
+// provider from the resolved profile. Returns a typed VerificationUnavailable
+// error when no credentials are available — the CLI should treat that as a
+// soft skip rather than a hard failure during initial setup.
 func NewRegionVerifier(profileName, configPath string, getenv func(string) string) (*RegionVerifier, error) {
 	if getenv == nil {
 		getenv = func(string) string { return "" }
 	}
-	profile, _, err := ecconfig.EffectiveProfile(profileName, configPath, ecconfig.AliyunConfigPath(getenv))
+	openAPIProfile, err := resolveOpenAPIProfile(profileName, configPath, ecconfig.ResolvedRegion{}, getenv)
 	if err != nil {
-		return nil, ecerrors.Client(ErrCodeVerificationUnavailable, err.Error())
-	}
-	openAPIProfile := toOpenAPIProfile(profile, "", getenv)
-	if openAPIProfile.AccessKeyID == "" || openAPIProfile.AccessKeySecret == "" {
-		return nil, ecerrors.Client(ErrCodeVerificationUnavailable, "Alibaba Cloud credentials are required to verify the region; configure access keys first or pass --no-verify")
+		return nil, ecerrors.Client(ErrCodeVerificationUnavailable, callerSanitizeCloudError(err))
 	}
 	// Location is a global service. Pin a known-good RegionId for signing even
 	// when the user-supplied region is invalid.
 	openAPIProfile.RegionID = firstNonEmptyString(openAPIProfile.RegionID, locationDefaultSignRegion)
-	executor, err := newDarabonbaExecutor(openAPIProfile)
-	if err != nil {
-		return nil, ecerrors.Client(ErrCodeVerificationUnavailable, callerSanitizeCloudError(err))
-	}
-	return &RegionVerifier{executor: executor, profile: openAPIProfile}, nil
+	setCredentialFallbackRegion(openAPIProfile.Acquirer, openAPIProfile.RegionID)
+	return &RegionVerifier{profile: openAPIProfile}, nil
 }
 
 // newRegionVerifierWithExecutor lets tests substitute the OpenAPI executor with a fake.
@@ -90,7 +83,7 @@ func (v *RegionVerifier) Verify(region, serviceCode string) error {
 // VerifyContext is Verify with the command context used for telemetry parentage
 // and cancellation.
 func (v *RegionVerifier) VerifyContext(ctx context.Context, region, serviceCode string) error {
-	if v == nil || v.executor == nil {
+	if v == nil || (v.executor == nil && v.profile.Acquirer == nil) {
 		return ecerrors.Client(ErrCodeVerificationUnavailable, "region verifier is not initialised")
 	}
 	if region == "" {
@@ -110,33 +103,38 @@ func (v *RegionVerifier) VerifyContext(ctx context.Context, region, serviceCode 
 	req.QueryParams["Id"] = region
 	req.QueryParams["ServiceCode"] = serviceCode
 	req.QueryParams["Type"] = "openAPI"
-	decoded, err := v.execute(ctx, req)
+	ctx = withCredentialOperationRegion(ctx, region)
+	executor, identityExecutor, credentialKey, err := v.operationExecutor(ctx)
+	if err != nil {
+		return ecerrors.Client(ErrCodeVerificationUnavailable, callerSanitizeCloudError(err))
+	}
+	decoded, err := v.executeWith(ctx, executor, identityExecutor, credentialKey, req)
 	if err != nil {
 		if isInvalidRegionCloudError(err) {
-			return v.invalidRegionError(ctx, region, serviceCode)
+			return v.invalidRegionError(ctx, executor, identityExecutor, credentialKey, region, serviceCode)
 		}
 		return ecerrors.Client(ErrCodeVerificationUnavailable, callerSanitizeCloudError(err))
 	}
 	if locationResponseHasEndpoints(decoded, region) {
 		return nil
 	}
-	return v.invalidRegionError(ctx, region, serviceCode)
+	return v.invalidRegionError(ctx, executor, identityExecutor, credentialKey, region, serviceCode)
 }
 
 // invalidRegionError builds the typed InvalidRegion error and, on a best-effort
 // basis, attaches a Suggestion field listing the closest known region plus the
 // full set of valid regions. Failure to enumerate regions degrades silently —
 // the user still gets a precise InvalidRegion error, just without the list.
-func (v *RegionVerifier) invalidRegionError(ctx context.Context, region, serviceCode string) *ecerrors.AppError {
+func (v *RegionVerifier) invalidRegionError(ctx context.Context, executor openAPIExecutor, identity telemetry.IdentityResolver, credentialKey, region, serviceCode string) *ecerrors.AppError {
 	options := []ecerrors.Option{}
-	if suggestion := v.regionSuggestion(ctx, region); suggestion != "" {
+	if suggestion := v.regionSuggestion(ctx, executor, identity, credentialKey, region); suggestion != "" {
 		options = append(options, ecerrors.WithSuggestion(suggestion))
 	}
 	return ecerrors.Client(ErrCodeInvalidRegion, locationInvalidRegionMessage(region, serviceCode), options...)
 }
 
-func (v *RegionVerifier) regionSuggestion(ctx context.Context, region string) string {
-	candidates, err := v.knownRegionIDs(ctx)
+func (v *RegionVerifier) regionSuggestion(ctx context.Context, executor openAPIExecutor, identity telemetry.IdentityResolver, credentialKey, region string) string {
+	candidates, err := v.knownRegionIDs(ctx, executor, identity, credentialKey)
 	if err != nil || len(candidates) == 0 {
 		return ""
 	}
@@ -146,8 +144,8 @@ func (v *RegionVerifier) regionSuggestion(ctx context.Context, region string) st
 // knownRegionIDs calls ECS/DescribeRegions to enumerate the regions reachable
 // for this account. It uses a known ECS endpoint and the verifier's OpenAPI
 // executor.
-func (v *RegionVerifier) knownRegionIDs(ctx context.Context) ([]string, error) {
-	if v == nil || v.executor == nil {
+func (v *RegionVerifier) knownRegionIDs(ctx context.Context, executor openAPIExecutor, identity telemetry.IdentityResolver, credentialKey string) ([]string, error) {
+	if v == nil || executor == nil {
 		return nil, ecerrors.Client(ErrCodeVerificationUnavailable, "region verifier is not initialised")
 	}
 	req := newOpenAPIRequest()
@@ -158,21 +156,62 @@ func (v *RegionVerifier) knownRegionIDs(ctx context.Context) ([]string, error) {
 	req.Method = "GET"
 	req.Scheme = "https"
 	req.Domain = "ecs." + locationDefaultSignRegion + ".aliyuncs.com"
-	decoded, err := v.execute(ctx, req)
+	decoded, err := v.executeWith(ctx, executor, identity, credentialKey, req)
 	if err != nil {
 		return nil, err
 	}
 	return parseRegionIDsFromDescribeRegions(decoded), nil
 }
 
-func (v *RegionVerifier) execute(ctx context.Context, req *openAPIRequest) (map[string]any, error) {
+func (v *RegionVerifier) operationExecutor(ctx context.Context) (openAPIExecutor, telemetry.IdentityResolver, string, error) {
+	if v.executor != nil {
+		return v.executor, identityResolver(v.executor), "", nil
+	}
+	profile := v.profile
+	operationRegion := credentialOperationRegion(ctx)
+	if operationRegion == "" {
+		operationRegion = profile.RegionID
+	}
+	operationCtx := withCredentialOperationRegion(ctx, operationRegion)
+	operationAcquirer, err := credentialAcquirerForOperation(operationCtx, profile.Acquirer)
+	if err != nil {
+		return nil, nil, "", &credentialProviderError{mode: profile.Mode, err: err}
+	}
+	profile.Acquirer = operationAcquirer
+	snapshot, err := operationAcquirer.Acquire(operationCtx)
+	if err != nil {
+		return nil, nil, "", &credentialProviderError{mode: profile.Mode, err: err}
+	}
+	var identityGuard *operationIdentityGuard
+	if profile.PinCredentialIdentity && credentialAcquirerIsRenewable(operationAcquirer) {
+		identityGuard, err = newOperationIdentityGuard(operationCtx, profile, snapshot)
+		if err != nil {
+			return nil, nil, "", err
+		}
+	}
+	executor, err := newDarabonbaExecutor(profile, snapshot, identityGuard)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	identityExecutor, err := newStaticDarabonbaExecutor(profile, snapshot)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	identity := identityResolver(identityExecutor)
+	if identityGuard != nil {
+		identity = identityGuard.Resolver()
+	}
+	return executor, identity, credentialIdentityCacheKey(profile, snapshot), nil
+}
+
+func (v *RegionVerifier) executeWith(ctx context.Context, executor openAPIExecutor, identity telemetry.IdentityResolver, credentialKey string, req *openAPIRequest) (map[string]any, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	session := telemetry.FromContext(ctx)
 	operationID := session.NextOperationID()
 	if session != nil {
-		session.RegisterIdentity(v.profile.AccessKeyID, identityResolver(v.profile, v.executor))
+		session.RegisterIdentity(credentialKey, identity)
 	}
 	endSpan := session.StartAPI(telemetry.APIRequest{
 		Service:         req.Product,
@@ -183,7 +222,7 @@ func (v *RegionVerifier) execute(ctx context.Context, req *openAPIRequest) (map[
 		Attempt:         1,
 		RetryObservable: true,
 	})
-	response, err := v.executor.ExecuteOpenAPI(ctx, req)
+	response, err := executor.ExecuteOpenAPI(ctx, req)
 	endSpan(err)
 	return response, err
 }

@@ -7,7 +7,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 )
+
+func TestResolveRegionForProfileCompatibilitySignatures(t *testing.T) {
+	var legacy func(string, string, string, func(string) string) (string, *ecerrors.AppError) = ResolveRegionForProfile
+	var withSource func(string, string, string, func(string) string) (ResolvedRegion, *ecerrors.AppError) = ResolveRegionForProfileWithSource
+	if legacy == nil || withSource == nil {
+		t.Fatal("region resolver compatibility functions are unavailable")
+	}
+}
 
 func TestResolveRegionClassifiesMissingAndInvalid(t *testing.T) {
 	tests := []struct {
@@ -207,6 +217,78 @@ func TestSetTelemetryEnabledPreservesSiblingFieldsAndRepairsMalformedEnabled(t *
 	}
 	if future, _ := telemetryConfig["future"].(map[string]any); future["mode"] != "keep" {
 		t.Fatalf("nested telemetry sibling was not preserved: %#v", telemetryConfig)
+	}
+}
+
+func TestStoreSaveReplaysMutationOntoConcurrentCredentialRefresh(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeConfig(t, path, map[string]any{
+		"current": "oauth",
+		"profiles": []any{map[string]any{
+			"name": "oauth", "mode": "OAuth", "region_id": "cn-hangzhou",
+			"oauth_refresh_token": "refresh-before", "access_key_id": "id-before",
+		}},
+	})
+	store, err := LoadStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetValue("oauth", "region", "cn-shanghai"); err != nil {
+		t.Fatal(err)
+	}
+	writeConfig(t, path, map[string]any{
+		"current": "oauth", "custom": "preserve",
+		"profiles": []any{map[string]any{
+			"name": "oauth", "mode": "OAuth", "region_id": "cn-hangzhou",
+			"oauth_refresh_token": "refresh-after", "access_key_id": "id-after",
+		}},
+	})
+	if err := store.Save(); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := LoadStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := updated.profileMap("oauth")
+	if stringField(profile, "region_id") != "cn-shanghai" || stringField(profile, "oauth_refresh_token") != "refresh-after" || stringField(profile, "access_key_id") != "id-after" {
+		t.Fatalf("merged profile = %#v", profile)
+	}
+	if updated.data["custom"] != "preserve" {
+		t.Fatalf("concurrent top-level field was lost: %#v", updated.data)
+	}
+}
+
+func TestStoreSavePreservesSymlinkAndTargetMode(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.json")
+	link := filepath.Join(dir, "config.json")
+	writeConfig(t, target, map[string]any{
+		"current": "default", "profiles": []any{map[string]any{"name": "default", "region_id": "cn-hangzhou"}},
+	})
+	if err := os.Chmod(target, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Base(target), link); err != nil {
+		t.Fatal(err)
+	}
+	store, err := LoadStore(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetValue("default", "region", "cn-shanghai"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(); err != nil {
+		t.Fatal(err)
+	}
+	linkInfo, err := os.Lstat(link)
+	if err != nil || linkInfo.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("configuration symlink was replaced: mode=%v err=%v", linkInfo.Mode(), err)
+	}
+	targetInfo, err := os.Stat(target)
+	if err != nil || targetInfo.Mode().Perm() != 0o640 {
+		t.Fatalf("target mode = %v err=%v", targetInfo.Mode().Perm(), err)
 	}
 }
 
@@ -528,8 +610,72 @@ func TestResolveRegionForProfileReportsConfigAndMissingErrors(t *testing.T) {
 	}
 }
 
+func TestResolveRegionForProfilePreservesProvenanceAndPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "ecctl.json")
+	aliyunPath := filepath.Join(dir, "aliyun.json")
+	writeConfig(t, configPath, map[string]any{
+		"current": "prod",
+		"profiles": []any{map[string]any{
+			"name": "prod", "region_id": "cn-profile-1",
+		}},
+	})
+	tests := []struct {
+		name     string
+		explicit string
+		env      map[string]string
+		want     ResolvedRegion
+	}{
+		{name: "explicit", explicit: "cn-explicit-1", env: map[string]string{"ECCTL_REGION": "cn-ecctl-1", "ALIBABA_CLOUD_REGION_ID": "cn-env-1"}, want: ResolvedRegion{Value: "cn-explicit-1", Source: RegionSourceExplicit}},
+		{name: "ecctl", env: map[string]string{"ECCTL_REGION": "cn-ecctl-1", "ALIBABA_CLOUD_REGION_ID": "cn-env-1"}, want: ResolvedRegion{Value: "cn-ecctl-1", Source: RegionSourceECCTL}},
+		{name: "profile", env: map[string]string{"ALIBABA_CLOUD_REGION_ID": "cn-env-1"}, want: ResolvedRegion{Value: "cn-profile-1", Source: RegionSourceProfile}},
+		{name: "ignore profile", env: map[string]string{"ALIBABA_CLOUD_IGNORE_PROFILE": "TRUE", "ALIBABA_CLOUD_REGION_ID": "cn-env-1"}, want: ResolvedRegion{Value: "cn-env-1", Source: RegionSourceAlibabaEnv}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			getenv := func(name string) string {
+				if name == "ECCTL_ALIYUN_CONFIG_PATH" {
+					return aliyunPath
+				}
+				return tc.env[name]
+			}
+			got, err := ResolveRegionForProfileWithSource(tc.explicit, "prod", configPath, getenv)
+			if err != nil || got != tc.want {
+				t.Fatalf("ResolveRegionForProfile = %#v, %v; want %#v", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveRegionForProfileIgnoreProfileBypassesMalformedFiles(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "broken.json")
+	if err := os.WriteFile(configPath, []byte("not-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolveRegionForProfileWithSource("", "prod", configPath, func(name string) string {
+		switch name {
+		case "ALIBABA_CLOUD_IGNORE_PROFILE":
+			return "true"
+		case "ALIBABA_CLOUD_REGION_ID":
+			return "cn-hangzhou"
+		case "ECCTL_ALIYUN_CONFIG_PATH":
+			return filepath.Join(dir, "also-broken.json")
+		default:
+			return ""
+		}
+	})
+	if err != nil || got != (ResolvedRegion{Value: "cn-hangzhou", Source: RegionSourceAlibabaEnv}) {
+		t.Fatalf("region = %#v, error = %v", got, err)
+	}
+}
+
 func TestValidRegionRejectsMalformedValues(t *testing.T) {
-	for _, region := range []string{"cn", "cn-", "-hangzhou"} {
+	for _, region := range []string{
+		"cn", "cn-", "-hangzhou", "CN-hangzhou", "cn_hangzhou",
+		"x@attacker.example-a", "cn/hangzhou-a", "cn?query-a", "cn#fragment-a", "cn:443-a",
+		strings.Repeat("a", 64) + "-b",
+	} {
 		t.Run(region, func(t *testing.T) {
 			if ValidRegion(region) {
 				t.Fatalf("ValidRegion(%q) = true, want false", region)
@@ -605,6 +751,37 @@ func TestLoadExistingStoreReportsMissingAndInvalidFiles(t *testing.T) {
 	}
 	if got := store.Current(); got != DefaultProfileName {
 		t.Fatalf("null existing store current = %q, want %q", got, DefaultProfileName)
+	}
+}
+
+func TestLoadExistingStoreRejectsReplacedSymlinkTargetOnSave(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "first.json")
+	second := filepath.Join(dir, "second.json")
+	link := filepath.Join(dir, "config.json")
+	for _, path := range []string{first, second} {
+		if err := os.WriteFile(path, []byte(`{"current":"default","profiles":[{"name":"default","region_id":"cn-hangzhou"}]}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Base(first), link); err != nil {
+		t.Fatal(err)
+	}
+	store, exists, err := LoadExistingStore(link)
+	if err != nil || !exists {
+		t.Fatalf("LoadExistingStore = %#v, %t, %v", store, exists, err)
+	}
+	if _, err := store.SetValue("default", "region", "cn-beijing"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Base(second), link); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(); err == nil || !strings.Contains(err.Error(), "target was replaced") {
+		t.Fatalf("Save after symlink replacement error = %v", err)
 	}
 }
 
@@ -716,7 +893,7 @@ func TestStoreGetAndSetValidateKeysAndValues(t *testing.T) {
 		t.Fatalf("security-token display = %#v", value)
 	}
 	profile, ok := store.Profile("")
-	if !ok || profile.Mode != "AK" || profile.SecurityToken != "token" {
+	if !ok || profile.Mode != "StsToken" || profile.SecurityToken != "token" {
 		t.Fatalf("profile after security-token = %#v ok=%v", profile, ok)
 	}
 }

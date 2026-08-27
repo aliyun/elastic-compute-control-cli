@@ -1,21 +1,61 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/aliyun/elastic-compute-control-cli/internal/configfile"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 )
 
 const DefaultProfileName = "default"
 
-type Store struct {
-	path string
-	data map[string]any
+// RegionSource records which input won region resolution. Callers must keep
+// this provenance until credential profile policy has been applied: ignoring
+// credential profiles must discard a stored profile region, but it must not
+// discard an explicit flag or ECCTL_REGION.
+type RegionSource uint8
+
+const (
+	RegionSourceUnset RegionSource = iota
+	RegionSourceExplicit
+	RegionSourceECCTL
+	RegionSourceAlibabaEnv
+	RegionSourceProfile
+)
+
+type ResolvedRegion struct {
+	Value  string
+	Source RegionSource
 }
+
+type Store struct {
+	path       string
+	targetPath string
+	existed    bool
+	data       map[string]any
+	pending    []storeMutation
+}
+
+type storeMutation struct {
+	kind  string
+	name  string
+	key   string
+	value string
+}
+
+const (
+	storeMutationSetValue   = "set-value"
+	storeMutationUseProfile = "use-profile"
+	storeMutationSetCurrent = "set-current"
+	configWriteLockTimeout  = 2 * time.Second
+	configWriteLockRetry    = 25 * time.Millisecond
+)
 
 type Profile struct {
 	Name            string
@@ -84,20 +124,28 @@ func ResolveRegion(explicit string, getenv func(string) string) (string, *ecerro
 }
 
 func ResolveRegionForProfile(explicit string, profile string, configPath string, getenv func(string) string) (string, *ecerrors.AppError) {
+	resolved, err := ResolveRegionForProfileWithSource(explicit, profile, configPath, getenv)
+	return resolved.Value, err
+}
+
+func ResolveRegionForProfileWithSource(explicit string, profile string, configPath string, getenv func(string) string) (ResolvedRegion, *ecerrors.AppError) {
 	if explicit != "" {
-		return ResolveRegion(explicit, getenv)
+		return resolveRegionWithSource(explicit, RegionSourceExplicit)
 	}
 	if getenv != nil {
 		if region := getenv("ECCTL_REGION"); region != "" {
-			return ResolveRegion(region, nil)
+			return resolveRegionWithSource(region, RegionSourceECCTL)
 		}
 	}
-	loaded, _, err := EffectiveProfile(profile, configPath, AliyunConfigPath(getenv))
-	if err != nil {
-		return "", ecerrors.Client("InvalidConfig", err.Error())
-	}
-	if loaded.Region != "" {
-		return ResolveRegion(loaded.Region, nil)
+	ignoreProfile := getenv != nil && (strings.EqualFold(strings.TrimSpace(getenv("ALIBABA_CLOUD_IGNORE_PROFILE")), "true") || strings.EqualFold(strings.TrimSpace(getenv("ALIBABACLOUD_IGNORE_PROFILE")), "true"))
+	if !ignoreProfile {
+		loaded, _, err := EffectiveProfile(profile, configPath, AliyunConfigPath(getenv))
+		if err != nil {
+			return ResolvedRegion{}, ecerrors.Client("InvalidConfig", err.Error())
+		}
+		if loaded.Region != "" {
+			return resolveRegionWithSource(loaded.Region, RegionSourceProfile)
+		}
 	}
 	if getenv != nil {
 		for _, name := range []string{
@@ -108,25 +156,35 @@ func ResolveRegionForProfile(explicit string, profile string, configPath string,
 			"REGION",
 		} {
 			if region := getenv(name); region != "" {
-				return ResolveRegion(region, nil)
+				return resolveRegionWithSource(region, RegionSourceAlibabaEnv)
 			}
 		}
 	}
-	return "", ecerrors.Client("MissingRegion", "region is required")
+	return ResolvedRegion{}, ecerrors.Client("MissingRegion", "region is required")
+}
+
+func resolveRegionWithSource(value string, source RegionSource) (ResolvedRegion, *ecerrors.AppError) {
+	region, err := ResolveRegion(value, nil)
+	if err != nil {
+		return ResolvedRegion{}, err
+	}
+	return ResolvedRegion{Value: region, Source: source}, nil
 }
 
 func ValidRegion(region string) bool {
-	if region == "not-a-real-region" {
+	if region == "not-a-real-region" || len(region) < 3 || len(region) > 63 || region[0] == '-' || region[len(region)-1] == '-' || !strings.Contains(region, "-") {
 		return false
 	}
-	parts := strings.Split(region, "-")
-	if len(parts) < 2 {
-		return false
-	}
-	for _, part := range parts {
-		if part == "" {
+	previousHyphen := false
+	for _, char := range region {
+		isHyphen := char == '-'
+		if !(char >= 'a' && char <= 'z') && !(char >= '0' && char <= '9') && !isHyphen {
 			return false
 		}
+		if isHyphen && previousHyphen {
+			return false
+		}
+		previousHyphen = isHyphen
 	}
 	return true
 }
@@ -181,21 +239,26 @@ func LoadStore(path string) (*Store, error) {
 	if path == "" {
 		path = EcctlConfigPath(os.Getenv)
 	}
-	raw, err := os.ReadFile(path)
+	_, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return newStore(path), nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	var data map[string]any
-	if err := json.Unmarshal(raw, &data); err != nil {
+	target, err := configfile.Resolve(path, false)
+	if err != nil {
 		return nil, err
 	}
-	if data == nil {
-		data = map[string]any{}
+	raw, _, err := target.Read()
+	if err != nil {
+		return nil, err
 	}
-	store := &Store{path: path, data: data}
+	data, err := decodeStoreData(raw)
+	if err != nil {
+		return nil, err
+	}
+	store := &Store{path: path, targetPath: target.Path(), existed: true, data: data}
 	store.ensureShape()
 	return store, nil
 }
@@ -204,35 +267,108 @@ func LoadExistingStore(path string) (*Store, bool, error) {
 	if path == "" {
 		path = EcctlConfigPath(os.Getenv)
 	}
-	raw, err := os.ReadFile(path)
+	_, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil, false, nil
 	}
 	if err != nil {
 		return nil, false, err
 	}
-	var data map[string]any
-	if err := json.Unmarshal(raw, &data); err != nil {
+	target, err := configfile.Resolve(path, false)
+	if err != nil {
 		return nil, false, err
 	}
-	if data == nil {
-		data = map[string]any{}
+	raw, _, err := target.Read()
+	if err != nil {
+		return nil, false, err
 	}
-	store := &Store{path: path, data: data}
+	data, err := decodeStoreData(raw)
+	if err != nil {
+		return nil, false, err
+	}
+	store := &Store{path: path, targetPath: target.Path(), existed: true, data: data}
 	store.ensureShape()
 	return store, true, nil
 }
 
 func (s *Store) Save() error {
-	s.ensureShape()
-	raw, err := json.MarshalIndent(s.data, "", "  ")
+	if s == nil || s.path == "" {
+		return fmt.Errorf("configuration store is unavailable")
+	}
+	target, err := configfile.Resolve(s.path, true)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return err
+	if s.targetPath != "" && s.targetPath != target.Path() {
+		return fmt.Errorf("configuration target was replaced")
 	}
-	return os.WriteFile(s.path, append(raw, '\n'), 0o600)
+	return target.WithLock(context.Background(), configWriteLockTimeout, configWriteLockRetry, func() error {
+		var current *Store
+		raw, info, readErr := target.Read()
+		switch {
+		case readErr == nil:
+			data, decodeErr := decodeStoreData(raw)
+			if decodeErr != nil {
+				return decodeErr
+			}
+			current = &Store{path: s.path, targetPath: target.Path(), existed: true, data: data}
+		case os.IsNotExist(readErr):
+			current = newStore(s.path)
+			current.targetPath = target.Path()
+		default:
+			return readErr
+		}
+		current.ensureShape()
+		if len(s.pending) == 0 && s.existed {
+			s.data = current.data
+			s.targetPath = target.Path()
+			return nil
+		}
+		if len(s.pending) == 0 {
+			cloned, cloneErr := cloneConfigMap(s.data)
+			if cloneErr != nil {
+				return cloneErr
+			}
+			current.data = cloned
+			current.ensureShape()
+		} else {
+			for _, mutation := range s.pending {
+				if err := current.applyMutation(mutation, false); err != nil {
+					return err
+				}
+			}
+		}
+		if info != nil && info.Mode().Perm()&0o200 == 0 {
+			return fmt.Errorf("configuration is read-only")
+		}
+		encoded, err := json.MarshalIndent(current.data, "", "  ")
+		if err != nil {
+			return err
+		}
+		mode := os.FileMode(0o600)
+		if info != nil {
+			mode = info.Mode().Perm()
+		}
+		if err := target.AtomicWrite(append(encoded, '\n'), mode); err != nil {
+			return err
+		}
+		s.data = current.data
+		s.targetPath = target.Path()
+		s.existed = true
+		s.pending = nil
+		return nil
+	})
+}
+
+func decodeStoreData(raw []byte) (map[string]any, error) {
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil, err
+	}
+	if data == nil {
+		data = map[string]any{}
+	}
+	return data, nil
 }
 
 func (s *Store) Current() string {
@@ -400,6 +536,10 @@ func (s *Store) GetValue(name string, key string, showSecret bool) (ConfigValue,
 }
 
 func (s *Store) SetValue(name string, key string, value string) (ConfigValue, error) {
+	return s.setValue(name, key, value, true)
+}
+
+func (s *Store) setValue(name string, key string, value string, record bool) (ConfigValue, error) {
 	item, ok := lookupConfigItem(key)
 	if !ok {
 		return ConfigValue{}, fmt.Errorf("unknown config key %s", key)
@@ -412,6 +552,9 @@ func (s *Store) SetValue(name string, key string, value string) (ConfigValue, er
 		rawTelemetry, exists := s.data["telemetry"]
 		if !exists {
 			s.data["telemetry"] = map[string]any{"enabled": enabled}
+			if record {
+				s.pending = append(s.pending, storeMutation{kind: storeMutationSetValue, key: item.Key, value: value})
+			}
 			return ConfigValue{Key: item.Key, Value: value}, nil
 		}
 		telemetryMap, ok := rawTelemetry.(map[string]any)
@@ -419,6 +562,9 @@ func (s *Store) SetValue(name string, key string, value string) (ConfigValue, er
 			return ConfigValue{}, fmt.Errorf("telemetry must be an object")
 		}
 		telemetryMap["enabled"] = enabled
+		if record {
+			s.pending = append(s.pending, storeMutation{kind: storeMutationSetValue, key: item.Key, value: value})
+		}
 		return ConfigValue{Key: item.Key, Value: value}, nil
 	}
 	if name == "" {
@@ -426,10 +572,20 @@ func (s *Store) SetValue(name string, key string, value string) (ConfigValue, er
 	}
 	profile := s.profileMap(name)
 	profile[item.StoredAs] = value
-	if item.Key == "access-key-id" || item.Key == "access-key-secret" || item.Key == "security-token" {
-		profile["mode"] = "AK"
+	if item.Key == "access-key-id" || item.Key == "access-key-secret" {
+		if stringField(profile, "sts_token") != "" {
+			profile["mode"] = "StsToken"
+		} else {
+			profile["mode"] = "AK"
+		}
+	}
+	if item.Key == "security-token" {
+		profile["mode"] = "StsToken"
 	}
 	s.data["current"] = name
+	if record {
+		s.pending = append(s.pending, storeMutation{kind: storeMutationSetValue, name: name, key: item.Key, value: value})
+	}
 	return ConfigValue{Key: item.Key, Value: displayConfigValue(item, value, false), Sensitive: item.Sensitive}, nil
 }
 
@@ -439,6 +595,10 @@ func (s *Store) SetRegion(name string, region string) error {
 }
 
 func (s *Store) UseProfile(name string) error {
+	return s.useProfile(name, true)
+}
+
+func (s *Store) useProfile(name string, record bool) error {
 	if name == "" {
 		return fmt.Errorf("profile is required")
 	}
@@ -446,16 +606,40 @@ func (s *Store) UseProfile(name string) error {
 		return fmt.Errorf("profile %s not found", name)
 	}
 	s.data["current"] = name
+	if record {
+		s.pending = append(s.pending, storeMutation{kind: storeMutationUseProfile, name: name})
+	}
 	return nil
 }
 
 func (s *Store) SetCurrentProfile(name string) error {
+	return s.setCurrentProfile(name, true)
+}
+
+func (s *Store) setCurrentProfile(name string, record bool) error {
 	if name == "" {
 		return fmt.Errorf("profile is required")
 	}
 	s.profileMap(name)
 	s.data["current"] = name
+	if record {
+		s.pending = append(s.pending, storeMutation{kind: storeMutationSetCurrent, name: name})
+	}
 	return nil
+}
+
+func (s *Store) applyMutation(mutation storeMutation, record bool) error {
+	switch mutation.kind {
+	case storeMutationSetValue:
+		_, err := s.setValue(mutation.name, mutation.key, mutation.value, record)
+		return err
+	case storeMutationUseProfile:
+		return s.useProfile(mutation.name, record)
+	case storeMutationSetCurrent:
+		return s.setCurrentProfile(mutation.name, record)
+	default:
+		return fmt.Errorf("unsupported configuration mutation %s", mutation.kind)
+	}
 }
 
 func (s *Store) ensureShape() {
@@ -506,6 +690,18 @@ func newStore(path string) *Store {
 	store := &Store{path: path, data: map[string]any{}}
 	store.ensureShape()
 	return store
+}
+
+func cloneConfigMap(values map[string]any) (map[string]any, error) {
+	raw, err := json.Marshal(values)
+	if err != nil {
+		return nil, err
+	}
+	cloned, err := decodeStoreData(raw)
+	if err != nil {
+		return nil, err
+	}
+	return cloned, nil
 }
 
 func lookupConfigItem(key string) (ConfigItem, bool) {

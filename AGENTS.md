@@ -78,6 +78,28 @@ make lint
 Use `go test ./...` when validating the whole open-source tree. Avoid live cloud
 API calls in default tests.
 
+## Credential Configuration Safety
+
+- Route every credential-config write through the shared resolved-target lock
+  and atomic replacement implementation in `internal/configfile`.
+- Preserve the existing target's permissions and security metadata for general
+  configuration writes. Private credential-cache writes must instead use a
+  canonical current-user-only policy. On Windows, both the cache directory and
+  each cache entry use a protected DACL restricted to the current user and
+  SYSTEM; never preserve an unvalidated DACL.
+- Treat profile identity, target, or auth-field changes during credential
+  refresh as fatal conflicts. Only a write-stage cache persistence failure may
+  degrade to an in-memory CloudSSO credential.
+- Validate derived STS endpoints before reading or transmitting OIDC tokens.
+- Treat compatible `aliyun` configuration as read-only during cloud commands.
+  Persist renewable OAuth and CloudSSO state only in the canonical per-user
+  ecctl credential store. Key entries by resolved Aliyun source path and
+  profile; `ECCTL_CONFIG_PATH` must not create another OAuth rotation owner.
+- Pin the canonical account, user, or role for every renewable operation and
+  reject a refreshed credential before use when its identity changes.
+- Require HTTPS for CredentialsURI except for literal loopback HTTP endpoints,
+  and require every CredentialsURI response to carry a valid future expiration.
+
 ## Releases
 
 - `version.txt` is the canonical public release version and must contain one

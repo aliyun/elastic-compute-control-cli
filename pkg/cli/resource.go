@@ -52,7 +52,11 @@ func resourceCallerFactoryFromContext(ctx context.Context) ResourceCallerFactory
 }
 
 func defaultResourceCallerFactory(profileName, configPath string, resource spec.ResourceSpec, region string, getenv func(string) string) (engine.Caller, error) {
-	caller, err := aliyun.NewOpenAPICaller(profileName, configPath, resourceAPIProduct(resource), region, getenv)
+	return defaultResourceCallerFactoryResolved(profileName, configPath, resource, config.ResolvedRegion{Value: region, Source: config.RegionSourceExplicit}, getenv)
+}
+
+func defaultResourceCallerFactoryResolved(profileName, configPath string, resource spec.ResourceSpec, region config.ResolvedRegion, getenv func(string) string) (engine.Caller, error) {
+	caller, err := aliyun.NewOpenAPICallerWithRegionSource(profileName, configPath, resourceAPIProduct(resource), region, getenv)
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +78,13 @@ func resourceAPIProduct(resource spec.ResourceSpec) string {
 func resourceEffectiveRegion(resource spec.ResourceSpec, region string) string {
 	if resource.FixedRegion != "" {
 		return resource.FixedRegion
+	}
+	return region
+}
+
+func resourceEffectiveResolvedRegion(resource spec.ResourceSpec, region config.ResolvedRegion) config.ResolvedRegion {
+	if resource.FixedRegion != "" {
+		return config.ResolvedRegion{Value: resource.FixedRegion, Source: config.RegionSourceExplicit}
 	}
 	return region
 }
@@ -1196,7 +1207,7 @@ func runResourceAction(cmd *cobra.Command, options *globalOptions, stdout io.Wri
 	if err != nil {
 		return err
 	}
-	region = resourceEffectiveRegion(resource, region)
+	region = resourceEffectiveResolvedRegion(resource, region)
 	input, timeout, err := resourceActionInput(cmd, resource, actionName, operation, args)
 	if err != nil {
 		return err
@@ -1217,22 +1228,28 @@ func runResourceAction(cmd *cobra.Command, options *globalOptions, stdout io.Wri
 	delete(input, fieldSelectorInputName)
 	// Factories may tune waiter timing for one execution; keep the catalog immutable.
 	resource.Waiters = maps.Clone(resource.Waiters)
-	callerFactory := resourceCallerFactoryFromContext(cmd.Context())
-	caller, err := callerFactory(config.ProfileName(options.profile, os.Getenv), config.ConfigPath(os.Getenv), resource, region, os.Getenv)
+	profileName := config.ProfileName(options.profile, os.Getenv)
+	configPath := config.ConfigPath(os.Getenv)
+	var caller engine.Caller
+	if callerFactory, ok := cmd.Context().Value(resourceCallerFactoryKey{}).(ResourceCallerFactory); ok {
+		caller, err = callerFactory(profileName, configPath, resource, region.Value, os.Getenv)
+	} else {
+		caller, err = defaultResourceCallerFactoryResolved(profileName, configPath, resource, region, os.Getenv)
+	}
 	if err != nil {
 		return err
 	}
 	result, err := engine.NewExecutor(resource, caller).Execute(cmd.Context(), engine.Request{
 		Action:  actionName,
 		Input:   input,
-		Context: map[string]any{"region": region},
+		Context: map[string]any{"region": region.Value},
 		Timeout: timeout,
 	})
 	if err != nil {
 		return err
 	}
 	result = cropResultFields(result, selectedFields)
-	return writeCommandOutput(options, stdout, resourceActionPayload(resource, actionName, operation, input, region, result))
+	return writeCommandOutput(options, stdout, resourceActionPayload(resource, actionName, operation, input, region.Value, result))
 }
 
 func selectedOutputFields(resource spec.ResourceSpec, actionName string, operation spec.Operation, input map[string]any) ([]string, error) {

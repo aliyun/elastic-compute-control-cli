@@ -567,6 +567,49 @@ func TestExecuteCreateRunsTransitionWaitAndReadBack(t *testing.T) {
 	}
 }
 
+type preparedOperationContextKey struct{}
+
+type operationPreparingCaller struct {
+	inner        *fakeCaller
+	preparations int
+	unprepared   int
+}
+
+func (c *operationPreparingCaller) PrepareOperationContext(ctx context.Context) (context.Context, error) {
+	c.preparations++
+	return context.WithValue(ctx, preparedOperationContextKey{}, true), nil
+}
+
+func (c *operationPreparingCaller) Call(ctx context.Context, operation string, request map[string]any) (map[string]any, error) {
+	if prepared, _ := ctx.Value(preparedOperationContextKey{}).(bool); !prepared {
+		c.unprepared++
+	}
+	return c.inner.Call(ctx, operation, request)
+}
+
+func TestExecutorPreparesOneContextForMutationWaitersAndReadback(t *testing.T) {
+	resource := fakeVPCSpecForEngine(t)
+	waitSpec := resource.Waiters["available_after_create"]
+	waitSpec.Interval = "1ms"
+	resource.Waiters["available_after_create"] = waitSpec
+	caller := &operationPreparingCaller{inner: &fakeCaller{responses: []map[string]any{
+		{"VpcId": "vpc-new", "RequestId": "req-create"},
+		{"RequestId": "req-pending", "VpcId": "vpc-new", "Status": "Pending", "RegionId": "cn-beijing"},
+		{"RequestId": "req-available", "VpcId": "vpc-new", "Status": "Available", "RegionId": "cn-beijing"},
+	}}}
+	_, err := NewExecutor(resource, caller).Execute(testContext(), Request{
+		Action:  "create",
+		Input:   map[string]any{"name": "prod", "cidr": "10.0.0.0/16", "no_wait": false},
+		Context: map[string]any{"region": "cn-beijing", "client_token": "token-1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if caller.preparations != 1 || caller.unprepared != 0 || len(caller.inner.calls) < 2 {
+		t.Fatalf("operation context preparations=%d unprepared=%d calls=%d", caller.preparations, caller.unprepared, len(caller.inner.calls))
+	}
+}
+
 func TestExecuteWaitTimeoutOverrideExtendsAttemptBudget(t *testing.T) {
 	resource := fakeVPCSpecForEngine(t)
 	waitSpec := resource.Waiters["available_after_create"]

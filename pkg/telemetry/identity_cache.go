@@ -33,8 +33,8 @@ type identityCacheHandle struct {
 	close func()
 }
 
-func resolveCachedIdentity(ctx context.Context, configPath, accessKeyID string, resolver IdentityResolver) (Identity, error) {
-	if accessKeyID == "" || resolver == nil {
+func resolveCachedIdentity(ctx context.Context, configPath, credentialKey string, resolver IdentityResolver) (Identity, error) {
+	if credentialKey == "" || resolver == nil {
 		return Identity{}, errors.New("identity unavailable")
 	}
 	handle, err := openIdentityCache(ctx, configPath)
@@ -46,7 +46,7 @@ func resolveCachedIdentity(ctx context.Context, configPath, accessKeyID string, 
 	now := time.Now().UTC()
 	cache := handle.cache
 	dirty := pruneIdentityCache(&cache, now)
-	key := identityCacheKey(accessKeyID)
+	key := identityCacheKey(credentialKey)
 	if entry, ok := cache.Entries[key]; ok {
 		if dirty {
 			_ = handle.write(cache)
@@ -69,8 +69,8 @@ func resolveCachedIdentity(ctx context.Context, configPath, accessKeyID string, 
 	return identity, nil
 }
 
-func identityCacheKey(accessKeyID string) string {
-	digest := sha256.Sum256([]byte("ak\x00" + accessKeyID))
+func identityCacheKey(credentialKey string) string {
+	digest := sha256.Sum256([]byte("credential\x00" + credentialKey))
 	return hex.EncodeToString(digest[:])
 }
 

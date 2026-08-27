@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/aliyun/elastic-compute-control-cli/internal/configfile"
 	ecconfig "github.com/aliyun/elastic-compute-control-cli/pkg/config"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 )
@@ -47,6 +48,9 @@ func NewCLICommandCaller(profileName, configPath, product, region string, getenv
 func newCLICommandCaller(profileName, configPath, product, region string, getenv func(string) string, runner CLICommandRunner) (*CLICommandCaller, error) {
 	if getenv == nil {
 		getenv = func(string) string { return "" }
+	}
+	if err := rejectUnsafeCredentialDebug(getenv); err != nil {
+		return nil, err
 	}
 	if configPath == "" {
 		configPath = ecconfig.EcctlConfigPath(getenv)
@@ -363,13 +367,13 @@ func upsertConfigProfile(config map[string]any, profile map[string]any) {
 }
 
 func writeTempConfig(config map[string]any) (string, func(), error) {
-	file, err := os.CreateTemp("", "ecctl-aliyun-config-*.json")
+	file, err := configfile.CreateSensitiveTemp("", "ecctl-aliyun-config-*.json")
 	if err != nil {
 		return "", nil, err
 	}
 	path := file.Name()
 	cleanup := func() {
-		_ = os.Remove(path)
+		_ = configfile.CleanupSensitiveTemp(path)
 	}
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")

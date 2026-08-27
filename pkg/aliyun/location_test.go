@@ -138,6 +138,28 @@ func TestVerifyRegionFailsWhenNoCredentials(t *testing.T) {
 	requireAppErrorCode(t, err, ErrCodeVerificationUnavailable)
 }
 
+func TestRegionVerifierPropagatesSigningRegionToCredentialSource(t *testing.T) {
+	dir := t.TempDir()
+	aliyunPath := filepath.Join(dir, "aliyun.json")
+	writeJSONFile(t, aliyunPath, map[string]any{
+		"current": "role",
+		"profiles": []any{map[string]any{
+			"name": "role", "mode": "RamRoleArn", "access_key_id": "id", "access_key_secret": "secret",
+			"ram_role_arn": "acs:ram::1234567890123456:role/admin", "enable_vpc": true,
+		}},
+	})
+	verifier, err := NewRegionVerifier("role", filepath.Join(dir, "ecctl.json"), mapGetenv(map[string]string{
+		"ECCTL_ALIYUN_CONFIG_PATH": aliyunPath,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquirer, ok := verifier.profile.Acquirer.(*ramRoleCredentialAcquirer)
+	if !ok || verifier.profile.RegionID != locationDefaultSignRegion || acquirer.fallbackRegion != locationDefaultSignRegion {
+		t.Fatalf("verifier profile=%#v acquirer=%#v", verifier.profile, acquirer)
+	}
+}
+
 func requireLocationRequestShape(t *testing.T, req *openAPIRequest, region, serviceCode string) {
 	t.Helper()
 	if req == nil {

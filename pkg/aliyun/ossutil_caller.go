@@ -37,23 +37,27 @@ type OSSUtilCaller struct {
 }
 
 func NewOSSUtilCaller(profileName, configPath, region string, getenv func(string) string) (*OSSUtilCaller, error) {
+	resolved := ecconfig.ResolvedRegion{}
+	if region != "" {
+		resolved = ecconfig.ResolvedRegion{Value: region, Source: ecconfig.RegionSourceExplicit}
+	}
+	return NewOSSUtilCallerWithRegionSource(profileName, configPath, resolved, getenv)
+}
+
+func NewOSSUtilCallerWithRegionSource(profileName, configPath string, region ecconfig.ResolvedRegion, getenv func(string) string) (*OSSUtilCaller, error) {
 	return newOSSUtilCaller(profileName, configPath, region, getenv, execCLICommandRunner{})
 }
 
-func newOSSUtilCaller(profileName, configPath, region string, getenv func(string) string, runner CLICommandRunner) (*OSSUtilCaller, error) {
+func newOSSUtilCaller(profileName, configPath string, region ecconfig.ResolvedRegion, getenv func(string) string, runner CLICommandRunner) (*OSSUtilCaller, error) {
 	if getenv == nil {
 		getenv = func(string) string { return "" }
 	}
 	if configPath == "" {
 		configPath = ecconfig.EcctlConfigPath(getenv)
 	}
-	profile, _, err := ecconfig.EffectiveProfile(profileName, configPath, ecconfig.AliyunConfigPath(getenv))
+	resolved, err := resolveOpenAPIProfile(profileName, configPath, region, getenv)
 	if err != nil {
-		return nil, ecerrors.Client("InvalidConfig", err.Error())
-	}
-	resolved := toOpenAPIProfile(profile, region, getenv)
-	if resolved.AccessKeyID == "" || resolved.AccessKeySecret == "" {
-		return nil, ecerrors.Client("MissingCredentials", "Alibaba Cloud access key is required")
+		return nil, err
 	}
 	resolvedRegion, regionErr := ecconfig.ResolveRegion(resolved.RegionID, nil)
 	if regionErr != nil {
@@ -75,7 +79,7 @@ func (c *OSSUtilCaller) Call(ctx context.Context, operation string, request map[
 	return c.CallWithArgs(ctx, operation, request, nil)
 }
 
-func (c *OSSUtilCaller) CallWithArgs(ctx context.Context, operation string, request map[string]any, passthrough []string) (map[string]any, error) {
+func (c *OSSUtilCaller) CallWithArgs(ctx context.Context, operation string, request map[string]any, passthrough []string) (result map[string]any, resultErr error) {
 	args, metadata, err := c.commandArgs(operation, request, passthrough)
 	if err != nil {
 		return nil, err
@@ -84,17 +88,81 @@ func (c *OSSUtilCaller) CallWithArgs(ctx context.Context, operation string, requ
 	if err != nil {
 		return nil, err
 	}
-	env := c.commandEnv()
-	if err := c.requireVersion2(ctx, runtimePath, env); err != nil {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = withCredentialOperationRegion(ctx, c.Region)
+	probeEnv := c.commandProbeEnv()
+	if err := c.requireVersion2(ctx, runtimePath, probeEnv); err != nil {
 		return nil, err
 	}
-	if err := c.requireOperation(ctx, runtimePath, metadata, env); err != nil {
+	if err := c.requireOperation(ctx, runtimePath, metadata, probeEnv); err != nil {
 		return nil, err
+	}
+	operationProfile := c.Profile
+	operationAcquirer, err := credentialAcquirerForOperation(ctx, c.Profile.Acquirer)
+	if err != nil {
+		return nil, credentialResolutionError(&credentialProviderError{mode: c.Profile.Mode, err: err})
+	}
+	operationProfile.Acquirer = operationAcquirer
+	snapshot, err := operationAcquirer.Acquire(ctx)
+	if err != nil {
+		return nil, credentialResolutionError(&credentialProviderError{mode: c.Profile.Mode, err: err})
+	}
+	if err := validateCredentialLifetime(ctx, operationAcquirer, snapshot); err != nil {
+		return nil, credentialResolutionError(err)
+	}
+	var broker *credentialBroker
+	brokerURL := ""
+	var env []string
+	var identityGuard *operationIdentityGuard
+	renewable := credentialAcquirerIsRenewable(operationAcquirer)
+	if renewable && operationProfile.PinCredentialIdentity {
+		identityGuard, err = newOperationIdentityGuard(ctx, operationProfile, snapshot)
+		if err != nil {
+			return nil, credentialResolutionError(&credentialProviderError{mode: c.Profile.Mode, err: err})
+		}
+	}
+	if renewable && credentialBrokerCompatibleSnapshot(snapshot) {
+		broker, err = startCredentialBrokerWithGuard(ctx, operationAcquirer, identityGuard, snapshot)
+		if err != nil {
+			return nil, credentialResolutionError(&credentialProviderError{mode: c.Profile.Mode, err: err})
+		}
+		defer func() {
+			if closeErr := broker.Close(); closeErr != nil {
+				resultErr = errors.Join(resultErr, credentialResolutionError(&credentialProviderError{mode: c.Profile.Mode, err: closeErr}))
+			}
+		}()
+		brokerURL = broker.URL()
+		args, err = broker.CommandArgs(args, c.Region)
+		if err != nil {
+			return nil, credentialResolutionError(&credentialProviderError{mode: c.Profile.Mode, err: err})
+		}
+		env = c.commandBrokerEnv()
+		if err := c.requireLauncherProfile(ctx, args, env, brokerURL); err != nil {
+			if refreshErr := broker.RefreshError(); refreshErr != nil {
+				return nil, credentialResolutionError(&credentialProviderError{mode: c.Profile.Mode, err: refreshErr})
+			}
+			return nil, err
+		}
+		broker.Activate(snapshot)
+	} else {
+		if renewable && !credentialStaticExternalSnapshot(c.Profile.Mode, snapshot) {
+			return nil, credentialResolutionError(&credentialProviderError{mode: c.Profile.Mode, err: errors.New("renewable OSS credentials must be STS credentials with a security token")})
+		}
+		env, err = c.commandEnv(snapshot)
+		if err != nil {
+			return nil, err
+		}
 	}
 	session := telemetry.FromContext(ctx)
 	operationID := session.NextOperationID()
 	if session != nil {
-		session.RegisterIdentity(c.Profile.AccessKeyID, identityResolver(c.Profile, nil))
+		if identityGuard != nil {
+			session.RegisterIdentity(credentialIdentityCacheKey(operationProfile, snapshot), identityGuard.Resolver())
+		} else if identityExecutor, identityErr := newStaticDarabonbaExecutor(operationProfile, snapshot); identityErr == nil {
+			session.RegisterIdentity(credentialIdentityCacheKey(operationProfile, snapshot), identityResolver(identityExecutor))
+		}
 	}
 	endSpan := session.StartAPI(telemetry.APIRequest{
 		Service:         "Oss",
@@ -108,6 +176,15 @@ func (c *OSSUtilCaller) CallWithArgs(ctx context.Context, operation string, requ
 	stdout, stderr, runErr := c.runner.Run(ctx, "aliyun", args, env)
 	if runErr != nil {
 		endSpan(runErr)
+		if brokerURL != "" {
+			stdout = redactCredentialSourceOutput(stdout, brokerURL)
+			stderr = redactCredentialSourceOutput(stderr, brokerURL)
+		}
+		if broker != nil {
+			if refreshErr := broker.RefreshError(); refreshErr != nil {
+				return nil, credentialResolutionError(&credentialProviderError{mode: c.Profile.Mode, err: refreshErr})
+			}
+		}
 		return nil, c.commandError(runErr, stdout, stderr, request)
 	}
 	if metadata.transfer != "" {
@@ -155,6 +232,32 @@ func (c *OSSUtilCaller) requireOperation(ctx context.Context, runtimePath string
 	}
 	message := cliCommandErrorMessage(err, stdout, stderr)
 	return ecerrors.Client("OSSUtilAPIUnavailable", "OSS call operation is unavailable", ecerrors.WithDetail(callerSanitizeCloudError(errors.New(message))))
+}
+
+func (c *OSSUtilCaller) requireLauncherProfile(ctx context.Context, operationArgs, env []string, credentialSource string) error {
+	if len(operationArgs) < 4 || operationArgs[0] != "--config-path" || operationArgs[2] != "--profile" {
+		return ecerrors.Client("OSSUtilUnavailable", "OSS call runtime is unavailable")
+	}
+	args := append([]string(nil), operationArgs[:4]...)
+	args = append(args, "--auto-plugin-install", "false", "ossutil", "version")
+	stdout, stderr, err := c.runner.Run(ctx, "aliyun", args, env)
+	if err != nil {
+		stdout = redactCredentialSourceOutput(stdout, credentialSource)
+		stderr = redactCredentialSourceOutput(stderr, credentialSource)
+		return ossUtilRuntimeError(err, stdout, stderr)
+	}
+	match := ossUtilVersionPattern.FindSubmatch(bytes.TrimSpace(stdout))
+	if len(match) != 2 || string(match[1]) != "2" {
+		return ecerrors.Client("OSSUtilVersionUnsupported", "OSS call runtime version is unsupported")
+	}
+	return nil
+}
+
+func redactCredentialSourceOutput(raw []byte, source string) []byte {
+	if source == "" || len(raw) == 0 {
+		return raw
+	}
+	return bytes.ReplaceAll(raw, []byte(source), []byte("<credential-source>"))
 }
 
 func ossUtilRuntimeError(err error, stdout, stderr []byte) error {
@@ -331,34 +434,69 @@ func ossUtilPassthroughArgs(args []string, transfer bool) ([]string, error) {
 	return out, nil
 }
 
-func (c *OSSUtilCaller) commandEnv() []string {
-	env := withoutEnvironmentKeys(os.Environ(), ossUtilIdentityEnvironmentKeys...)
+func (c *OSSUtilCaller) commandEnv(snapshot *credentialSnapshot) ([]string, error) {
+	env := c.commandProbeEnv()
+	if snapshot == nil {
+		return nil, ecerrors.Client("MissingCredentials", "Alibaba Cloud credentials are required")
+	}
+	accessKeyID := snapshot.AccessKeyID
+	accessKeySecret := snapshot.AccessKeySecret
+	securityToken := snapshot.SecurityToken
+	bearerToken := snapshot.BearerToken
+	if bearerToken != "" {
+		env = append(env, "ALIBABA_CLOUD_BEARER_TOKEN="+bearerToken)
+		if c.Profile.BearerTokenHeaderKey != "" {
+			env = append(env, "ALIBABA_CLOUD_BEARER_TOKEN_HEADER_KEY="+c.Profile.BearerTokenHeaderKey)
+		}
+		return env, nil
+	}
+	if accessKeyID == "" || accessKeySecret == "" {
+		return nil, ecerrors.Client("InvalidCredentials", "credential provider returned incomplete credentials")
+	}
 	env = append(env,
-		"ALIBABA_CLOUD_IGNORE_PROFILE=TRUE",
-		"ALIBABA_CLOUD_ACCESS_KEY_ID="+c.Profile.AccessKeyID,
-		"ALIBABA_CLOUD_ACCESS_KEY_SECRET="+c.Profile.AccessKeySecret,
-		"ALIBABA_CLOUD_REGION_ID="+c.Region,
-		"OSS_ACCESS_KEY_ID="+c.Profile.AccessKeyID,
-		"OSS_ACCESS_KEY_SECRET="+c.Profile.AccessKeySecret,
-		"OSS_REGION="+c.Region,
+		"ALIBABA_CLOUD_ACCESS_KEY_ID="+accessKeyID,
+		"ALIBABA_CLOUD_ACCESS_KEY_SECRET="+accessKeySecret,
+		"OSS_ACCESS_KEY_ID="+accessKeyID,
+		"OSS_ACCESS_KEY_SECRET="+accessKeySecret,
 	)
-	if c.Profile.SecurityToken != "" {
+	if securityToken != "" {
 		env = append(env,
-			"ALIBABA_CLOUD_SECURITY_TOKEN="+c.Profile.SecurityToken,
-			"OSS_SESSION_TOKEN="+c.Profile.SecurityToken,
+			"ALIBABA_CLOUD_SECURITY_TOKEN="+securityToken,
+			"OSS_SESSION_TOKEN="+securityToken,
 		)
 	}
-	return env
+	return env, nil
+}
+
+func (c *OSSUtilCaller) commandProbeEnv() []string {
+	env := withoutEnvironmentKeys(os.Environ(), ossUtilIdentityEnvironmentKeys...)
+	return append(env,
+		"ALIBABA_CLOUD_IGNORE_PROFILE=TRUE",
+		"ALIBABA_CLOUD_ECS_METADATA_DISABLED=true",
+		"ALIBABA_CLOUD_REGION_ID="+c.Region,
+		"OSS_REGION="+c.Region,
+	)
+}
+
+func (c *OSSUtilCaller) commandBrokerEnv() []string {
+	env := withoutEnvironmentKeys(os.Environ(), ossUtilIdentityEnvironmentKeys...)
+	return append(env,
+		"ALIBABA_CLOUD_ECS_METADATA_DISABLED=true",
+		"ALIBABA_CLOUD_REGION_ID="+c.Region,
+		"OSS_REGION="+c.Region,
+	)
 }
 
 var ossUtilIdentityEnvironmentKeys = []string{
 	"ALIBABA_CLOUD_IGNORE_PROFILE", "ALIBABACLOUD_IGNORE_PROFILE",
 	"ALIBABA_CLOUD_PROFILE", "ALIBABACLOUD_PROFILE", "ALICLOUD_PROFILE",
+	"ECCTL_ALIYUN_CONFIG_PATH", "ALIBABA_CLOUD_CONFIG_PATH", "ALIBABACLOUD_CONFIG_PATH", "ALICLOUD_CONFIG_PATH",
 	"ALIBABA_CLOUD_ACCESS_KEY_ID", "ALIBABACLOUD_ACCESS_KEY_ID", "ALICLOUD_ACCESS_KEY_ID", "ACCESS_KEY_ID",
 	"ALIBABA_CLOUD_ACCESS_KEY_SECRET", "ALIBABACLOUD_ACCESS_KEY_SECRET", "ALICLOUD_ACCESS_KEY_SECRET", "ACCESS_KEY_SECRET",
 	"ALIBABA_CLOUD_SECURITY_TOKEN", "ALIBABACLOUD_SECURITY_TOKEN", "ALICLOUD_SECURITY_TOKEN", "SECURITY_TOKEN",
 	"ALIBABA_CLOUD_REGION_ID", "ALIBABACLOUD_REGION_ID", "ALICLOUD_REGION_ID", "REGION_ID", "REGION",
 	"ALIBABA_CLOUD_CREDENTIALS_URI", "ALIBABA_CLOUD_EXTERNAL_ACCOUNT_TYPE",
+	"ALIBABA_CLOUD_DISABLE_EXTERNAL_PROCESS", "ALIBABA_CLOUD_ECS_METADATA_DISABLED",
 	"ALIBABA_CLOUD_OIDC_PROVIDER_ARN", "ALIBABACLOUD_OIDC_PROVIDER_ARN",
 	"ALIBABA_CLOUD_OIDC_TOKEN_FILE", "ALIBABACLOUD_OIDC_TOKEN_FILE",
 	"ALIBABA_CLOUD_ROLE_ARN", "ALIBABACLOUD_ROLE_ARN",
@@ -399,13 +537,23 @@ func resolveInstalledOSSUtilRuntime(getenv func(string) string) (string, error) 
 }
 
 func withoutEnvironmentKeys(env []string, keys ...string) []string {
+	return withoutEnvironmentKeysForOS(env, runtime.GOOS, keys...)
+}
+
+func withoutEnvironmentKeysForOS(env []string, goos string, keys ...string) []string {
 	blocked := make(map[string]bool, len(keys))
 	for _, key := range keys {
+		if goos == "windows" {
+			key = strings.ToUpper(key)
+		}
 		blocked[key] = true
 	}
 	out := make([]string, 0, len(env))
 	for _, item := range env {
 		key, _, _ := strings.Cut(item, "=")
+		if goos == "windows" {
+			key = strings.ToUpper(key)
+		}
 		if blocked[key] {
 			continue
 		}

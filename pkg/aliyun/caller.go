@@ -3,8 +3,10 @@ package aliyun
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -35,12 +37,19 @@ type openAPIExecutor interface {
 }
 
 type resolvedOpenAPIProfile struct {
-	Name            string
-	AccessKeyID     string
-	AccessKeySecret string
-	SecurityToken   string
-	RegionID        string
-	Language        string
+	Name                  string
+	Mode                  string
+	RegionID              string
+	RegionSource          ecconfig.RegionSource
+	Language              string
+	Acquirer              credentialAcquirer
+	AuthType              string
+	BearerTokenHeaderKey  string
+	CredentialPrincipal   string
+	ExpectedAccountID     string
+	ExpectedIdentityType  string
+	IdentityPolicy        credentialIdentityPolicy
+	PinCredentialIdentity bool
 }
 
 const topLevelArrayResponseMarker = "__ecctl_top_level_array_response"
@@ -61,63 +70,190 @@ type OpenAPICaller struct {
 	sleepFn           func(context.Context, time.Duration) error
 }
 
+var ErrCredentialLeaseExpired = errors.New("credential lease expired")
+
+type credentialLeaseContextKey struct{}
+
+type credentialLease struct {
+	owner            *OpenAPICaller
+	snapshot         *credentialSnapshot
+	executor         openAPIExecutor
+	identity         telemetry.IdentityResolver
+	identityExecutor openAPIExecutor
+	credentialKey    string
+}
+
 func NewOpenAPICaller(profileName, configPath, product, region string, getenv func(string) string) (*OpenAPICaller, error) {
+	resolved := ecconfig.ResolvedRegion{}
+	if region != "" {
+		resolved = ecconfig.ResolvedRegion{Value: region, Source: ecconfig.RegionSourceExplicit}
+	}
+	return NewOpenAPICallerWithRegionSource(profileName, configPath, product, resolved, getenv)
+}
+
+func NewOpenAPICallerWithRegionSource(profileName, configPath, product string, region ecconfig.ResolvedRegion, getenv func(string) string) (*OpenAPICaller, error) {
 	if getenv == nil {
 		getenv = func(string) string { return "" }
 	}
-	profile, _, err := ecconfig.EffectiveProfile(profileName, configPath, ecconfig.AliyunConfigPath(getenv))
+	openAPIProfile, err := resolveOpenAPIProfile(profileName, configPath, region, getenv)
 	if err != nil {
-		return nil, ecerrors.Client("InvalidConfig", err.Error())
-	}
-	openAPIProfile := toOpenAPIProfile(profile, region, getenv)
-	if openAPIProfile.AccessKeyID == "" || openAPIProfile.AccessKeySecret == "" {
-		return nil, ecerrors.Client("MissingCredentials", "Alibaba Cloud access key is required")
-	}
-	executor, err := newDarabonbaExecutor(openAPIProfile)
-	if err != nil {
-		return nil, ecerrors.Client("InvalidCredentials", callerSanitizeCloudError(err))
+		return nil, err
 	}
 	return &OpenAPICaller{
-		Product:  product,
-		Region:   openAPIProfile.RegionID,
-		Profile:  openAPIProfile,
-		executor: executor,
+		Product: product,
+		Region:  openAPIProfile.RegionID,
+		Profile: openAPIProfile,
 	}, nil
 }
 
-func toOpenAPIProfile(profile ecconfig.Profile, region string, getenv func(string) string) resolvedOpenAPIProfile {
-	accessKeyID := firstNonEmptyString(profile.AccessKeyID, getenv("ALIBABA_CLOUD_ACCESS_KEY_ID"), getenv("ALIBABACLOUD_ACCESS_KEY_ID"), getenv("ALICLOUD_ACCESS_KEY_ID"))
-	accessKeySecret := firstNonEmptyString(profile.AccessKeySecret, getenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET"), getenv("ALIBABACLOUD_ACCESS_KEY_SECRET"), getenv("ALICLOUD_ACCESS_KEY_SECRET"))
-	securityToken := firstNonEmptyString(profile.SecurityToken, getenv("ALIBABA_CLOUD_SECURITY_TOKEN"), getenv("ALIBABACLOUD_SECURITY_TOKEN"), getenv("ALICLOUD_SECURITY_TOKEN"))
-	return resolvedOpenAPIProfile{
-		Name:            firstNonEmptyString(profile.Name, ecconfig.DefaultProfileName),
-		AccessKeyID:     accessKeyID,
-		AccessKeySecret: accessKeySecret,
-		SecurityToken:   securityToken,
-		RegionID:        firstNonEmptyString(region, profile.Region, getenv("ECCTL_REGION")),
-		Language:        firstNonEmptyString(profile.Language, "en"),
+// PrepareOperationContext pins one logical credential source and executor for
+// the complete engine operation. Temporary material may renew before later
+// requests, while profile identity and endpoint policy remain fixed.
+func (c *OpenAPICaller) PrepareOperationContext(ctx context.Context) (context.Context, error) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	if existing, _ := ctx.Value(credentialLeaseContextKey{}).(*credentialLease); existing != nil && existing.owner == c {
+		return ctx, nil
+	}
+	lease, err := c.acquireCredentialLease(withCredentialOperationRegion(ctx, c.Region))
+	if err != nil {
+		return ctx, credentialResolutionError(err)
+	}
+	return context.WithValue(ctx, credentialLeaseContextKey{}, lease), nil
+}
+
+func (c *OpenAPICaller) acquireCredentialLease(ctx context.Context) (*credentialLease, error) {
+	executor := c.executor
+	var snapshot *credentialSnapshot
+	credentialKey := ""
+	if c.Profile.Acquirer != nil {
+		operationProfile := c.Profile
+		operationAcquirer, err := credentialAcquirerForOperation(ctx, c.Profile.Acquirer)
+		if err != nil {
+			return nil, &credentialProviderError{mode: c.Profile.Mode, err: err}
+		}
+		operationProfile.Acquirer = operationAcquirer
+		snapshot, err = operationAcquirer.Acquire(ctx)
+		if err != nil {
+			return nil, &credentialProviderError{mode: c.Profile.Mode, err: err}
+		}
+		if err := validateCredentialLifetime(ctx, operationAcquirer, snapshot); err != nil {
+			return nil, err
+		}
+		credentialKey = credentialIdentityCacheKey(operationProfile, snapshot)
+		var identityGuard *operationIdentityGuard
+		if operationProfile.PinCredentialIdentity && credentialAcquirerIsRenewable(operationAcquirer) {
+			identityGuard, err = newOperationIdentityGuard(ctx, operationProfile, snapshot)
+			if err != nil {
+				return nil, &credentialProviderError{mode: c.Profile.Mode, err: err}
+			}
+		}
+		identityExecutor, identityErr := newStaticDarabonbaExecutor(operationProfile, snapshot)
+		if identityErr != nil {
+			return nil, &credentialProviderError{mode: c.Profile.Mode, err: identityErr}
+		}
+		if executor == nil {
+			executor, err = newDarabonbaExecutor(operationProfile, snapshot, identityGuard)
+			if err != nil {
+				return nil, &credentialProviderError{mode: c.Profile.Mode, err: err}
+			}
+		}
+		identity := identityResolver(identityExecutor)
+		if identityGuard != nil {
+			identity = identityGuard.Resolver()
+		}
+		return &credentialLease{owner: c, snapshot: snapshot, executor: executor, identity: identity, identityExecutor: identityExecutor, credentialKey: credentialKey}, nil
+	}
+	if executor == nil {
+		return nil, ecerrors.Client("OpenAPINotInitialized", "OpenAPI caller is not initialised")
+	}
+	return &credentialLease{owner: c, snapshot: snapshot, executor: executor, identity: identityResolver(executor), identityExecutor: executor, credentialKey: credentialKey}, nil
+}
+
+func snapshotExpired(snapshot *credentialSnapshot, now time.Time) bool {
+	return snapshot != nil && !snapshot.ExpiresAt.IsZero() && !now.Before(snapshot.ExpiresAt)
 }
 
 type darabonbaExecutor struct {
-	client *openapiClient.Client
-	mu     sync.Mutex
+	client               *openapiClient.Client
+	credential           *operationCredential
+	authType             string
+	bearerTokenHeaderKey string
+	bearerToken          string
+	mu                   sync.Mutex
 }
 
-func newDarabonbaExecutor(profile resolvedOpenAPIProfile) (*darabonbaExecutor, error) {
+func newDarabonbaExecutor(profile resolvedOpenAPIProfile, snapshot *credentialSnapshot, guards ...*operationIdentityGuard) (*darabonbaExecutor, error) {
+	return newDarabonbaExecutorWithRenewal(profile, snapshot, true, guards...)
+}
+
+func newStaticDarabonbaExecutor(profile resolvedOpenAPIProfile, snapshot *credentialSnapshot) (*darabonbaExecutor, error) {
+	return newDarabonbaExecutorWithRenewal(profile, snapshot, false)
+}
+
+func newDarabonbaExecutorWithRenewal(profile resolvedOpenAPIProfile, snapshot *credentialSnapshot, renew bool, guards ...*operationIdentityGuard) (*darabonbaExecutor, error) {
+	if err := rejectUnsafeCredentialDebug(nil); err != nil {
+		return nil, err
+	}
+	credential, err := staticCredentialForSnapshot(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	var renewable *operationCredential
+	if renew && profile.Acquirer != nil && snapshot.BearerToken == "" {
+		var validator func(context.Context, *credentialSnapshot) error
+		if len(guards) > 0 && guards[0] != nil {
+			validator = guards[0].Validate
+		}
+		renewable, err = newOperationCredential(profile.Acquirer, profile.Mode, snapshot, validator)
+		if err != nil {
+			return nil, err
+		}
+		credential = renewable
+	}
 	config := &openapiClient.Config{
-		AccessKeyId:     tea.String(profile.AccessKeyID),
-		AccessKeySecret: tea.String(profile.AccessKeySecret),
-		SecurityToken:   tea.String(profile.SecurityToken),
-		RegionId:        tea.String(profile.RegionID),
-		UserAgent:       tea.String("ecctl"),
+		Credential: credential,
+		RegionId:   tea.String(profile.RegionID),
+		UserAgent:  tea.String("ecctl"),
 	}
 	client, err := openapiClient.NewClient(config)
 	if err != nil {
 		return nil, err
 	}
 	client.DisableSDKError = tea.Bool(true)
-	return &darabonbaExecutor{client: client}, nil
+	return &darabonbaExecutor{
+		client:               client,
+		credential:           renewable,
+		authType:             firstNonEmptyString(profile.AuthType, "AK"),
+		bearerTokenHeaderKey: profile.BearerTokenHeaderKey,
+		bearerToken:          snapshot.BearerToken,
+	}, nil
+}
+
+// credentialFinalHTTPClient receives the fully materialized net/http request
+// after Dara has emitted its DEBUG headers. Bearer material is injected only
+// here, and redirects are never followed for any credential-bearing request.
+type credentialFinalHTTPClient struct {
+	bearerHeader string
+	bearerToken  string
+	delegate     dara.HttpClient
+}
+
+func (c *credentialFinalHTTPClient) Call(request *http.Request, transport *http.Transport) (*http.Response, error) {
+	if c.bearerHeader != "" {
+		request.Header.Set(c.bearerHeader, c.bearerToken)
+	}
+	if c.delegate != nil {
+		return c.delegate.Call(request, transport)
+	}
+	client := &http.Client{
+		Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	return client.Do(request)
 }
 
 func (e *darabonbaExecutor) ExecuteOpenAPI(ctx context.Context, req *openAPIRequest) (map[string]any, error) {
@@ -126,10 +262,20 @@ func (e *darabonbaExecutor) ExecuteOpenAPI(ctx context.Context, req *openAPIRequ
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.credential != nil {
+		e.credential.SetContext(ctx)
+	}
+	originalHTTPClient := e.client.HttpClient
+	e.client.HttpClient = &credentialFinalHTTPClient{
+		bearerHeader: e.bearerTokenHeaderKey,
+		bearerToken:  e.bearerToken,
+		delegate:     originalHTTPClient,
+	}
 	originalEndpoint := e.client.Endpoint
 	originalRegionID := e.client.RegionId
 	originalProductID := e.client.ProductId
 	defer func() {
+		e.client.HttpClient = originalHTTPClient
 		e.client.Endpoint = originalEndpoint
 		e.client.RegionId = originalRegionID
 		e.client.ProductId = originalProductID
@@ -140,9 +286,23 @@ func (e *darabonbaExecutor) ExecuteOpenAPI(ctx context.Context, req *openAPIRequ
 		body = stringMapAny(req.FormParams)
 		reqBodyType = "formData"
 	}
+	headers := stringPointerMap(req.Headers)
+	if e.bearerTokenHeaderKey != "" {
+		if strings.EqualFold(req.Style, "RPC") {
+			if req.QueryParams == nil {
+				req.QueryParams = map[string]string{}
+			}
+			req.QueryParams["SignatureType"] = "BEARERTOKEN"
+		} else {
+			if headers == nil {
+				headers = map[string]*string{}
+			}
+			headers["x-acs-signature-type"] = tea.String("BEARERTOKEN")
+		}
+	}
 	openReq := &openapiClient.OpenApiRequest{
 		Query:   stringPointerMap(req.QueryParams),
-		Headers: stringPointerMap(req.Headers),
+		Headers: headers,
 		Body:    body,
 	}
 	if strings.TrimSpace(req.Domain) != "" {
@@ -161,7 +321,7 @@ func (e *darabonbaExecutor) ExecuteOpenAPI(ctx context.Context, req *openAPIRequ
 		Protocol:    tea.String(req.Scheme),
 		Pathname:    tea.String(req.BuildPath()),
 		Method:      tea.String(req.Method),
-		AuthType:    tea.String("AK"),
+		AuthType:    tea.String(firstNonEmptyString(e.authType, "AK")),
 		BodyType:    tea.String("string"),
 		ReqBodyType: tea.String(reqBodyType),
 		Style:       tea.String(openAPIStyle(req.Style)),
@@ -184,6 +344,13 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 	}
 	resp, err := c.executeOpenAPIRequest(ctx, operation, req)
 	if err != nil {
+		if errors.Is(err, ErrCredentialLeaseExpired) || errors.Is(err, ErrCredentialIdentityChanged) {
+			return nil, credentialResolutionError(err)
+		}
+		var providerErr *credentialProviderError
+		if errors.As(err, &providerErr) {
+			return nil, credentialResolutionError(providerErr)
+		}
 		if callerBoolMapValue(request, "DryRun") && isDryRunPassed(err) {
 			return map[string]any{"DryRun": true}, nil
 		}
@@ -236,9 +403,16 @@ func (c *OpenAPICaller) executeOpenAPIRequest(ctx context.Context, operation str
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if c.executor == nil {
-		return nil, ecerrors.Client("OpenAPINotInitialized", "OpenAPI caller is not initialised")
+	lease, _ := ctx.Value(credentialLeaseContextKey{}).(*credentialLease)
+	if lease == nil || lease.owner != c {
+		var err error
+		lease, err = c.acquireCredentialLease(withCredentialOperationRegion(ctx, req.RegionId))
+		if err != nil {
+			return nil, err
+		}
 	}
+	executor := lease.executor
+	credentialKey := lease.credentialKey
 	attempts := c.retryMaxAttempts
 	if attempts <= 0 {
 		attempts = defaultThrottleMaxAttempts
@@ -264,7 +438,7 @@ func (c *OpenAPICaller) executeOpenAPIRequest(ctx context.Context, operation str
 	operationID := session.NextOperationID()
 	for attempt := 0; attempt < attempts; attempt++ {
 		if session != nil {
-			session.RegisterIdentity(c.Profile.AccessKeyID, identityResolver(c.Profile, c.executor))
+			session.RegisterIdentity(credentialKey, lease.identity)
 		}
 		endSpan := session.StartAPI(telemetry.APIRequest{
 			Service:         req.Product,
@@ -275,7 +449,7 @@ func (c *OpenAPICaller) executeOpenAPIRequest(ctx context.Context, operation str
 			Attempt:         attempt + 1,
 			RetryObservable: true,
 		})
-		resp, err := c.executor.ExecuteOpenAPI(ctx, req)
+		resp, err := executor.ExecuteOpenAPI(ctx, req)
 		spanErr := err
 		if spanErr == nil && c.Resource != "" {
 			spanErr = openAPIBusinessError(resp)
@@ -352,6 +526,9 @@ func (c *OpenAPICaller) commonRequest(operation string, values map[string]any) (
 	req.Version = product.Version
 	req.ApiName = operationName
 	req.RegionId = firstNonEmptyString(callerStringMapValue(values, "RegionId"), c.Region)
+	if req.RegionId != "" && !ecconfig.ValidRegion(req.RegionId) {
+		return nil, ecerrors.Client("InvalidRegion", "region is not supported")
+	}
 	endpoint, err := c.productEndpoint(product, req.RegionId)
 	if err != nil {
 		return nil, err
@@ -923,10 +1100,8 @@ func callerSanitizeCloudError(err error) string {
 		return ""
 	}
 	message := err.Error()
-	for _, marker := range []string{"AccessKeySecret", "access_key_secret"} {
-		if strings.Contains(message, marker) {
-			return "Alibaba Cloud API request failed"
-		}
+	if sensitiveCredentialFieldPattern.MatchString(message) {
+		return "Alibaba Cloud API request failed"
 	}
 	message = redactCredentialBearingURLs(message)
 	message = redactSensitiveAssignments(message)
@@ -962,9 +1137,10 @@ func cloudErrorOptions(err error) []ecerrors.Option {
 }
 
 var (
-	credentialURLPattern       = regexp.MustCompile(`https?://[^\s"]+`)
-	sensitiveAssignmentPattern = regexp.MustCompile(`(?i)(^|[\s?&])(?:AccessKeyId|SignatureNonce|Signature|SecurityToken)=[^&\s"]+`)
-	sensitiveCredentialURLKeys = map[string]bool{"accesskeyid": true, "signature": true, "signaturenonce": true, "securitytoken": true}
+	credentialURLPattern            = regexp.MustCompile(`https?://[^\s"]+`)
+	sensitiveCredentialFieldPattern = regexp.MustCompile(`(?i)(?:access[_-]?key[_-]?secret|security[_-]?token|sts[_-]?token|bearer[_-]?token|oauth[_-]?(?:access|refresh)[_-]?token|access[_-]?token|refresh[_-]?token)["']?\s*[:=]`)
+	sensitiveAssignmentPattern      = regexp.MustCompile(`(?i)(^|[\s?&])(?:AccessKeyId|SignatureNonce|Signature|SecurityToken|BearerToken|RefreshToken)=[^&\s"]+`)
+	sensitiveCredentialURLKeys      = map[string]bool{"accesskeyid": true, "signature": true, "signaturenonce": true, "securitytoken": true}
 )
 
 func redactCredentialBearingURLs(message string) string {

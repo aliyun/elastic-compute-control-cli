@@ -88,6 +88,22 @@ func TestOSSUtilRuntimeErrorsAreLocalized(t *testing.T) {
 	}
 }
 
+func TestCredentialRecoveryErrorsAreLocalized(t *testing.T) {
+	zh := NewLocalizer("zh-CN")
+	reauth := zh.ErrorPayload(ecerrorsPayload("CredentialReauthenticationRequired", "expired"), false)
+	if reauth.Message != "凭证需要重新认证" || !strings.Contains(reauth.Suggestion, "aliyun configure") {
+		t.Fatalf("reauth payload = %#v", reauth)
+	}
+	disabled := zh.ErrorPayload(ecerrorsPayload("CredentialSourceDisabled", "disabled"), false)
+	if disabled.Message != "凭证来源已禁用" || !strings.Contains(disabled.Suggestion, "ALIBABA_CLOUD_DISABLE_EXTERNAL_PROCESS") {
+		t.Fatalf("disabled payload = %#v", disabled)
+	}
+	unsafeDebug := zh.ErrorPayload(ecerrorsPayload("UnsafeCredentialDebug", "unsafe"), false)
+	if unsafeDebug.Message != "启用 Dara 请求调试时不能执行携带凭证的命令" || !strings.Contains(unsafeDebug.Suggestion, "DEBUG") {
+		t.Fatalf("unsafe debug payload = %#v", unsafeDebug)
+	}
+}
+
 func TestGenericUnsupportedParameterPreservesSpecificMessage(t *testing.T) {
 	payload := NewLocalizer("zh-CN").ErrorPayload(ecerrorsPayload("UnsupportedParameter", "specific non-OSS parameter message"), false)
 	if payload.Message != "specific non-OSS parameter message" {
@@ -129,6 +145,9 @@ func TestKnownErrorCodesHaveEnglishAndChineseMessages(t *testing.T) {
 		"CloudAPIErrorWithActions",
 		"ConfigWriteFailed",
 		"ConflictingParameters",
+		"CredentialReauthenticationRequired",
+		"CredentialSourceDisabled",
+		"UnsafeCredentialDebug",
 		"DependencyConflict",
 		"DependencyViolation",
 		"HiddenRetryTimeout",
@@ -166,6 +185,7 @@ func TestKnownErrorCodesHaveEnglishAndChineseMessages(t *testing.T) {
 		"UnknownTransition",
 		"UnknownWaiter",
 		"UnsupportedAction",
+		"UnsupportedCredentialMode",
 		"UnsupportedEmit",
 		"UnsupportedOperation",
 		"UnsupportedOutputMode",

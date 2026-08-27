@@ -122,10 +122,14 @@ func apiCallerFactoryFromContext(ctx context.Context) APICallerFactory {
 }
 
 func defaultAPICallerFactory(profileName, configPath, product, region string, getenv func(string) string) (engine.Caller, error) {
+	return defaultAPICallerFactoryResolved(profileName, configPath, product, config.ResolvedRegion{Value: region, Source: config.RegionSourceExplicit}, getenv)
+}
+
+func defaultAPICallerFactoryResolved(profileName, configPath, product string, region config.ResolvedRegion, getenv func(string) string) (engine.Caller, error) {
 	if strings.EqualFold(strings.TrimSpace(product), "oss") {
-		return aliyun.NewOSSUtilCaller(profileName, configPath, region, getenv)
+		return aliyun.NewOSSUtilCallerWithRegionSource(profileName, configPath, region, getenv)
 	}
-	return aliyun.NewOpenAPICaller(profileName, configPath, product, region, getenv)
+	return aliyun.NewOpenAPICallerWithRegionSource(profileName, configPath, product, region, getenv)
 }
 
 func newAPICommand(options *globalOptions, stdout io.Writer) *cobra.Command {
@@ -669,8 +673,14 @@ func runAPICall(cmd *cobra.Command, options *globalOptions, stdout io.Writer, pr
 	if err != nil {
 		return err
 	}
-	callerFactory := apiCallerFactoryFromContext(cmd.Context())
-	caller, err := callerFactory(config.ProfileName(options.profile, os.Getenv), config.ConfigPath(os.Getenv), resolvedProduct, region, os.Getenv)
+	profileName := config.ProfileName(options.profile, os.Getenv)
+	configPath := config.ConfigPath(os.Getenv)
+	var caller engine.Caller
+	if callerFactory, ok := cmd.Context().Value(apiCallerFactoryKey{}).(APICallerFactory); ok {
+		caller, err = callerFactory(profileName, configPath, resolvedProduct, region.Value, os.Getenv)
+	} else {
+		caller, err = defaultAPICallerFactoryResolved(profileName, configPath, resolvedProduct, region, os.Getenv)
+	}
 	if err != nil {
 		return err
 	}
@@ -686,7 +696,7 @@ func runAPICall(cmd *cobra.Command, options *globalOptions, stdout io.Writer, pr
 	if err != nil {
 		return err
 	}
-	return writeCommandOutput(options, stdout, apiCallPayload(resolvedProduct, resolvedOperation, region, response))
+	return writeCommandOutput(options, stdout, apiCallPayload(resolvedProduct, resolvedOperation, region.Value, response))
 }
 
 func resolveRunnableAPIOperation(productCode, operation, lang string) (string, string, error) {
@@ -747,33 +757,33 @@ func deprecatedAPIOperationError(productCode, operation, lang string) error {
 	)
 }
 
-func resolveAPIRegion(options *globalOptions, request map[string]any, aliyunArgs []string) (string, error) {
+func resolveAPIRegion(options *globalOptions, request map[string]any, aliyunArgs []string) (config.ResolvedRegion, error) {
 	if options.region != "" {
 		return resolveRegion(options)
 	}
 	if region := apiRequestRegion(request); region != "" {
 		resolved, appErr := config.ResolveRegion(region, nil)
 		if appErr != nil {
-			return "", appErr
+			return config.ResolvedRegion{}, appErr
 		}
-		return resolved, nil
+		return config.ResolvedRegion{Value: resolved, Source: config.RegionSourceExplicit}, nil
 	}
 	if region, ok := apiCallPassthroughFlagValue(aliyunArgs, "region"); ok {
 		resolved, appErr := config.ResolveRegion(region, nil)
 		if appErr != nil {
-			return "", appErr
+			return config.ResolvedRegion{}, appErr
 		}
-		return resolved, nil
+		return config.ResolvedRegion{Value: resolved, Source: config.RegionSourceExplicit}, nil
 	}
 	if apiCallPassthroughHasFlag(aliyunArgs, "profile") || apiCallPassthroughHasFlag(aliyunArgs, "config-path") {
-		return "", nil
+		return config.ResolvedRegion{}, nil
 	}
-	region, appErr := config.ResolveRegionForProfile("", config.ProfileName(options.profile, os.Getenv), config.ConfigPath(os.Getenv), os.Getenv)
+	region, appErr := config.ResolveRegionForProfileWithSource("", config.ProfileName(options.profile, os.Getenv), config.ConfigPath(os.Getenv), os.Getenv)
 	if appErr != nil {
 		if code, _, ok := appErrorCodeMessage(appErr); ok && code == "MissingRegion" {
-			return "", nil
+			return config.ResolvedRegion{}, nil
 		}
-		return "", appErr
+		return config.ResolvedRegion{}, appErr
 	}
 	return region, nil
 }
