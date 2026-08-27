@@ -40,8 +40,8 @@ type Identity struct {
 type IdentityResolver func(context.Context) (Identity, error)
 
 type identityRegistration struct {
-	accessKeyID string
-	resolver    IdentityResolver
+	credentialKey string
+	resolver      IdentityResolver
 }
 
 // Session owns a private provider and one command root span. It deliberately
@@ -122,13 +122,22 @@ func FromContext(ctx context.Context) *Session {
 	return session
 }
 
-func (s *Session) RegisterIdentity(accessKeyID string, resolver IdentityResolver) {
-	if s == nil || accessKeyID == "" || resolver == nil {
+func (s *Session) RegisterIdentity(credentialKey string, resolver IdentityResolver) {
+	if s == nil || credentialKey == "" || resolver == nil {
 		return
 	}
 	s.identity.Do(func() {
-		s.identityR = identityRegistration{accessKeyID: accessKeyID, resolver: resolver}
+		s.identityR = identityRegistration{credentialKey: credentialKey, resolver: resolver}
 	})
+}
+
+// RecordCredentialOutcome records a fixed, secret-free credential lifecycle
+// outcome on the command span. Callers must pass only enumerated values.
+func (s *Session) RecordCredentialOutcome(outcome string) {
+	if s == nil || s.root == nil || outcome == "" {
+		return
+	}
+	s.root.SetAttributes(attribute.String("ecctl.credential.outcome", outcome))
 }
 
 func (s *Session) NextOperationID() string {
@@ -192,7 +201,7 @@ func (s *Session) finishOnce(command string, exitCode int) {
 	}
 	if registration := s.identityR; registration.resolver != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), identityTimeout)
-		if identity, err := resolveCachedIdentity(ctx, s.configPath, registration.accessKeyID, registration.resolver); err == nil && identity.Hash != "" && identity.Type != "" {
+		if identity, err := resolveCachedIdentity(ctx, s.configPath, registration.credentialKey, registration.resolver); err == nil && identity.Hash != "" && identity.Type != "" {
 			s.root.SetAttributes(
 				attribute.String("ecctl.identity.hash", identity.Hash),
 				attribute.String("ecctl.identity.type", identity.Type),

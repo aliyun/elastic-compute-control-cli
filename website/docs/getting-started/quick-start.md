@@ -27,8 +27,10 @@ ecctl configure set region cn-hangzhou
 ecctl configure set output json
 ```
 
-Set the AccessKey or STS credentials you intend to use for cloud operations with
-`ecctl configure set`. See [Configuration](./configuration.md) for details.
+Configure a supported Alibaba Cloud credential profile, then select it with
+`--profile` or the profile environment variable. Local AK and STS credentials
+may also be set with `ecctl configure set`. See [Configuration](./configuration.md)
+for details.
 
 ## Common Commands
 

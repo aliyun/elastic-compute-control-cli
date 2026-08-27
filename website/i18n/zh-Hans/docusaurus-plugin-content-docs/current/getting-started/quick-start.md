@@ -26,7 +26,7 @@ ecctl configure set region cn-hangzhou
 ecctl configure set output json
 ```
 
-通过 `ecctl configure set` 设置准备用于云操作的 AccessKey 或 STS 凭证。详见 [配置](./configuration.md)。
+先配置受支持的阿里云凭证 profile，再通过 `--profile` 或 profile 环境变量选择它。本地 AK 和 STS 凭证也可以使用 `ecctl configure set` 设置。详见 [配置](./configuration.md)。
 
 ## 常用命令
 

@@ -2,7 +2,10 @@ package aliyun
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,9 +14,11 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
+	ecconfig "github.com/aliyun/elastic-compute-control-cli/pkg/config"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
 )
@@ -22,6 +27,35 @@ type ossUtilRunnerResult struct {
 	stdout []byte
 	stderr []byte
 	err    error
+}
+
+func TestOSSUtilCommandEnvRefreshesDynamicCredential(t *testing.T) {
+	provider := &rotatingCredentialsProvider{}
+	caller := &OSSUtilCaller{
+		Region: "cn-hangzhou",
+		Profile: resolvedOpenAPIProfile{
+			Acquirer: &credentialsProviderAcquirer{provider: provider, mode: credentialModeAK},
+		},
+	}
+	firstSnapshot, err := caller.Profile.Acquirer.Acquire(context.Background())
+	if err != nil {
+		t.Fatalf("first Acquire: %v", err)
+	}
+	first, err := caller.commandEnv(firstSnapshot)
+	if err != nil {
+		t.Fatalf("first commandEnv: %v", err)
+	}
+	secondSnapshot, err := caller.Profile.Acquirer.Acquire(context.Background())
+	if err != nil {
+		t.Fatalf("second Acquire: %v", err)
+	}
+	second, err := caller.commandEnv(secondSnapshot)
+	if err != nil {
+		t.Fatalf("second commandEnv: %v", err)
+	}
+	if environmentValue(first, "ALIBABA_CLOUD_ACCESS_KEY_ID") != "id-1" || environmentValue(second, "ALIBABA_CLOUD_ACCESS_KEY_ID") != "id-2" {
+		t.Fatalf("dynamic credentials did not rotate: first=%q second=%q", environmentValue(first, "ALIBABA_CLOUD_ACCESS_KEY_ID"), environmentValue(second, "ALIBABA_CLOUD_ACCESS_KEY_ID"))
+	}
 }
 
 type ossUtilRunnerCall struct {
@@ -33,6 +67,104 @@ type ossUtilRunnerCall struct {
 type fakeOSSUtilRunner struct {
 	results []ossUtilRunnerResult
 	calls   []ossUtilRunnerCall
+}
+
+type brokerAwareOSSUtilRunner struct {
+	calls     int
+	brokerURL string
+	config    string
+	seenIDs   []string
+}
+
+type brokerLeakingPreflightRunner struct {
+	calls     int
+	brokerURL string
+}
+
+func (r *brokerLeakingPreflightRunner) Run(_ context.Context, _ string, args []string, _ []string) ([]byte, []byte, error) {
+	r.calls++
+	if r.calls == 1 {
+		return []byte("2.3.0\n"), nil, nil
+	}
+	if r.calls == 2 {
+		return []byte("cp help\n"), nil, nil
+	}
+	configPath := ""
+	for index := 0; index+1 < len(args); index++ {
+		if args[index] == "--config-path" {
+			configPath = args[index+1]
+			break
+		}
+	}
+	config, _, err := loadConfigObject(configPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	profile, _ := configProfile(config, credentialBrokerProfileName)
+	r.brokerURL = stringMapField(profile, "credentials_uri")
+	return nil, []byte("launcher rejected " + r.brokerURL), errors.New("launcher failed")
+}
+
+func (r *brokerAwareOSSUtilRunner) Run(_ context.Context, _ string, args []string, env []string) ([]byte, []byte, error) {
+	r.calls++
+	switch r.calls {
+	case 1:
+		return []byte("2.3.0\n"), nil, nil
+	case 2:
+		return []byte("cp help\n"), nil, nil
+	case 3:
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == "--config-path" {
+				r.config = args[i+1]
+			}
+		}
+		if r.config == "" || !slices.Contains(args, "--profile") || !slices.Contains(args, credentialBrokerProfileName) {
+			return nil, nil, errors.New("credential broker profile arguments are missing")
+		}
+		config, _, err := loadConfigObject(r.config)
+		if err != nil {
+			return nil, nil, err
+		}
+		profile, ok := configProfile(config, credentialBrokerProfileName)
+		if !ok || stringMapField(profile, "mode") != credentialModeCredentialsURI {
+			return nil, nil, errors.New("credential broker profile is invalid")
+		}
+		r.brokerURL = stringMapField(profile, "credentials_uri")
+		if r.brokerURL == "" {
+			return nil, nil, errors.New("credential broker URI is missing")
+		}
+		return []byte("2.3.0\n"), nil, nil
+	case 4:
+		deadline := time.Now().Add(time.Second)
+		for len(r.seenIDs) < 2 && time.Now().Before(deadline) {
+			response, err := http.Get(r.brokerURL)
+			if err != nil {
+				return nil, nil, err
+			}
+			var payload map[string]string
+			decodeErr := json.NewDecoder(response.Body).Decode(&payload)
+			_ = response.Body.Close()
+			if decodeErr != nil || response.StatusCode != http.StatusOK {
+				return nil, nil, fmt.Errorf("broker response status=%d decode=%v", response.StatusCode, decodeErr)
+			}
+			id := payload["AccessKeyId"]
+			if len(r.seenIDs) == 0 || id != r.seenIDs[0] {
+				r.seenIDs = append(r.seenIDs, id)
+			}
+			if len(r.seenIDs) < 2 {
+				time.Sleep(time.Millisecond)
+			}
+		}
+		if len(r.seenIDs) != 2 {
+			return nil, nil, errors.New("credential broker did not publish refreshed credentials")
+		}
+		if environmentHasKey(env, "ALIBABA_CLOUD_ACCESS_KEY_ID") || environmentHasKey(env, "OSS_ACCESS_KEY_ID") || environmentHasKey(env, "ALIBABA_CLOUD_CREDENTIALS_URI") || environmentHasKey(env, "ALIBABA_CLOUD_IGNORE_PROFILE") {
+			return nil, nil, errors.New("static credentials leaked beside broker URI")
+		}
+		return []byte("upload succeeded\n"), nil, nil
+	default:
+		return nil, nil, errors.New("unexpected runner call")
+	}
 }
 
 func (r *fakeOSSUtilRunner) Run(_ context.Context, name string, args []string, env []string) ([]byte, []byte, error) {
@@ -118,6 +250,7 @@ func TestOSSUtilCallerMapsRequestAndUsesCredentialEnvironment(t *testing.T) {
 		"ALICLOUD_ACCESS_KEY_SECRET": "ambient-secret",
 		"SECURITY_TOKEN":             "ambient-token",
 		"ALIBABA_CLOUD_PROFILE":      "ambient-profile",
+		"ALIBABA_CLOUD_CONFIG_PATH":  "/ambient/config.json",
 		"OSSUTIL_CONFIG_VALUE":       "ambient-config",
 		"OSS_ACCESS_KEY_ID":          "ambient-oss-ak",
 		"OSS_ACCESS_KEY_SECRET":      "ambient-oss-secret",
@@ -163,6 +296,13 @@ func TestOSSUtilCallerMapsRequestAndUsesCredentialEnvironment(t *testing.T) {
 	if runner.calls[1].name != "/test/ossutil" || !reflect.DeepEqual(runner.calls[1].args, []string{"api", "put-bucket", "--help"}) {
 		t.Fatalf("direct API help call = %#v", runner.calls[1])
 	}
+	for _, probe := range runner.calls[:2] {
+		for _, key := range []string{"ALIBABA_CLOUD_ACCESS_KEY_ID", "ALIBABA_CLOUD_ACCESS_KEY_SECRET", "ALIBABA_CLOUD_SECURITY_TOKEN", "OSS_ACCESS_KEY_ID", "OSS_ACCESS_KEY_SECRET", "OSS_SESSION_TOKEN"} {
+			if environmentHasKey(probe.env, key) {
+				t.Fatalf("probe environment contains credential key %s", key)
+			}
+		}
+	}
 	wantArgs := []string{
 		"--auto-plugin-install", "false", "ossutil", "api", "put-bucket",
 		"--bucket", "ecctl-test-bucket",
@@ -202,7 +342,7 @@ func TestOSSUtilCallerMapsRequestAndUsesCredentialEnvironment(t *testing.T) {
 			t.Fatalf("%s = %q, want %q", key, got, want)
 		}
 	}
-	for _, key := range []string{"ALIBABACLOUD_ACCESS_KEY_ID", "ALICLOUD_ACCESS_KEY_SECRET", "SECURITY_TOKEN", "ALIBABA_CLOUD_PROFILE", "ALIBABA_CLOUD_ROLE_ARN", "OSS_ROLE_ARN", "OSSUTIL_CONFIG_VALUE"} {
+	for _, key := range []string{"ALIBABACLOUD_ACCESS_KEY_ID", "ALICLOUD_ACCESS_KEY_SECRET", "SECURITY_TOKEN", "ALIBABA_CLOUD_PROFILE", "ALIBABA_CLOUD_CONFIG_PATH", "ALIBABA_CLOUD_ROLE_ARN", "OSS_ROLE_ARN", "OSSUTIL_CONFIG_VALUE"} {
 		if environmentHasKey(runner.calls[2].env, key) {
 			t.Fatalf("ambient identity key %s leaked into child environment", key)
 		}
@@ -221,6 +361,158 @@ func TestOSSUtilCallerMapsRequestAndUsesCredentialEnvironment(t *testing.T) {
 	}
 	if apiSpans != 1 {
 		t.Fatalf("OSS API spans = %d, want only final api subprocess", apiSpans)
+	}
+}
+
+func TestOSSUtilDynamicCredentialBrokerRefreshesDuringTransferAndCloses(t *testing.T) {
+	acquirer := &renewableCountingCredentialAcquirer{&countingCredentialAcquirer{snapshots: []credentialSnapshot{
+		{AccessKeyID: "id-initial", AccessKeySecret: "secret", SecurityToken: "sts-initial", Type: "sts"},
+		{AccessKeyID: "id-transfer-one", AccessKeySecret: "secret", SecurityToken: "sts-one", Type: "sts"},
+		{AccessKeyID: "id-transfer-two", AccessKeySecret: "secret", SecurityToken: "sts-two", Type: "sts"},
+	}}}
+	factory := &operationFactoryCredentialAcquirer{child: acquirer}
+	runner := &brokerAwareOSSUtilRunner{}
+	caller := newTestOSSUtilCaller(t, runner, "cn-hangzhou")
+	caller.Profile.Acquirer = factory
+	caller.Profile.Mode = credentialModeExternal
+	caller.Profile.CredentialPrincipal = "helper"
+	response, err := caller.Call(context.Background(), "PutObject", map[string]any{
+		"Bucket": "bucket", "Key": "large.raw", "File": "/tmp/large.raw",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(runner.seenIDs, []string{"id-initial", "id-transfer-one"}) {
+		t.Fatalf("broker credentials = %#v", runner.seenIDs)
+	}
+	if response["Bucket"] != "bucket" || factory.operations != 1 || factory.acquisitions != 0 {
+		t.Fatalf("response=%#v factory operations=%d base acquisitions=%d", response, factory.operations, factory.acquisitions)
+	}
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	if result, getErr := client.Get(runner.brokerURL); getErr == nil {
+		_ = result.Body.Close()
+		t.Fatal("credential broker remained reachable after transfer")
+	}
+	if _, statErr := os.Stat(runner.config); !os.IsNotExist(statErr) {
+		t.Fatalf("credential broker configuration remained after transfer: %v", statErr)
+	}
+}
+
+type operationRegionCredentialAcquirer struct {
+	region string
+}
+
+func (a *operationRegionCredentialAcquirer) Acquire(ctx context.Context) (*credentialSnapshot, error) {
+	a.region = credentialOperationRegion(ctx)
+	return &credentialSnapshot{AccessKeyID: "id", AccessKeySecret: "secret", Type: "access_key"}, nil
+}
+
+func TestOSSUtilPassesOperationRegionToCredentialSource(t *testing.T) {
+	runner := &fakeOSSUtilRunner{results: []ossUtilRunnerResult{
+		{stdout: []byte("2.3.0\n")},
+		{stdout: []byte("cp help\n")},
+		{stdout: []byte("upload succeeded\n")},
+	}}
+	caller := newTestOSSUtilCaller(t, runner, "cn-hangzhou")
+	acquirer := &operationRegionCredentialAcquirer{}
+	caller.Profile.Acquirer = acquirer
+	if _, err := caller.Call(context.Background(), "PutObject", map[string]any{
+		"Bucket": "bucket", "Key": "object", "File": "/tmp/object",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if acquirer.region != "cn-hangzhou" {
+		t.Fatalf("credential operation region = %q", acquirer.region)
+	}
+}
+
+func TestOSSUtilDynamicCredentialRequiresLauncherProfileSupport(t *testing.T) {
+	acquirer := &renewableCountingCredentialAcquirer{&countingCredentialAcquirer{snapshot: credentialSnapshot{
+		AccessKeyID: "id", AccessKeySecret: "secret", SecurityToken: "sts", Type: "sts",
+	}}}
+	runner := &fakeOSSUtilRunner{results: []ossUtilRunnerResult{
+		{stdout: []byte("2.3.0\n")},
+		{stdout: []byte("cp help\n")},
+		{stderr: []byte("unsupported profile"), err: &exec.Error{Name: "aliyun", Err: exec.ErrNotFound}},
+	}}
+	caller := newTestOSSUtilCaller(t, runner, "cn-hangzhou")
+	caller.Profile.Acquirer = acquirer
+	caller.Profile.Mode = credentialModeExternal
+	_, err := caller.Call(context.Background(), "PutObject", map[string]any{
+		"Bucket": "bucket", "Key": "large.raw", "File": "/tmp/large.raw",
+	})
+	if appErrorCode(err) != "OSSUtilUnavailable" || len(runner.calls) != 3 {
+		t.Fatalf("launcher preflight error=%v calls=%#v", err, runner.calls)
+	}
+	configPath := ""
+	for i := 0; i+1 < len(runner.calls[2].args); i++ {
+		if runner.calls[2].args[i] == "--config-path" {
+			configPath = runner.calls[2].args[i+1]
+		}
+	}
+	if configPath == "" {
+		t.Fatal("launcher preflight did not receive broker config")
+	}
+	if _, statErr := os.Stat(configPath); !os.IsNotExist(statErr) {
+		t.Fatalf("broker config remained after preflight failure: %v", statErr)
+	}
+}
+
+func TestOSSUtilLauncherPreflightRedactsBrokerCapabilityURL(t *testing.T) {
+	acquirer := &renewableCountingCredentialAcquirer{&countingCredentialAcquirer{snapshot: credentialSnapshot{
+		AccessKeyID: "id", AccessKeySecret: "secret", SecurityToken: "sts", Type: "sts",
+	}}}
+	runner := &brokerLeakingPreflightRunner{}
+	caller := newTestOSSUtilCaller(t, runner, "cn-hangzhou")
+	caller.Profile.Acquirer = acquirer
+	caller.Profile.Mode = credentialModeExternal
+	_, err := caller.Call(context.Background(), "PutObject", map[string]any{
+		"Bucket": "bucket", "Key": "large.raw", "File": "/tmp/large.raw",
+	})
+	if err == nil || runner.brokerURL == "" {
+		t.Fatalf("preflight error=%v broker=%q", err, runner.brokerURL)
+	}
+	var appErr *ecerrors.AppError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("preflight error type = %T", err)
+	}
+	payload := appErr.Payload()
+	if strings.Contains(payload.Detail, runner.brokerURL) || !strings.Contains(payload.Detail, "<credential-source>") {
+		t.Fatalf("preflight payload did not redact broker capability: %#v", payload)
+	}
+}
+
+func TestWithoutEnvironmentKeysIsCaseInsensitiveOnWindows(t *testing.T) {
+	env := []string{
+		"Path=C:\\Windows", "Alibaba_Cloud_Access_Key_Id=ambient", "oss_access_key_secret=ambient",
+		"aLiBaBa_CLoUd_Ignore_Profile=TRUE", "KEEP=value",
+	}
+	cleaned := withoutEnvironmentKeysForOS(env, "windows", ossUtilIdentityEnvironmentKeys...)
+	if len(cleaned) != 2 || cleaned[0] != "Path=C:\\Windows" || cleaned[1] != "KEEP=value" {
+		t.Fatalf("Windows environment scrub = %#v", cleaned)
+	}
+}
+
+func TestOSSUtilRejectsExpiredStaticSTSBeforeTransfer(t *testing.T) {
+	runner := &fakeOSSUtilRunner{results: []ossUtilRunnerResult{
+		{stdout: []byte("2.3.0\n")},
+		{stdout: []byte("cp help\n")},
+		{stdout: []byte("upload succeeded\n")},
+	}}
+	caller := newTestOSSUtilCaller(t, runner, "cn-hangzhou")
+	caller.Profile.Mode = credentialModeStsToken
+	caller.Profile.Acquirer = &staticCredentialAcquirer{snapshot: credentialSnapshot{
+		AccessKeyID: "id", AccessKeySecret: "secret", SecurityToken: "sts", Type: "sts",
+		ExpiresAt: time.Now().Add(-time.Minute),
+	}}
+	_, err := caller.Call(context.Background(), "PutObject", map[string]any{
+		"Bucket": "bucket", "Key": "large.raw", "File": "/tmp/large.raw",
+	})
+	if appErrorCode(err) != "CredentialLeaseExpired" {
+		t.Fatalf("expired static STS error = %v", err)
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("final OSS transfer ran with expired STS: %#v", runner.calls)
 	}
 }
 
@@ -548,10 +840,10 @@ func TestOSSUtilCallerRequiresValidRegionAtConstruction(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(raw), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	if _, err := newOSSUtilCaller("prod", configPath, "", ossUtilTestGetenv(t), &fakeOSSUtilRunner{}); appErrorCode(err) != "MissingRegion" {
+	if _, err := newOSSUtilCaller("prod", configPath, ecconfig.ResolvedRegion{}, ossUtilTestGetenv(t), &fakeOSSUtilRunner{}); appErrorCode(err) != "MissingRegion" {
 		t.Fatalf("missing region error = %v", err)
 	}
-	if _, err := newOSSUtilCaller("prod", configPath, "not-a-real-region", ossUtilTestGetenv(t), &fakeOSSUtilRunner{}); appErrorCode(err) != "InvalidRegion" {
+	if _, err := newOSSUtilCaller("prod", configPath, ecconfig.ResolvedRegion{Value: "not-a-real-region", Source: ecconfig.RegionSourceExplicit}, ossUtilTestGetenv(t), &fakeOSSUtilRunner{}); appErrorCode(err) != "InvalidRegion" {
 		t.Fatalf("invalid region error = %v", err)
 	}
 }
@@ -610,7 +902,11 @@ func writeOSSUtilTestConfig(t *testing.T) string {
 
 func newTestOSSUtilCaller(t *testing.T, runner CLICommandRunner, region string) *OSSUtilCaller {
 	t.Helper()
-	caller, err := newOSSUtilCaller("prod", writeOSSUtilTestConfig(t), region, ossUtilTestGetenv(t), runner)
+	resolvedRegion := ecconfig.ResolvedRegion{}
+	if region != "" {
+		resolvedRegion = ecconfig.ResolvedRegion{Value: region, Source: ecconfig.RegionSourceExplicit}
+	}
+	caller, err := newOSSUtilCaller("prod", writeOSSUtilTestConfig(t), resolvedRegion, ossUtilTestGetenv(t), runner)
 	if err != nil {
 		t.Fatalf("newOSSUtilCaller: %v", err)
 	}

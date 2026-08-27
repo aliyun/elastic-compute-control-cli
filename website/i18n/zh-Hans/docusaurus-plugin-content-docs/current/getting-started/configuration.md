@@ -50,7 +50,40 @@ ecctl configure get
 
 ## 凭证
 
-设置 AccessKey 凭证：
+读取 `~/.aliyun/config.json` 时，`ecctl` 支持阿里云 CLI 当前的同组凭证模式：
+
+| 模式 | 典型场景 |
+|---|---|
+| `OAuth` | 浏览器登录的本地用户；缓存令牌可自动刷新 |
+| `EcsRamRole` | 通过 IMDS 使用 ECS 实例 RAM 角色 |
+| `RamRoleArn` | 从 AK 或 STS 源凭证扮演 RAM 角色 |
+| `ChainableRamRoleArn` | 通过命名的源 profile 形成角色链 |
+| `OIDC` | OIDC/RRSA 工作负载身份 |
+| `CloudSSO` | CloudSSO 访问配置 |
+| `External` | 不经过 shell，按 argv 执行凭证辅助程序 |
+| `CredentialsURI` | 从 HTTPS 或 loopback HTTP 端点获取可续期 STS 凭证 |
+| `StsToken` | 已有的临时 AK、Secret 和 SecurityToken |
+| `BearerToken` | 接受 Bearer 鉴权的产品 API |
+| `AK` | 长期 AccessKey 凭证 |
+
+浏览器登录和高级模式由阿里云 CLI 完成配置，之后在 `ecctl` 中选择同名 profile：
+
+```bash
+aliyun configure --mode OAuth --profile production
+ecctl --profile production ecs instance list --region cn-hangzhou
+```
+
+`ecctl` 会在整条命令期间保留选定的凭证 provider，并在后续请求签名前按需刷新临时凭证。首个可续期凭证会固定规范化的账号、用户或角色；后续凭证如果属于其他身份，会在签名业务请求前被拒绝。`ecctl` 不会再实现一套 OAuth 或 CloudSSO 浏览器登录流程。如果交互式身份已经过期，请使用阿里云 CLI 对该 profile 重新认证。命令运行期间如果所选 profile 的身份字段发生变化，`ecctl` 会失败退出，不会在同一条命令中切换账号。
+
+RAM 角色和 OIDC profile 必须使用完整的 `acs:ram::<16位账号ID>:role/<角色名>` ARN。`ecctl` 从 ARN 派生预期账号，并在第一条业务请求前通过官方 STS `GetCallerIdentity` 端点验证初始凭证。显式 custom `sts_endpoint` 可以签发凭证，但不能验证自己签发的结果。独立身份检查需要使用地域或 VPC STS 端点时，请设置 `sts_region` 和 `enable_vpc`。
+
+云命令只读兼容的 `aliyun` 配置。轮换后的 OAuth token，以及 OAuth/CloudSSO 的 STS 缓存，按 profile 分别写入 `~/.ecctl/credentials-v2/`，目录和文件仅当前用户可访问。该存储使用当前进程解析到的 home，不随 `ECCTL_CONFIG_PATH` 改变；两个 ecctl 配置选择同一解析后 Aliyun 配置路径和 profile 时会共享一个 OAuth 轮换所有者。entry 文件名由该来源路径和 profile 名哈希生成。删除 entry 不会修改来源 profile。如果服务端 refresh token 轮换无法提交到本地，`ecctl` 会停止且不重试该轮换，profile 必须重新认证。
+
+当 OSS 命令使用可续期凭证时，`ecctl` 通过仅绑定到 `127.0.0.1` 的短期凭证端点和仅当前用户可读的临时 profile，向本地 `ossutil` 子进程提供凭证。该端点使用每条命令独有的随机路径；子进程退出后，端点和临时 profile 都会立即删除，凭证不会出现在命令参数中。External 凭证获取的 deadline 为 60 秒；Unix 会在取消时终止整个进程组，所有平台都会在额外两秒宽限后强制释放继承的输出管道。无过期时间的 External AK 会作为本次 OSS 操作的静态 AK 使用；可续期 OSS broker 响应必须是包含 SecurityToken 的 STS 凭证。
+
+上游 Dara 请求日志会在 `ecctl` 的最终 HTTP client 能够脱敏之前打印已签名 URL 和请求头。因此，逗号分隔的 `DEBUG` 环境变量包含精确 token `dara` 时，携带凭证的命令会失败退出。移除该 token 后再重试。
+
+如需由 `ecctl` 管理本地 AK profile：
 
 ```bash
 ecctl configure set access-key-id <id>
@@ -62,6 +95,21 @@ ecctl configure set access-key-secret <secret>
 ```bash
 ecctl configure set security-token <token>
 ```
+
+`StsToken` 凭证会直接使用，无法自行续期。profile 包含 `sts_expiration`
+时，`ecctl` 会拒绝已过期的令牌，也会在令牌无法覆盖已知命令 deadline
+时提前失败。长时间 OSS 传输应优先使用 OAuth、OIDC、RAM 角色、ECS
+角色、External 或 CredentialsURI 等可续期模式。
+
+`External` 和 `CredentialsURI` 会执行本地程序或访问外部端点。设置
+`ALIBABA_CLOUD_DISABLE_EXTERNAL_PROCESS=true` 可同时禁用这两类来源。
+External 命令只会拆分为 argv 后直接执行，不会交给 shell 求值。
+CredentialsURI 必须使用 HTTPS；只有 `127.0.0.1`、`::1` 等字面量
+loopback IP 可以使用 HTTP。
+
+CredentialsURI 端点遵循阿里云 CLI 响应契约：必须返回 HTTP 200，JSON
+中必须包含 `Code: "Success"`、`AccessKeyId`、`AccessKeySecret`、
+`SecurityToken`，以及 RFC 3339 UTC 格式的 `Expiration`。
 
 ## 支持的配置项
 
@@ -100,6 +148,15 @@ ecctl configure use production
 
 `configure use` 会在兼容的 `aliyun` 配置和 `ecctl` 配置中检查该 profile 名，然后将所选 profile 记录到 `ecctl` 配置文件。
 
+凭证 profile 的选择优先级如下：
+
+1. `--profile`
+2. `ECCTL_PROFILE`，然后是兼容的阿里云 profile 环境变量
+3. 本地配置中的当前 profile
+
+所选 profile 优先于普通凭证环境变量。设置
+`ALIBABA_CLOUD_IGNORE_PROFILE=TRUE` 后，命令忽略已存储凭证，仅使用环境变量提供的凭证。显式选择的 profile 不存在时会直接失败，不会静默切换身份。
+
 ## 全局覆盖
 
 全局 flag 可对单条命令覆盖配置：
@@ -129,3 +186,11 @@ ecctl --region cn-beijing --output json --lang en schema --list ecs
 | `ECCTL_PROFILE`、`ALIBABACLOUD_PROFILE`、`ALIBABA_CLOUD_PROFILE`、`ALICLOUD_PROFILE` | 未传 `--profile` 时的默认 profile |
 | `ECCTL_REGION`、`ALIBABA_CLOUD_REGION_ID`、`ALIBABACLOUD_REGION_ID`、`ALICLOUD_REGION_ID` | 未传 `--region` 时的地域覆盖 |
 | `ALIBABA_CLOUD_CONFIG_PATH`、`ALIBABACLOUD_CONFIG_PATH`、`ALICLOUD_CONFIG_PATH` | 兼容的 `aliyun` CLI 配置文件路径 |
+| `ALIBABA_CLOUD_IGNORE_PROFILE` | 设为 `TRUE` 时忽略已存储的凭证 profile |
+| `ALIBABA_CLOUD_ACCESS_KEY_ID`、`ALIBABA_CLOUD_ACCESS_KEY_SECRET`、`ALIBABA_CLOUD_SECURITY_TOKEN` | AK 或 STS 凭证 |
+| `ALIBABA_CLOUD_ROLE_ARN`、`ALIBABA_CLOUD_ROLE_SESSION_NAME`、`ALIBABA_CLOUD_EXTERNAL_ID` | RAM 角色扮演 |
+| `ALIBABA_CLOUD_ECS_METADATA`、`ALIBABA_CLOUD_IMDSV1_DISABLED` | ECS 实例 RAM 角色和 IMDS 策略 |
+| `ALIBABA_CLOUD_OIDC_PROVIDER_ARN`、`ALIBABA_CLOUD_OIDC_TOKEN_FILE` | OIDC/RRSA 凭证 |
+| `ALIBABA_CLOUD_CREDENTIALS_URI` | CredentialsURI 端点 |
+| `ALIBABA_CLOUD_BEARER_TOKEN`、`ALIBABA_CLOUD_BEARER_TOKEN_HEADER_KEY` | Bearer Token 和可选自定义 Header |
+| `ALIBABA_CLOUD_DISABLE_EXTERNAL_PROCESS` | 禁用 `External` 和 `CredentialsURI` 凭证来源 |

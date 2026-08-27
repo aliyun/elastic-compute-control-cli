@@ -798,7 +798,6 @@ func fakeECSInvocationStatusResponse(invokeID string, status string) map[string]
 }
 
 func TestECSInstanceExecDefaultWaitsForCompletion(t *testing.T) {
-	t.Parallel()
 	fake := &fakeSpecCaller{responses: []map[string]any{
 		{"RequestId": "req-run-command", "InvokeId": "inv-123"},
 		fakeECSInvocationStatusResponse("inv-123", "Running"),
@@ -810,14 +809,14 @@ func TestECSInstanceExecDefaultWaitsForCompletion(t *testing.T) {
 		return fake, nil
 	})
 
-	stdout, stderr, code := runCLI("ecs", "instance", "exec", "i-123", "--region", "cn-beijing", "--command", "uptime", "--timeout", "1ms")
+	stdout, stderr, code := runCLI("ecs", "instance", "exec", "i-123", "--region", "cn-beijing", "--command", "uptime", "--timeout", "100ms")
 	if code == 0 {
 		t.Fatalf("ecs instance exec should wait for completion and time out; stdout=%s stderr=%s", stdout, stderr)
 	}
 	if got := errorCode(t, stdout); got != "WaitTimeout" {
 		t.Fatalf("error code = %q, want WaitTimeout; stdout=%s stderr=%s", got, stdout, stderr)
 	}
-	// The 1ms timeout can elapse after one or more polls, so assert at least one
+	// The timeout can elapse after one or more polls, so assert at least one
 	// DescribeInvocations poll rather than an exact call count.
 	if len(fake.calls) < 2 || fake.calls[0].operation != "RunCommand" || fake.calls[1].operation != "DescribeInvocations" {
 		t.Fatalf("calls = %#v", fake.calls)

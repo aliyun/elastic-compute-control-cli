@@ -19,6 +19,10 @@ type Caller interface {
 	Call(ctx context.Context, operation string, request map[string]any) (map[string]any, error)
 }
 
+type operationContextPreparer interface {
+	PrepareOperationContext(context.Context) (context.Context, error)
+}
+
 var timeScale float64 = 1.0
 
 func SetTimeScaleForTest(scale float64) func() {
@@ -75,6 +79,13 @@ func (e *Executor) Execute(ctx context.Context, req Request) (Result, error) {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
 		defer cancel()
+	}
+	if preparer, ok := e.caller.(operationContextPreparer); ok {
+		var err error
+		ctx, err = preparer.PrepareOperationContext(ctx)
+		if err != nil {
+			return Result{}, err
+		}
 	}
 
 	if operation, ok := e.spec.Operations[req.Action]; ok {

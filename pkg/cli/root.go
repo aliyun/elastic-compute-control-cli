@@ -1032,15 +1032,15 @@ func requireRegion(options *globalOptions) error {
 	return err
 }
 
-func resolveRegion(options *globalOptions) (string, error) {
-	region, appErr := config.ResolveRegionForProfile(
+func resolveRegion(options *globalOptions) (config.ResolvedRegion, error) {
+	region, appErr := config.ResolveRegionForProfileWithSource(
 		options.region,
 		config.ProfileName(options.profile, os.Getenv),
 		config.ConfigPath(os.Getenv),
 		os.Getenv,
 	)
 	if appErr != nil {
-		return "", appErr
+		return config.ResolvedRegion{}, appErr
 	}
 	return region, nil
 }

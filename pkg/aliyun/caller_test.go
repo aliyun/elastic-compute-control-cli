@@ -1,22 +1,27 @@
 package aliyun
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	credentialproviders "github.com/aliyun/credentials-go/credentials/providers"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
+	ecconfig "github.com/aliyun/elastic-compute-control-cli/pkg/config"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
@@ -24,17 +29,53 @@ import (
 	_ "github.com/aliyun/elastic-compute-control-cli/specs/ecs"
 )
 
+func TestExportedCallerConstructorCompatibilitySignatures(t *testing.T) {
+	var openAPILegacy func(string, string, string, string, func(string) string) (*OpenAPICaller, error) = NewOpenAPICaller
+	var openAPIWithSource func(string, string, string, ecconfig.ResolvedRegion, func(string) string) (*OpenAPICaller, error) = NewOpenAPICallerWithRegionSource
+	var ossLegacy func(string, string, string, func(string) string) (*OSSUtilCaller, error) = NewOSSUtilCaller
+	var ossWithSource func(string, string, ecconfig.ResolvedRegion, func(string) string) (*OSSUtilCaller, error) = NewOSSUtilCallerWithRegionSource
+	if openAPILegacy == nil || openAPIWithSource == nil || ossLegacy == nil || ossWithSource == nil {
+		t.Fatal("exported caller compatibility functions are unavailable")
+	}
+}
+
 type regionStringer string
 
 func (r regionStringer) String() string { return string(r) }
 
+func testResolvedOpenAPIProfile(t *testing.T, region string) resolvedOpenAPIProfile {
+	t.Helper()
+	credential, err := staticCredentialFromValues("ak", "secret", "", credentialModeAK, "test-credential")
+	if err != nil {
+		t.Fatalf("staticCredentialFromValues: %v", err)
+	}
+	return resolvedOpenAPIProfile{
+		Acquirer:            credential.Acquirer,
+		AuthType:            credential.AuthType,
+		CredentialPrincipal: credential.Principal,
+		Mode:                credential.Mode,
+		RegionID:            region,
+	}
+}
+
+func testCredentialSnapshot(t *testing.T, acquirer credentialAcquirer) *credentialSnapshot {
+	t.Helper()
+	snapshot, err := acquirer.Acquire(context.Background())
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	return snapshot
+}
+
 type recordingHTTPClient struct {
 	request      *http.Request
+	requests     []*http.Request
 	responseBody string
 }
 
 func (c *recordingHTTPClient) Call(req *http.Request, _ *http.Transport) (*http.Response, error) {
 	c.request = req
+	c.requests = append(c.requests, req)
 	body := c.responseBody
 	if body == "" {
 		body = `{"RequestId":"req-1"}`
@@ -109,7 +150,7 @@ func TestCLICommandCallerRunsAliyunCLIWithMergedConfigAndRequest(t *testing.T) {
 				"mode":                    "RamRoleArn",
 				"access_key_id":           "aliyun-id",
 				"access_key_secret":       "aliyun-secret",
-				"ram_role_arn":            "acs:ram::123:role/admin",
+				"ram_role_arn":            "acs:ram::1234567890123456:role/admin",
 				"source_profile":          "base",
 				"region_id":               "us-west-1",
 				"auto_plugin_install":     true,
@@ -183,7 +224,7 @@ func TestCLICommandCallerRunsAliyunCLIWithMergedConfigAndRequest(t *testing.T) {
 	if profile["access_key_id"] != "ecctl-id" || profile["access_key_secret"] != "ecctl-secret" || profile["region_id"] != "cn-hangzhou" {
 		t.Fatalf("ecctl overlay not applied to temp aliyun config: %#v", profile)
 	}
-	if profile["ram_role_arn"] != "acs:ram::123:role/admin" || profile["source_profile"] != "base" {
+	if profile["ram_role_arn"] != "acs:ram::1234567890123456:role/admin" || profile["source_profile"] != "base" {
 		t.Fatalf("aliyun-only profile fields not preserved: %#v", profile)
 	}
 	if profileMapFromConfig(t, rawConfig, "base")["access_key_id"] != "base-id" {
@@ -855,12 +896,18 @@ func TestOpenAPICallerUsesStringLikeRegionIDForEndpoint(t *testing.T) {
 	}
 }
 
+func TestOpenAPICallerRejectsUnsafeRegionBeforeEndpointConstruction(t *testing.T) {
+	fake := &fakeOpenAPIExecutor{response: `{"RequestId":"unexpected"}`}
+	caller := &OpenAPICaller{Product: "Vpc", Region: "x@attacker.example-a", executor: fake, Profile: resolvedOpenAPIProfile{Language: "en"}}
+	_, err := caller.Call(context.Background(), "DescribeVpcs", map[string]any{"PageSize": 1})
+	if appErrorCode(err) != "InvalidRegion" || len(fake.requests) != 0 {
+		t.Fatalf("unsafe region error=%v requests=%#v", err, fake.requests)
+	}
+}
+
 func TestDarabonbaExecutorUsesRequestDomainAsHTTPHost(t *testing.T) {
-	executor, err := newDarabonbaExecutor(resolvedOpenAPIProfile{
-		AccessKeyID:     "ak",
-		AccessKeySecret: "secret",
-		RegionID:        "cn-heyuan",
-	})
+	profile := testResolvedOpenAPIProfile(t, "cn-heyuan")
+	executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
 	if err != nil {
 		t.Fatalf("newDarabonbaExecutor: %v", err)
 	}
@@ -900,12 +947,228 @@ func TestDarabonbaExecutorUsesRequestDomainAsHTTPHost(t *testing.T) {
 	}
 }
 
-func TestDarabonbaExecutorPreservesTopLevelJSONArray(t *testing.T) {
-	executor, err := newDarabonbaExecutor(resolvedOpenAPIProfile{
-		AccessKeyID:     "ak",
-		AccessKeySecret: "secret",
-		RegionID:        "cn-zhangjiakou",
+func TestDarabonbaExecutorInjectsCustomBearerHeaderWithoutAKSigning(t *testing.T) {
+	resolved, err := bearerCredential("bearer-value", "x-custom-auth", credentialModeBearerToken)
+	if err != nil {
+		t.Fatalf("bearerCredential: %v", err)
+	}
+	profile := resolvedOpenAPIProfile{
+		Acquirer:             resolved.Acquirer,
+		Mode:                 resolved.Mode,
+		AuthType:             resolved.AuthType,
+		BearerTokenHeaderKey: resolved.BearerTokenHeaderKey,
+		RegionID:             "cn-hangzhou",
+	}
+	executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+	if err != nil {
+		t.Fatalf("newDarabonbaExecutor: %v", err)
+	}
+	recorder := &recordingHTTPClient{}
+	executor.client.HttpClient = recorder
+	_, _ = executor.ExecuteOpenAPI(context.Background(), &openAPIRequest{
+		Product:     "Example",
+		Version:     "2020-01-01",
+		ApiName:     "GetExample",
+		RegionId:    "cn-hangzhou",
+		Domain:      "example.cn-hangzhou.aliyuncs.com",
+		Scheme:      "https",
+		Method:      "GET",
+		Style:       "RPC",
+		QueryParams: map[string]string{},
+		Headers:     map[string]string{},
 	})
+	if err != nil {
+		t.Fatalf("ExecuteOpenAPI: %v", err)
+	}
+	if recorder.request == nil || recorder.request.Header.Get("x-custom-auth") != "bearer-value" {
+		t.Fatalf("request headers = %#v", recorder.request)
+	}
+	if recorder.request.Header.Get("Authorization") != "" {
+		t.Fatalf("custom bearer request unexpectedly used AK Authorization: %q", recorder.request.Header.Get("Authorization"))
+	}
+}
+
+func TestDarabonbaDebugFailsBeforeCredentialUse(t *testing.T) {
+	const accessKeyID = "dummy-sensitive-access-key-id"
+	const securityToken = "dummy-sensitive-security-token"
+	if os.Getenv("ECCTL_DARA_DEBUG_HELPER") == "1" {
+		snapshot := &credentialSnapshot{
+			AccessKeyID: accessKeyID, AccessKeySecret: "dummy-sensitive-access-key-secret",
+			SecurityToken: securityToken, Type: "sts",
+		}
+		executor, err := newDarabonbaExecutor(resolvedOpenAPIProfile{AuthType: "AK", RegionID: "cn-hangzhou"}, snapshot)
+		if executor != nil || appErrorCode(err) != "UnsafeCredentialDebug" {
+			t.Fatalf("debug rejection = %#v, %v", executor, err)
+		}
+		return
+	}
+	command := exec.Command(os.Args[0], "-test.run=^TestDarabonbaDebugFailsBeforeCredentialUse$")
+	command.Env = append(os.Environ(), "DEBUG=dara,other", "ECCTL_DARA_DEBUG_HELPER=1")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("debug helper failed: %v\n%s", err, output)
+	}
+	for _, secret := range []string{accessKeyID, securityToken, "Authorization", "Signature"} {
+		if bytes.Contains(output, []byte(secret)) {
+			t.Fatalf("Dara DEBUG leaked %q: %s", secret, output)
+		}
+	}
+}
+
+func TestCredentialCallersRejectDaraDebugBeforeReadingConfig(t *testing.T) {
+	getenv := mapGetenv(map[string]string{"DEBUG": "other,dara", "ECCTL_ALIYUN_CONFIG_PATH": filepath.Join(t.TempDir(), "missing.json")})
+	if caller, err := NewOpenAPICaller("missing", filepath.Join(t.TempDir(), "broken.json"), "ecs", "cn-hangzhou", getenv); caller != nil || appErrorCode(err) != "UnsafeCredentialDebug" {
+		t.Fatalf("OpenAPI caller = %#v, %v", caller, err)
+	}
+	if caller, err := NewCLICommandCaller("missing", filepath.Join(t.TempDir(), "broken.json"), "ecs", "cn-hangzhou", getenv); caller != nil || appErrorCode(err) != "UnsafeCredentialDebug" {
+		t.Fatalf("CLI caller = %#v, %v", caller, err)
+	}
+}
+
+func TestBearerCredentialClientRejectsRedirectBeforeDestination(t *testing.T) {
+	destinationCalls := 0
+	destination := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { destinationCalls++ }))
+	defer destination.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Location", destination.URL)
+		response.WriteHeader(http.StatusFound)
+	}))
+	defer source.Close()
+	resolved, err := bearerCredential("bearer-value", "x-custom-auth", credentialModeBearerToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := resolvedOpenAPIProfile{
+		Acquirer: resolved.Acquirer, Mode: resolved.Mode, AuthType: resolved.AuthType,
+		BearerTokenHeaderKey: resolved.BearerTokenHeaderKey, RegionID: "cn-hangzhou",
+	}
+	executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = executor.ExecuteOpenAPI(context.Background(), &openAPIRequest{
+		Product: "Example", Version: "2020-01-01", ApiName: "GetExample", RegionId: "cn-hangzhou",
+		Domain: strings.TrimPrefix(source.URL, "http://"), Scheme: "http", Method: "GET", Style: "RPC",
+		QueryParams: map[string]string{}, Headers: map[string]string{},
+	})
+	if destinationCalls != 0 {
+		t.Fatalf("redirect destination received %d requests", destinationCalls)
+	}
+}
+
+func TestDarabonbaExecutorRefreshesDynamicCredentialForEachRequest(t *testing.T) {
+	provider := &rotatingCredentialsProvider{}
+	acquirer := &credentialsProviderAcquirer{provider: provider, mode: credentialModeAK}
+	profile := resolvedOpenAPIProfile{Acquirer: acquirer, Mode: credentialModeAK, AuthType: "AK", RegionID: "cn-hangzhou"}
+	executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, acquirer))
+	if err != nil {
+		t.Fatalf("newDarabonbaExecutor: %v", err)
+	}
+	recorder := &recordingHTTPClient{}
+	executor.client.HttpClient = recorder
+	request := &openAPIRequest{
+		Product:     "Example",
+		Version:     "2020-01-01",
+		ApiName:     "GetExample",
+		RegionId:    "cn-hangzhou",
+		Domain:      "example.cn-hangzhou.aliyuncs.com",
+		Scheme:      "https",
+		Method:      "GET",
+		Style:       "RPC",
+		QueryParams: map[string]string{},
+		Headers:     map[string]string{},
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := executor.ExecuteOpenAPI(context.Background(), request); err != nil {
+			t.Fatalf("ExecuteOpenAPI %d: %v", i+1, err)
+		}
+	}
+	if provider.calls != 2 || len(recorder.requests) != 2 {
+		t.Fatalf("provider calls = %d requests = %d", provider.calls, len(recorder.requests))
+	}
+	if first, second := requestHeaderValue(recorder.requests[0], "Authorization"), requestHeaderValue(recorder.requests[1], "Authorization"); !strings.Contains(first, "Credential=id-1") || !strings.Contains(second, "Credential=id-2") {
+		t.Fatalf("operation credential did not refresh: first=%q second=%q", first, second)
+	}
+}
+
+func TestOpenAPICallerClassifiesDynamicCredentialRefreshFailure(t *testing.T) {
+	provider := &failAfterCredentialsProvider{err: errors.New("CloudSSO access token is expired, please re-login with cli")}
+	profile := resolvedOpenAPIProfile{
+		Acquirer: &credentialsProviderAcquirer{provider: provider, mode: credentialModeCloudSSO},
+		Mode:     credentialModeCloudSSO,
+		AuthType: "AK",
+		RegionID: "cn-hangzhou",
+		Language: "en",
+	}
+	caller := &OpenAPICaller{Product: "Vpc", Region: "cn-hangzhou", Profile: profile}
+	ctx, err := caller.PrepareOperationContext(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, _ := ctx.Value(credentialLeaseContextKey{}).(*credentialLease)
+	executor := lease.executor.(*darabonbaExecutor)
+	executor.client.HttpClient = &recordingHTTPClient{}
+	if _, err := caller.Call(ctx, "DescribeVpcs", map[string]any{"RegionId": "cn-hangzhou", "PageSize": 1}); err != nil {
+		t.Fatalf("initial call: %v", err)
+	}
+	_, err = caller.Call(ctx, "DescribeVpcs", map[string]any{"RegionId": "cn-hangzhou", "PageSize": 1})
+	var appErr *ecerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Payload().Code != "CredentialReauthenticationRequired" {
+		t.Fatalf("error = %T %v", err, err)
+	}
+}
+
+type failAfterCredentialsProvider struct {
+	calls int
+	err   error
+}
+
+func (p *failAfterCredentialsProvider) GetCredentials() (*credentialproviders.Credentials, error) {
+	p.calls++
+	if p.calls == 1 {
+		return &credentialproviders.Credentials{AccessKeyId: "id", AccessKeySecret: "secret", SecurityToken: "sts", ProviderName: "test"}, nil
+	}
+	return nil, p.err
+}
+
+func (*failAfterCredentialsProvider) GetProviderName() string { return "test" }
+
+type rotatingCredentialsProvider struct{ calls int }
+
+func (p *rotatingCredentialsProvider) GetCredentials() (*credentialproviders.Credentials, error) {
+	p.calls++
+	return &credentialproviders.Credentials{
+		AccessKeyId:     fmt.Sprintf("id-%d", p.calls),
+		AccessKeySecret: "secret",
+		ProviderName:    p.GetProviderName(),
+	}, nil
+}
+
+func (p *rotatingCredentialsProvider) GetProviderName() string { return "rotating" }
+
+type errorCredentialsProvider struct{ err error }
+
+func (p *errorCredentialsProvider) GetCredentials() (*credentialproviders.Credentials, error) {
+	return nil, p.err
+}
+
+func (p *errorCredentialsProvider) GetProviderName() string { return "failing" }
+
+func requestHeaderValue(request *http.Request, name string) string {
+	if request == nil {
+		return ""
+	}
+	for key, values := range request.Header {
+		if strings.EqualFold(key, name) && len(values) > 0 {
+			return values[0]
+		}
+	}
+	return ""
+}
+
+func TestDarabonbaExecutorPreservesTopLevelJSONArray(t *testing.T) {
+	profile := testResolvedOpenAPIProfile(t, "cn-zhangjiakou")
+	executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
 	if err != nil {
 		t.Fatalf("newDarabonbaExecutor: %v", err)
 	}
@@ -942,11 +1205,8 @@ func TestDarabonbaExecutorPreservesTopLevelJSONArray(t *testing.T) {
 }
 
 func TestDarabonbaExecutorRestoresRequestScopedClientState(t *testing.T) {
-	executor, err := newDarabonbaExecutor(resolvedOpenAPIProfile{
-		AccessKeyID:     "ak",
-		AccessKeySecret: "secret",
-		RegionID:        "cn-hangzhou",
-	})
+	profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
+	executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
 	if err != nil {
 		t.Fatalf("newDarabonbaExecutor: %v", err)
 	}
@@ -1628,6 +1888,20 @@ func TestCallerSanitizeCloudErrorRedactsDenyPrincipal(t *testing.T) {
 	}
 }
 
+func TestCallerSanitizeCloudErrorRedactsCredentialJSONVariants(t *testing.T) {
+	for _, message := range []string{
+		`{"accessKeySecret":"secret-value"}`,
+		`{"securityToken":"token-value"}`,
+		`{"bearer_token":"bearer-value"}`,
+		`{"oauthRefreshToken":"refresh-value"}`,
+	} {
+		got := callerSanitizeCloudError(errors.New(message))
+		if strings.Contains(got, "value") || got != "Alibaba Cloud API request failed" {
+			t.Fatalf("sanitized error = %q", got)
+		}
+	}
+}
+
 func TestOpenAPICallerRedactsSignedURLFromActionError(t *testing.T) {
 	signedURL := `https://ecs.cn-definitely-notreal-1.aliyuncs.com/?AccessKeyId=LTAI-test&Action=DescribeInstances&Signature=secret-signature&SignatureNonce=nonce-1`
 	fake := &fakeOpenAPIExecutor{callError: errors.New(`Post "` + signedURL + `": dial tcp: lookup ecs.cn-definitely-notreal-1.aliyuncs.com: no such host`)}
@@ -1742,8 +2016,15 @@ func TestCallRawRetriesThenSucceedsOnThrottling(t *testing.T) {
 	}
 	caller := &OpenAPICaller{
 		Product: "ecs", Resource: "instance", Region: "cn-beijing", executor: fake,
+		Profile: resolvedOpenAPIProfile{
+			Mode: credentialModeAK,
+			Acquirer: &countingCredentialAcquirer{snapshot: credentialSnapshot{
+				AccessKeyID: "id", AccessKeySecret: "secret", Type: "access_key",
+			}},
+		},
 		sleepFn: func(context.Context, time.Duration) error { return nil },
 	}
+	acquirer := caller.Profile.Acquirer.(*countingCredentialAcquirer)
 
 	exporter := tracetest.NewInMemoryExporter()
 	ctx, session := telemetry.Start(telemetry.WithExporterForTest(context.Background(), exporter), telemetry.Options{
@@ -1760,6 +2041,9 @@ func TestCallRawRetriesThenSucceedsOnThrottling(t *testing.T) {
 		t.Fatalf("attempts = %d, want 3 (2 throttled + 1 success)", len(fake.requests))
 	}
 	session.Finish("ecctl call ecs DescribeInstances", 0)
+	if acquirer.calls != 1 {
+		t.Fatalf("credential acquisitions = %d, want exactly one for all retries and telemetry", acquirer.calls)
+	}
 	var operationID string
 	apiSpans := 0
 	for _, span := range exporter.GetSpans() {
@@ -1780,6 +2064,271 @@ func TestCallRawRetriesThenSucceedsOnThrottling(t *testing.T) {
 	if apiSpans != 3 {
 		t.Fatalf("API spans = %d, want 3", apiSpans)
 	}
+}
+
+func TestCallRawRetryDoesNotGateOnFrozenInitialSnapshot(t *testing.T) {
+	throttle := errors.New("SDK.ServerError\nErrorCode: Throttling.User\nMessage: Request was denied due to user flow control.")
+	fake := &fakeOpenAPIExecutor{
+		callErrors: []error{throttle},
+		response:   `{"RequestId":"req-should-not-run"}`,
+	}
+	acquirer := &countingCredentialAcquirer{snapshot: credentialSnapshot{
+		AccessKeyID: "principal-one", AccessKeySecret: "secret", Type: "access_key",
+		ExpiresAt: time.Now().Add(time.Hour),
+	}}
+	caller := &OpenAPICaller{
+		Product: "ecs", Region: "cn-beijing", executor: fake,
+		Profile:          resolvedOpenAPIProfile{Mode: credentialModeExternal, Acquirer: acquirer, CredentialPrincipal: "helper"},
+		retryMaxAttempts: 3,
+	}
+	ctx, err := caller.PrepareOperationContext(context.Background())
+	if err != nil {
+		t.Fatalf("PrepareOperationContext: %v", err)
+	}
+	lease, _ := ctx.Value(credentialLeaseContextKey{}).(*credentialLease)
+	caller.sleepFn = func(context.Context, time.Duration) error {
+		lease.snapshot.ExpiresAt = time.Now().Add(-time.Second)
+		return nil
+	}
+
+	_, err = caller.Call(ctx, "DescribeInstances", map[string]any{"RegionId": "cn-beijing"})
+	if err != nil {
+		t.Fatalf("retry failed after initial snapshot expired: %v", err)
+	}
+	if len(fake.requests) != 2 {
+		t.Fatalf("attempts = %d, want retry to proceed", len(fake.requests))
+	}
+	if acquirer.calls != 1 {
+		t.Fatalf("credential acquisitions = %d, want no mid-operation reacquire", acquirer.calls)
+	}
+}
+
+func TestPreparedOperationAcquiresInitialCredentialOnceWithInjectedExecutor(t *testing.T) {
+	acquirer := &renewableCountingCredentialAcquirer{&countingCredentialAcquirer{snapshots: []credentialSnapshot{
+		{AccessKeyID: "principal-one", AccessKeySecret: "secret", Type: "access_key"},
+		{AccessKeyID: "principal-two", AccessKeySecret: "secret", Type: "access_key"},
+	}}}
+	fake := &fakeOpenAPIExecutor{response: `{"RequestId":"req-ok","TotalCount":0,"Instances":{"Instance":[]}}`}
+	caller := &OpenAPICaller{
+		Product: "ecs", Region: "cn-beijing", executor: fake,
+		Profile: resolvedOpenAPIProfile{Mode: credentialModeExternal, Acquirer: acquirer, CredentialPrincipal: "helper"},
+	}
+	ctx, err := caller.PrepareOperationContext(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := caller.Call(ctx, "DescribeInstances", map[string]any{"RegionId": "cn-beijing"}); err != nil {
+			t.Fatalf("Call %d: %v", i+1, err)
+		}
+	}
+	if acquirer.calls != 1 {
+		t.Fatalf("credential acquisitions = %d, want one for complete operation", acquirer.calls)
+	}
+}
+
+func TestPrepareOperationUsesOperationScopedCredentialSource(t *testing.T) {
+	child := &countingCredentialAcquirer{snapshot: credentialSnapshot{AccessKeyID: "operation-id", AccessKeySecret: "secret", Type: "access_key"}}
+	factory := &operationFactoryCredentialAcquirer{child: child}
+	caller := &OpenAPICaller{
+		Product: "ecs", Region: "cn-beijing", executor: &fakeOpenAPIExecutor{},
+		Profile: resolvedOpenAPIProfile{Mode: credentialModeEcsRamRole, Acquirer: factory, CredentialPrincipal: "role"},
+	}
+	if _, err := caller.PrepareOperationContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if factory.operations != 1 || factory.acquisitions != 0 || child.calls != 1 {
+		t.Fatalf("factory operations=%d acquisitions=%d child acquisitions=%d", factory.operations, factory.acquisitions, child.calls)
+	}
+}
+
+func TestOperationTelemetryIdentityStaysBoundToFirstSignedSnapshot(t *testing.T) {
+	provider := &rotatingCredentialsProvider{}
+	acquirer := &credentialsProviderAcquirer{provider: provider, mode: credentialModeExternal}
+	caller := &OpenAPICaller{
+		Product: "Example", Region: "cn-hangzhou",
+		Profile: resolvedOpenAPIProfile{Acquirer: acquirer, Mode: credentialModeExternal, AuthType: "AK", RegionID: "cn-hangzhou", CredentialPrincipal: "helper"},
+	}
+	lease, err := caller.acquireCredentialLease(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mainExecutor := lease.executor.(*darabonbaExecutor)
+	mainRecorder := &recordingHTTPClient{}
+	mainExecutor.client.HttpClient = mainRecorder
+	request := &openAPIRequest{
+		Product: "Example", Version: "2020-01-01", ApiName: "GetExample", RegionId: "cn-hangzhou",
+		Domain: "example.cn-hangzhou.aliyuncs.com", Scheme: "https", Method: "GET", Style: "RPC",
+		QueryParams: map[string]string{}, Headers: map[string]string{},
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := mainExecutor.ExecuteOpenAPI(context.Background(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	identityExecutor := lease.identityExecutor.(*darabonbaExecutor)
+	identityRecorder := &recordingHTTPClient{}
+	identityExecutor.client.HttpClient = identityRecorder
+	if _, err := identityExecutor.ExecuteOpenAPI(context.Background(), &openAPIRequest{
+		Product: "Sts", Version: "2015-04-01", ApiName: "GetCallerIdentity", Domain: "sts.aliyuncs.com",
+		Scheme: "https", Method: "GET", Style: "RPC", QueryParams: map[string]string{}, Headers: map[string]string{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if provider.calls != 2 {
+		t.Fatalf("provider calls = %d, want initial plus one renewal", provider.calls)
+	}
+	mainFirst := requestHeaderValue(mainRecorder.requests[0], "Authorization")
+	mainSecond := requestHeaderValue(mainRecorder.requests[1], "Authorization")
+	identity := requestHeaderValue(identityRecorder.requests[0], "Authorization")
+	if !strings.Contains(mainFirst, "Credential=id-1") || !strings.Contains(mainSecond, "Credential=id-2") || !strings.Contains(identity, "Credential=id-1") {
+		t.Fatalf("main first=%q second=%q identity=%q", mainFirst, mainSecond, identity)
+	}
+}
+
+func TestOperationRejectsRenewedCredentialFromDifferentIdentityBeforeRequest(t *testing.T) {
+	originalResolver := resolveCredentialSnapshotIdentity
+	var resolvedIDs []string
+	resolveCredentialSnapshotIdentity = func(_ context.Context, _ resolvedOpenAPIProfile, snapshot *credentialSnapshot, _ string) (telemetry.Identity, error) {
+		resolvedIDs = append(resolvedIDs, snapshot.AccessKeyID)
+		identity := "account-a"
+		if snapshot.AccessKeyID == "principal-two" {
+			identity = "account-b"
+		}
+		return telemetry.Identity{Hash: identity, Type: "Account"}, nil
+	}
+	t.Cleanup(func() { resolveCredentialSnapshotIdentity = originalResolver })
+
+	acquirer := &renewableCountingCredentialAcquirer{&countingCredentialAcquirer{snapshots: []credentialSnapshot{
+		{AccessKeyID: "principal-one", AccessKeySecret: "secret", Type: "access_key"},
+		{AccessKeyID: "principal-two", AccessKeySecret: "secret", Type: "access_key"},
+	}}}
+	caller := &OpenAPICaller{
+		Product: "Example", Region: "cn-hangzhou",
+		Profile: resolvedOpenAPIProfile{
+			Acquirer: acquirer, Mode: credentialModeExternal, AuthType: "AK", RegionID: "cn-hangzhou",
+			CredentialPrincipal: "helper", PinCredentialIdentity: true,
+		},
+	}
+	lease, err := caller.acquireCredentialLease(withCredentialOperationRegion(context.Background(), "cn-hangzhou"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := lease.executor.(*darabonbaExecutor)
+	recorder := &recordingHTTPClient{}
+	executor.client.HttpClient = recorder
+	request := &openAPIRequest{
+		Product: "Example", Version: "2020-01-01", ApiName: "GetExample", RegionId: "cn-hangzhou",
+		Domain: "example.cn-hangzhou.aliyuncs.com", Scheme: "https", Method: "GET", Style: "RPC",
+		QueryParams: map[string]string{}, Headers: map[string]string{},
+	}
+	if _, err := executor.ExecuteOpenAPI(context.Background(), request); err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+	if _, err := executor.ExecuteOpenAPI(context.Background(), request); !errors.Is(err, ErrCredentialIdentityChanged) {
+		t.Fatalf("second request identity error = %v resolved=%#v acquisitions=%d", err, resolvedIDs, acquirer.calls)
+	}
+	if len(recorder.requests) != 1 {
+		t.Fatalf("business requests after identity change = %d, want 1", len(recorder.requests))
+	}
+}
+
+func TestOperationCredentialReacquiresAfterInitialSnapshotExpires(t *testing.T) {
+	base := &countingCredentialAcquirer{snapshots: []credentialSnapshot{
+		{AccessKeyID: "principal-one", AccessKeySecret: "secret", Type: "access_key", ExpiresAt: time.Now().Add(10 * time.Millisecond)},
+		{AccessKeyID: "principal-two", AccessKeySecret: "secret", Type: "access_key", ExpiresAt: time.Now().Add(time.Hour)},
+	}}
+	acquirer := &renewableCountingCredentialAcquirer{base}
+	initial, err := acquirer.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := newOperationCredential(acquirer, credentialModeExternal, initial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	model, err := credential.GetCredential()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ""
+	if model.AccessKeyId != nil {
+		got = *model.AccessKeyId
+	}
+	if got != "principal-two" {
+		t.Fatalf("refreshed access key = %q", got)
+	}
+	if acquirer.calls != 2 {
+		t.Fatalf("credential acquisitions = %d, want initial plus refresh", acquirer.calls)
+	}
+}
+
+func TestPrepareOperationRejectsNonRenewableCredentialShorterThanDeadline(t *testing.T) {
+	acquirer := &staticCredentialAcquirer{snapshot: credentialSnapshot{
+		AccessKeyID: "principal-one", AccessKeySecret: "secret", SecurityToken: "token", Type: "sts",
+		ExpiresAt: time.Now().Add(time.Minute),
+	}}
+	caller := &OpenAPICaller{
+		Product: "ecs", Region: "cn-beijing", executor: &fakeOpenAPIExecutor{},
+		Profile: resolvedOpenAPIProfile{Mode: credentialModeStsToken, Acquirer: acquirer, CredentialPrincipal: "principal-one"},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	_, err := caller.PrepareOperationContext(ctx)
+	var appErr *ecerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Payload().Code != "CredentialLeaseExpired" {
+		t.Fatalf("short static lease error = %T %v", err, err)
+	}
+}
+
+type countingCredentialAcquirer struct {
+	calls     int
+	snapshot  credentialSnapshot
+	snapshots []credentialSnapshot
+	err       error
+}
+
+type renewableCountingCredentialAcquirer struct {
+	*countingCredentialAcquirer
+}
+
+func (*renewableCountingCredentialAcquirer) Renewable() bool { return true }
+
+type operationFactoryCredentialAcquirer struct {
+	child        credentialAcquirer
+	operations   int
+	acquisitions int
+}
+
+func (a *operationFactoryCredentialAcquirer) Acquire(context.Context) (*credentialSnapshot, error) {
+	a.acquisitions++
+	return nil, errors.New("base credential source must not be acquired directly")
+}
+
+func (a *operationFactoryCredentialAcquirer) ForOperation(context.Context) (credentialAcquirer, error) {
+	a.operations++
+	return a.child, nil
+}
+
+func (a *countingCredentialAcquirer) Acquire(ctx context.Context) (*credentialSnapshot, error) {
+	a.calls++
+	if err := contextError(ctx); err != nil {
+		return nil, err
+	}
+	if a.err != nil {
+		return nil, a.err
+	}
+	selected := a.snapshot
+	if len(a.snapshots) > 0 {
+		index := a.calls - 1
+		if index >= len(a.snapshots) {
+			index = len(a.snapshots) - 1
+		}
+		selected = a.snapshots[index]
+	}
+	copy := selected
+	return &copy, nil
 }
 
 func testSpanAttributes(attributes []attribute.KeyValue) map[string]any {
