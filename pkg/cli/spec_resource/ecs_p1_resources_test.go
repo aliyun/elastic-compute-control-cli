@@ -176,25 +176,25 @@ func TestECSAssistantInstallTargetsInstances(t *testing.T) {
 }
 
 func TestECSAssistantInstallDefaultWaitsForAgentStatus(t *testing.T) {
-	t.Parallel()
 	fake := &fakeSpecCaller{responses: []map[string]any{
 		{"RequestId": "req-install"},
 		{"RequestId": "req-status", "InstanceCloudAssistantStatusSet": map[string]any{"InstanceCloudAssistantStatus": []any{
 			map[string]any{"InstanceId": "i-123", "CloudAssistantStatus": "false"},
 		}}},
+		{"RequestId": "req-status", "InstanceCloudAssistantStatusSet": map[string]any{"InstanceCloudAssistantStatus": []any{
+			map[string]any{"InstanceId": "i-123", "CloudAssistantStatus": "true"},
+		}}},
+		{"RequestId": "req-status", "InstanceCloudAssistantStatusSet": map[string]any{"InstanceCloudAssistantStatus": []any{
+			map[string]any{"InstanceId": "i-123", "CloudAssistantStatus": "true"},
+		}}},
 	}}
 	runCLI := catalogCaller(t, "ecs", "assistant", fake)
 
-	stdout, stderr, code := runCLI("ecs", "assistant", "install", "--region", "cn-hangzhou", "--instance-ids", `["i-123"]`, "--timeout", "1ms")
-	if code == 0 {
-		t.Fatalf("ecs assistant install should wait for CloudAssistantStatus=true and time out; stdout=%s stderr=%s", stdout, stderr)
+	stdout, stderr, code := runCLI("ecs", "assistant", "install", "--region", "cn-hangzhou", "--instance-ids", `["i-123"]`)
+	if code != 0 {
+		t.Fatalf("ecs assistant install should wait for CloudAssistantStatus=true; exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
-	if got := errorCode(t, stdout); got != "WaitTimeout" {
-		t.Fatalf("error code = %q, want WaitTimeout; stdout=%s stderr=%s", got, stdout, stderr)
-	}
-	// The 1ms timeout can elapse after one or more polls, so assert at least one
-	// DescribeCloudAssistantStatus poll rather than an exact call count.
-	if len(fake.calls) < 2 || fake.calls[0].operation != "InstallCloudAssistant" || fake.calls[1].operation != "DescribeCloudAssistantStatus" {
+	if len(fake.calls) != 4 || fake.calls[0].operation != "InstallCloudAssistant" || fake.calls[1].operation != "DescribeCloudAssistantStatus" || fake.calls[2].operation != "DescribeCloudAssistantStatus" || fake.calls[3].operation != "DescribeCloudAssistantStatus" {
 		t.Fatalf("calls = %#v", fake.calls)
 	}
 }

@@ -801,6 +801,8 @@ func TestECSInstanceExecDefaultWaitsForCompletion(t *testing.T) {
 	fake := &fakeSpecCaller{responses: []map[string]any{
 		{"RequestId": "req-run-command", "InvokeId": "inv-123"},
 		fakeECSInvocationStatusResponse("inv-123", "Running"),
+		fakeECSInvocationStatusResponse("inv-123", "Success"),
+		{"RequestId": "req-results", "Invocation": map[string]any{"InvocationResults": map[string]any{"InvocationResult": []any{}}}},
 	}}
 	runCLI := withCaller(func(_ string, _ string, resource spec.ResourceSpec, _ string, _ func(string) string) (engine.Caller, error) {
 		if resource.Product != "ecs" || resource.Resource != "instance" {
@@ -809,16 +811,11 @@ func TestECSInstanceExecDefaultWaitsForCompletion(t *testing.T) {
 		return fake, nil
 	})
 
-	stdout, stderr, code := runCLI("ecs", "instance", "exec", "i-123", "--region", "cn-beijing", "--command", "uptime", "--timeout", "100ms")
-	if code == 0 {
-		t.Fatalf("ecs instance exec should wait for completion and time out; stdout=%s stderr=%s", stdout, stderr)
+	stdout, stderr, code := runCLI("ecs", "instance", "exec", "i-123", "--region", "cn-beijing", "--command", "uptime")
+	if code != 0 {
+		t.Fatalf("ecs instance exec should wait for completion; exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
-	if got := errorCode(t, stdout); got != "WaitTimeout" {
-		t.Fatalf("error code = %q, want WaitTimeout; stdout=%s stderr=%s", got, stdout, stderr)
-	}
-	// The timeout can elapse after one or more polls, so assert at least one
-	// DescribeInvocations poll rather than an exact call count.
-	if len(fake.calls) < 2 || fake.calls[0].operation != "RunCommand" || fake.calls[1].operation != "DescribeInvocations" {
+	if len(fake.calls) != 4 || fake.calls[0].operation != "RunCommand" || fake.calls[1].operation != "DescribeInvocations" || fake.calls[2].operation != "DescribeInvocations" || fake.calls[3].operation != "DescribeInvocationResults" {
 		t.Fatalf("calls = %#v", fake.calls)
 	}
 }
@@ -975,10 +972,11 @@ func fakeECSSendFileResultsResponse(invokeID string, status string) map[string]a
 }
 
 func TestECSInstanceSendfileDefaultWaitsForCompletion(t *testing.T) {
-	t.Parallel()
 	fake := &fakeSpecCaller{responses: []map[string]any{
 		{"RequestId": "req-sendfile", "InvokeId": "sf-123"},
 		fakeECSSendFileResultsResponse("sf-123", "Running"),
+		fakeECSSendFileResultsResponse("sf-123", "Success"),
+		fakeECSSendFileResultsResponse("sf-123", "Success"),
 	}}
 	runCLI := withCaller(func(_ string, _ string, resource spec.ResourceSpec, _ string, _ func(string) string) (engine.Caller, error) {
 		if resource.Product != "ecs" || resource.Resource != "instance" {
@@ -987,17 +985,11 @@ func TestECSInstanceSendfileDefaultWaitsForCompletion(t *testing.T) {
 		return fake, nil
 	})
 
-	stdout, stderr, code := runCLI("ecs", "instance", "sendfile", "i-123", "--region", "cn-beijing", "--file-name", "app.conf", "--target-dir", "/tmp", "--content", "hello", "--timeout", "1ms")
-	if code == 0 {
-		t.Fatalf("ecs instance sendfile should wait for completion and time out; stdout=%s stderr=%s", stdout, stderr)
+	stdout, stderr, code := runCLI("ecs", "instance", "sendfile", "i-123", "--region", "cn-beijing", "--file-name", "app.conf", "--target-dir", "/tmp", "--content", "hello")
+	if code != 0 {
+		t.Fatalf("ecs instance sendfile should wait for completion; exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
-	if got := errorCode(t, stdout); got != "WaitTimeout" {
-		t.Fatalf("error code = %q, want WaitTimeout; stdout=%s stderr=%s", got, stdout, stderr)
-	}
-	// The 1ms timeout can elapse after one or more poll attempts, so assert that
-	// SendFile is followed by at least one DescribeSendFileResults poll rather
-	// than an exact call count.
-	if len(fake.calls) < 2 || fake.calls[0].operation != "SendFile" || fake.calls[1].operation != "DescribeSendFileResults" {
+	if len(fake.calls) != 4 || fake.calls[0].operation != "SendFile" || fake.calls[1].operation != "DescribeSendFileResults" || fake.calls[2].operation != "DescribeSendFileResults" || fake.calls[3].operation != "DescribeSendFileResults" {
 		t.Fatalf("calls = %#v", fake.calls)
 	}
 }
