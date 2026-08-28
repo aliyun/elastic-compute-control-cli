@@ -377,10 +377,10 @@ func TestLingjunNodeExecMapsRunCommandAndReadsBack(t *testing.T) {
 }
 
 func TestLingjunNodeExecDefaultWaitsForCompletion(t *testing.T) {
-	t.Parallel()
 	fake := &fakeSpecCaller{responses: []map[string]any{
 		{"RequestId": "req-run", "InvokeId": "invoke-123"},
 		fakeLingjunInvocationResponse("invoke-123", "Running"),
+		fakeLingjunInvocationResponse("invoke-123", "Success"),
 	}}
 	runCLI := lingjunNodeCaller(t, fake)
 
@@ -389,17 +389,11 @@ func TestLingjunNodeExecDefaultWaitsForCompletion(t *testing.T) {
 		"node-1",
 		"--region", "cn-beijing",
 		"--command", "echo ok",
-		"--timeout", "1ms",
 	)
-	if code == 0 {
-		t.Fatalf("lingjun node exec should wait for completion and time out; stdout=%s stderr=%s", stdout, stderr)
+	if code != 0 {
+		t.Fatalf("lingjun node exec should wait for completion; exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
-	if got := errorCode(t, stdout); got != "WaitTimeout" {
-		t.Fatalf("error code = %q, want WaitTimeout; stdout=%s stderr=%s", got, stdout, stderr)
-	}
-	// The 1ms timeout can elapse after one or more polls, so assert at least one
-	// DescribeInvocations poll rather than an exact call count.
-	if len(fake.calls) < 2 || fake.calls[0].operation != "RunCommand" || fake.calls[1].operation != "DescribeInvocations" {
+	if len(fake.calls) != 3 || fake.calls[0].operation != "RunCommand" || fake.calls[1].operation != "DescribeInvocations" || fake.calls[2].operation != "DescribeInvocations" {
 		t.Fatalf("calls = %#v", fake.calls)
 	}
 }
@@ -448,10 +442,10 @@ func TestLingjunNodeSendfileMapsSendFileAndReadsBack(t *testing.T) {
 }
 
 func TestLingjunNodeSendfileDefaultWaitsForCompletion(t *testing.T) {
-	t.Parallel()
 	fake := &fakeSpecCaller{responses: []map[string]any{
 		{"RequestId": "req-send", "InvokeId": "invoke-123"},
 		fakeLingjunInvocationResponse("invoke-123", "Running"),
+		fakeLingjunInvocationResponse("invoke-123", "Success"),
 	}}
 	runCLI := lingjunNodeCaller(t, fake)
 
@@ -462,17 +456,11 @@ func TestLingjunNodeSendfileDefaultWaitsForCompletion(t *testing.T) {
 		"--content", "hello",
 		"--name", "hello.txt",
 		"--target", "/tmp",
-		"--timeout", "1ms",
 	)
-	if code == 0 {
-		t.Fatalf("lingjun node sendfile should wait for completion and time out; stdout=%s stderr=%s", stdout, stderr)
+	if code != 0 {
+		t.Fatalf("lingjun node sendfile should wait for completion; exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
-	if got := errorCode(t, stdout); got != "WaitTimeout" {
-		t.Fatalf("error code = %q, want WaitTimeout; stdout=%s stderr=%s", got, stdout, stderr)
-	}
-	// The 1ms timeout can elapse after one or more polls, so assert at least one
-	// DescribeSendFileResults poll rather than an exact call count.
-	if len(fake.calls) < 2 || fake.calls[0].operation != "SendFile" || fake.calls[1].operation != "DescribeSendFileResults" {
+	if len(fake.calls) != 3 || fake.calls[0].operation != "SendFile" || fake.calls[1].operation != "DescribeSendFileResults" || fake.calls[2].operation != "DescribeSendFileResults" {
 		t.Fatalf("calls = %#v", fake.calls)
 	}
 }
