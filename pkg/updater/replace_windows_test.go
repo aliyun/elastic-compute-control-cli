@@ -83,15 +83,11 @@ func TestWindowsSelfUpdateCompletesAfterParentExit(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(45 * time.Second)
-	for {
-		versionOutput, versionErr := exec.Command(targetPath, "--version").CombinedOutput()
-		if versionErr == nil && strings.TrimSpace(string(versionOutput)) == "ecctl 1.2.3" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("updated executable did not become ready: %v, %q", versionErr, versionOutput)
-		}
-		time.Sleep(100 * time.Millisecond)
+	waitForWindowsUpdateHelper(t, targetPath, deadline)
+
+	versionOutput, versionErr := exec.Command(targetPath, "--version").CombinedOutput()
+	if versionErr != nil || strings.TrimSpace(string(versionOutput)) != "ecctl 1.2.3" {
+		t.Fatalf("updated executable version: %v, %q", versionErr, versionOutput)
 	}
 
 	if output, err := exec.Command(targetPath, "reconcile", server.URL+"/oss", server.URL+"/github", server.URL+"/api/latest").CombinedOutput(); err != nil {
@@ -114,6 +110,44 @@ func TestWindowsSelfUpdateCompletesAfterParentExit(t *testing.T) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("Windows update files remain: helpers=%v backups=%v installs=%v", helpers, backups, installFiles)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func waitForWindowsUpdateHelper(t *testing.T, targetPath string, deadline time.Time) {
+	t.Helper()
+	statusPath := targetPath + updateStatusSuffix
+	lockPath := targetPath + updateLockSuffix
+	var lastStatus windowsUpdateStatus
+	var lastStatusErr error
+	var lastGuardErr error
+	for {
+		raw, err := os.ReadFile(statusPath)
+		var status windowsUpdateStatus
+		if err != nil {
+			lastStatusErr = err
+		} else if err := json.Unmarshal(raw, &status); err != nil {
+			lastStatusErr = err
+		} else {
+			lastStatus = status
+			lastStatusErr = nil
+			if lastStatus.State == "failed" {
+				t.Fatalf("Windows update helper failed: %s", lastStatus.Error)
+			}
+			if lastStatus.State == "succeeded" {
+				guard, err := openWindowsUpdateLockGuard(lockPath, lastStatus.Token)
+				if err == nil {
+					if err := guard.Close(); err != nil {
+						t.Fatalf("close completed Windows update lock guard: %v", err)
+					}
+					return
+				}
+				lastGuardErr = err
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Windows update helper did not complete: status=%#v, status error=%v, lock guard error=%v", lastStatus, lastStatusErr, lastGuardErr)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
