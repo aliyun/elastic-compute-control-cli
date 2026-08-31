@@ -7,7 +7,9 @@ import { apply } from '../index.js'
 const fakeEcctl = fileURLToPath(new URL('./fixtures/fake-ecctl.mjs', import.meta.url))
 const config = {
   bin: fakeEcctl,
-  timeoutMs: 5_000,
+  // Leave headroom for cold Node startup on loaded CI hosts. Cancellation
+  // behavior has its own sub-two-second assertions below.
+  timeoutMs: 30_000,
   maxOutputBytes: 1024 * 1024,
 }
 
