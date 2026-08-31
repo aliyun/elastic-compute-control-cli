@@ -2,7 +2,10 @@
 
 package configfile
 
-import "os"
+import (
+	"os"
+	"path/filepath"
+)
 
 func syncDirectory(path string) error {
 	directory, err := os.Open(path)
@@ -11,4 +14,8 @@ func syncDirectory(path string) error {
 	}
 	defer directory.Close()
 	return directory.Sync()
+}
+
+func syncReplacementPlatform(path string) error {
+	return syncDirectory(filepath.Dir(path))
 }

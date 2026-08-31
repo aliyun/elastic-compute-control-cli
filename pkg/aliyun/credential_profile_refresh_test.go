@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -48,9 +50,10 @@ func TestOAuthHelperProcessDoesNotLeakCredentials(t *testing.T) {
 	)
 	if os.Getenv("ECCTL_OAUTH_HELPER") == "1" {
 		oauthEndpoints["CN"] = struct {
-			baseURL  string
-			clientID string
-		}{baseURL: os.Getenv("ECCTL_OAUTH_ENDPOINT"), clientID: "test-client"}
+			baseURL   string
+			signInURL string
+			clientID  string
+		}{baseURL: os.Getenv("ECCTL_OAUTH_ENDPOINT"), signInURL: "https://signin.example.com", clientID: "test-client"}
 		transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} // #nosec G402 -- isolated httptest server
 		client := &http.Client{Transport: transport}
 		config, _, err := loadConfigObject(os.Getenv("ECCTL_OAUTH_CONFIG"))
@@ -133,9 +136,10 @@ func TestOAuthRedirectTargetNeverReceivesCredential(t *testing.T) {
 	defer source.Close()
 	original := oauthEndpoints["CN"]
 	oauthEndpoints["CN"] = struct {
-		baseURL  string
-		clientID string
-	}{baseURL: source.URL, clientID: "test-client"}
+		baseURL   string
+		signInURL string
+		clientID  string
+	}{baseURL: source.URL, signInURL: "https://signin.example.com", clientID: "test-client"}
 	t.Cleanup(func() { oauthEndpoints["CN"] = original })
 	configPath, profile := writeOAuthRefreshProfile(t, "refresh-before")
 	provider, err := newOAuthProfileCredentialsProviderWithClient(profile, "oauth", configPath, source.Client())
@@ -963,12 +967,138 @@ func TestCredentialProfileDigestsSeparateLogicalSettingsFromOAuthGeneration(t *t
 	if credentialProfileIdentityDigest(base) == credentialProfileIdentityDigest(changed) {
 		t.Fatal("OAuth site change did not change the logical identity digest")
 	}
+	nativeOne := map[string]any{"name": "oauth", "mode": "OAuth", "oauth_site_type": "CN", "oauth_generation": "one"}
+	nativeTwo := cloneStringAnyMap(nativeOne)
+	nativeTwo["oauth_generation"] = "two"
+	if credentialProfileIdentityDigest(nativeOne) == credentialProfileIdentityDigest(nativeTwo) || credentialProfileAuthDigest(nativeOne) == credentialProfileAuthDigest(nativeTwo) {
+		t.Fatal("native OAuth login generation did not change identity and auth digests")
+	}
 }
 
 func TestCredentialRefreshLockBudgetCoversOAuthRequestsAndPersistence(t *testing.T) {
 	minimum := 2*credentialHTTPTimeout + oauthPersistenceTimeout
 	if credentialRefreshLockTimeout <= minimum {
 		t.Fatalf("refresh lock timeout %s does not cover OAuth budget %s", credentialRefreshLockTimeout, minimum)
+	}
+}
+
+func TestNativeOAuthStaleProviderCannotOverwriteNewCanonicalGeneration(t *testing.T) {
+	dir := t.TempDir()
+	cacheRoot := filepath.Join(dir, "credentials-v2")
+	configA := filepath.Join(dir, "config-a.json")
+	profileA := map[string]any{
+		"name": "production", "mode": "OAuth", "oauth_site_type": "CN",
+		"oauth_generation": "login-a", "oauth_account_id": "1111111111111111",
+	}
+	profileB := map[string]any{
+		"name": "production", "mode": "OAuth", "oauth_site_type": "CN",
+		"oauth_generation": "login-b", "oauth_account_id": "2222222222222222",
+	}
+	writeCredentialConfigForTest(t, configA, profileA)
+	cachePath := credentialCacheEntryPath(cacheRoot, nativeOAuthCacheSource, "production")
+	generationA := credentialSourceGeneration(profileA, credentialModeOAuth)
+	generationB := credentialSourceGeneration(profileB, credentialModeOAuth)
+	if err := storeCredentialCacheEntry(context.Background(), cachePath, credentialCacheEntry{
+		Mode: credentialModeOAuth, SourceGeneration: generationA,
+		OAuthRefreshToken: "refresh-a", OAuthAccessToken: "access-a", OAuthAccessExpire: time.Now().Add(time.Hour).Unix(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	provider, err := newNativeOAuthProfileCredentialsProvider(profileA, "production", configA, cacheRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storeCredentialCacheEntry(context.Background(), cachePath, credentialCacheEntry{
+		Mode: credentialModeOAuth, SourceGeneration: generationB,
+		OAuthRefreshToken: "refresh-b", OAuthAccessToken: "access-b", OAuthAccessExpire: time.Now().Add(time.Hour).Unix(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	refreshCalls := 0
+	originalRefresh := refreshOAuthCredential
+	refreshOAuthCredential = func(context.Context, map[string]any, credentialHTTPClient, oauthTokenCommitFunc) (*credentialproviders.Credentials, *oauthCredentialProfileUpdate, error) {
+		refreshCalls++
+		return nil, nil, errors.New("stale provider must not refresh")
+	}
+	t.Cleanup(func() { refreshOAuthCredential = originalRefresh })
+	if _, err := provider.Acquire(context.Background()); !errors.Is(err, ErrCredentialProfileChanged) {
+		t.Fatalf("stale provider error = %v", err)
+	}
+	if refreshCalls != 0 {
+		t.Fatalf("stale provider refresh calls = %d", refreshCalls)
+	}
+	entry, found, err := loadCredentialCacheEntry(context.Background(), cachePath, credentialModeOAuth, generationB)
+	if err != nil || !found || entry.OAuthRefreshToken != "refresh-b" {
+		t.Fatalf("new canonical entry = %#v found=%t err=%v", entry, found, err)
+	}
+}
+
+func TestOAuthRefreshUsesTypedExpiryAndServiceErrors(t *testing.T) {
+	profile := map[string]any{
+		"oauth_site_type": "CN", "oauth_refresh_token": "expired-refresh",
+		"oauth_refresh_token_expire": time.Now().Add(-time.Minute).Unix(),
+	}
+	calls := 0
+	client := credentialHTTPClientFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("must not call")
+	})
+	_, _, err := refreshOAuthCredentialWithHTTP(context.Background(), profile, client, nil)
+	var reauthentication *OAuthReauthenticationError
+	if !errors.As(err, &reauthentication) || calls != 0 {
+		t.Fatalf("expired refresh error=%v calls=%d", err, calls)
+	}
+	profile["oauth_refresh_token_expire"] = time.Now().Add(time.Hour).Unix()
+	client = credentialHTTPClientFunc(func(*http.Request) (*http.Response, error) {
+		return jsonHTTPResponse(http.StatusServiceUnavailable, `{"error":"temporarily_unavailable"}`), nil
+	})
+	_, _, err = refreshOAuthCredentialWithHTTP(context.Background(), profile, client, nil)
+	var remote *OAuthRemoteError
+	if !errors.As(err, &remote) || remote.StatusCode != http.StatusServiceUnavailable || remote.Code != "temporarily_unavailable" {
+		t.Fatalf("service refresh error = %#v raw=%v", remote, err)
+	}
+}
+
+func TestOAuthProviderRecoveryCommandUsesAbsoluteConfigPath(t *testing.T) {
+	dir := t.TempDir()
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(originalDir) })
+	provider, err := newOAuthProfileCredentialsProviderWithClient(
+		map[string]any{"name": "production", "mode": "OAuth", "oauth_site_type": "CN"},
+		"production", "relative.json", nil, filepath.Join(dir, "cache"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recoveryErr := provider.withRecovery(&OAuthReauthenticationError{Reason: "expired"})
+	var recovery interface{ RecoveryCommand() []string }
+	if !errors.As(recoveryErr, &recovery) {
+		t.Fatalf("recovery error = %v", recoveryErr)
+	}
+	want, err := filepath.Abs("relative.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := recovery.RecoveryCommand()
+	if !slices.Contains(command, filepath.Clean(want)) {
+		t.Fatalf("provider recovery command = %#v", command)
+	}
+}
+
+func writeCredentialConfigForTest(t *testing.T, path string, profile map[string]any) {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{"current": profile["name"], "profiles": []any{profile}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 

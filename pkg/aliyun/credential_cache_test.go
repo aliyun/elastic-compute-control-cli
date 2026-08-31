@@ -2,6 +2,7 @@ package aliyun
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -24,6 +25,28 @@ func TestCredentialCacheIsPrivateAndGenerationBound(t *testing.T) {
 	}
 	if _, ok, err := loadCredentialCacheEntry(context.Background(), path, credentialModeOAuth, "generation-two"); err != nil || ok {
 		t.Fatalf("stale generation ok=%t err=%v", ok, err)
+	}
+}
+
+func TestCredentialCacheCompareAndSwapRejectsChangedOrUnexpectedOwner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "credentials-v2", "entry.json")
+	first := credentialCacheEntry{Mode: credentialModeOAuth, SourceGeneration: "generation-one", OAuthRefreshToken: "refresh-one"}
+	if err := storeCredentialCacheEntryIfMissing(context.Background(), path, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := storeCredentialCacheEntryIfMissing(context.Background(), path, first); !errors.Is(err, ErrCredentialProfileChanged) {
+		t.Fatalf("second create error = %v", err)
+	}
+	second := credentialCacheEntry{Mode: credentialModeOAuth, SourceGeneration: "generation-two", OAuthRefreshToken: "refresh-two"}
+	if err := storeCredentialCacheEntryIfGeneration(context.Background(), path, "other-generation", second); !errors.Is(err, ErrCredentialProfileChanged) {
+		t.Fatalf("wrong owner CAS error = %v", err)
+	}
+	if err := storeCredentialCacheEntryIfGeneration(context.Background(), path, "generation-one", second); err != nil {
+		t.Fatal(err)
+	}
+	loaded, found, err := loadCredentialCacheEntry(context.Background(), path, credentialModeOAuth, "generation-two")
+	if err != nil || !found || loaded.OAuthRefreshToken != "refresh-two" {
+		t.Fatalf("CAS entry=%#v found=%t err=%v", loaded, found, err)
 	}
 }
 
@@ -82,6 +105,15 @@ func TestCredentialCacheEntryPathIsIndependentOfEcctlConfigPath(t *testing.T) {
 	}
 	if first == credentialCacheEntryPath(root, "/other/config.json", "oauth") || first == credentialCacheEntryPath(root, "/home/user/.aliyun/config.json", "other") {
 		t.Fatal("distinct credential sources shared a cache entry")
+	}
+}
+
+func TestNativeOAuthCacheEntryPathIsCanonicalAcrossEcctlConfigPaths(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "credentials-v2")
+	first := credentialCacheEntryPath(root, nativeOAuthCacheSource, "production")
+	second := credentialCacheEntryPath(root, nativeOAuthCacheSource, "production")
+	if first != second || first == credentialCacheEntryPath(root, nativeOAuthCacheSource, "other") {
+		t.Fatalf("native OAuth cache paths first=%q second=%q", first, second)
 	}
 }
 

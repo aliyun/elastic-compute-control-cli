@@ -95,6 +95,35 @@ API calls in default tests.
   Persist renewable OAuth and CloudSSO state only in the canonical per-user
   ecctl credential store. Key entries by resolved Aliyun source path and
   profile; `ECCTL_CONFIG_PATH` must not create another OAuth rotation owner.
+- Native ecctl OAuth login stores only non-secret mode, site, login generation,
+  and verified account metadata in the ecctl config. Store every token and STS
+  result in the canonical private credential entry keyed independently of
+  `ECCTL_CONFIG_PATH`; never write native OAuth tokens into the Aliyun config.
+- Before interactive authorization, strictly validate the ecctl metadata file
+  and reserve private credential persistence. Every native cache modification
+  must compare the active generation under the canonical profile lock. Keep a
+  private write-ahead transaction until cache and metadata generations agree,
+  retain the previous entry until recovery is complete, and reconcile actual
+  post-rename contents instead of inferring commit state from an error alone.
+  Journal both the absolute requested config path and its resolved target, and
+  durably retire private cache/journal paths before discarding recovery state:
+  sync the containing directory on Unix and use a write-through tombstone move
+  on Windows. Every successful atomic replacement must establish a
+  platform-specific durability barrier: sync the parent directory on Unix; on
+  Windows preserve the existing target metadata with `ReplaceFileW`, then open
+  and flush the installed target with write-through semantics. Before retiring
+  a successful transaction journal, establish that barrier and re-read both
+  the resolved config generation and the desired cache mode/generation. Repeated
+  tombstone sync failures remain post-commit uncertainty, and a tombstone that
+  is the same file as its source must fail closed before rename.
+  Reject profile deletion or same-profile authentication changes while
+  allowing unrelated settings and concurrent current-profile switches to
+  survive.
+- Browser launchers must inherit a credential-scrubbed environment. Do not emit
+  the one-time authorization URL after a successful automatic launch; manual
+  URL output must be explicit or confined to an interactive terminal. Verify
+  the OAuth account through trusted STS before persistence and require an
+  expected account or explicit terminal confirmation for a first login.
 - Pin the canonical account, user, or role for every renewable operation and
   reject a refreshed credential before use when its identity changes.
 - Require HTTPS for CredentialsURI except for literal loopback HTTP endpoints,

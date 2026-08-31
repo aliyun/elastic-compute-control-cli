@@ -35,6 +35,7 @@ func TestErrorPayloadIncludesStableAndOptionalFields(t *testing.T) {
 		WithCurrentState("running"),
 		WithExpectedStates("stopped"),
 		WithSuggestion("stop the instance before deleting it"),
+		WithRecoveryCommand("ecctl", "configure", "--mode", "OAuth"),
 	)
 
 	payload := err.Payload()
@@ -70,6 +71,9 @@ func TestErrorPayloadIncludesStableAndOptionalFields(t *testing.T) {
 	}
 	if len(payload.AcceptedValues) != 1 || payload.AcceptedValues[0] != "stopped" {
 		t.Fatalf("AcceptedValues = %#v", payload.AcceptedValues)
+	}
+	if len(payload.RecoveryCommand) != 4 || payload.RecoveryCommand[0] != "ecctl" || payload.RecoveryCommand[3] != "OAuth" {
+		t.Fatalf("RecoveryCommand = %#v", payload.RecoveryCommand)
 	}
 }
 

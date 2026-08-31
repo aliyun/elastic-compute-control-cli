@@ -11,10 +11,12 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/aliyun/elastic-compute-control-cli/internal/configfile"
 	ecconfig "github.com/aliyun/elastic-compute-control-cli/pkg/config"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 )
@@ -408,6 +410,28 @@ func TestCredentialResolutionClassifiesOAuthRefreshRejection(t *testing.T) {
 	}
 }
 
+func TestCredentialResolutionPreservesTypedOAuthRecoveryAndRetry(t *testing.T) {
+	recovery := []string{"ecctl", "configure", "--mode", "OAuth", "--profile", "production"}
+	err := credentialResolutionError(&credentialProviderError{
+		mode: credentialModeOAuth,
+		err: &credentialRecoveryError{
+			err:     &OAuthRemoteError{Stage: "refresh", StatusCode: http.StatusBadRequest, Code: "invalid_grant"},
+			command: recovery,
+		},
+	})
+	var appErr *ecerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Payload().Code != "CredentialReauthenticationRequired" || !slices.Equal(appErr.Payload().RecoveryCommand, recovery) {
+		t.Fatalf("typed reauthentication error = %#v", appErr)
+	}
+	err = credentialResolutionError(&credentialProviderError{
+		mode: credentialModeOAuth,
+		err:  &OAuthRemoteError{Stage: "refresh", StatusCode: http.StatusServiceUnavailable},
+	})
+	if !errors.As(err, &appErr) || appErr.Payload().Code != "OAuthServiceUnavailable" || !appErr.Payload().Retryable {
+		t.Fatalf("typed service error = %#v", appErr)
+	}
+}
+
 func TestCredentialResolutionClassifiesAccountAndPersistenceFailures(t *testing.T) {
 	for _, tc := range []struct {
 		err  error
@@ -421,6 +445,17 @@ func TestCredentialResolutionClassifiesAccountAndPersistenceFailures(t *testing.
 		if !errors.As(err, &appErr) || appErr.Payload().Code != tc.code {
 			t.Fatalf("%v classified as %T %v", tc.err, err, err)
 		}
+	}
+}
+
+func TestCredentialResolutionPrioritizesPostCommitUncertainty(t *testing.T) {
+	err := credentialResolutionError(errors.Join(
+		ErrCredentialProfileChanged,
+		&configfile.PostCommitError{Err: errors.New("directory sync failed")},
+	))
+	var appErr *ecerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Payload().Code != "OAuthPersistenceUncertain" {
+		t.Fatalf("post-commit runtime classification = %#v raw=%v", appErr, err)
 	}
 }
 

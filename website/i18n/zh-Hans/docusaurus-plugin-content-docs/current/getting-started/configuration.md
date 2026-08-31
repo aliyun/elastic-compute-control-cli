@@ -5,7 +5,7 @@ description: 配置 profile、凭证、地域、语言和输出。
 
 # 配置
 
-`ecctl configure` 写入资源命令使用的本地配置。它也可以读取兼容的本地 `aliyun` CLI 配置；当两者同时存在时，`ecctl` 配置会覆盖兼容配置中的同名值。
+`ecctl configure` 写入资源命令使用的 ecctl 本地配置。原生 OAuth 登录只在其中保存非敏感 profile 元数据，包括经过验证的账号 ID；access token、refresh token 和换取到的 STS 凭证只进入 `~/.ecctl/credentials-v2/` 下的 canonical 私有存储。普通云命令仍会把本地 `aliyun` CLI profile 作为只读 fallback。
 
 ## 配置地域
 
@@ -66,18 +66,39 @@ ecctl configure get
 | `BearerToken` | 接受 Bearer 鉴权的产品 API |
 | `AK` | 长期 AccessKey 凭证 |
 
-浏览器登录和高级模式由阿里云 CLI 完成配置，之后在 `ecctl` 中选择同名 profile：
+OAuth 登录沿用阿里云 CLI 的常用命令形态，可以直接由 `ecctl` 完成：
 
 ```bash
-aliyun configure --mode OAuth --profile production
+ecctl configure --mode OAuth --profile production
 ecctl --profile production ecs instance list --region cn-hangzhou
 ```
 
-`ecctl` 会在整条命令期间保留选定的凭证 provider，并在后续请求签名前按需刷新临时凭证。首个可续期凭证会固定规范化的账号、用户或角色；后续凭证如果属于其他身份，会在签名业务请求前被拒绝。`ecctl` 不会再实现一套 OAuth 或 CloudSSO 浏览器登录流程。如果交互式身份已经过期，请使用阿里云 CLI 对该 profile 重新认证。命令运行期间如果所选 profile 的身份字段发生变化，`ecctl` 会失败退出，不会在同一条命令中切换账号。
+默认站点为 `CN`。需要国际站 OAuth 服务或指定 ecctl 元数据配置文件时使用：
+
+```bash
+ecctl configure --mode OAuth --profile production --oauth-site-type INTL
+ecctl configure --mode OAuth --profile production --config-path /path/to/config.json
+```
+
+在非交互终端中，或者已经知道目标账号时，请把登录绑定到预期的 16 位阿里云账号：
+
+```bash
+ecctl configure --mode OAuth --profile production --expected-account-id 1234567890123456
+```
+
+首次交互登录会显示经过验证的账号 ID，并要求输入完整 ID 后才保存凭证。后续登录必须与该 profile 已记录的账号一致；需要有意切换账号时，显式传入新的 `--expected-account-id`。
+
+后续资源命令需要使用自定义路径时，请导出 `ECCTL_CONFIG_PATH=/path/to/config.json` 并选择同名 profile。原生 OAuth 的 config path 不能与 aliyun CLI 配置路径相同。
+
+登录使用 PKCE，并且 HTTP 回调只监听 `127.0.0.1` 的 12345 到 12349 端口。自动打开浏览器成功时不会输出一次性授权地址；需要手工打开时，请在私有终端中使用 `--manual`，不要把地址复制到共享日志。成功时 stdout 只包含 profile、模式、站点、经过验证的账号 ID、配置路径和浏览器启动状态，不包含 token。浏览器启动进程不会继承阿里云或 OSS 凭证环境变量。CloudSSO 等其他需要浏览器的高级模式仍由阿里云 CLI 配置。
+
+`ecctl` 会在整条命令期间保留选定的凭证 provider，并在后续请求签名前按需刷新临时凭证。首个可续期凭证会固定规范化的账号、用户或角色；后续凭证如果属于其他身份，会在签名业务请求前被拒绝。原生 OAuth 身份过期时重新执行 `ecctl configure --mode OAuth`；Aliyun-compatible OAuth 仍使用 `aliyun configure` 重新认证。命令运行期间如果所选 profile 的身份字段发生变化，`ecctl` 会失败退出，不会在同一条命令中切换账号。
 
 RAM 角色和 OIDC profile 必须使用完整的 `acs:ram::<16位账号ID>:role/<角色名>` ARN。`ecctl` 从 ARN 派生预期账号，并在第一条业务请求前通过官方 STS `GetCallerIdentity` 端点验证初始凭证。显式 custom `sts_endpoint` 可以签发凭证，但不能验证自己签发的结果。独立身份检查需要使用地域或 VPC STS 端点时，请设置 `sts_region` 和 `enable_vpc`。
 
-云命令只读兼容的 `aliyun` 配置。轮换后的 OAuth token，以及 OAuth/CloudSSO 的 STS 缓存，按 profile 分别写入 `~/.ecctl/credentials-v2/`，目录和文件仅当前用户可访问。该存储使用当前进程解析到的 home，不随 `ECCTL_CONFIG_PATH` 改变；两个 ecctl 配置选择同一解析后 Aliyun 配置路径和 profile 时会共享一个 OAuth 轮换所有者。entry 文件名由该来源路径和 profile 名哈希生成。删除 entry 不会修改来源 profile。如果服务端 refresh token 轮换无法提交到本地，`ecctl` 会停止且不重试该轮换，profile 必须重新认证。
+云命令只读兼容的 `aliyun` 配置。同名的 ecctl 原生 OAuth 元数据优先于 Aliyun profile；不存在原生元数据时，原有 Aliyun profile 继续可用。轮换后的 OAuth token，以及 OAuth/CloudSSO 的 STS 缓存，按 profile 分别写入 `~/.ecctl/credentials-v2/`，目录和文件仅当前用户可访问。该存储使用当前进程解析到的 home，不随 `ECCTL_CONFIG_PATH` 改变。原生 OAuth 每个 profile 只有一个 per-user owner，新的 login generation 会让旧元数据失效，而不会静默切换身份；Aliyun-compatible entry 仍按来源路径和 profile 名隔离。如果服务端 refresh token 轮换无法提交到本地，`ecctl` 会停止且不重试该轮换，profile 必须重新认证。
+
+原生 OAuth cache 的每次写入都会在 per-profile 锁内比较 active generation。登录还会保留私有 write-ahead transaction，直到 cache 与 ecctl metadata 的 generation 一致。如果进程或主机在两次写入之间停止，下一次登录或凭证加载会先恢复旧 generation 或完成新 generation，再使用任何 token。
 
 当 OSS 命令使用可续期凭证时，`ecctl` 通过仅绑定到 `127.0.0.1` 的短期凭证端点和仅当前用户可读的临时 profile，向本地 `ossutil` 子进程提供凭证。该端点使用每条命令独有的随机路径；子进程退出后，端点和临时 profile 都会立即删除，凭证不会出现在命令参数中。External 凭证获取的 deadline 为 60 秒；Unix 会在取消时终止整个进程组，所有平台都会在额外两秒宽限后强制释放继承的输出管道。无过期时间的 External AK 会作为本次 OSS 操作的静态 AK 使用；可续期 OSS broker 响应必须是包含 SecurityToken 的 STS 凭证。
 

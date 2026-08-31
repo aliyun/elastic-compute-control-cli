@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	stderrors "errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -66,6 +68,7 @@ type globalOptions struct {
 	forceJSON     bool
 	command       string
 	fullSurface   bool
+	stderr        io.Writer
 }
 
 const (
@@ -89,12 +92,13 @@ const (
 )
 
 var (
-	version         = "dev"
-	commit          = ""
-	date            = ""
-	checkUpdate     = updater.Check
-	installUpdate   = updater.Update
-	autoCheckUpdate = updater.AutoCheck
+	version             = "dev"
+	commit              = ""
+	date                = ""
+	checkUpdate         = updater.Check
+	installUpdate       = updater.Update
+	autoCheckUpdate     = updater.AutoCheck
+	configureOAuthLogin = aliyun.ConfigureOAuthProfile
 )
 
 type buildInfoReader func() (*debug.BuildInfo, bool)
@@ -133,6 +137,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) (exitCode
 	args = normalizeAPICallParameterFlags(args)
 	args = normalizeHelpTopicArgs(args)
 	options := newGlobalOptions(args, os.Getenv)
+	options.stderr = stderr
 	options.fullSurface = fullCommandSurfaceFromContext(ctx)
 	customSpecSurface := strings.TrimSpace(os.Getenv("ECCTL_SPEC_DIR")) != ""
 	telemetryEnabled := !telemetry.Truthy(os.Getenv("ECCTL_DISABLE_TELEMETRY")) &&
@@ -832,15 +837,131 @@ func missingPositionalName(use string, provided int) string {
 }
 
 func newConfigCommand(options *globalOptions, stdout io.Writer) *cobra.Command {
+	var configureMode string
+	var oauthSiteType string
+	var aliyunConfigPath string
+	var oauthManual bool
+	var expectedAccountID string
 	cmd := &cobra.Command{
 		Use:     "configure",
 		Aliases: []string{"config"},
 		Short:   "Manage ecctl configuration",
-		Example: `  ecctl configure get
+		Example: `  ecctl configure --mode OAuth --profile production
+  ecctl configure get
   ecctl configure set region cn-hangzhou
-  ecctl configure list
   ecctl configure use production`,
+		Args: cobra.NoArgs,
+		RunE: func(runCmd *cobra.Command, _ []string) error {
+			if configureMode == "" {
+				return runCmd.Help()
+			}
+			if !strings.EqualFold(strings.TrimSpace(configureMode), "OAuth") {
+				return ecerrors.Client("UnsupportedCredentialMode", fmt.Sprintf("credential mode %s is not supported by ecctl configure", configureMode), ecerrors.WithAcceptedValues("OAuth"))
+			}
+			configPath := aliyunConfigPath
+			if configPath == "" {
+				configPath = config.EcctlConfigPath(os.Getenv)
+			}
+			recoveryConfigPath, err := filepath.Abs(configPath)
+			if err != nil {
+				return ecerrors.Client("InvalidParameter", err.Error(), ecerrors.WithField("config-path"))
+			}
+			recoveryConfigPath = filepath.Clean(recoveryConfigPath)
+			requestedProfile := config.ProfileName(options.profile, os.Getenv)
+			if requestedProfile != "" {
+				requestedProfile, err = config.NormalizeOAuthProfileName(requestedProfile)
+				if err != nil {
+					return ecerrors.Client("InvalidParameter", err.Error(), ecerrors.WithField("profile"))
+				}
+			}
+			siteType := strings.ToUpper(strings.TrimSpace(oauthSiteType))
+			if siteType != "" && siteType != "CN" && siteType != "INTL" {
+				return ecerrors.Client("InvalidParameter", "OAuth site type must be CN or INTL", ecerrors.WithField("oauth-site-type"), ecerrors.WithAcceptedValues("CN", "INTL"))
+			}
+			expectedAccountID = strings.TrimSpace(expectedAccountID)
+			if expectedAccountID != "" {
+				expectedAccountID, err = config.NormalizeOAuthAccountID(expectedAccountID)
+				if err != nil {
+					return ecerrors.Client("InvalidParameter", err.Error(), ecerrors.WithField("expected-account-id"))
+				}
+			}
+			localizer := i18n.NewLocalizer(options.lang)
+			progress := options.stderr
+			if progress == nil {
+				progress = io.Discard
+			}
+			interactive := writerIsTerminal(progress) && readerIsTerminal(runCmd.InOrStdin())
+			result, err := configureOAuthLogin(runCmd.Context(), aliyun.OAuthConfigureOptions{
+				ProfileName: requestedProfile, SiteType: siteType,
+				ConfigPath: configPath, AliyunConfigPath: config.AliyunConfigPath(os.Getenv),
+				OpenBrowser: openBrowserURL,
+				OnAuthorizationURL: func(rawURL string) error {
+					if !oauthManual && !writerIsTerminal(progress) {
+						return aliyun.ErrOAuthManualAuthorizationRequired
+					}
+					_, writeErr := fmt.Fprintf(progress, "%s\n%s\n", localizer.Message("OAuthAuthorizationPrompt"), rawURL)
+					return writeErr
+				},
+				SuccessPage: localizer.Message("OAuthAuthorizationSuccessPage"),
+				Manual:      oauthManual, ExpectedAccountID: expectedAccountID,
+				ConfirmAccount: func(accountID, identityType string) error {
+					if expectedAccountID != "" {
+						return nil
+					}
+					if !interactive {
+						return aliyun.ErrOAuthAccountConfirmationRequired
+					}
+					return confirmOAuthAccount(runCmd.InOrStdin(), progress, localizer, accountID, identityType)
+				},
+			})
+			if err != nil {
+				suggestion := localizer.Message("SuggestionOAuthLogin")
+				recovery := oauthConfigureRecoveryCommand(requestedProfile, siteType, recoveryConfigPath, expectedAccountID, oauthManual)
+				recoveryOption := ecerrors.WithRecoveryCommand(recovery...)
+				var configureErr *aliyun.OAuthConfigureError
+				if !stderrors.As(err, &configureErr) {
+					return ecerrors.Client("OAuthLoginFailed", err.Error(), ecerrors.WithSuggestion(suggestion), ecerrors.WithDetail(err.Error()), recoveryOption)
+				}
+				switch configureErr.Kind {
+				case aliyun.OAuthConfigureTimeout:
+					return ecerrors.Timeout("OAuthLoginTimeout", err.Error(), ecerrors.WithSuggestion(suggestion), ecerrors.WithDetail(err.Error()), recoveryOption)
+				case aliyun.OAuthConfigureCanceled:
+					return ecerrors.Client("OAuthLoginCanceled", err.Error(), ecerrors.WithSuggestion(suggestion), recoveryOption)
+				case aliyun.OAuthConfigureDenied:
+					return ecerrors.Client("OAuthLoginDenied", err.Error(), ecerrors.WithSuggestion(suggestion), recoveryOption)
+				case aliyun.OAuthConfigureService:
+					return ecerrors.Service("OAuthServiceUnavailable", err.Error(), configureErr.Retryable, ecerrors.WithSuggestion(suggestion), ecerrors.WithDetail(err.Error()), recoveryOption)
+				case aliyun.OAuthConfigureLocal:
+					return ecerrors.Client("OAuthCallbackUnavailable", err.Error(), ecerrors.WithSuggestion(localizer.Message("SuggestionOAuthCallback")), ecerrors.WithDetail(err.Error()), recoveryOption)
+				case aliyun.OAuthConfigureManual:
+					manualRecovery := oauthConfigureRecoveryCommand(requestedProfile, siteType, recoveryConfigPath, expectedAccountID, true)
+					return ecerrors.Client("OAuthManualAuthorizationRequired", err.Error(), ecerrors.WithSuggestion(localizer.Message("SuggestionOAuthManual")), ecerrors.WithRecoveryCommand(manualRecovery...))
+				case aliyun.OAuthConfigureAccountMismatch:
+					return ecerrors.Client("OAuthAccountMismatch", err.Error(), ecerrors.WithSuggestion(localizer.Message("SuggestionOAuthExpectedAccount")), recoveryOption)
+				case aliyun.OAuthConfigureConfirmation:
+					return ecerrors.Client("OAuthAccountConfirmationRequired", err.Error(), ecerrors.WithSuggestion(localizer.Message("SuggestionOAuthExpectedAccount")), recoveryOption)
+				case aliyun.OAuthConfigureProfileChanged:
+					return ecerrors.Client("CredentialIdentityChanged", err.Error(), ecerrors.WithSuggestion(suggestion), recoveryOption)
+				case aliyun.OAuthConfigurePersistence:
+					return ecerrors.Client("ConfigWriteFailed", err.Error(), ecerrors.WithSuggestion(suggestion), ecerrors.WithDetail(err.Error()), recoveryOption)
+				case aliyun.OAuthConfigurePersistenceUncertain:
+					return ecerrors.Client("OAuthPersistenceUncertain", err.Error(), ecerrors.WithSuggestion(localizer.Message("SuggestionOAuthPersistenceUncertain")), ecerrors.WithDetail(err.Error()), recoveryOption)
+				default:
+					return ecerrors.Client("InvalidParameter", err.Error(), ecerrors.WithSuggestion(suggestion), ecerrors.WithDetail(err.Error()), recoveryOption)
+				}
+			}
+			return writeCommandOutput(options, stdout, map[string]any{
+				"profile": result.ProfileName, "mode": "OAuth", "oauth_site_type": result.SiteType,
+				"config_path": result.ConfigPath, "account_id": result.AccountID,
+				"browser_launch_started": result.BrowserLaunched,
+			})
+		},
 	}
+	cmd.Flags().StringVar(&configureMode, "mode", "", "authentication mode (supported: OAuth)")
+	cmd.Flags().StringVar(&oauthSiteType, "oauth-site-type", "", "OAuth site type (CN or INTL; default: CN)")
+	cmd.Flags().StringVar(&aliyunConfigPath, "config-path", "", "ecctl configuration file path")
+	cmd.Flags().BoolVar(&oauthManual, "manual", false, "print the one-time OAuth URL instead of opening a browser")
+	cmd.Flags().StringVar(&expectedAccountID, "expected-account-id", "", "expected 16-digit Alibaba Cloud account ID")
 	var getShowSecret bool
 	getCmd := &cobra.Command{
 		Use:     "get [key]",
@@ -2209,11 +2330,59 @@ func telemetryOptOutRequested(args []string) bool {
 
 func commandValueFlag(name string) bool {
 	switch name {
-	case "--fields", "--filter", "--limit", "--region", "--profile", "--lang", "--output", "--request", "--api-param":
+	case "--fields", "--filter", "--limit", "--region", "--profile", "--lang", "--output", "--request", "--api-param", "--mode", "--config-path", "--oauth-site-type", "--expected-account-id":
 		return true
 	default:
 		return false
 	}
+}
+
+func confirmOAuthAccount(reader io.Reader, writer io.Writer, localizer *i18n.Localizer, accountID, identityType string) error {
+	if reader == nil || writer == nil || localizer == nil {
+		return aliyun.ErrOAuthAccountConfirmationRequired
+	}
+	if _, err := fmt.Fprintf(writer, "%s\n", localizer.MessageData("OAuthAccountConfirmationPrompt", map[string]any{
+		"AccountID": accountID, "IdentityType": identityType,
+	})); err != nil {
+		return err
+	}
+	line, err := bufio.NewReader(reader).ReadString('\n')
+	if err != nil && !stderrors.Is(err, io.EOF) {
+		return err
+	}
+	if strings.TrimSpace(line) != accountID {
+		return aliyun.ErrOAuthAccountConfirmationRequired
+	}
+	return nil
+}
+
+func oauthConfigureRecoveryCommand(profile, siteType, configPath, expectedAccountID string, manual bool) []string {
+	command := []string{"ecctl", "configure", "--mode", "OAuth"}
+	if profile != "" {
+		command = append(command, "--profile", profile)
+	}
+	if siteType != "" {
+		command = append(command, "--oauth-site-type", siteType)
+	}
+	if configPath != "" {
+		command = append(command, "--config-path", configPath)
+	}
+	if expectedAccountID != "" {
+		command = append(command, "--expected-account-id", expectedAccountID)
+	}
+	if manual {
+		command = append(command, "--manual")
+	}
+	return command
+}
+
+func readerIsTerminal(reader io.Reader) bool {
+	file, ok := reader.(*os.File)
+	if !ok || file == nil {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func isBuiltinRootCommand(name string) bool {
