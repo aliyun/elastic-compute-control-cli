@@ -8,7 +8,12 @@ def expected_assets:
     "ecctl_\($version)_linux_arm64.tar.gz",
     "ecctl_\($version)_windows_amd64.zip",
     "ecctl_\($version)_windows_arm64.zip"
-  ] + (if ($version | contains("-")) then [] else ["ecctl_\($version)_cask.rb"] end);
+  ] +
+  (if ($version | contains("-")) then [] else ["ecctl_\($version)_cask.rb"] end) +
+  (if $update_v2 then [
+    "ecctl-update-manifest-v2.json",
+    "ecctl-update-manifest-v2.sigstore.json"
+  ] else [] end);
 
 . as $release |
 ($release.tag_name == $tag) and

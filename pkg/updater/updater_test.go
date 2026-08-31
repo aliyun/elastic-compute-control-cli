@@ -62,6 +62,254 @@ func TestClientDownloadsOSSArtifact(t *testing.T) {
 	}
 }
 
+func TestClientDownloadsSignedOSSArtifactWithoutGitHub(t *testing.T) {
+	version := "1.2.3"
+	filename := "ecctl_1.2.3_darwin_arm64.tar.gz"
+	archive := testTarGzip(t, "ecctl", []byte("signed-oss-binary"))
+	manifest, checksums, assets := testUpdateManifestV2(t, version, map[string][]byte{filename: archive})
+	bundle := []byte(`{"test":"valid-bundle"}`)
+	var githubRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/oss/1.2.3/ecctl-update-manifest-v2.json":
+			_, _ = w.Write(manifest)
+		case "/oss/1.2.3/ecctl-update-manifest-v2.sigstore.json":
+			_, _ = w.Write(bundle)
+		case "/oss/1.2.3/checksums.txt":
+			_, _ = w.Write(checksums)
+		case "/oss/1.2.3/" + filename:
+			_, _ = w.Write(assets[filename])
+		case "/api/tags/v1.2.3", "/api/latest":
+			githubRequests.Add(1)
+			http.Error(w, "rate limited", http.StatusForbidden)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+
+	client := &Client{
+		HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest",
+		verifyManifest: func(gotManifest, gotBundle []byte) error {
+			if !bytes.Equal(gotManifest, manifest) || !bytes.Equal(gotBundle, bundle) {
+				return errors.New("unexpected signed material")
+			}
+			return nil
+		},
+	}
+	artifact, err := client.DownloadArtifact(context.Background(), version, "darwin", "arm64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Source != "oss" || artifact.Filename != filename || !bytes.Equal(artifact.Archive, archive) {
+		t.Fatalf("artifact = %#v", artifact)
+	}
+	if got := githubRequests.Load(); got != 0 {
+		t.Fatalf("GitHub requests = %d, want 0", got)
+	}
+}
+
+func TestClientChecksSignedOSSLatestWhenGitHubIsRateLimited(t *testing.T) {
+	version := "1.2.3"
+	filename := "ecctl_1.2.3_darwin_arm64.tar.gz"
+	archive := testTarGzip(t, "ecctl", []byte("signed-latest-binary"))
+	manifest, checksums, assets := testUpdateManifestV2(t, version, map[string][]byte{filename: archive})
+	bundle := []byte(`{"test":"valid-bundle"}`)
+	var githubRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/oss/version.txt":
+			fmt.Fprintln(w, version)
+		case "/oss/1.2.3/ecctl-update-manifest-v2.json":
+			_, _ = w.Write(manifest)
+		case "/oss/1.2.3/ecctl-update-manifest-v2.sigstore.json":
+			_, _ = w.Write(bundle)
+		case "/oss/1.2.3/checksums.txt":
+			_, _ = w.Write(checksums)
+		case "/oss/1.2.3/" + filename:
+			_, _ = w.Write(assets[filename])
+		case "/api/latest", "/api/tags/v1.2.3":
+			githubRequests.Add(1)
+			http.Error(w, "rate limited", http.StatusForbidden)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	client := &Client{
+		HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest",
+		verifyManifest: func(gotManifest, gotBundle []byte) error {
+			if !bytes.Equal(gotManifest, manifest) || !bytes.Equal(gotBundle, bundle) {
+				return errors.New("unexpected signed material")
+			}
+			return nil
+		},
+	}
+	result, err := Check(context.Background(), Options{
+		CurrentVersion: "1.2.2", Executable: filepath.Join(t.TempDir(), "ecctl"),
+		GOOS: "darwin", GOARCH: "arm64", Client: client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TargetVersion != version || result.Source != "oss" || !result.UpdateAvailable {
+		t.Fatalf("check result = %#v", result)
+	}
+	if got := githubRequests.Load(); got != 0 {
+		t.Fatalf("GitHub requests = %d, want 0", got)
+	}
+}
+
+func TestClientChecksSignedOSSExplicitPrereleaseWithoutLatestMetadata(t *testing.T) {
+	version := "1.2.4-rc.1"
+	filename := "ecctl_1.2.4-rc.1_linux_amd64.tar.gz"
+	archive := testTarGzip(t, "ecctl", []byte("signed-prerelease-binary"))
+	manifest, checksums, assets := testUpdateManifestV2(t, version, map[string][]byte{filename: archive})
+	bundle := []byte(`{"test":"valid-bundle"}`)
+	var forbiddenRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/oss/1.2.4-rc.1/ecctl-update-manifest-v2.json":
+			_, _ = w.Write(manifest)
+		case "/oss/1.2.4-rc.1/ecctl-update-manifest-v2.sigstore.json":
+			_, _ = w.Write(bundle)
+		case "/oss/1.2.4-rc.1/checksums.txt":
+			_, _ = w.Write(checksums)
+		case "/oss/1.2.4-rc.1/" + filename:
+			_, _ = w.Write(assets[filename])
+		case "/oss/version.txt", "/api/latest", "/api/tags/v1.2.4-rc.1":
+			forbiddenRequests.Add(1)
+			http.Error(w, "must not be read", http.StatusForbidden)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	client := &Client{
+		HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest",
+		verifyManifest: func(gotManifest, gotBundle []byte) error {
+			if !bytes.Equal(gotManifest, manifest) || !bytes.Equal(gotBundle, bundle) {
+				return errors.New("unexpected signed material")
+			}
+			return nil
+		},
+	}
+	result, err := Check(context.Background(), Options{
+		CurrentVersion: "1.2.3", TargetVersion: version,
+		Executable: filepath.Join(t.TempDir(), "ecctl"), GOOS: "linux", GOARCH: "amd64", Client: client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TargetVersion != version || result.Source != "oss" || !result.UpdateAvailable {
+		t.Fatalf("check result = %#v", result)
+	}
+	if got := forbiddenRequests.Load(); got != 0 {
+		t.Fatalf("latest or GitHub metadata requests = %d, want 0", got)
+	}
+}
+
+func TestLatestFallsBackToGitHubWhenOSSPointerIsUnavailable(t *testing.T) {
+	version := "1.2.3"
+	filename := "ecctl_1.2.3_darwin_arm64.tar.gz"
+	archive := testTarGzip(t, "ecctl", []byte("github-fallback-binary"))
+	checksums := []byte(digestBytes(archive) + "  " + filename + "\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/oss/version.txt", "/oss/1.2.3/checksums.txt":
+			http.Error(w, "OSS unavailable", http.StatusServiceUnavailable)
+		case "/api/latest":
+			writeTestRelease(t, w, request, version, false, false, true, map[string][]byte{
+				"checksums.txt": checksums, filename: archive,
+			})
+		case "/assets/" + filename:
+			_, _ = w.Write(archive)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	result, err := Check(context.Background(), Options{
+		CurrentVersion: "1.2.2", Executable: filepath.Join(t.TempDir(), "ecctl"),
+		GOOS: "darwin", GOARCH: "arm64",
+		Client: &Client{HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TargetVersion != version || result.Source != "github" || !result.UpdateAvailable {
+		t.Fatalf("fallback result = %#v", result)
+	}
+}
+
+func TestSignedOSSIntegrityFailuresDoNotFallback(t *testing.T) {
+	version := "1.2.3"
+	filename := "ecctl_1.2.3_darwin_arm64.tar.gz"
+	archive := testTarGzip(t, "ecctl", []byte("signed-binary"))
+	manifest, checksums, assets := testUpdateManifestV2(t, version, map[string][]byte{filename: archive})
+	bundle := []byte(`{"test":"valid-bundle"}`)
+	for _, failure := range []string{"manifest", "bundle", "identity", "checksums", "archive"} {
+		t.Run(failure, func(t *testing.T) {
+			servedManifest := manifest
+			servedBundle := bundle
+			servedChecksums := checksums
+			servedArchive := assets[filename]
+			if failure == "manifest" {
+				servedManifest = bytes.Replace(manifest, []byte(UpdateManifestSchemaForTest), []byte("tampered-update-manifest-v2"), 1)
+			}
+			if failure == "bundle" {
+				servedBundle = []byte(`{"test":"tampered-bundle"}`)
+			}
+			if failure == "checksums" {
+				servedChecksums = append(append([]byte(nil), checksums...), 'x')
+			}
+			if failure == "archive" {
+				servedArchive = []byte("tampered archive")
+			}
+			var githubRequests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				switch request.URL.Path {
+				case "/oss/1.2.3/ecctl-update-manifest-v2.json":
+					_, _ = w.Write(servedManifest)
+				case "/oss/1.2.3/ecctl-update-manifest-v2.sigstore.json":
+					_, _ = w.Write(servedBundle)
+				case "/oss/1.2.3/checksums.txt":
+					_, _ = w.Write(servedChecksums)
+				case "/oss/1.2.3/" + filename:
+					_, _ = w.Write(servedArchive)
+				default:
+					if strings.HasPrefix(request.URL.Path, "/api/") || strings.HasPrefix(request.URL.Path, "/assets/") {
+						githubRequests.Add(1)
+					}
+					http.Error(w, "must not fall back", http.StatusForbidden)
+				}
+			}))
+			defer server.Close()
+			client := &Client{
+				HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest",
+				verifyManifest: func(gotManifest, gotBundle []byte) error {
+					if failure == "identity" {
+						return errors.New("certificate identity mismatch")
+					}
+					if !bytes.Equal(gotManifest, manifest) || !bytes.Equal(gotBundle, bundle) {
+						return errors.New("signature mismatch")
+					}
+					return nil
+				},
+			}
+			_, err := client.DownloadArtifact(context.Background(), version, "darwin", "arm64")
+			if err == nil || ErrorKindOf(err) != ErrorIntegrity {
+				t.Fatalf("integrity error = %v, kind=%q", err, ErrorKindOf(err))
+			}
+			if got := githubRequests.Load(); got != 0 {
+				t.Fatalf("integrity failure made %d GitHub request(s)", got)
+			}
+		})
+	}
+}
+
+const UpdateManifestSchemaForTest = "ecctl-update-manifest-v2"
+
 func TestLatestVersionRequiresOneSemVerValue(t *testing.T) {
 	for _, body := range []string{"1.2.3\r\n", "1.2.3\nextra\n", "1.2.3-rc.1\n"} {
 		t.Run(fmt.Sprintf("%q", body), func(t *testing.T) {
@@ -158,12 +406,15 @@ func TestExplicitTargetRejectsUntrustedReleaseBeforeArtifact(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var artifactRequests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-				if request.URL.Path == "/api/tags/v1.2.3" {
+				switch request.URL.Path {
+				case "/oss/1.2.3/ecctl-update-manifest-v2.json":
+					http.NotFound(w, request)
+				case "/api/tags/v1.2.3":
 					writeTestReleaseTag(t, w, request, strings.TrimPrefix(test.tag, "v"), test.tag, test.draft, test.prerelease, test.immutable, nil)
-					return
+				default:
+					artifactRequests.Add(1)
+					http.NotFound(w, request)
 				}
-				artifactRequests.Add(1)
-				http.NotFound(w, request)
 			}))
 			defer server.Close()
 			_, err := Check(context.Background(), Options{
@@ -268,7 +519,7 @@ func TestClientRejectsSelfConsistentMaliciousOSSAgainstGitHubDigest(t *testing.T
 	client := &Client{HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest"}
 
 	_, err := client.DownloadArtifact(context.Background(), "1.2.3", "darwin", "arm64")
-	if err == nil || ErrorKindOf(err) != ErrorIntegrity || !strings.Contains(err.Error(), "immutable GitHub Release digest") {
+	if err == nil || ErrorKindOf(err) != ErrorIntegrity || !strings.Contains(err.Error(), "checksums.txt checksum mismatch") {
 		t.Fatalf("malicious OSS error = %v, kind=%q", err, ErrorKindOf(err))
 	}
 	if requests := githubArchiveRequests.Load(); requests != 0 {
@@ -940,14 +1191,11 @@ func TestReplaceEnvironmentValueRemovesDuplicates(t *testing.T) {
 
 func TestAutoCheckCachesAndThrottlesNotification(t *testing.T) {
 	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
-		fmt.Fprintln(w, "1.2.3")
-	}))
-	defer server.Close()
+	var githubRequests atomic.Int32
+	latest := "1.2.3"
+	client := signedAutoCheckClient(t, &latest, []string{"1.2.3"}, &requests, &githubRequests, nil)
 	cachePath := filepath.Join(t.TempDir(), "update-check.json")
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
-	client := &Client{HTTP: server.Client(), OSSBase: server.URL}
 	options := AutoCheckOptions{CurrentVersion: "1.2.2", CachePath: cachePath, Client: client, Now: func() time.Time { return now }, MarkNotification: true}
 
 	first, err := AutoCheck(context.Background(), options)
@@ -958,8 +1206,11 @@ func TestAutoCheckCachesAndThrottlesNotification(t *testing.T) {
 	if err != nil || !second.Available || second.Notify {
 		t.Fatalf("second AutoCheck = %#v, %v", second, err)
 	}
-	if got := requests.Load(); got != 1 {
-		t.Fatalf("requests = %d, want 1", got)
+	if got := requests.Load(); got != 3 {
+		t.Fatalf("signed OSS requests = %d, want 3", got)
+	}
+	if got := githubRequests.Load(); got != 0 {
+		t.Fatalf("GitHub requests = %d, want 0", got)
 	}
 
 	now = now.Add(25 * time.Hour)
@@ -967,21 +1218,19 @@ func TestAutoCheckCachesAndThrottlesNotification(t *testing.T) {
 	if err != nil || !third.Notify {
 		t.Fatalf("third AutoCheck = %#v, %v", third, err)
 	}
-	if got := requests.Load(); got != 2 {
-		t.Fatalf("requests after expiry = %d, want 2", got)
+	if got := requests.Load(); got != 6 {
+		t.Fatalf("signed OSS requests after expiry = %d, want 6", got)
 	}
 }
 
 func TestAutoCheckSerializesNotificationMarking(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintln(w, "1.2.3")
-	}))
-	defer server.Close()
+	latest := "1.2.3"
+	client := signedAutoCheckClient(t, &latest, []string{"1.2.3"}, nil, nil, nil)
 	cachePath := filepath.Join(t.TempDir(), "update-check.json")
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 	base := AutoCheckOptions{
 		CurrentVersion: "1.2.2", CachePath: cachePath,
-		Client: &Client{HTTP: server.Client(), OSSBase: server.URL},
+		Client: client,
 		Now:    func() time.Time { return now }, MarkNotification: true,
 	}
 	if _, err := AutoCheck(context.Background(), AutoCheckOptions{
@@ -1016,28 +1265,70 @@ func TestAutoCheckSerializesNotificationMarking(t *testing.T) {
 	}
 }
 
-func TestAutoCheckRecoversAfterTransientHighOSSVersion(t *testing.T) {
-	latest := "999.0.0"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintln(w, latest)
-	}))
-	defer server.Close()
+func TestAutoCheckIgnoresLegacyUnsignedLatestCache(t *testing.T) {
+	latest := "1.2.3"
+	client := signedAutoCheckClient(t, &latest, []string{"1.2.3"}, nil, nil, nil)
+	cachePath := filepath.Join(t.TempDir(), "update-check.json")
+	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	legacy := fmt.Sprintf(`{"checked_at":%q,"latest_version":"999.0.0"}`, now.Format(time.RFC3339))
+	if err := os.WriteFile(cachePath, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	options := AutoCheckOptions{
+		CurrentVersion: "1.2.2", CachePath: cachePath,
+		Client: client,
+		Now:    func() time.Time { return now },
+	}
+	result, err := AutoCheck(context.Background(), options)
+	if err != nil || result.LatestVersion != "1.2.3" || !result.Available {
+		t.Fatalf("migrated AutoCheck = %#v, %v", result, err)
+	}
+	state := readCache(cachePath)
+	if state.VerifiedLatestVersion != "1.2.3" {
+		t.Fatalf("verified cache state = %#v", state)
+	}
+}
+
+func TestAutoCheckRejectsVerifiedRollbackWithoutOverwritingCache(t *testing.T) {
+	latest := "1.2.4"
+	client := signedAutoCheckClient(t, &latest, []string{"1.2.3", "1.2.4"}, nil, nil, nil)
 	cachePath := filepath.Join(t.TempDir(), "update-check.json")
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 	options := AutoCheckOptions{
-		CurrentVersion: "1.2.2", CachePath: cachePath,
-		Client: &Client{HTTP: server.Client(), OSSBase: server.URL},
-		Now:    func() time.Time { return now },
+		CurrentVersion: "1.2.2", CachePath: cachePath, Client: client,
+		Now: func() time.Time { return now },
 	}
 	first, err := AutoCheck(context.Background(), options)
-	if err != nil || first.LatestVersion != "999.0.0" {
-		t.Fatalf("transient high AutoCheck = %#v, %v", first, err)
+	if err != nil || first.LatestVersion != "1.2.4" {
+		t.Fatalf("first verified AutoCheck = %#v, %v", first, err)
 	}
 	latest = "1.2.3"
 	now = now.Add(autoCheckInterval + time.Hour)
-	recovered, err := AutoCheck(context.Background(), options)
-	if err != nil || recovered.LatestVersion != "1.2.3" || !recovered.Available {
-		t.Fatalf("recovered AutoCheck = %#v, %v", recovered, err)
+	_, err = AutoCheck(context.Background(), options)
+	if err == nil || ErrorKindOf(err) != ErrorUnavailable {
+		t.Fatalf("verified rollback error = %v, kind=%q", err, ErrorKindOf(err))
+	}
+	state := readCache(cachePath)
+	if state.VerifiedLatestVersion != "1.2.4" || state.FailedAt.IsZero() {
+		t.Fatalf("rollback cache state = %#v", state)
+	}
+}
+
+func TestAutoCheckDoesNotCacheInvalidSignature(t *testing.T) {
+	latest := "1.2.3"
+	client := signedAutoCheckClient(t, &latest, []string{"1.2.3"}, nil, nil, func([]byte, []byte) error {
+		return errors.New("signature mismatch")
+	})
+	cachePath := filepath.Join(t.TempDir(), "update-check.json")
+	_, err := AutoCheck(context.Background(), AutoCheckOptions{
+		CurrentVersion: "1.2.2", CachePath: cachePath, Client: client,
+	})
+	if err == nil || ErrorKindOf(err) != ErrorIntegrity {
+		t.Fatalf("invalid signature error = %v, kind=%q", err, ErrorKindOf(err))
+	}
+	state := readCache(cachePath)
+	if state.VerifiedLatestVersion != "" || state.FailedAt.IsZero() {
+		t.Fatalf("invalid signature cache state = %#v", state)
 	}
 }
 
@@ -1138,7 +1429,7 @@ func TestAutoCheckBacksOffAfterFailure(t *testing.T) {
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 	options := AutoCheckOptions{
 		CurrentVersion: "1.2.2", CachePath: cachePath,
-		Client: &Client{HTTP: server.Client(), OSSBase: server.URL},
+		Client: &Client{HTTP: server.Client(), OSSBase: server.URL, GitHubAPIBase: server.URL + "/api/latest"},
 		Now:    func() time.Time { return now },
 	}
 	if _, err := AutoCheck(context.Background(), options); err == nil {
@@ -1148,8 +1439,49 @@ func TestAutoCheckBacksOffAfterFailure(t *testing.T) {
 	if result, err := AutoCheck(context.Background(), options); err != nil || result.Available {
 		t.Fatalf("backoff AutoCheck = %#v, %v", result, err)
 	}
-	if got := requests.Load(); got != 1 {
-		t.Fatalf("requests = %d, want 1", got)
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("OSS plus GitHub fallback requests = %d, want 2", got)
+	}
+}
+
+func signedAutoCheckClient(t *testing.T, latest *string, versions []string, requests, githubRequests *atomic.Int32, verifier func([]byte, []byte) error) *Client {
+	t.Helper()
+	manifests := make(map[string][]byte, len(versions))
+	for _, version := range versions {
+		manifest, _, _ := testUpdateManifestV2(t, version, nil)
+		manifests[version] = manifest
+	}
+	bundle := []byte(`{"test":"valid-bundle"}`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if strings.HasPrefix(request.URL.Path, "/api/") {
+			if githubRequests != nil {
+				githubRequests.Add(1)
+			}
+			http.Error(w, "GitHub must not be used", http.StatusForbidden)
+			return
+		}
+		if requests != nil {
+			requests.Add(1)
+		}
+		version := *latest
+		switch request.URL.Path {
+		case "/version.txt":
+			fmt.Fprintln(w, version)
+		case "/" + version + "/" + releaseartifact.UpdateManifestV2Name:
+			_, _ = w.Write(manifests[version])
+		case "/" + version + "/" + releaseartifact.UpdateManifestV2BundleName:
+			_, _ = w.Write(bundle)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	t.Cleanup(server.Close)
+	if verifier == nil {
+		verifier = func([]byte, []byte) error { return nil }
+	}
+	return &Client{
+		HTTP: server.Client(), OSSBase: server.URL, GitHubAPIBase: server.URL + "/api/latest",
+		verifyManifest: verifier,
 	}
 }
 
@@ -1184,6 +1516,53 @@ func releaseServer(t *testing.T, archive []byte, ossUnavailable, corruptOSS bool
 			http.NotFound(w, r)
 		}
 	}))
+}
+
+func testUpdateManifestV2(t *testing.T, version string, overrides map[string][]byte) ([]byte, []byte, map[string][]byte) {
+	t.Helper()
+	files := make(map[string][]byte)
+	var checksumLines strings.Builder
+	records := make([]map[string]any, 0, 9)
+	for _, goos := range []string{"darwin", "linux", "windows"} {
+		for _, goarch := range []string{"amd64", "arm64"} {
+			name, err := artifactFilename(version, goos, goarch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw := []byte("test archive " + name)
+			if override, ok := overrides[name]; ok {
+				raw = override
+			}
+			files[name] = raw
+			digest := digestBytes(raw)
+			fmt.Fprintf(&checksumLines, "%s  %s\n", digest, name)
+			records = append(records, map[string]any{
+				"name": name, "kind": "archive", "goos": goos, "goarch": goarch,
+				"sha256": digest, "size": len(raw),
+			})
+		}
+	}
+	checksums := []byte(checksumLines.String())
+	files["checksums.txt"] = checksums
+	records = append(records,
+		map[string]any{"name": "checksums.txt", "kind": "checksums", "sha256": digestBytes(checksums), "size": len(checksums)},
+	)
+	if !strings.Contains(version, "-") {
+		name := homebrewCaskAssetName(version)
+		raw := []byte("test cask")
+		files[name] = raw
+		records = append(records, map[string]any{
+			"name": name, "kind": "homebrew-cask", "sha256": digestBytes(raw), "size": len(raw),
+		})
+	}
+	manifest, err := json.MarshalIndent(map[string]any{
+		"schema": "ecctl-update-manifest-v2", "version": version,
+		"prerelease": strings.Contains(version, "-"), "assets": records,
+	}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append(manifest, '\n'), checksums, files
 }
 
 func writeTestRelease(t *testing.T, w http.ResponseWriter, request *http.Request, version string, draft, prerelease, immutable bool, content map[string][]byte) {

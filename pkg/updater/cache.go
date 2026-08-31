@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -33,11 +34,11 @@ type AutoCheckResult struct {
 }
 
 type cacheState struct {
-	CheckedAt       time.Time `json:"checked_at,omitempty"`
-	FailedAt        time.Time `json:"failed_at,omitempty"`
-	LatestVersion   string    `json:"latest_version,omitempty"`
-	NotifiedVersion string    `json:"notified_version,omitempty"`
-	NotifiedAt      time.Time `json:"notified_at,omitempty"`
+	CheckedAt             time.Time `json:"checked_at,omitempty"`
+	FailedAt              time.Time `json:"failed_at,omitempty"`
+	VerifiedLatestVersion string    `json:"verified_latest_version,omitempty"`
+	NotifiedVersion       string    `json:"notified_version,omitempty"`
+	NotifiedAt            time.Time `json:"notified_at,omitempty"`
 }
 
 func DefaultCachePath() (string, error) {
@@ -84,7 +85,7 @@ func AutoCheck(ctx context.Context, options AutoCheckOptions) (AutoCheckResult, 
 	if !state.FailedAt.IsZero() && now.Sub(state.FailedAt) >= 0 && now.Sub(state.FailedAt) < failureBackoff {
 		return AutoCheckResult{}, nil
 	}
-	latest, err := options.Client.LatestVersion(ctx)
+	latest, err := options.Client.ResolveLatestVersion(ctx)
 	if err != nil {
 		state.FailedAt = now
 		if writeErr := writeCache(options.CachePath, state); writeErr != nil {
@@ -92,9 +93,23 @@ func AutoCheck(ctx context.Context, options AutoCheckOptions) (AutoCheckResult, 
 		}
 		return AutoCheckResult{}, err
 	}
+	if previous, previousErr := NormalizeVersion(state.VerifiedLatestVersion); previousErr == nil && !isPrereleaseVersion(previous) {
+		order, compareErr := CompareVersions(latest, previous)
+		if compareErr != nil {
+			return AutoCheckResult{}, compareErr
+		}
+		if order < 0 {
+			rollbackErr := WrapError(ErrorUnavailable, fmt.Errorf("verified latest version %s is older than previously verified version %s", latest, previous))
+			state.FailedAt = now
+			if writeErr := writeCache(options.CachePath, state); writeErr != nil {
+				return AutoCheckResult{}, errors.Join(rollbackErr, writeErr)
+			}
+			return AutoCheckResult{}, rollbackErr
+		}
+	}
 	state.CheckedAt = now
 	state.FailedAt = time.Time{}
-	state.LatestVersion = latest
+	state.VerifiedLatestVersion = latest
 	result := compareAutoCheck(current, latest)
 	return maybeMarkNotification(options.CachePath, state, result, now, true, options.MarkNotification)
 }
@@ -103,11 +118,11 @@ func cachedAutoCheckResult(current string, state cacheState, now time.Time) (Aut
 	if state.CheckedAt.IsZero() || now.Sub(state.CheckedAt) < 0 || now.Sub(state.CheckedAt) >= autoCheckInterval {
 		return AutoCheckResult{}, false
 	}
-	latest, err := NormalizeVersion(state.LatestVersion)
+	latest, err := NormalizeVersion(state.VerifiedLatestVersion)
 	if err != nil || isPrereleaseVersion(latest) {
 		return AutoCheckResult{}, false
 	}
-	return compareAutoCheck(current, state.LatestVersion), true
+	return compareAutoCheck(current, state.VerifiedLatestVersion), true
 }
 
 func compareAutoCheck(current, latest string) AutoCheckResult {

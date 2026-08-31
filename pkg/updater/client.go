@@ -17,6 +17,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/aliyun/elastic-compute-control-cli/internal/releaseartifact"
 )
 
 const (
@@ -32,9 +34,10 @@ const (
 var errUntrustedRedirect = errors.New("update redirect uses an untrusted HTTPS host")
 
 type Client struct {
-	HTTP          *http.Client
-	OSSBase       string
-	GitHubAPIBase string
+	HTTP           *http.Client
+	OSSBase        string
+	GitHubAPIBase  string
+	verifyManifest func([]byte, []byte) error
 }
 
 type Artifact struct {
@@ -48,12 +51,14 @@ type releaseAsset struct {
 	Name   string
 	SHA256 string
 	URL    string
+	Size   int64
 }
 
 type releaseDescriptor struct {
 	Version    string
 	Prerelease bool
 	Assets     map[string]releaseAsset
+	Source     string
 }
 
 type sourceUnavailableError struct {
@@ -130,37 +135,39 @@ func (client *Client) LatestVersion(ctx context.Context) (string, error) {
 	return version, nil
 }
 
-// ResolveLatestVersion verifies the mutable OSS pointer against GitHub's
-// immutable latest stable Release.
+// ResolveLatestVersion resolves the mutable OSS pointer through a signed v2
+// manifest. GitHub remains a compatibility fallback when OSS is unavailable.
 func (client *Client) ResolveLatestVersion(ctx context.Context) (string, error) {
-	ossVersion, err := client.LatestVersion(ctx)
+	descriptor, err := client.resolveLatestRelease(ctx)
 	if err != nil {
 		return "", err
 	}
-	descriptor, err := client.resolveRelease(ctx, "", true)
-	if err != nil {
-		return "", err
-	}
-	order, err := CompareVersions(ossVersion, descriptor.Version)
-	if err != nil {
-		return "", WrapError(ErrorIntegrity, err)
-	}
-	switch {
-	case order < 0:
-		return "", WrapError(ErrorUnavailable, fmt.Errorf("OSS version %s has not reached GitHub latest release %s", ossVersion, descriptor.Version))
-	case order > 0:
-		return "", WrapError(ErrorIntegrity, fmt.Errorf("OSS version %s is newer than GitHub latest release %s", ossVersion, descriptor.Version))
-	default:
-		return ossVersion, nil
-	}
+	return descriptor.Version, nil
 }
 
 func (client *Client) resolveLatestRelease(ctx context.Context) (releaseDescriptor, error) {
 	ossVersion, err := client.LatestVersion(ctx)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return releaseDescriptor{}, ctxErr
+		}
+		if ErrorKindOf(err) == ErrorUnavailable {
+			return client.resolveRelease(ctx, "", true)
+		}
 		return releaseDescriptor{}, err
 	}
-	descriptor, err := client.resolveRelease(ctx, "", true)
+	descriptor, signedErr := client.resolveOSSRelease(ctx, ossVersion)
+	if signedErr == nil {
+		return descriptor, nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return releaseDescriptor{}, ctxErr
+	}
+	var unavailable *sourceUnavailableError
+	if !errors.As(signedErr, &unavailable) {
+		return releaseDescriptor{}, WrapError(ErrorIntegrity, fmt.Errorf("verify OSS release v%s: %w", ossVersion, signedErr))
+	}
+	descriptor, err = client.resolveRelease(ctx, "", true)
 	if err != nil {
 		return releaseDescriptor{}, err
 	}
@@ -182,7 +189,56 @@ func (client *Client) resolveReleaseForVersion(ctx context.Context, version stri
 	if err != nil {
 		return releaseDescriptor{}, WrapError(ErrorInvalidTarget, err)
 	}
+	descriptor, signedErr := client.resolveOSSRelease(ctx, normalized)
+	if signedErr == nil {
+		return descriptor, nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return releaseDescriptor{}, ctxErr
+	}
+	var unavailable *sourceUnavailableError
+	if !errors.As(signedErr, &unavailable) {
+		return releaseDescriptor{}, WrapError(ErrorIntegrity, fmt.Errorf("verify OSS release v%s: %w", normalized, signedErr))
+	}
 	return client.resolveRelease(ctx, normalized, false)
+}
+
+func (client *Client) resolveOSSRelease(ctx context.Context, version string) (releaseDescriptor, error) {
+	base := strings.TrimRight(client.OSSBase, "/") + "/" + url.PathEscape(version)
+	manifestRaw, err := client.fetch(ctx, base+"/"+releaseartifact.UpdateManifestV2Name, maxReleaseBytes, "oss update manifest")
+	if err != nil {
+		return releaseDescriptor{}, classifyAvailability(ctx, "oss", err)
+	}
+	bundleRaw, err := client.fetch(ctx, base+"/"+releaseartifact.UpdateManifestV2BundleName, maxReleaseBytes, "oss update manifest bundle")
+	if err != nil {
+		return releaseDescriptor{}, classifyAvailability(ctx, "oss", err)
+	}
+	verifier := client.verifyManifest
+	if verifier == nil {
+		verifier = releaseartifact.VerifySignedUpdateManifest
+	}
+	if err := verifier(manifestRaw, bundleRaw); err != nil {
+		return releaseDescriptor{}, fmt.Errorf("invalid Sigstore bundle: %w", err)
+	}
+	manifest, err := releaseartifact.ParseUpdateManifestV2(manifestRaw)
+	if err != nil {
+		return releaseDescriptor{}, err
+	}
+	normalized, err := NormalizeVersion(manifest.Version)
+	if err != nil || normalized != version || manifest.Version != normalized {
+		return releaseDescriptor{}, fmt.Errorf("OSS update manifest version %q does not match requested version %s", manifest.Version, version)
+	}
+	descriptor := releaseDescriptor{
+		Version: manifest.Version, Prerelease: manifest.Prerelease, Source: "oss-v2",
+		Assets: make(map[string]releaseAsset, len(manifest.Assets)),
+	}
+	for _, asset := range manifest.Assets {
+		descriptor.Assets[asset.Name] = releaseAsset{
+			Name: asset.Name, SHA256: asset.SHA256, Size: asset.Size,
+			URL: base + "/" + url.PathEscape(asset.Name),
+		}
+	}
+	return descriptor, nil
 }
 
 func (client *Client) resolveRelease(ctx context.Context, version string, latest bool) (releaseDescriptor, error) {
@@ -236,7 +292,7 @@ func (client *Client) resolveRelease(ctx context.Context, version string, latest
 	if len(release.Assets) == 0 || len(release.Assets) > maxReleaseAssets {
 		return releaseDescriptor{}, WrapError(ErrorIntegrity, fmt.Errorf("GitHub release v%s must contain 1 to %d assets", githubVersion, maxReleaseAssets))
 	}
-	descriptor := releaseDescriptor{Version: githubVersion, Prerelease: release.Prerelease, Assets: make(map[string]releaseAsset, len(release.Assets))}
+	descriptor := releaseDescriptor{Version: githubVersion, Prerelease: release.Prerelease, Source: "github", Assets: make(map[string]releaseAsset, len(release.Assets))}
 	for _, rawAsset := range release.Assets {
 		if rawAsset.Name == "" || path.Base(rawAsset.Name) != rawAsset.Name {
 			return releaseDescriptor{}, WrapError(ErrorIntegrity, fmt.Errorf("GitHub release v%s contains invalid asset name %q", githubVersion, rawAsset.Name))
@@ -339,20 +395,31 @@ func (client *Client) downloadArtifact(ctx context.Context, descriptor releaseDe
 	if !errors.As(err, &unavailable) {
 		return Artifact{}, unavailableOrIntegrityError("download from OSS", err)
 	}
-	archive, err := client.fetch(ctx, asset.URL, maxArchiveBytes, "GitHub archive")
+	fallbackAsset := asset
+	if descriptor.Source == "oss-v2" {
+		fallback, fallbackErr := client.resolveRelease(ctx, descriptor.Version, false)
+		if fallbackErr != nil {
+			return Artifact{}, fallbackErr
+		}
+		fallbackAsset = fallback.Assets[filename]
+		if fallbackAsset.SHA256 != asset.SHA256 {
+			return Artifact{}, WrapError(ErrorIntegrity, fmt.Errorf("GitHub archive digest for %s does not match signed OSS manifest", filename))
+		}
+	}
+	archive, err := client.fetch(ctx, fallbackAsset.URL, maxArchiveBytes, "GitHub archive")
 	if err != nil {
 		return Artifact{}, unavailableOrIntegrityError("download from GitHub", classifyAvailability(ctx, "github", err))
 	}
-	if got := digestBytes(archive); got != asset.SHA256 {
-		return Artifact{}, WrapError(ErrorIntegrity, fmt.Errorf("GitHub archive checksum mismatch for %s: got %s, want %s", filename, got, asset.SHA256))
+	if got := digestBytes(archive); got != fallbackAsset.SHA256 {
+		return Artifact{}, WrapError(ErrorIntegrity, fmt.Errorf("GitHub archive checksum mismatch for %s: got %s, want %s", filename, got, fallbackAsset.SHA256))
 	}
-	return Artifact{Archive: archive, Filename: filename, SHA256: asset.SHA256, Source: "github"}, nil
+	return Artifact{Archive: archive, Filename: filename, SHA256: fallbackAsset.SHA256, Source: "github"}, nil
 }
 
 // ValidateArtifact verifies that a platform artifact is published and returns
-// the source an update would use without downloading the archive itself. OSS
-// remains preferred, but its mutable checksum must agree with the immutable
-// GitHub Release checksum before it is trusted.
+// the source an update would use without downloading the archive itself. A v2
+// release is bound by its signed OSS manifest; legacy releases are bound by
+// immutable GitHub Release digests.
 func (client *Client) ValidateArtifact(ctx context.Context, version, goos, goarch string) (string, error) {
 	normalized, err := NormalizeVersion(version)
 	if err != nil {
@@ -386,13 +453,24 @@ func (client *Client) validateArtifact(ctx context.Context, descriptor releaseDe
 		}
 	}
 	if ossErr != nil {
-		if probeErr := client.probe(ctx, asset.URL, "github archive"); probeErr != nil {
+		fallbackAsset := asset
+		if descriptor.Source == "oss-v2" {
+			fallback, fallbackErr := client.resolveRelease(ctx, descriptor.Version, false)
+			if fallbackErr != nil {
+				return "", fallbackErr
+			}
+			fallbackAsset = fallback.Assets[filename]
+			if fallbackAsset.SHA256 != asset.SHA256 {
+				return "", WrapError(ErrorIntegrity, fmt.Errorf("GitHub archive digest for %s does not match signed OSS manifest", filename))
+			}
+		}
+		if probeErr := client.probe(ctx, fallbackAsset.URL, "github archive"); probeErr != nil {
 			return "", unavailableOrIntegrityError("validate GitHub artifact", classifyAvailability(ctx, "github", probeErr))
 		}
 		return "github", nil
 	}
 	if ossChecksum != asset.SHA256 {
-		return "", WrapError(ErrorIntegrity, fmt.Errorf("OSS checksum for %s does not match immutable GitHub Release checksum", filename))
+		return "", WrapError(ErrorIntegrity, fmt.Errorf("OSS checksum for %s does not match the verified release digest", filename))
 	}
 	return "oss", nil
 }
@@ -403,15 +481,15 @@ func (client *Client) downloadOSSArtifact(ctx context.Context, descriptor releas
 		return Artifact{}, err
 	}
 	if want != asset.SHA256 {
-		return Artifact{}, WrapError(ErrorIntegrity, fmt.Errorf("OSS checksum for %s does not match immutable GitHub Release digest", asset.Name))
+		return Artifact{}, WrapError(ErrorIntegrity, fmt.Errorf("OSS checksum for %s does not match the verified release digest", asset.Name))
 	}
 	base := strings.TrimRight(client.OSSBase, "/") + "/" + url.PathEscape(descriptor.Version)
 	archive, err := client.fetch(ctx, base+"/"+url.PathEscape(asset.Name), maxArchiveBytes, "oss archive")
 	if err != nil {
 		return Artifact{}, classifyAvailability(ctx, "oss", err)
 	}
-	if got := digestBytes(archive); got != asset.SHA256 {
-		return Artifact{}, WrapError(ErrorIntegrity, fmt.Errorf("oss checksum mismatch for %s: got %s, want %s", asset.Name, got, asset.SHA256))
+	if err := verifyReleaseAssetBytes(asset, archive, "oss archive"); err != nil {
+		return Artifact{}, WrapError(ErrorIntegrity, err)
 	}
 	return Artifact{Archive: archive, Filename: asset.Name, SHA256: asset.SHA256, Source: "oss"}, nil
 }
@@ -423,8 +501,8 @@ func (client *Client) verifiedOSSChecksum(ctx context.Context, descriptor releas
 		return "", classifyAvailability(ctx, "oss", err)
 	}
 	asset := descriptor.Assets["checksums.txt"]
-	if got := digestBytes(raw); got != asset.SHA256 {
-		return "", WrapError(ErrorIntegrity, fmt.Errorf("OSS checksums.txt does not match immutable GitHub Release digest: got %s, want %s", got, asset.SHA256))
+	if err := verifyReleaseAssetBytes(asset, raw, "OSS checksums.txt"); err != nil {
+		return "", WrapError(ErrorIntegrity, err)
 	}
 	checksums, err := parseChecksums(raw)
 	if err != nil {
@@ -435,6 +513,16 @@ func (client *Client) verifiedOSSChecksum(ctx context.Context, descriptor releas
 		return "", WrapError(ErrorIntegrity, fmt.Errorf("OSS checksums do not contain %s", filename))
 	}
 	return want, nil
+}
+
+func verifyReleaseAssetBytes(asset releaseAsset, raw []byte, label string) error {
+	if asset.Size > 0 && int64(len(raw)) != asset.Size {
+		return fmt.Errorf("%s size mismatch for %s: got %d, want %d", label, asset.Name, len(raw), asset.Size)
+	}
+	if got := digestBytes(raw); got != asset.SHA256 {
+		return fmt.Errorf("%s checksum mismatch for %s: got %s, want %s", label, asset.Name, got, asset.SHA256)
+	}
+	return nil
 }
 
 func digestBytes(raw []byte) string {
