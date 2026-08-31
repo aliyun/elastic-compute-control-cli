@@ -101,7 +101,7 @@ func checkResolved(ctx context.Context, resolved Options) (Result, installerDesc
 	}
 	if installer.Kind == "homebrew" {
 		if _, ok := descriptor.Assets[homebrewCaskAssetName(target)]; !ok {
-			return Result{}, installerDescriptor{}, releaseDescriptor{}, WrapError(ErrorIntegrity, errors.New("immutable GitHub Release is missing its Homebrew Cask"))
+			return Result{}, installerDescriptor{}, releaseDescriptor{}, WrapError(ErrorIntegrity, errors.New("verified release is missing its Homebrew Cask"))
 		}
 	}
 	order, err := CompareVersions(target, resolved.CurrentVersion)
@@ -302,14 +302,18 @@ func updateWithHomebrew(ctx context.Context, options Options, installer installe
 	}
 	caskAsset, ok := descriptor.Assets[homebrewCaskAssetName(descriptor.Version)]
 	if !ok {
-		return WrapError(ErrorIntegrity, errors.New("immutable GitHub Release is missing its Homebrew Cask"))
+		return WrapError(ErrorIntegrity, errors.New("verified release is missing its Homebrew Cask"))
 	}
-	caskRaw, err := options.Client.fetch(ctx, caskAsset.URL, 64<<10, "immutable Homebrew Cask")
+	source := "github"
+	if descriptor.Source == "oss-v2" {
+		source = "oss"
+	}
+	caskRaw, err := options.Client.fetch(ctx, caskAsset.URL, 64<<10, "verified Homebrew Cask")
 	if err != nil {
-		return unavailableOrIntegrityError("download immutable Homebrew Cask", classifyAvailability(ctx, "github", err))
+		return unavailableOrIntegrityError("download verified Homebrew Cask", classifyAvailability(ctx, source, err))
 	}
-	if got := digestBytes(caskRaw); got != caskAsset.SHA256 {
-		return WrapError(ErrorIntegrity, fmt.Errorf("Homebrew Cask digest mismatch: got %s, want %s", got, caskAsset.SHA256))
+	if err := verifyReleaseAssetBytes(caskAsset, caskRaw, "Homebrew Cask"); err != nil {
+		return WrapError(ErrorIntegrity, err)
 	}
 	intel := descriptor.Assets["ecctl_"+descriptor.Version+"_darwin_amd64.tar.gz"]
 	arm := descriptor.Assets["ecctl_"+descriptor.Version+"_darwin_arm64.tar.gz"]

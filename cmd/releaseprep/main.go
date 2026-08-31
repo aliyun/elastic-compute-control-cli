@@ -15,6 +15,15 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/internal/telemetryconfig"
 )
 
+const (
+	releaseDistDir       = "dist"
+	releaseVersionFile   = "version.txt"
+	releaseCaskFile      = "dist/homebrew/Casks/ecctl.rb"
+	releaseManifestFile  = "dist/ecctl-update-manifest-v2.json"
+	releaseBundleFile    = "dist/ecctl-update-manifest-v2.sigstore.json"
+	releaseMetadataLimit = 1 << 20
+)
+
 var (
 	githubModulePattern = regexp.MustCompile(`github\.com/[A-Za-z0-9_.-]+/ecctl([^A-Za-z0-9_.-]|$)`)
 	githubOwnerPattern  = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$`)
@@ -33,6 +42,8 @@ func main() {
 	checkHomebrew := flag.Bool("check-homebrew-version", false, "check whether a release tag advances the current Homebrew Cask")
 	checkVersion := flag.Bool("check-version-file", false, "check the canonical release version file")
 	verifyHomebrew := flag.Bool("verify-homebrew-cask", false, "strictly validate a generated Homebrew Cask against immutable release checksums")
+	generateManifest := flag.Bool("generate-update-manifest", false, "generate the signed-updater v2 manifest from local release assets")
+	verifyManifest := flag.Bool("verify-update-manifest", false, "verify an updater v2 manifest with the production offline trust policy")
 	checkTelemetry := flag.Bool("check-telemetry-config", false, "validate release telemetry environment configuration")
 	repository := flag.String("repository", "", "GitHub repository identity for public release checks")
 	releaseTag := flag.String("release-tag", "", "candidate release tag for version and Homebrew checks")
@@ -46,7 +57,7 @@ func main() {
 	flag.Parse()
 
 	selected := 0
-	for _, enabled := range []bool{*write, *check, *checkHomebrew, *checkVersion, *verifyHomebrew, *checkTelemetry} {
+	for _, enabled := range []bool{*write, *check, *checkHomebrew, *checkVersion, *verifyHomebrew, *generateManifest, *verifyManifest, *checkTelemetry} {
 		if enabled {
 			selected++
 		}
@@ -93,9 +104,77 @@ func main() {
 		}
 		return
 	}
+	if *generateManifest {
+		if err := generateUpdateManifest(*releaseTag); err != nil {
+			exitError(err)
+		}
+		return
+	}
+	if *verifyManifest {
+		if err := verifyUpdateManifestFiles(); err != nil {
+			exitError(err)
+		}
+		return
+	}
 	if err := checkReleaseReady(root, *repository); err != nil {
 		exitError(err)
 	}
+}
+
+func verifyUpdateManifestFiles() error {
+	manifestRaw, err := readBoundedRegularFile(releaseManifestFile, releaseMetadataLimit)
+	if err != nil {
+		return fmt.Errorf("read update manifest: %w", err)
+	}
+	bundleRaw, err := readBoundedRegularFile(releaseBundleFile, releaseMetadataLimit)
+	if err != nil {
+		return fmt.Errorf("read Sigstore bundle: %w", err)
+	}
+	return releaseartifact.VerifySignedUpdateManifest(manifestRaw, bundleRaw)
+}
+
+func readBoundedRegularFile(path string, limit int64) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() < 1 || info.Size() > limit {
+		return nil, fmt.Errorf("file must be regular and between 1 and %d bytes", limit)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) != info.Size() {
+		return nil, errors.New("file size changed while it was read")
+	}
+	return raw, nil
+}
+
+func generateUpdateManifest(releaseTag string) error {
+	if releaseTag == "" {
+		return errors.New("--release-tag is required")
+	}
+	version, parsed, err := readReleaseVersionFile(releaseVersionFile)
+	if err != nil {
+		return err
+	}
+	if releaseTag != "v"+version {
+		return fmt.Errorf("release tag %q does not match version file; want %q", releaseTag, "v"+version)
+	}
+	caskPath := ""
+	if len(parsed.prerelease) == 0 {
+		caskPath = releaseCaskFile
+	}
+	manifest, err := releaseartifact.BuildUpdateManifestV2(version, releaseDistDir, releaseVersionFile, caskPath)
+	if err != nil {
+		return err
+	}
+	raw, err := releaseartifact.MarshalUpdateManifestV2(manifest)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(releaseManifestFile, raw, 0o644)
 }
 
 func checkTelemetryConfig(getenv func(string) string) error {

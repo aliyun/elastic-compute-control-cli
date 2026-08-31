@@ -31,6 +31,7 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       commit: ${{ steps.version.outputs.commit }}
       release_state: ${{ steps.release.outputs.state }}
+      update_v2: ${{ steps.version.outputs.update_v2 }}
     steps:
       - name: Checkout release tooling
         uses: actions/checkout@v4
@@ -133,6 +134,10 @@ jobs:
           version=$(go -C ../tooling run ./cmd/releaseprep "${version_args[@]}")
           tag="v${version}"
           commit=$(git rev-parse HEAD)
+          update_v2=false
+          if [[ -f pkg/updater/trusted_root.json ]]; then
+            update_v2=true
+          fi
 
           tag_rows=$(git ls-remote --tags origin "refs/tags/${tag}" "refs/tags/${tag}^{}")
           direct_sha=$(awk -v ref="refs/tags/${tag}" '$2 == ref { print $1 }' <<< "${tag_rows}")
@@ -147,6 +152,7 @@ jobs:
             echo "version=${version}"
             echo "tag=${tag}"
             echo "commit=${commit}"
+            echo "update_v2=${update_v2}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Inspect existing GitHub release
@@ -157,6 +163,7 @@ jobs:
           RELEASE_EVENT: ${{ github.event_name }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          UPDATE_V2: ${{ steps.version.outputs.update_v2 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -192,6 +199,7 @@ jobs:
             --arg tag "${RELEASE_TAG}" \
             --arg version "${RELEASE_VERSION}" \
             --arg repository "${GITHUB_REPOSITORY}" \
+            --argjson update_v2 "${UPDATE_V2}" \
             --argjson draft false \
             --argjson immutable true \
             -f "${GITHUB_WORKSPACE}/tooling/.github/scripts/validate-release.jq" \
@@ -331,26 +339,33 @@ jobs:
     environment: release
     permissions:
       contents: write
+      id-token: write
     steps:
       - name: Checkout release tooling
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.workflow_sha }}
           path: tooling
           fetch-depth: 0
 
       - name: Checkout validated release source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ needs.validate.outputs.commit }}
           path: release-source
           fetch-depth: 0
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: tooling/go.mod
           cache: true
+
+      - name: Install pinned Cosign
+        if: ${{ needs.validate.outputs.release_state != 'immutable' && needs.validate.outputs.update_v2 == 'true' }}
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v3.1.3'
 
       - name: Revalidate release identity
         env:
@@ -438,7 +453,7 @@ jobs:
 
       - name: Build GitHub release draft
         if: needs.validate.outputs.release_state != 'immutable'
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           distribution: goreleaser
           version: v2.17.0
@@ -472,12 +487,34 @@ jobs:
           gh release upload "${RELEASE_TAG}" "release-cask/${asset}#${asset}" \
             --repo "${GITHUB_REPOSITORY}" --clobber
 
+      - name: Generate, sign, and attach updater v2 manifest
+        if: ${{ needs.validate.outputs.release_state != 'immutable' && needs.validate.outputs.update_v2 == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="release-source/dist/ecctl-update-manifest-v2.json"
+          bundle="release-source/dist/ecctl-update-manifest-v2.sigstore.json"
+          go -C release-source run ./cmd/releaseprep \
+            --generate-update-manifest \
+            --release-tag "${RELEASE_TAG}"
+          cosign sign-blob --yes --bundle "${bundle}" "${manifest}"
+          go -C release-source run ./cmd/releaseprep --verify-update-manifest
+          gh release upload "${RELEASE_TAG}" \
+            "${manifest}#ecctl-update-manifest-v2.json" \
+            "${bundle}#ecctl-update-manifest-v2.sigstore.json" \
+            --repo "${GITHUB_REPOSITORY}" --clobber
+
       - name: Validate complete draft and publish immutable release
         if: needs.validate.outputs.release_state != 'immutable'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          UPDATE_V2: ${{ needs.validate.outputs.update_v2 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -491,6 +528,7 @@ jobs:
             --arg tag "${RELEASE_TAG}" \
             --arg version "${RELEASE_VERSION}" \
             --arg repository "${GITHUB_REPOSITORY}" \
+            --argjson update_v2 "${UPDATE_V2}" \
             --argjson draft true \
             --argjson immutable false \
             -f "${GITHUB_WORKSPACE}/tooling/.github/scripts/validate-release.jq" \
@@ -519,6 +557,7 @@ jobs:
             --arg tag "${RELEASE_TAG}" \
             --arg version "${RELEASE_VERSION}" \
             --arg repository "${GITHUB_REPOSITORY}" \
+            --argjson update_v2 "${UPDATE_V2}" \
             --argjson draft false \
             --argjson immutable true \
             -f "${GITHUB_WORKSPACE}/tooling/.github/scripts/validate-release.jq" \
@@ -565,6 +604,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          UPDATE_V2: ${{ needs.validate.outputs.update_v2 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -615,6 +655,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          UPDATE_V2: ${{ needs.validate.outputs.update_v2 }}
           RELEASE_WEBHOOK_TOKEN: ${{ secrets.RELEASE_WEBHOOK_TOKEN }}
           RELEASE_WEBHOOK_URL: ${{ secrets.RELEASE_WEBHOOK_URL }}
         shell: bash
@@ -653,6 +694,7 @@ jobs:
             --arg tag "${RELEASE_TAG}" \
             --arg version "${RELEASE_VERSION}" \
             --arg repository "${GITHUB_REPOSITORY}" \
+            --argjson update_v2 "${UPDATE_V2}" \
             --argjson draft false \
             --argjson immutable true \
             -f "${GITHUB_WORKSPACE}/tooling/.github/scripts/validate-release.jq" \
@@ -706,12 +748,25 @@ jobs:
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
           STABLE_VERSION_SNAPSHOT: ${{ runner.temp }}/ecctl-oss-stable-version.txt
+          UPDATE_V2: ${{ needs.validate.outputs.update_v2 }}
         shell: bash
         run: |
           set -euo pipefail
           work_dir=$(mktemp -d)
           trap 'rm -rf "${work_dir}"' EXIT
           gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --pattern checksums.txt --dir "${work_dir}"
+          signed_assets=()
+          if [[ "${UPDATE_V2}" == true ]]; then
+            for asset in ecctl-update-manifest-v2.json ecctl-update-manifest-v2.sigstore.json; do
+              gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --pattern "${asset}" --dir "${work_dir}"
+              signed_assets+=("${asset}")
+            done
+            if [[ "${RELEASE_VERSION}" != *-* ]]; then
+              cask_asset="ecctl_${RELEASE_VERSION}_cask.rb"
+              gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --pattern "${cask_asset}" --dir "${work_dir}"
+              signed_assets+=("${cask_asset}")
+            fi
+          fi
           base_url="https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/elastic-compute-control-cli"
           artifacts=(
             "ecctl_${RELEASE_VERSION}_darwin_amd64.tar.gz"
@@ -774,6 +829,21 @@ jobs:
               elif ! cmp -s "${work_dir}/checksums.txt" "${work_dir}/oss-checksums.txt"; then
                 ready=false
               fi
+            fi
+            if [[ "${ready}" == true ]]; then
+              for asset in "${signed_assets[@]}"; do
+                if ! curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+                  --connect-timeout 5 --max-time 30 --max-filesize 1048576 \
+                  --output "${work_dir}/oss-${asset}" \
+                  "${base_url}/${RELEASE_VERSION}/${asset}?${cache_bust}"; then
+                  ready=false
+                  break
+                fi
+                if ! cmp -s "${work_dir}/${asset}" "${work_dir}/oss-${asset}"; then
+                  ready=false
+                  break
+                fi
+              done
             fi
             if [[ "${ready}" == true ]]; then
               for artifact in "${artifacts[@]}"; do

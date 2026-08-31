@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +14,56 @@ import (
 
 	"github.com/aliyun/elastic-compute-control-cli/internal/releaseartifact"
 )
+
+func TestGenerateUpdateManifestWritesCanonicalV2(t *testing.T) {
+	const version = "1.2.3"
+	root := t.TempDir()
+	t.Chdir(root)
+	dist := filepath.Join(root, "dist")
+	if err := os.Mkdir(dist, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	versionFile := "version.txt"
+	writeFile(t, versionFile, version+"\n")
+	var checksums strings.Builder
+	for _, goos := range []string{"darwin", "linux", "windows"} {
+		for _, goarch := range []string{"amd64", "arm64"} {
+			name := releaseartifact.UpdateArchiveName(version, goos, goarch)
+			raw := []byte("archive " + name)
+			if err := os.WriteFile(filepath.Join(dist, name), raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			digest := sha256.Sum256(raw)
+			fmt.Fprintf(&checksums, "%s  %s\n", hex.EncodeToString(digest[:]), name)
+		}
+	}
+	writeFile(t, filepath.Join(dist, "checksums.txt"), checksums.String())
+	cask := filepath.Join("dist", "homebrew", "Casks", "ecctl.rb")
+	if err := os.MkdirAll(filepath.Dir(cask), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, cask, "stable cask\n")
+	if err := generateUpdateManifest("v" + version); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join("dist", releaseartifact.UpdateManifestV2Name)
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := releaseartifact.ParseUpdateManifestV2(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Version != version || manifest.Prerelease || len(manifest.Assets) != 8 || raw[len(raw)-1] != '\n' {
+		t.Fatalf("generated manifest = %#v", manifest)
+	}
+	for _, asset := range manifest.Assets {
+		if asset.Name == "version.txt" || asset.Kind == "version" {
+			t.Fatal("v2 manifest must use its version field and directory name, not a versioned version.txt asset")
+		}
+	}
+}
 
 func TestReleaseWorkflowUsesInfraGuardWebhookAction(t *testing.T) {
 	workflowPath := filepath.Join("..", "..", ".github", "workflows", "release.yml")
@@ -98,8 +150,13 @@ func TestReleaseWorkflowUsesCurrentToolingForHistoricalRecovery(t *testing.T) {
 	if snapshotIndex < 0 || webhookIndex < 0 || snapshotIndex > webhookIndex {
 		t.Fatal("prerelease OSS pointer is not snapshotted before the webhook")
 	}
-	if count := strings.Count(workflow, `gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}"`); count != 3 {
-		t.Fatalf("release workflow has %d repository-pinned release downloads, want 3", count)
+	if count := strings.Count(workflow, `gh release download "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}"`); count != 5 {
+		t.Fatalf("release workflow has %d repository-pinned release downloads, want 5", count)
+	}
+	for _, asset := range []string{releaseartifact.UpdateManifestV2Name, releaseartifact.UpdateManifestV2BundleName} {
+		if !strings.Contains(workflow, `--pattern "${asset}"`) {
+			t.Fatalf("release workflow does not download signed updater asset %s", asset)
+		}
 	}
 	if count := strings.Count(workflow, `-f "${GITHUB_WORKSPACE}/tooling/.github/scripts/validate-release.jq"`); count != 4 {
 		t.Fatalf("release workflow has %d shared Release validators, want 4", count)
@@ -161,6 +218,83 @@ func TestReleaseWorkflowFindsDraftOnlyWithWritePermission(t *testing.T) {
 	}
 }
 
+func TestReleaseWorkflowPublishesSignedUpdateManifest(t *testing.T) {
+	root := filepath.Join("..", "..")
+	raw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow := string(raw)
+	publishStart := strings.Index(workflow, "\n  publish:\n")
+	notifyStart := strings.Index(workflow, "\n  notify:\n")
+	if publishStart < 0 || notifyStart < publishStart {
+		t.Fatal("release workflow job boundaries are missing")
+	}
+	publish := workflow[publishStart:notifyStart]
+	for _, required := range []string{
+		"contents: write",
+		"id-token: write",
+		"actions/checkout@11d5960a326750d5838078e36cf38b85af677262",             // v4
+		"actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff",             // v5
+		"goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a", // v6
+		"sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6",    // v4.1.2
+		"cosign-release: 'v3.1.3'",
+		"--generate-update-manifest",
+		releaseartifact.UpdateManifestV2Name,
+		releaseartifact.UpdateManifestV2BundleName,
+		"cosign sign-blob --yes --bundle",
+		"go -C release-source run ./cmd/releaseprep",
+		"--verify-update-manifest",
+	} {
+		if !strings.Contains(publish, required) {
+			t.Fatalf("publish job is missing %q", required)
+		}
+	}
+	for _, removed := range []string{"manifest_args=(", "--release-dir", `--output "${GITHUB_WORKSPACE}/${manifest}"`, "--manifest"} {
+		if strings.Contains(publish, removed) {
+			t.Fatalf("publish job still exposes generic updater path argument %q", removed)
+		}
+	}
+	if strings.Contains(workflow[:publishStart], "id-token: write") || strings.Contains(workflow[notifyStart:], "id-token: write") {
+		t.Fatal("id-token: write is not scoped exclusively to the publish job")
+	}
+	generateIndex := strings.Index(publish, "--generate-update-manifest")
+	signIndex := strings.Index(publish, "cosign sign-blob --yes --bundle")
+	verifyIndex := strings.Index(publish, "--verify-update-manifest")
+	uploadIndex := -1
+	if verifyIndex >= 0 {
+		if relative := strings.Index(publish[verifyIndex:], `gh release upload "${RELEASE_TAG}"`); relative >= 0 {
+			uploadIndex = verifyIndex + relative
+		}
+	}
+	publishIndex := strings.Index(publish, "Validate complete draft and publish immutable release")
+	if generateIndex < 0 || signIndex < generateIndex || verifyIndex < signIndex || uploadIndex < verifyIndex || publishIndex < uploadIndex {
+		t.Fatal("signed update manifest is not generated, signed, production-verified, and uploaded before immutable publication")
+	}
+	for _, mutable := range []string{"actions/checkout@v4", "actions/setup-go@v5", "goreleaser/goreleaser-action@v6"} {
+		if strings.Contains(publish, mutable) {
+			t.Fatalf("OIDC-enabled publish job uses mutable action tag %q", mutable)
+		}
+	}
+
+	validator, err := os.ReadFile(filepath.Join(root, ".github", "scripts", "validate-release.jq"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{releaseartifact.UpdateManifestV2Name, releaseartifact.UpdateManifestV2BundleName} {
+		if !strings.Contains(string(validator), name) {
+			t.Fatalf("release asset validator is missing %s", name)
+		}
+		if !strings.Contains(workflow[notifyStart:], name) {
+			t.Fatalf("OSS mirror verification is missing %s", name)
+		}
+	}
+	if strings.Contains(workflow[notifyStart:], `"${base_url}/${RELEASE_VERSION}/version.txt?${cache_bust}"`) ||
+		strings.Contains(workflow[notifyStart:], `release-metadata/version.txt`) {
+		t.Fatal("OSS mirror verification depends on a redundant versioned version.txt object")
+	}
+}
+
 func TestReleaseAssetValidatorAcceptsPublishedAndDraftURLsAndRejectsInvalidAssets(t *testing.T) {
 	jqPath, err := exec.LookPath("jq")
 	if err != nil {
@@ -182,6 +316,8 @@ func TestReleaseAssetValidatorAcceptsPublishedAndDraftURLsAndRejectsInvalidAsset
 		"ecctl_1.2.3_windows_amd64.zip",
 		"ecctl_1.2.3_windows_arm64.zip",
 		"ecctl_1.2.3_cask.rb",
+		releaseartifact.UpdateManifestV2Name,
+		releaseartifact.UpdateManifestV2BundleName,
 	}
 	assets := make([]map[string]any, 0, len(names)+1)
 	for _, name := range names {
@@ -217,7 +353,7 @@ func TestReleaseAssetValidatorAcceptsPublishedAndDraftURLsAndRejectsInvalidAsset
 			t.Fatalf("Release validator is missing %q", required)
 		}
 	}
-	runValidator := func() error {
+	runValidator := func(updateV2 bool) error {
 		t.Helper()
 		fixture, marshalErr := json.Marshal(release)
 		if marshalErr != nil {
@@ -228,6 +364,7 @@ func TestReleaseAssetValidatorAcceptsPublishedAndDraftURLsAndRejectsInvalidAsset
 			"--arg", "tag", tag,
 			"--arg", "version", version,
 			"--arg", "repository", repository,
+			"--argjson", "update_v2", fmt.Sprint(updateV2),
 			"--argjson", "draft", fmt.Sprint(release["draft"]),
 			"--argjson", "immutable", fmt.Sprint(release["immutable"]),
 			"-f", validator,
@@ -236,9 +373,14 @@ func TestReleaseAssetValidatorAcceptsPublishedAndDraftURLsAndRejectsInvalidAsset
 		return cmd.Run()
 	}
 
-	if err := runValidator(); err != nil {
+	if err := runValidator(true); err != nil {
 		t.Fatalf("valid immutable Release fixture rejected: %v", err)
 	}
+	release["assets"] = assets[:len(assets)-2]
+	if err := runValidator(false); err != nil {
+		t.Fatalf("historical Release without updater v2 assets rejected: %v", err)
+	}
+	release["assets"] = assets
 
 	draftURL := "https://github.com/" + repository + "/releases/tag/untagged-0123456789abcdef"
 	release["draft"] = true
@@ -248,16 +390,16 @@ func TestReleaseAssetValidatorAcceptsPublishedAndDraftURLsAndRejectsInvalidAsset
 		name := asset["name"].(string)
 		asset["browser_download_url"] = strings.Replace(draftURL, "/releases/tag/", "/releases/download/", 1) + "/" + name
 	}
-	if err := runValidator(); err != nil {
+	if err := runValidator(true); err != nil {
 		t.Fatalf("valid draft Release fixture rejected: %v", err)
 	}
 
 	assets[0]["browser_download_url"] = "https://github.com/attacker/example/releases/download/untagged-0123456789abcdef/checksums.txt"
-	if err := runValidator(); err == nil {
+	if err := runValidator(true); err == nil {
 		t.Fatal("draft Release fixture with a cross-repository asset URL was accepted")
 	}
 	assets[0]["browser_download_url"] = strings.Replace(draftURL, "/releases/tag/", "/releases/download/", 1) + "/wrong/checksums.txt"
-	if err := runValidator(); err == nil {
+	if err := runValidator(true); err == nil {
 		t.Fatal("draft Release fixture with an invalid asset path was accepted")
 	}
 	assets[0]["browser_download_url"] = strings.Replace(draftURL, "/releases/tag/", "/releases/download/", 1) + "/checksums.txt"
@@ -269,7 +411,7 @@ func TestReleaseAssetValidatorAcceptsPublishedAndDraftURLsAndRejectsInvalidAsset
 		"browser_download_url": "http://attacker.invalid/poisoned-extra.txt",
 	})
 	release["assets"] = assets
-	if err := runValidator(); err == nil {
+	if err := runValidator(true); err == nil {
 		t.Fatal("Release fixture with an invalid extra asset was accepted")
 	}
 }
