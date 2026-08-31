@@ -6,7 +6,7 @@ REVIEW_GOMODCACHE ?= $(REVIEW_CACHE_DIR)/go-mod
 REVIEW_NPM_CACHE ?= $(REVIEW_CACHE_DIR)/npm
 REVIEW_ENV = env GOPATH="$(REVIEW_GOPATH)" GOCACHE="$(REVIEW_GOCACHE)" GOMODCACHE="$(REVIEW_GOMODCACHE)" npm_config_cache="$(REVIEW_NPM_CACHE)"
 
-.PHONY: help install build test coverage ci-test lint fmt clean generate drift drift-baseline drift-check specdrift prepare-public-release check-public-release check-release-version review-final review-e2e review-website
+.PHONY: help install build test coverage ci-test lint fmt clean generate drift drift-baseline drift-check specdrift prepare-public-release check-public-release check-release-version review-final review-dsh-plugin review-e2e review-website
 
 install: ## Install git pre-commit hook
 	git config core.hooksPath .githooks
@@ -79,8 +79,14 @@ review-final: ## Run the complete offline review gates once for a final candidat
 	@printf 'review cache: %s\n' "$(REVIEW_CACHE_DIR)"
 	$(REVIEW_ENV) $(MAKE) lint
 	$(REVIEW_ENV) $(MAKE) test
+	$(REVIEW_ENV) $(MAKE) review-dsh-plugin
 	$(REVIEW_ENV) $(MAKE) review-e2e
 	$(REVIEW_ENV) $(MAKE) review-website
+
+review-dsh-plugin: ## Install, test, and inspect the DSH plugin package
+	npm --prefix dsh-plugin ci --ignore-scripts --registry=https://registry.npmjs.org
+	npm --prefix dsh-plugin test
+	npm pack ./dsh-plugin --dry-run
 
 review-e2e: ## Run E2E unit tests and offline public-surface gates
 	$(MAKE) -C e2e test

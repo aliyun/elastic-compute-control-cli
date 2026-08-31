@@ -31,6 +31,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Setup Node for DSH plugin
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dsh-plugin/package-lock.json
+
       - name: Check release version
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -66,6 +73,9 @@ jobs:
 
       - name: Test
         run: make test
+
+      - name: Test DSH plugin
+        run: make review-dsh-plugin
 
       - name: Test Linux credential filesystem and lifecycle boundaries
         run: |
