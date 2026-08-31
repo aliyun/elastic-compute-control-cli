@@ -19,7 +19,7 @@ Run `ecctl ecs keypair <action> -h` for usage, or `ecctl schema ecs.keypair.<act
 ecctl ecs keypair create [flags]
 ```
 
-Create or import a key pair
+Create or import a key pair; generated private keys are returned once in the create output
 
 - Kind: `mutation` · Risk: medium
 
@@ -27,7 +27,7 @@ Create or import a key pair
 |---|---|---|
 | `ImportKeyPair` | When `--public-key` is specified. | Perform the resource operation. |
 | `CreateKeyPair` | When `--public-key` is not specified. | Perform the resource operation. |
-| `DescribeKeyPairs` | Every time the command runs. | Read the resource view. |
+| `DescribeKeyPairs` | When `--public-key` is specified. | Read the resource view. |
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

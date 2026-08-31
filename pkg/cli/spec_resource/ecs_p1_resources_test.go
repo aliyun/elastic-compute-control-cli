@@ -1,6 +1,7 @@
 package spec_resource
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -18,21 +19,28 @@ func fakeKeyPairListResponse(name string) map[string]any {
 
 func TestECSKeypairCreateUsesCreateKeyPair(t *testing.T) {
 	t.Parallel()
+	privateKey := "-----BEGIN PRIVATE KEY-----\nprivate-key-material\n-----END PRIVATE KEY-----\n"
 	fake := &fakeSpecCaller{responses: []map[string]any{
-		{"RequestId": "req-create", "KeyPairName": "web-key", "KeyPairId": "kp-1"},
-		fakeKeyPairListResponse("web-key"),
-	}}
+		{"RequestId": "req-create", "KeyPairName": "web-key", "KeyPairId": "kp-1", "KeyPairFingerPrint": "ab:cd:ef", "PrivateKeyBody": privateKey},
+	}, errors: []error{nil, errors.New("generated keypair must not perform a lossy readback")}}
 	runCLI := catalogCaller(t, "ecs", "keypair", fake)
 
 	stdout, stderr, code := runCLI("ecs", "keypair", "create", "--region", "cn-hangzhou", "--name", "web-key")
 	if code != 0 {
 		t.Fatalf("ecs keypair create exit %d stderr=%s stdout=%s", code, stderr, stdout)
 	}
-	if len(fake.calls) != 2 || fake.calls[0].operation != "CreateKeyPair" || fake.calls[1].operation != "DescribeKeyPairs" {
+	if len(fake.calls) != 1 || fake.calls[0].operation != "CreateKeyPair" {
 		t.Fatalf("calls = %#v", fake.calls)
 	}
 	if fake.calls[0].request["KeyPairName"] != "web-key" {
 		t.Fatalf("CreateKeyPair request = %#v", fake.calls[0].request)
+	}
+	keypair, _ := decodeObject(t, stdout)["keypair"].(map[string]any)
+	if keypair["private_key"] != privateKey {
+		t.Fatalf("keypair.private_key = %#v, want exact CreateKeyPair PrivateKeyBody; stdout=%s", keypair["private_key"], stdout)
+	}
+	if keypair["key_pair_id"] != "kp-1" || keypair["fingerprint"] != "ab:cd:ef" {
+		t.Fatalf("generated keypair must use the CreateKeyPair response without readback; stdout=%s", stdout)
 	}
 }
 
@@ -53,6 +61,10 @@ func TestECSKeypairCreateWithPublicKeyImports(t *testing.T) {
 	}
 	if fake.calls[0].request["PublicKeyBody"] != "ssh-rsa AAAAB3" {
 		t.Fatalf("ImportKeyPair request = %#v", fake.calls[0].request)
+	}
+	keypair, _ := decodeObject(t, stdout)["keypair"].(map[string]any)
+	if _, ok := keypair["private_key"]; ok {
+		t.Fatalf("imported keypair must not contain private_key; stdout=%s", stdout)
 	}
 }
 
