@@ -134,9 +134,17 @@ jobs:
           version=$(go -C ../tooling run ./cmd/releaseprep "${version_args[@]}")
           tag="v${version}"
           commit=$(git rev-parse HEAD)
-          update_v2=false
-          if [[ -f pkg/updater/trusted_root.json ]]; then
-            update_v2=true
+          update_v2=$(go -C ../tooling run ./cmd/releaseprep \
+            --update-v2-required \
+            --release-tag "${tag}")
+          trusted_root=internal/releaseartifact/trusted_root.json
+          if [[ "${update_v2}" == true && ! -f "${trusted_root}" ]]; then
+            echo "Release ${tag} requires ${trusted_root}; refusing to publish without signed updater metadata." >&2
+            exit 1
+          fi
+          if [[ "${update_v2}" != true && -z "${RECOVERY_TAG}" ]]; then
+            echo "New releases must use signed updater metadata; ${tag} was classified as legacy." >&2
+            exit 1
           fi
 
           tag_rows=$(git ls-remote --tags origin "refs/tags/${tag}" "refs/tags/${tag}^{}")
