@@ -19,11 +19,21 @@ import (
 	"github.com/gofrs/flock"
 
 	"github.com/aliyun/elastic-compute-control-cli/internal/configfile"
+	ecconfig "github.com/aliyun/elastic-compute-control-cli/pkg/config"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
 )
 
 var ErrCredentialProfileChanged = errors.New("credential profile changed during refresh")
 var ErrCredentialStatePersistenceFailed = errors.New("credential state could not be persisted")
+
+type OAuthReauthenticationError struct{ Reason string }
+
+func (e *OAuthReauthenticationError) Error() string {
+	if e == nil || e.Reason == "" {
+		return "OAuth authentication must be renewed"
+	}
+	return e.Reason
+}
 
 type credentialCacheWriteError struct{ err error }
 
@@ -52,11 +62,12 @@ const (
 )
 
 var oauthEndpoints = map[string]struct {
-	baseURL  string
-	clientID string
+	baseURL   string
+	signInURL string
+	clientID  string
 }{
-	"CN":   {baseURL: "https://oauth.aliyun.com", clientID: "4038181954557748008"},
-	"INTL": {baseURL: "https://oauth.alibabacloud.com", clientID: "4103531455503354461"},
+	"CN":   {baseURL: "https://oauth.aliyun.com", signInURL: "https://signin.aliyun.com", clientID: "4038181954557748008"},
+	"INTL": {baseURL: "https://oauth.alibabacloud.com", signInURL: "https://signin.alibabacloud.com", clientID: "4103531455503354461"},
 }
 
 func cachedProfileCredentials(profile map[string]any) (*credentialproviders.Credentials, time.Time) {
@@ -91,6 +102,8 @@ type oauthProfileCredentialsProvider struct {
 	cachePath  string
 	client     credentialHTTPClient
 	generation string
+	siteType   string
+	native     bool
 	cacheEntry credentialCacheEntry
 
 	gate      contextGate
@@ -134,9 +147,13 @@ func refreshOAuthCredentialWithHTTP(ctx context.Context, profile map[string]any,
 		client = newCredentialHTTPClient(credentialHTTPTimeout)
 	}
 	refreshToken := stringMapField(profile, "oauth_refresh_token")
+	refreshTokenExpire := int64MapField(profile, "oauth_refresh_token_expire")
 	accessToken := stringMapField(profile, "oauth_access_token")
 	accessTokenExpire := int64MapField(profile, "oauth_access_token_expire")
 	tokenRefreshed := false
+	if refreshToken != "" && refreshTokenExpire > 0 && refreshTokenExpire <= time.Now().Unix() {
+		return nil, nil, &OAuthReauthenticationError{Reason: "OAuth refresh token is expired"}
+	}
 	if refreshToken != "" && (accessToken == "" || accessTokenExpire == 0 || accessTokenExpire-time.Now().Unix() <= 1200) {
 		form := url.Values{
 			"grant_type":    []string{"refresh_token"},
@@ -154,14 +171,14 @@ func refreshOAuthCredentialWithHTTP(ctx context.Context, profile map[string]any,
 			if ctx.Err() != nil {
 				return nil, nil, ctx.Err()
 			}
-			return nil, nil, errors.New("OAuth token refresh request failed")
+			return nil, nil, &OAuthRemoteError{Stage: "refresh", Err: err}
 		}
 		body, status, err := readCredentialHTTPResponse(response)
 		if err != nil {
 			return nil, nil, err
 		}
 		if status != http.StatusOK {
-			return nil, nil, fmt.Errorf("OAuth token refresh returned HTTP %d", status)
+			return nil, nil, oauthRemoteResponseError("refresh", status, body)
 		}
 		var payload oauthRefreshTokenResponse
 		if err := json.Unmarshal(body, &payload); err != nil || payload.AccessToken == "" || payload.RefreshToken == "" || payload.ExpiresIn <= 0 {
@@ -173,7 +190,7 @@ func refreshOAuthCredentialWithHTTP(ctx context.Context, profile map[string]any,
 		tokenRefreshed = true
 	}
 	if accessToken == "" {
-		return nil, nil, errors.New("OAuth access token is unavailable, please re-login with cli")
+		return nil, nil, &OAuthReauthenticationError{Reason: "OAuth access token is unavailable"}
 	}
 	if tokenRefreshed && commitToken != nil {
 		if err := commitToken(&oauthCredentialProfileUpdate{
@@ -193,14 +210,14 @@ func refreshOAuthCredentialWithHTTP(ctx context.Context, profile map[string]any,
 		if ctx.Err() != nil {
 			return nil, nil, ctx.Err()
 		}
-		return nil, nil, errors.New("OAuth credential exchange request failed")
+		return nil, nil, &OAuthRemoteError{Stage: "exchange", Err: err}
 	}
 	body, status, err := readCredentialHTTPResponse(response)
 	if err != nil {
 		return nil, nil, err
 	}
 	if status != http.StatusOK {
-		return nil, nil, fmt.Errorf("OAuth credential exchange returned HTTP %d", status)
+		return nil, nil, oauthRemoteResponseError("exchange", status, body)
 	}
 	var payload oauthCredentialResponse
 	if err := json.Unmarshal(body, &payload); err != nil || payload.AccessKeyID == "" || payload.AccessKeySecret == "" || payload.SecurityToken == "" {
@@ -226,19 +243,39 @@ func readCredentialHTTPResponse(response *http.Response) ([]byte, int, error) {
 		return nil, 0, errors.New("credential response is unavailable")
 	}
 	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, credentialResponseLimit))
+	body, err := io.ReadAll(io.LimitReader(response.Body, credentialResponseLimit+1))
 	if err != nil {
 		return nil, response.StatusCode, errors.New("credential response is unreadable")
 	}
+	if len(body) > credentialResponseLimit {
+		return nil, response.StatusCode, errors.New("credential response is too large")
+	}
 	return body, response.StatusCode, nil
+}
+
+func oauthRemoteResponseError(stage string, status int, body []byte) error {
+	var payload struct {
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(body, &payload)
+	return &OAuthRemoteError{Stage: stage, StatusCode: status, Code: standardOAuthErrorCode(payload.Error)}
 }
 
 func newOAuthProfileCredentialsProvider(profile map[string]any, name, configPath string, cachePaths ...string) (*oauthProfileCredentialsProvider, error) {
 	return newOAuthProfileCredentialsProviderWithClient(profile, name, configPath, nil, cachePaths...)
 }
 
+func newNativeOAuthProfileCredentialsProvider(profile map[string]any, name, configPath string, cachePaths ...string) (*oauthProfileCredentialsProvider, error) {
+	return newOAuthProfileCredentialsProviderWithCacheSource(profile, name, configPath, nativeOAuthCacheSource, true, nil, cachePaths...)
+}
+
 func newOAuthProfileCredentialsProviderWithClient(profile map[string]any, name, configPath string, client credentialHTTPClient, cachePaths ...string) (*oauthProfileCredentialsProvider, error) {
-	if _, ok := oauthEndpoints[strings.ToUpper(stringMapField(profile, "oauth_site_type"))]; !ok {
+	return newOAuthProfileCredentialsProviderWithCacheSource(profile, name, configPath, configPath, false, client, cachePaths...)
+}
+
+func newOAuthProfileCredentialsProviderWithCacheSource(profile map[string]any, name, configPath, cacheSource string, native bool, client credentialHTTPClient, cachePaths ...string) (*oauthProfileCredentialsProvider, error) {
+	siteType := strings.ToUpper(stringMapField(profile, "oauth_site_type"))
+	if _, ok := oauthEndpoints[siteType]; !ok {
 		return nil, errors.New("OAuth site type must be CN or INTL")
 	}
 	if client == nil {
@@ -246,6 +283,11 @@ func newOAuthProfileCredentialsProviderWithClient(profile map[string]any, name, 
 	} else {
 		client = rejectCredentialRedirects(client)
 	}
+	absoluteConfigPath, err := filepath.Abs(configPath)
+	if err != nil {
+		return nil, err
+	}
+	configPath = filepath.Clean(absoluteConfigPath)
 	cacheRoot := ""
 	if len(cachePaths) > 0 && cachePaths[0] != "" {
 		cacheRoot = cachePaths[0]
@@ -257,14 +299,21 @@ func newOAuthProfileCredentialsProviderWithClient(profile map[string]any, name, 
 		}
 	}
 	generation := credentialSourceGeneration(profile, credentialModeOAuth)
-	cachePath := credentialCacheEntryPath(cacheRoot, configPath, name)
+	cachePath := credentialCacheEntryPath(cacheRoot, cacheSource, name)
+	if native {
+		if err := recoverNativeOAuthTransactionWithProfileLock(context.Background(), cachePath, name); err != nil {
+			return nil, err
+		}
+	}
 	provider := &oauthProfileCredentialsProvider{
 		name: name, configPath: configPath, cachePath: cachePath, client: client,
-		generation: generation,
+		generation: generation, siteType: siteType, native: native,
 	}
-	if entry, ok, cacheErr := loadCredentialCacheEntry(context.Background(), cachePath, credentialModeOAuth, generation); cacheErr != nil {
+	if entry, match, cacheErr := loadCredentialCacheEntryState(context.Background(), cachePath, credentialModeOAuth, generation); cacheErr != nil {
 		return nil, credentialCacheError("read", cacheErr)
-	} else if ok {
+	} else if match == credentialCacheMismatched && native {
+		return nil, ErrCredentialProfileChanged
+	} else if match == credentialCacheMatching {
 		provider.cacheEntry = entry
 		profile = cacheEntryProfile(profile, entry)
 	}
@@ -295,12 +344,25 @@ func (p *oauthProfileCredentialsProvider) Acquire(ctx context.Context) (*credent
 		return nil, fmt.Errorf("persist refreshed OAuth credential: %w", err)
 	}
 	defer transaction.close()
+	if p.native {
+		if err := recoverNativeOAuthTransactionWithProfileLockHeld(ctx, p.cachePath, p.name); err != nil {
+			return nil, err
+		}
+	}
 	if credentialSourceGeneration(transaction.profile, credentialModeOAuth) != p.generation {
 		return nil, ErrCredentialProfileChanged
 	}
-	if entry, ok, cacheErr := loadCredentialCacheEntry(ctx, p.cachePath, credentialModeOAuth, p.generation); cacheErr != nil {
+	if entry, match, cacheErr := loadCredentialCacheEntryState(ctx, p.cachePath, credentialModeOAuth, p.generation); cacheErr != nil {
 		return nil, credentialCacheError("read", cacheErr)
-	} else if ok {
+	} else if match == credentialCacheMismatched && p.native {
+		p.cacheEntry = credentialCacheEntry{}
+		p.cached, p.expiresAt = nil, time.Time{}
+		return nil, ErrCredentialProfileChanged
+	} else if match == credentialCacheMissing && p.native {
+		p.cacheEntry = credentialCacheEntry{}
+		p.cached, p.expiresAt = nil, time.Time{}
+		return nil, p.withRecovery(&OAuthReauthenticationError{Reason: "native OAuth credential cache is unavailable"})
+	} else if match == credentialCacheMatching {
 		p.cacheEntry = entry
 	}
 	effectiveProfile := cacheEntryProfile(transaction.profile, p.cacheEntry)
@@ -331,8 +393,14 @@ func (p *oauthProfileCredentialsProvider) Acquire(ctx context.Context) (*credent
 		if err := contextError(persistenceCtx); err != nil {
 			return err
 		}
-		if err := commitPreparedCredentialCacheEntry(prepared, entry); err != nil {
-			return fmt.Errorf("%w: %v", ErrCredentialStatePersistenceFailed, credentialCacheError("write OAuth token state", err))
+		var err error
+		if p.native {
+			err = commitPreparedCredentialCacheEntryIfGeneration(persistenceCtx, p.cachePath, p.generation, prepared, entry)
+		} else {
+			err = commitPreparedCredentialCacheEntry(prepared, entry)
+		}
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrCredentialStatePersistenceFailed, credentialCacheError("write OAuth token state", err))
 		}
 		p.cacheEntry = entry
 		// Persist the one-time remote result before checking for an external
@@ -344,7 +412,7 @@ func (p *oauthProfileCredentialsProvider) Acquire(ctx context.Context) (*credent
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, p.withRecovery(err)
 	}
 	expiration := time.Unix(update.stsExpire, 0)
 	if credentials == nil || credentials.AccessKeyId == "" || credentials.AccessKeySecret == "" || credentials.SecurityToken == "" || !expiration.After(time.Now()) {
@@ -358,16 +426,49 @@ func (p *oauthProfileCredentialsProvider) Acquire(ctx context.Context) (*credent
 	entry := credentialCacheEntry{
 		Mode: credentialModeOAuth, SourceGeneration: p.generation,
 		OAuthRefreshToken: update.refreshToken, OAuthAccessToken: update.accessToken,
-		OAuthAccessExpire: update.accessTokenExpire, AccessKeyID: update.accessKeyID,
+		OAuthRefreshExpire: p.cacheEntry.OAuthRefreshExpire, OAuthAccessExpire: update.accessTokenExpire, AccessKeyID: update.accessKeyID,
 		AccessKeySecret: update.accessKeySecret, SecurityToken: update.securityToken,
 		STSExpiration: update.stsExpire,
 	}
-	if err := storeCredentialCacheEntry(persistenceCtx, p.cachePath, entry); err != nil {
-		return nil, fmt.Errorf("persist refreshed OAuth credential: %w", credentialCacheError("write", err))
+	var storeErr error
+	if p.native {
+		storeErr = storeCredentialCacheEntryIfGeneration(persistenceCtx, p.cachePath, p.generation, entry)
+	} else {
+		storeErr = storeCredentialCacheEntry(persistenceCtx, p.cachePath, entry)
+	}
+	if storeErr != nil {
+		return nil, fmt.Errorf("persist refreshed OAuth credential: %w", credentialCacheError("write", storeErr))
 	}
 	p.cacheEntry = entry
 	p.cached, p.expiresAt = credentials, expiration
 	return snapshotFromProviderCredentialsWithExpiration(credentials, expiration)
+}
+
+func (p *oauthProfileCredentialsProvider) withRecovery(err error) error {
+	if err == nil {
+		return nil
+	}
+	var reauthentication *OAuthReauthenticationError
+	var remote *OAuthRemoteError
+	requiresRecovery := errors.As(err, &reauthentication)
+	if errors.As(err, &remote) {
+		requiresRecovery = requiresRecovery || remote.Code == "invalid_grant" || remote.Code == "invalid_token" || remote.StatusCode == http.StatusUnauthorized || remote.StatusCode == http.StatusForbidden
+	}
+	if !requiresRecovery {
+		return err
+	}
+	binary := "aliyun"
+	if p.native {
+		binary = "ecctl"
+	}
+	command := []string{binary, "configure", "--mode", "OAuth", "--profile", p.name}
+	if p.siteType != "" {
+		command = append(command, "--oauth-site-type", p.siteType)
+	}
+	if p.configPath != "" {
+		command = append(command, "--config-path", p.configPath)
+	}
+	return &credentialRecoveryError{err: err, command: command}
 }
 
 func credentialPersistenceContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -731,32 +832,15 @@ func readCredentialConfig(target *configfile.Target) (map[string]any, os.FileInf
 	return config, info, nil
 }
 
-var credentialProfileAuthKeys = []string{
-	"mode", "access_key_id", "access_key_secret", "sts_token", "sts_expiration",
-	"ram_role_name", "ram_role_arn", "ram_session_name", "source_profile", "expired_seconds", "policy", "external_id",
-	"sts_endpoint", "sts_region", "enable_vpc", "oidc_provider_arn", "oidc_token_file",
-	"oauth_site_type", "oauth_refresh_token", "oauth_access_token", "oauth_access_token_expire",
-	"cloud_sso_sign_in_url", "cloud_sso_account_id", "cloud_sso_access_config", "access_token", "cloud_sso_access_token_expire",
-	"process_command", "credentials_uri", "bearer_token", "bearer_token_header_key",
-}
-
 var credentialProfileIdentityKeys = []string{
 	"mode", "ram_role_name", "ram_role_arn", "ram_session_name", "source_profile", "expired_seconds", "policy", "external_id",
 	"sts_endpoint", "sts_region", "enable_vpc", "oidc_provider_arn", "oidc_token_file",
-	"oauth_site_type", "cloud_sso_sign_in_url", "cloud_sso_account_id", "cloud_sso_access_config",
+	"oauth_site_type", "oauth_generation", "oauth_account_id", "cloud_sso_sign_in_url", "cloud_sso_account_id", "cloud_sso_access_config",
 	"process_command", "credentials_uri", "bearer_token_header_key",
 }
 
 func credentialProfileAuthDigest(profile map[string]any) [sha256.Size]byte {
-	auth := make(map[string]any, len(credentialProfileAuthKeys)+1)
-	auth["name"] = stringMapField(profile, "name")
-	for _, key := range credentialProfileAuthKeys {
-		if value, ok := profile[key]; ok {
-			auth[key] = value
-		}
-	}
-	raw, _ := json.Marshal(auth)
-	return sha256.Sum256(raw)
+	return ecconfig.CredentialProfileAuthDigest(profile)
 }
 
 func credentialProfileIdentityDigest(profile map[string]any) [sha256.Size]byte {

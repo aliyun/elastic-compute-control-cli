@@ -1,9 +1,13 @@
 package config
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +18,8 @@ import (
 )
 
 const DefaultProfileName = "default"
+
+var ErrCredentialProfileChanged = errors.New("credential profile changed during OAuth login")
 
 // RegionSource records which input won region resolution. Callers must keep
 // this provenance until credential profile policy has been applied: ignoring
@@ -42,20 +48,58 @@ type Store struct {
 	pending    []storeMutation
 }
 
+func (s *Store) ResolvedPath() string {
+	if s == nil {
+		return ""
+	}
+	return s.targetPath
+}
+
+func (s *Store) RequestedPath() string {
+	if s == nil {
+		return ""
+	}
+	return s.path
+}
+
 type storeMutation struct {
 	kind  string
 	name  string
 	key   string
 	value string
+	oauth nativeOAuthMutation
 }
 
 const (
 	storeMutationSetValue   = "set-value"
 	storeMutationUseProfile = "use-profile"
 	storeMutationSetCurrent = "set-current"
+	storeMutationSetOAuth   = "set-native-oauth"
 	configWriteLockTimeout  = 2 * time.Second
 	configWriteLockRetry    = 25 * time.Millisecond
+	nativeOAuthConfigLimit  = 1 << 20
 )
+
+type NativeOAuthProfileState struct {
+	Name           string
+	SiteType       string
+	Generation     string
+	AccountID      string
+	Current        string
+	Exists         bool
+	ConfigExisted  bool
+	AuthGeneration [sha256.Size]byte
+}
+
+type nativeOAuthMutation struct {
+	siteType               string
+	generation             string
+	accountID              string
+	expectedCurrent        string
+	expectedExists         bool
+	expectedConfigExisted  bool
+	expectedAuthGeneration [sha256.Size]byte
+}
 
 type Profile struct {
 	Name            string
@@ -93,6 +137,27 @@ var configItems = []ConfigItem{
 	{Key: "lang", StoredAs: "language", Description: "Default display language.", Type: "string", Allowed: []string{"en", "zh-CN"}, SetExample: "ecctl configure set lang zh-CN"},
 	{Key: "output", StoredAs: "output_format", Description: "Default output format.", Type: "string", Allowed: []string{"json", "text"}, SetExample: "ecctl configure set output text"},
 	{Key: "telemetry.enabled", StoredAs: "telemetry.enabled", Description: "Enable best-effort pseudonymous product telemetry.", Type: "boolean", Allowed: []string{"true", "false"}, SetExample: "ecctl configure set telemetry.enabled false"},
+}
+
+var credentialProfileAuthKeys = []string{
+	"mode", "access_key_id", "access_key_secret", "sts_token", "sts_expiration",
+	"ram_role_name", "ram_role_arn", "ram_session_name", "source_profile", "expired_seconds", "policy", "external_id",
+	"sts_endpoint", "sts_region", "enable_vpc", "oidc_provider_arn", "oidc_token_file",
+	"oauth_site_type", "oauth_refresh_token", "oauth_refresh_token_expire", "oauth_access_token", "oauth_access_token_expire", "oauth_generation", "oauth_account_id",
+	"cloud_sso_sign_in_url", "cloud_sso_account_id", "cloud_sso_access_config", "access_token", "cloud_sso_access_token_expire",
+	"process_command", "credentials_uri", "bearer_token", "bearer_token_header_key",
+}
+
+func CredentialProfileAuthDigest(profile map[string]any) [sha256.Size]byte {
+	auth := make(map[string]any, len(credentialProfileAuthKeys)+1)
+	auth["name"] = stringField(profile, "name")
+	for _, key := range credentialProfileAuthKeys {
+		if value, ok := profile[key]; ok {
+			auth[key] = value
+		}
+	}
+	raw, _ := json.Marshal(auth)
+	return sha256.Sum256(raw)
 }
 
 var configKeyAliases = map[string]string{
@@ -263,6 +328,64 @@ func LoadStore(path string) (*Store, error) {
 	return store, nil
 }
 
+// LoadNativeOAuthStore freezes and strictly validates the ecctl configuration
+// target before an interactive login begins. OAuth tokens are never stored in
+// this general configuration file.
+func LoadNativeOAuthStore(path string) (*Store, error) {
+	if path == "" {
+		path = EcctlConfigPath(os.Getenv)
+	}
+	target, err := configfile.Resolve(path, true)
+	if err != nil {
+		return nil, err
+	}
+	raw, _, err := target.ReadBoundedRegular(nativeOAuthConfigLimit)
+	if os.IsNotExist(err) {
+		store := newStore(path)
+		store.targetPath = target.Path()
+		return store, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	data, err := decodeNativeStoreData(raw)
+	if err != nil {
+		return nil, err
+	}
+	store := &Store{path: path, targetPath: target.Path(), existed: true, data: data}
+	return store, nil
+}
+
+func (s *Store) PreflightNativeOAuthWrite(ctx context.Context) error {
+	if s == nil || s.path == "" || s.targetPath == "" {
+		return fmt.Errorf("configuration store is unavailable")
+	}
+	target, err := configfile.Resolve(s.path, true)
+	if err != nil {
+		return err
+	}
+	if target.Path() != s.targetPath {
+		return configfile.ErrTargetReplaced
+	}
+	return target.WithLock(ctx, configWriteLockTimeout, configWriteLockRetry, func() error {
+		_, info, readErr := target.ReadBoundedRegular(nativeOAuthConfigLimit)
+		if readErr != nil && !os.IsNotExist(readErr) {
+			return readErr
+		}
+		if info != nil && info.Mode().Perm()&0o200 == 0 {
+			return fmt.Errorf("configuration is read-only")
+		}
+		temp, err := configfile.CreateSensitiveTemp(filepath.Dir(target.Path()), ".ecctl-oauth-preflight-*.tmp")
+		if err != nil {
+			return err
+		}
+		path := temp.Name()
+		closeErr := temp.Close()
+		cleanupErr := configfile.CleanupSensitiveTemp(path)
+		return errors.Join(closeErr, cleanupErr)
+	})
+}
+
 func LoadExistingStore(path string) (*Store, bool, error) {
 	if path == "" {
 		path = EcctlConfigPath(os.Getenv)
@@ -292,6 +415,10 @@ func LoadExistingStore(path string) (*Store, bool, error) {
 }
 
 func (s *Store) Save() error {
+	return s.SaveContext(context.Background())
+}
+
+func (s *Store) SaveContext(ctx context.Context) error {
 	if s == nil || s.path == "" {
 		return fmt.Errorf("configuration store is unavailable")
 	}
@@ -302,12 +429,26 @@ func (s *Store) Save() error {
 	if s.targetPath != "" && s.targetPath != target.Path() {
 		return fmt.Errorf("configuration target was replaced")
 	}
-	return target.WithLock(context.Background(), configWriteLockTimeout, configWriteLockRetry, func() error {
+	strictNativeOAuth := s.hasPendingNativeOAuthMutation()
+	return target.WithLock(ctx, configWriteLockTimeout, configWriteLockRetry, func() error {
 		var current *Store
-		raw, info, readErr := target.Read()
+		var raw []byte
+		var info os.FileInfo
+		var readErr error
+		if strictNativeOAuth {
+			raw, info, readErr = target.ReadBoundedRegular(nativeOAuthConfigLimit)
+		} else {
+			raw, info, readErr = target.Read()
+		}
 		switch {
 		case readErr == nil:
-			data, decodeErr := decodeStoreData(raw)
+			var data map[string]any
+			var decodeErr error
+			if strictNativeOAuth {
+				data, decodeErr = decodeNativeStoreData(raw)
+			} else {
+				data, decodeErr = decodeStoreData(raw)
+			}
 			if decodeErr != nil {
 				return decodeErr
 			}
@@ -360,6 +501,15 @@ func (s *Store) Save() error {
 	})
 }
 
+func (s *Store) hasPendingNativeOAuthMutation() bool {
+	for _, mutation := range s.pending {
+		if mutation.kind == storeMutationSetOAuth {
+			return true
+		}
+	}
+	return false
+}
+
 func decodeStoreData(raw []byte) (map[string]any, error) {
 	var data map[string]any
 	if err := json.Unmarshal(raw, &data); err != nil {
@@ -367,6 +517,50 @@ func decodeStoreData(raw []byte) (map[string]any, error) {
 	}
 	if data == nil {
 		data = map[string]any{}
+	}
+	return data, nil
+}
+
+func decodeNativeStoreData(raw []byte) (map[string]any, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var data map[string]any
+	if err := decoder.Decode(&data); err != nil {
+		return nil, err
+	}
+	if data == nil {
+		return nil, fmt.Errorf("configuration must be a JSON object")
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("configuration contains multiple JSON values")
+		}
+		return nil, err
+	}
+	current, ok := data["current"].(string)
+	if !ok || strings.TrimSpace(current) == "" || strings.TrimSpace(current) != current {
+		return nil, fmt.Errorf("configuration current must be a non-empty string")
+	}
+	profiles, ok := data["profiles"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("configuration profiles must be an array")
+	}
+	seen := map[string]bool{}
+	for index, rawProfile := range profiles {
+		profile, ok := rawProfile.(map[string]any)
+		if !ok || profile == nil {
+			return nil, fmt.Errorf("configuration profile %d must be an object", index)
+		}
+		rawName, ok := profile["name"].(string)
+		name := strings.TrimSpace(rawName)
+		if !ok || name == "" || name != rawName {
+			return nil, fmt.Errorf("configuration profile %d name must be a non-empty string", index)
+		}
+		if seen[name] {
+			return nil, fmt.Errorf("configuration profile %s is duplicated", name)
+		}
+		seen[name] = true
 	}
 	return data, nil
 }
@@ -628,6 +822,131 @@ func (s *Store) setCurrentProfile(name string, record bool) error {
 	return nil
 }
 
+func (s *Store) NativeOAuthProfileState(name string) NativeOAuthProfileState {
+	if name == "" {
+		name = s.Current()
+	}
+	if name == "" {
+		name = DefaultProfileName
+	}
+	profile, exists := s.profileMapExisting(name)
+	if !exists {
+		profile = map[string]any{"name": name}
+	}
+	siteType := strings.ToUpper(stringField(profile, "oauth_site_type"))
+	if siteType != "CN" && siteType != "INTL" {
+		siteType = ""
+	}
+	return NativeOAuthProfileState{
+		Name: name, SiteType: siteType,
+		Generation:     stringField(profile, "oauth_generation"),
+		AccountID:      stringField(profile, "oauth_account_id"),
+		Current:        s.Current(),
+		Exists:         exists,
+		ConfigExisted:  s.existed,
+		AuthGeneration: CredentialProfileAuthDigest(profile),
+	}
+}
+
+func (s *Store) SetNativeOAuthProfile(state NativeOAuthProfileState, siteType, generation, accountID string) error {
+	return s.setNativeOAuthProfile(
+		state.Name, siteType, generation, accountID,
+		state.Current, state.Exists, state.ConfigExisted, state.AuthGeneration, true,
+	)
+}
+
+func (s *Store) setNativeOAuthProfile(
+	name, siteType, generation, accountID, expectedCurrent string,
+	expectedExists, expectedConfigExisted bool,
+	expectedAuthGeneration [sha256.Size]byte,
+	record bool,
+) error {
+	var err error
+	name, err = NormalizeOAuthProfileName(name)
+	if err != nil {
+		return err
+	}
+	siteType = strings.ToUpper(strings.TrimSpace(siteType))
+	if siteType != "CN" && siteType != "INTL" {
+		return fmt.Errorf("OAuth site type must be CN or INTL")
+	}
+	if strings.TrimSpace(generation) == "" {
+		return fmt.Errorf("OAuth login generation is required")
+	}
+	if accountID != "" {
+		accountID, err = NormalizeOAuthAccountID(accountID)
+		if err != nil {
+			return err
+		}
+	}
+	if s.existed != expectedConfigExisted {
+		return ErrCredentialProfileChanged
+	}
+
+	profile, exists := s.profileMapExisting(name)
+	if exists != expectedExists {
+		return ErrCredentialProfileChanged
+	}
+	if !exists {
+		profile = map[string]any{"name": name, "output_format": "json"}
+	}
+	if CredentialProfileAuthDigest(profile) != expectedAuthGeneration {
+		return ErrCredentialProfileChanged
+	}
+	for _, key := range credentialProfileAuthKeys {
+		delete(profile, key)
+	}
+	profile["mode"] = "OAuth"
+	profile["oauth_site_type"] = siteType
+	profile["oauth_generation"] = generation
+	if accountID != "" {
+		profile["oauth_account_id"] = accountID
+	}
+	if !exists {
+		rawProfiles, _ := s.data["profiles"].([]any)
+		s.data["profiles"] = append(rawProfiles, profile)
+	}
+	if s.Current() == expectedCurrent {
+		s.data["current"] = name
+	}
+	if record {
+		s.pending = append(s.pending, storeMutation{
+			kind: storeMutationSetOAuth, name: name,
+			oauth: nativeOAuthMutation{
+				siteType: siteType, generation: generation, accountID: accountID,
+				expectedCurrent: expectedCurrent, expectedExists: expectedExists,
+				expectedConfigExisted:  expectedConfigExisted,
+				expectedAuthGeneration: expectedAuthGeneration,
+			},
+		})
+	}
+	return nil
+}
+
+func NormalizeOAuthProfileName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("profile is required")
+	}
+	if strings.ContainsAny(name, "\r\n\x00") {
+		return "", fmt.Errorf("profile contains control characters")
+	}
+	return name, nil
+}
+
+func NormalizeOAuthAccountID(accountID string) (string, error) {
+	accountID = strings.TrimSpace(accountID)
+	if len(accountID) != 16 {
+		return "", fmt.Errorf("OAuth account ID must contain exactly 16 digits")
+	}
+	for _, value := range accountID {
+		if value < '0' || value > '9' {
+			return "", fmt.Errorf("OAuth account ID must contain exactly 16 digits")
+		}
+	}
+	return accountID, nil
+}
+
 func (s *Store) applyMutation(mutation storeMutation, record bool) error {
 	switch mutation.kind {
 	case storeMutationSetValue:
@@ -637,6 +956,12 @@ func (s *Store) applyMutation(mutation storeMutation, record bool) error {
 		return s.useProfile(mutation.name, record)
 	case storeMutationSetCurrent:
 		return s.setCurrentProfile(mutation.name, record)
+	case storeMutationSetOAuth:
+		return s.setNativeOAuthProfile(
+			mutation.name, mutation.oauth.siteType, mutation.oauth.generation, mutation.oauth.accountID,
+			mutation.oauth.expectedCurrent, mutation.oauth.expectedExists, mutation.oauth.expectedConfigExisted,
+			mutation.oauth.expectedAuthGeneration, record,
+		)
 	default:
 		return fmt.Errorf("unsupported configuration mutation %s", mutation.kind)
 	}
@@ -670,20 +995,28 @@ func (s *Store) profileMaps() []map[string]any {
 }
 
 func (s *Store) profileMap(name string) map[string]any {
-	s.ensureShape()
-	rawProfiles, _ := s.data["profiles"].([]any)
-	for _, raw := range rawProfiles {
-		profile, ok := raw.(map[string]any)
-		if ok && stringField(profile, "name") == name {
-			return profile
-		}
+	if profile, ok := s.profileMapExisting(name); ok {
+		return profile
 	}
+	rawProfiles, _ := s.data["profiles"].([]any)
 	profile := map[string]any{
 		"name":          name,
 		"output_format": "json",
 	}
 	s.data["profiles"] = append(rawProfiles, profile)
 	return profile
+}
+
+func (s *Store) profileMapExisting(name string) (map[string]any, bool) {
+	s.ensureShape()
+	rawProfiles, _ := s.data["profiles"].([]any)
+	for _, raw := range rawProfiles {
+		profile, ok := raw.(map[string]any)
+		if ok && stringField(profile, "name") == name {
+			return profile, true
+		}
+	}
+	return nil, false
 }
 
 func newStore(path string) *Store {

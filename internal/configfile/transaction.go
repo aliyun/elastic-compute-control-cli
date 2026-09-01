@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -12,6 +13,30 @@ import (
 )
 
 var ErrTargetReplaced = errors.New("configuration target was replaced")
+
+// PostCommitError reports a failure that happened after an atomic replacement
+// became visible. Callers that coordinate multiple files must reconcile the
+// target contents instead of assuming the old file is still active.
+type PostCommitError struct{ Err error }
+
+func (e *PostCommitError) Error() string {
+	if e == nil || e.Err == nil {
+		return "atomic replacement completed with an uncertain persistence result"
+	}
+	return e.Err.Error()
+}
+
+func (e *PostCommitError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func ReplacementApplied(err error) bool {
+	var postCommit *PostCommitError
+	return errors.As(err, &postCommit)
+}
 
 // Target is the stable filesystem target behind a requested configuration
 // path. Resolving symlinks once and verifying them again under the sidecar lock
@@ -144,6 +169,55 @@ func (t *Target) Read() ([]byte, os.FileInfo, error) {
 	return raw, info, nil
 }
 
+func (t *Target) ReadBoundedRegular(limit int64) ([]byte, os.FileInfo, error) {
+	if t == nil || t.path == "" {
+		return nil, nil, errors.New("configuration target is unavailable")
+	}
+	if limit <= 0 {
+		return nil, nil, errors.New("configuration read limit must be positive")
+	}
+	if err := t.Verify(); err != nil {
+		return nil, nil, err
+	}
+	pathInfo, err := os.Lstat(t.path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if pathInfo.Mode()&os.ModeSymlink != 0 || !pathInfo.Mode().IsRegular() {
+		return nil, nil, errors.New("configuration target must be a stable regular file")
+	}
+	file, err := openBoundedRegularFile(t.path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, nil, err
+	}
+	if pathInfo.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || !os.SameFile(pathInfo, info) {
+		return nil, nil, errors.New("configuration target must be a stable regular file")
+	}
+	if info.Size() > limit {
+		return nil, nil, fmt.Errorf("configuration exceeds %d-byte limit", limit)
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, nil, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, nil, fmt.Errorf("configuration exceeds %d-byte limit", limit)
+	}
+	current, err := os.Stat(t.path)
+	if err != nil || !os.SameFile(info, current) {
+		return nil, nil, ErrTargetReplaced
+	}
+	if err := t.Verify(); err != nil {
+		return nil, nil, err
+	}
+	return raw, info, nil
+}
+
 func (t *Target) AtomicWrite(raw []byte, mode os.FileMode) error {
 	if t == nil || t.path == "" {
 		return errors.New("configuration target is unavailable")
@@ -178,10 +252,16 @@ func (t *Target) AtomicWrite(raw []byte, mode os.FileMode) error {
 	if err := temp.Close(); err != nil {
 		return err
 	}
+	if err := t.Verify(); err != nil {
+		return err
+	}
 	if err := replaceFile(tempPath, t.path); err != nil {
 		return err
 	}
-	return syncDirectory(filepath.Dir(t.path))
+	if err := SyncReplacement(t.path); err != nil {
+		return &PostCommitError{Err: err}
+	}
+	return nil
 }
 
 // AtomicWritePrivate replaces a credential-bearing file with a canonical
@@ -232,10 +312,13 @@ func (t *Target) AtomicWritePrivate(raw []byte) error {
 	if err := replaceFile(tempPath, t.path); err != nil {
 		return err
 	}
-	if err := syncDirectory(dir); err != nil {
-		return err
+	if err := SyncReplacement(t.path); err != nil {
+		return &PostCommitError{Err: err}
 	}
-	return ValidatePrivateFile(t.path)
+	if err := ValidatePrivateFile(t.path); err != nil {
+		return &PostCommitError{Err: err}
+	}
+	return nil
 }
 
 // BeginPrivateReplace prepares and reserves space for a private atomic
@@ -314,9 +397,21 @@ func (p *PrivateReplace) Commit(raw []byte) error {
 	}
 	p.committed = true
 	cleanupErr := CleanupSensitiveTemp(p.path)
-	syncErr := syncDirectory(filepath.Dir(p.target.path))
+	syncErr := SyncReplacement(p.target.path)
 	validateErr := ValidatePrivateFile(p.target.path)
-	return errors.Join(cleanupErr, syncErr, validateErr)
+	if err := errors.Join(cleanupErr, syncErr, validateErr); err != nil {
+		return &PostCommitError{Err: err}
+	}
+	return nil
+}
+
+func (p *PrivateReplace) CommitWithLock(ctx context.Context, timeout, retry time.Duration, raw []byte) error {
+	if p == nil || p.target == nil {
+		return errors.New("private replacement is unavailable")
+	}
+	return p.target.WithLock(ctx, timeout, retry, func() error {
+		return p.Commit(raw)
+	})
 }
 
 func (p *PrivateReplace) Abort() error {

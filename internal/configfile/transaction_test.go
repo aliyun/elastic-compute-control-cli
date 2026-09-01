@@ -80,6 +80,27 @@ func TestWithLockRejectsReplacedSymlinkTarget(t *testing.T) {
 	}
 }
 
+func TestReadBoundedRegularRejectsOversizedFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte("too-large"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target, err := Resolve(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := target.ReadBoundedRegular(4); err == nil {
+		t.Fatal("oversized configuration was accepted")
+	}
+}
+
+func TestReplacementAppliedRecognizesPostCommitError(t *testing.T) {
+	err := &PostCommitError{Err: errors.New("directory sync failed")}
+	if !ReplacementApplied(err) || !errors.Is(err, err.Err) {
+		t.Fatalf("post-commit error was not recognized: %v", err)
+	}
+}
+
 func TestResolveRejectsDanglingSymlink(t *testing.T) {
 	dir := t.TempDir()
 	link := filepath.Join(dir, "config.json")
@@ -146,5 +167,64 @@ func TestBeginPrivateReplaceAbortPreservesExistingTarget(t *testing.T) {
 	}
 	if _, err := os.Stat(stagingDir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("staging directory remained: %v", err)
+	}
+}
+
+func TestReplacementAPIsReportPostCommitBarrierFailure(t *testing.T) {
+	originalSync := syncReplacement
+	syncErr := errors.New("replacement durability barrier failed")
+	syncCalls := 0
+	syncReplacement = func(string) error {
+		syncCalls++
+		return syncErr
+	}
+	t.Cleanup(func() { syncReplacement = originalSync })
+
+	assertVisiblePostCommit := func(t *testing.T, path string, err error) {
+		t.Helper()
+		if !ReplacementApplied(err) || !errors.Is(err, syncErr) {
+			t.Fatalf("replacement error = %v, want post-commit sync failure", err)
+		}
+		if raw, readErr := os.ReadFile(path); readErr != nil || string(raw) != "after" {
+			t.Fatalf("replacement contents = %q, err=%v", raw, readErr)
+		}
+	}
+
+	t.Run("general atomic write", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "config.json")
+		target, err := Resolve(path, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertVisiblePostCommit(t, path, target.AtomicWrite([]byte("after"), 0o600))
+	})
+
+	t.Run("private atomic write", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "credentials-v2")
+		path := filepath.Join(dir, "entry.json")
+		target, err := Resolve(path, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertVisiblePostCommit(t, path, target.AtomicWritePrivate([]byte("after")))
+	})
+
+	t.Run("prepared private replacement", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "credentials-v2")
+		path := filepath.Join(dir, "entry.json")
+		target, err := Resolve(path, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		replacement, err := target.BeginPrivateReplace(4096)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer replacement.Abort()
+		assertVisiblePostCommit(t, path, replacement.Commit([]byte("after")))
+	})
+
+	if syncCalls != 3 {
+		t.Fatalf("replacement durability barrier calls = %d, want 3", syncCalls)
 	}
 }

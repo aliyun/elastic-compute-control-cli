@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/aliyun/elastic-compute-control-cli/internal/credentialenv"
 	ecconfig "github.com/aliyun/elastic-compute-control-cli/pkg/config"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
@@ -487,27 +488,7 @@ func (c *OSSUtilCaller) commandBrokerEnv() []string {
 	)
 }
 
-var ossUtilIdentityEnvironmentKeys = []string{
-	"ALIBABA_CLOUD_IGNORE_PROFILE", "ALIBABACLOUD_IGNORE_PROFILE",
-	"ALIBABA_CLOUD_PROFILE", "ALIBABACLOUD_PROFILE", "ALICLOUD_PROFILE",
-	"ECCTL_ALIYUN_CONFIG_PATH", "ALIBABA_CLOUD_CONFIG_PATH", "ALIBABACLOUD_CONFIG_PATH", "ALICLOUD_CONFIG_PATH",
-	"ALIBABA_CLOUD_ACCESS_KEY_ID", "ALIBABACLOUD_ACCESS_KEY_ID", "ALICLOUD_ACCESS_KEY_ID", "ACCESS_KEY_ID",
-	"ALIBABA_CLOUD_ACCESS_KEY_SECRET", "ALIBABACLOUD_ACCESS_KEY_SECRET", "ALICLOUD_ACCESS_KEY_SECRET", "ACCESS_KEY_SECRET",
-	"ALIBABA_CLOUD_SECURITY_TOKEN", "ALIBABACLOUD_SECURITY_TOKEN", "ALICLOUD_SECURITY_TOKEN", "SECURITY_TOKEN",
-	"ALIBABA_CLOUD_REGION_ID", "ALIBABACLOUD_REGION_ID", "ALICLOUD_REGION_ID", "REGION_ID", "REGION",
-	"ALIBABA_CLOUD_CREDENTIALS_URI", "ALIBABA_CLOUD_EXTERNAL_ACCOUNT_TYPE",
-	"ALIBABA_CLOUD_DISABLE_EXTERNAL_PROCESS", "ALIBABA_CLOUD_ECS_METADATA_DISABLED",
-	"ALIBABA_CLOUD_OIDC_PROVIDER_ARN", "ALIBABACLOUD_OIDC_PROVIDER_ARN",
-	"ALIBABA_CLOUD_OIDC_TOKEN_FILE", "ALIBABACLOUD_OIDC_TOKEN_FILE",
-	"ALIBABA_CLOUD_ROLE_ARN", "ALIBABACLOUD_ROLE_ARN",
-	"ALIBABA_CLOUD_EXTERNAL_ID", "ALIBABACLOUD_EXTERNAL_ID",
-	"ALIBABA_CLOUD_BEARER_TOKEN", "ALIBABA_CLOUD_BEARER_TOKEN_HEADER_KEY",
-	"ALIBABA_CLOUD_ENDPOINT", "ALIBABA_CLOUD_ENDPOINT_TYPE", "ALIBABACLOUD_ENDPOINT_TYPE", "ALICLOUD_ENDPOINT_TYPE", "ENDPOINT_TYPE",
-	"ALIBABA_CLOUD_CLI_PLUGIN_AUTO_INSTALL", "ALIBABA_CLOUD_CLI_PLUGIN_AUTO_INSTALL_ENABLE_PRE",
-	"OSS_ACCESS_KEY_ID", "OSS_ACCESS_KEY_SECRET", "OSS_SESSION_TOKEN", "OSS_REGION",
-	"OSS_ROLE_ARN", "OSS_ROLE_SESSION_NAME", "OSS_ENDPOINT",
-	"OSS_CONFIG_FILE", "OSS_PROFILE", "OSSUTIL_CONFIG_VALUE", "OSSUTIL_COMPAT_MODE",
-}
+var ossUtilIdentityEnvironmentKeys = credentialenv.SensitiveKeys
 
 func resolveInstalledOSSUtilRuntime(getenv func(string) string) (string, error) {
 	home := ""
@@ -541,25 +522,7 @@ func withoutEnvironmentKeys(env []string, keys ...string) []string {
 }
 
 func withoutEnvironmentKeysForOS(env []string, goos string, keys ...string) []string {
-	blocked := make(map[string]bool, len(keys))
-	for _, key := range keys {
-		if goos == "windows" {
-			key = strings.ToUpper(key)
-		}
-		blocked[key] = true
-	}
-	out := make([]string, 0, len(env))
-	for _, item := range env {
-		key, _, _ := strings.Cut(item, "=")
-		if goos == "windows" {
-			key = strings.ToUpper(key)
-		}
-		if blocked[key] {
-			continue
-		}
-		out = append(out, item)
-	}
-	return out
+	return credentialenv.WithoutKeysForOS(env, goos, keys...)
 }
 
 func (c *OSSUtilCaller) commandError(runErr error, stdout, stderr []byte, request map[string]any) error {

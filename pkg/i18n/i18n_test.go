@@ -91,7 +91,7 @@ func TestOSSUtilRuntimeErrorsAreLocalized(t *testing.T) {
 func TestCredentialRecoveryErrorsAreLocalized(t *testing.T) {
 	zh := NewLocalizer("zh-CN")
 	reauth := zh.ErrorPayload(ecerrorsPayload("CredentialReauthenticationRequired", "expired"), false)
-	if reauth.Message != "凭证需要重新认证" || !strings.Contains(reauth.Suggestion, "aliyun configure") {
+	if reauth.Message != "凭证需要重新认证" || !strings.Contains(reauth.Suggestion, "ecctl configure --mode OAuth") || !strings.Contains(reauth.Suggestion, "aliyun configure") {
 		t.Fatalf("reauth payload = %#v", reauth)
 	}
 	disabled := zh.ErrorPayload(ecerrorsPayload("CredentialSourceDisabled", "disabled"), false)
@@ -176,6 +176,16 @@ func TestKnownErrorCodesHaveEnglishAndChineseMessages(t *testing.T) {
 		"NotFound",
 		"NotFoundWithResource",
 		"NoUpdateFieldsSpecified",
+		"OAuthLoginCanceled",
+		"OAuthCallbackUnavailable",
+		"OAuthAccountMismatch",
+		"OAuthAccountConfirmationRequired",
+		"OAuthManualAuthorizationRequired",
+		"OAuthPersistenceUncertain",
+		"OAuthLoginDenied",
+		"OAuthLoginFailed",
+		"OAuthLoginTimeout",
+		"OAuthServiceUnavailable",
 		"ProfileNotFound",
 		"UnknownAction",
 		"UnknownCommand",

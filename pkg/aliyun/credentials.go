@@ -22,6 +22,7 @@ import (
 	credentialslib "github.com/aliyun/credentials-go/credentials"
 	credentialproviders "github.com/aliyun/credentials-go/credentials/providers"
 
+	"github.com/aliyun/elastic-compute-control-cli/internal/configfile"
 	ecconfig "github.com/aliyun/elastic-compute-control-cli/pkg/config"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 )
@@ -44,6 +45,8 @@ const (
 	externalCredentialWaitDelay       = 2 * time.Second
 	credentialRefreshWindow           = 180 * time.Second
 )
+
+var openAPICredentialCacheRoot = func() string { return "" }
 
 var daraDebugEnabledAtPackageInit = credentialDebugFlagEnabled(os.Getenv("DEBUG"), "dara")
 
@@ -521,7 +524,7 @@ func resolveOpenAPIProfile(profileName, configPath string, region ecconfig.Resol
 		}, nil
 	}
 	aliyunConfigPath := ecconfig.AliyunConfigPath(getenv)
-	privateCredentialCacheRoot := ""
+	privateCredentialCacheRoot := openAPICredentialCacheRoot()
 
 	ecctlConfig, hasEcctl, err := loadConfigObject(configPath)
 	if err != nil {
@@ -560,6 +563,18 @@ func resolveOpenAPIProfile(profileName, configPath string, region ecconfig.Resol
 	ecctlProfile, hasEcctlProfile := configProfile(ecctlConfig, selected)
 	aliyunProfile, hasAliyunProfile := configProfile(aliyunConfig, selected)
 	switch {
+	case hasEcctlProfile && profileIsNativeOAuth(ecctlProfile):
+		provider, providerErr := newNativeOAuthProfileCredentialsProvider(ecctlProfile, selected, configPath, privateCredentialCacheRoot)
+		if providerErr != nil {
+			err = providerErr
+		} else {
+			credential = resolvedCredential{
+				Acquirer: provider, Mode: credentialModeOAuth, AuthType: "AK",
+				Principal:         credentialProfilePrincipal(selected, credentialModeOAuth, ecctlProfile),
+				ExpectedAccountID: stringMapField(ecctlProfile, "oauth_account_id"),
+				IdentityPolicy:    identityPolicyFromProfile(ecctlProfile, getenv),
+			}
+		}
 	case hasEcctlProfile && profileHasStaticCredentialOverride(ecctlProfile):
 		credential, err = resolveStaticCredential(effective, getenv, "ecctl-profile", selected, ecctlProfile)
 	case hasAliyunProfile:
@@ -1196,6 +1211,32 @@ type credentialProviderError struct {
 	err  error
 }
 
+type credentialRecoveryError struct {
+	err     error
+	command []string
+}
+
+func (e *credentialRecoveryError) Error() string {
+	if e == nil || e.err == nil {
+		return "credential recovery is required"
+	}
+	return e.err.Error()
+}
+
+func (e *credentialRecoveryError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+func (e *credentialRecoveryError) RecoveryCommand() []string {
+	if e == nil {
+		return nil
+	}
+	return append([]string(nil), e.command...)
+}
+
 func (e *credentialProviderError) Error() string { return e.err.Error() }
 func (e *credentialProviderError) Unwrap() error { return e.err }
 
@@ -1610,6 +1651,9 @@ func credentialResolutionError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if configfile.ReplacementApplied(err) {
+		return ecerrors.Client("OAuthPersistenceUncertain", "OAuth state persistence is uncertain")
+	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return ecerrors.Timeout("WaitTimeout", "credential acquisition timed out")
 	}
@@ -1626,6 +1670,9 @@ func credentialResolutionError(err error) error {
 	if errors.Is(err, ErrCredentialAccountMismatch) {
 		return ecerrors.Client("CredentialAccountMismatch", "credential account does not match the configured account")
 	}
+	if errors.Is(err, ErrCredentialProfileChanged) {
+		return ecerrors.Client("CredentialIdentityChanged", "credential profile changed during operation")
+	}
 	if errors.Is(err, ErrCredentialStatePersistenceFailed) {
 		return ecerrors.Client("CredentialStatePersistenceFailed", "renewed credential state could not be persisted safely")
 	}
@@ -1636,12 +1683,31 @@ func credentialResolutionError(err error) error {
 	if errors.As(err, &providerErr) {
 		providerMode = providerErr.mode
 	}
+	options := []ecerrors.Option{}
+	var recovery interface{ RecoveryCommand() []string }
+	if errors.As(err, &recovery) {
+		options = append(options, ecerrors.WithRecoveryCommand(recovery.RecoveryCommand()...))
+	}
+	var remote *OAuthRemoteError
+	if providerMode == credentialModeOAuth && errors.As(err, &remote) {
+		retryable := remote.StatusCode == 0 || remote.StatusCode == http.StatusTooManyRequests || remote.StatusCode >= 500
+		if retryable {
+			return ecerrors.Service("OAuthServiceUnavailable", message, true, options...)
+		}
+		if remote.Code == "invalid_grant" || remote.Code == "invalid_token" || remote.StatusCode == http.StatusUnauthorized || remote.StatusCode == http.StatusForbidden {
+			return ecerrors.Client("CredentialReauthenticationRequired", message, options...)
+		}
+	}
+	var reauthentication *OAuthReauthenticationError
+	if providerMode == credentialModeOAuth && errors.As(err, &reauthentication) {
+		return ecerrors.Client("CredentialReauthenticationRequired", message, options...)
+	}
 	interactiveTokenFailure := (providerMode == credentialModeOAuth || providerMode == credentialModeCloudSSO) &&
 		(strings.Contains(rawLowerMessage, "re-login") || strings.Contains(rawLowerMessage, "access token") || strings.Contains(rawLowerMessage, "refresh token"))
 	if interactiveTokenFailure {
-		return ecerrors.Client("CredentialReauthenticationRequired", message)
+		return ecerrors.Client("CredentialReauthenticationRequired", message, options...)
 	}
-	return ecerrors.Client("InvalidCredentials", message)
+	return ecerrors.Client("InvalidCredentials", message, options...)
 }
 
 func normalizeCredentialMode(mode string) string {
@@ -1686,6 +1752,10 @@ func inferCredentialMode(profile map[string]any, getenv func(string) string) str
 
 func profileHasStaticCredentialOverride(profile map[string]any) bool {
 	return stringMapField(profile, "access_key_id") != "" || stringMapField(profile, "access_key_secret") != "" || stringMapField(profile, "sts_token") != ""
+}
+
+func profileIsNativeOAuth(profile map[string]any) bool {
+	return normalizeCredentialMode(stringMapField(profile, "mode")) == credentialModeOAuth && stringMapField(profile, "oauth_generation") != ""
 }
 
 func ignoreCredentialProfiles(getenv func(string) string) bool {

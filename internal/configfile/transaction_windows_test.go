@@ -3,6 +3,7 @@
 package configfile
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,32 @@ import (
 
 	"golang.org/x/sys/windows"
 )
+
+func TestSyncReplacementPlatformFlushesInstalledWindowsFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte("contents"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	originalFlush := flushFileBuffers
+	flushCalls := 0
+	flushFileBuffers = func(windows.Handle) error {
+		flushCalls++
+		return nil
+	}
+	t.Cleanup(func() { flushFileBuffers = originalFlush })
+	if err := syncReplacementPlatform(path); err != nil {
+		t.Fatal(err)
+	}
+	if flushCalls != 1 {
+		t.Fatalf("FlushFileBuffers calls = %d, want 1", flushCalls)
+	}
+
+	flushErr := errors.New("flush failed")
+	flushFileBuffers = func(windows.Handle) error { return flushErr }
+	if err := syncReplacementPlatform(path); !errors.Is(err, flushErr) {
+		t.Fatalf("replacement sync error = %v, want %v", err, flushErr)
+	}
+}
 
 func TestCreateSensitiveTempUsesRestrictedWindowsDACL(t *testing.T) {
 	file, err := CreateSensitiveTemp(t.TempDir(), "credential-*.json")

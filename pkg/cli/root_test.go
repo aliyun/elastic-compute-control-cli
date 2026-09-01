@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -24,6 +25,7 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/pkg/config"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/schema"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
@@ -3922,6 +3924,175 @@ func TestConfigCommandsRejectUnknownConfigKey(t *testing.T) {
 	}
 	if got := errorCode(t, stdout); got != "UnknownConfigKey" {
 		t.Fatalf("error.code = %q, want UnknownConfigKey; stdout=%s", got, stdout)
+	}
+}
+
+func TestConfigureOAuthMatchesAliyunCLICommandShape(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), ".ecctl", "config.json")
+	original := configureOAuthLogin
+	configureOAuthLogin = func(_ context.Context, options aliyun.OAuthConfigureOptions) (*aliyun.OAuthConfigureResult, error) {
+		if options.ProfileName != "production" || options.SiteType != "INTL" || options.ConfigPath != configPath || options.ExpectedAccountID != "1234567890123456" || !options.Manual {
+			t.Fatalf("OAuth configure options = %#v", options)
+		}
+		if err := options.OnAuthorizationURL("https://signin.example.com/oauth2/v1/auth?state=public-state"); err != nil {
+			t.Fatal(err)
+		}
+		return &aliyun.OAuthConfigureResult{
+			ProfileName: "production", SiteType: "INTL", ConfigPath: configPath,
+			AccountID: "1234567890123456", BrowserLaunched: false,
+		}, nil
+	}
+	t.Cleanup(func() { configureOAuthLogin = original })
+
+	stdout, stderr, code := runCLI("--lang", "en", "configure", "--mode", "OAuth", "--profile", "production", "--oauth-site-type", "INTL", "--config-path", configPath, "--manual", "--expected-account-id", "1234567890123456")
+	if code != 0 {
+		t.Fatalf("configure OAuth exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if !strings.Contains(stderr, "https://signin.example.com/") {
+		t.Fatalf("OAuth output omitted authorization URL: stderr=%s stdout=%s", stderr, stdout)
+	}
+	payload := decodeObject(t, stdout)
+	if payload["profile"] != "production" || payload["mode"] != "OAuth" || payload["oauth_site_type"] != "INTL" || payload["account_id"] != "1234567890123456" || payload["browser_launch_started"] != false || payload["config_path"] != configPath {
+		t.Fatalf("OAuth output = %s", stdout)
+	}
+}
+
+func TestConfigureOAuthMapsFailures(t *testing.T) {
+	t.Setenv("ECCTL_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+	original := configureOAuthLogin
+	t.Cleanup(func() { configureOAuthLogin = original })
+	configureOAuthLogin = func(_ context.Context, _ aliyun.OAuthConfigureOptions) (*aliyun.OAuthConfigureResult, error) {
+		return nil, &aliyun.OAuthConfigureError{Kind: aliyun.OAuthConfigureTimeout, Err: aliyun.ErrOAuthAuthorizationTimeout}
+	}
+	stdout, stderr, code := runCLI("--lang", "en", "configure", "--mode", "OAuth", "--profile", "international", "--expected-account-id", "1234567890123456")
+	if code != 3 {
+		t.Fatalf("OAuth timeout exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if errorCode(t, stdout) != "OAuthLoginTimeout" || !strings.Contains(stdout, "original") {
+		t.Fatalf("OAuth timeout output = %s", stdout)
+	}
+	timeoutPayload := errorObject(t, stdout)
+	if !containsStringValue(timeoutPayload["recovery_command"], "international") || !containsStringValue(timeoutPayload["recovery_command"], "1234567890123456") {
+		t.Fatalf("OAuth timeout recovery command = %s", stdout)
+	}
+
+	stdout, stderr, code = runCLI("--lang", "en", "configure", "--mode", "CloudSSO")
+	if code != 1 {
+		t.Fatalf("unsupported configure mode exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	errorPayload := errorObject(t, stdout)
+	if errorPayload["code"] != "UnsupportedCredentialMode" || !containsStringValue(errorPayload["accepted_values"], "OAuth") {
+		t.Fatalf("unsupported configure mode output = %s", stdout)
+	}
+}
+
+func TestConfigureOAuthRecoveryCommandUsesAbsoluteConfigPath(t *testing.T) {
+	dir := t.TempDir()
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(originalDir) })
+	original := configureOAuthLogin
+	configureOAuthLogin = func(context.Context, aliyun.OAuthConfigureOptions) (*aliyun.OAuthConfigureResult, error) {
+		return nil, &aliyun.OAuthConfigureError{Kind: aliyun.OAuthConfigureTimeout, Err: aliyun.ErrOAuthAuthorizationTimeout}
+	}
+	t.Cleanup(func() { configureOAuthLogin = original })
+	stdout, _, code := runCLI("--lang", "en", "configure", "--mode", "OAuth", "--config-path", "relative.json", "--expected-account-id", "1234567890123456")
+	if code != 3 {
+		t.Fatalf("relative recovery exit=%d output=%s", code, stdout)
+	}
+	payload := errorObject(t, stdout)
+	want, err := filepath.Abs("relative.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsStringValue(payload["recovery_command"], filepath.Clean(want)) {
+		t.Fatalf("relative recovery command = %s", stdout)
+	}
+}
+
+func TestConfigureOAuthMapsServiceAndDeniedFailures(t *testing.T) {
+	t.Setenv("ECCTL_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+	original := configureOAuthLogin
+	t.Cleanup(func() { configureOAuthLogin = original })
+	tests := []struct {
+		name      string
+		failure   *aliyun.OAuthConfigureError
+		wantCode  int
+		wantError string
+		retryable bool
+	}{
+		{name: "service", failure: &aliyun.OAuthConfigureError{Kind: aliyun.OAuthConfigureService, Retryable: true, Err: errors.New("HTTP 503")}, wantCode: 2, wantError: "OAuthServiceUnavailable", retryable: true},
+		{name: "denied", failure: &aliyun.OAuthConfigureError{Kind: aliyun.OAuthConfigureDenied, Err: errors.New("access denied")}, wantCode: 1, wantError: "OAuthLoginDenied"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			configureOAuthLogin = func(context.Context, aliyun.OAuthConfigureOptions) (*aliyun.OAuthConfigureResult, error) {
+				return nil, test.failure
+			}
+			stdout, stderr, code := runCLI("--lang", "en", "configure", "--mode", "OAuth", "--expected-account-id", "1234567890123456")
+			if code != test.wantCode {
+				t.Fatalf("exit %d want %d stderr=%s stdout=%s", code, test.wantCode, stderr, stdout)
+			}
+			payload := errorObject(t, stdout)
+			if payload["code"] != test.wantError || payload["retryable"] != test.retryable {
+				t.Fatalf("error payload = %s", stdout)
+			}
+		})
+	}
+}
+
+func TestConfigureOAuthRequiresExpectedAccountWhenNonInteractive(t *testing.T) {
+	t.Setenv("ECCTL_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+	original := configureOAuthLogin
+	called := false
+	configureOAuthLogin = func(_ context.Context, options aliyun.OAuthConfigureOptions) (*aliyun.OAuthConfigureResult, error) {
+		called = true
+		confirmErr := options.ConfirmAccount("1234567890123456", "RAMUser")
+		return nil, &aliyun.OAuthConfigureError{Kind: aliyun.OAuthConfigureConfirmation, Err: confirmErr}
+	}
+	t.Cleanup(func() { configureOAuthLogin = original })
+	stdout, _, code := runCLI("--lang", "en", "configure", "--mode", "OAuth")
+	if code != 1 || errorCode(t, stdout) != "OAuthAccountConfirmationRequired" || !called {
+		t.Fatalf("non-interactive configure code=%d called=%t output=%s", code, called, stdout)
+	}
+}
+
+func TestConfirmOAuthAccountRequiresExactAccountID(t *testing.T) {
+	localizer := i18n.NewLocalizer("en")
+	var output bytes.Buffer
+	if err := confirmOAuthAccount(strings.NewReader("1234567890123456\n"), &output, localizer, "1234567890123456", "RAMUser"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "1234567890123456") || !strings.Contains(output.String(), "RAMUser") {
+		t.Fatalf("confirmation output = %s", output.String())
+	}
+	if err := confirmOAuthAccount(strings.NewReader("9999999999999999\n"), io.Discard, localizer, "1234567890123456", "RAMUser"); !errors.Is(err, aliyun.ErrOAuthAccountConfirmationRequired) {
+		t.Fatalf("mismatched confirmation error = %v", err)
+	}
+}
+
+func TestConfigureOAuthRejectsInvalidProfileBeforeBrowserLogin(t *testing.T) {
+	t.Setenv("ECCTL_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
+	original := configureOAuthLogin
+	loginCalls := 0
+	configureOAuthLogin = func(context.Context, aliyun.OAuthConfigureOptions) (*aliyun.OAuthConfigureResult, error) {
+		loginCalls++
+		return nil, errors.New("must not be called")
+	}
+	t.Cleanup(func() { configureOAuthLogin = original })
+	for _, profile := range []string{"   ", "bad\nprofile"} {
+		stdout, stderr, code := runCLI("--lang", "en", "configure", "--mode", "OAuth", "--profile", profile)
+		if code != 1 || errorCode(t, stdout) != "InvalidParameter" {
+			t.Fatalf("profile %q exit %d stderr=%s stdout=%s", profile, code, stderr, stdout)
+		}
+	}
+	if loginCalls != 0 {
+		t.Fatalf("OAuth login calls = %d", loginCalls)
 	}
 }
 

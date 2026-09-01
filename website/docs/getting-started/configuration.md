@@ -5,9 +5,12 @@ description: Configure profiles, credentials, region, language, and output.
 
 # Configuration
 
-`ecctl configure` writes local configuration for resource commands. It can also
-read a compatible local `aliyun` CLI configuration, overlaying `ecctl`
-configuration on top when both exist.
+`ecctl configure` writes ecctl-local settings for resource commands. Native
+OAuth login stores only non-secret profile metadata, including the verified
+account ID, there. Access tokens, refresh tokens, and exchanged STS credentials
+stay in the canonical private store under `~/.ecctl/credentials-v2/`.
+For normal cloud commands, `ecctl` also reads compatible local `aliyun` CLI
+profiles as a read-only fallback.
 
 ## Configure a Region
 
@@ -69,22 +72,57 @@ reads `~/.aliyun/config.json`:
 | `BearerToken` | Product APIs that accept bearer authentication |
 | `AK` | Long-lived access key credentials |
 
-Configure browser and advanced modes with Alibaba Cloud CLI, then select the
-same profile in `ecctl`:
+OAuth uses the same common command shape as Alibaba Cloud CLI and can be
+completed directly with `ecctl`:
 
 ```bash
-aliyun configure --mode OAuth --profile production
+ecctl configure --mode OAuth --profile production
 ecctl --profile production ecs instance list --region cn-hangzhou
 ```
+
+The default site is `CN`. Select the international OAuth service or an explicit
+ecctl metadata config file when needed:
+
+```bash
+ecctl configure --mode OAuth --profile production --oauth-site-type INTL
+ecctl configure --mode OAuth --profile production --config-path /path/to/config.json
+```
+
+In a non-interactive terminal, or when the account is known in advance, bind
+the login to the intended 16-digit Alibaba Cloud account:
+
+```bash
+ecctl configure --mode OAuth --profile production --expected-account-id 1234567890123456
+```
+
+The first interactive login displays the verified account ID and asks you to
+type the complete value before credentials are stored. A later login must match
+the account already recorded for that profile. Supplying a different
+`--expected-account-id` is the explicit way to authorize an intentional account
+change.
+
+For later resource commands that should use a custom path, export
+`ECCTL_CONFIG_PATH=/path/to/config.json` and select the same profile. A native
+OAuth config path must not be the Aliyun CLI config path.
+
+The login uses PKCE and an HTTP callback bound only to `127.0.0.1` on ports
+12345 through 12349. A successful automatic browser launch does not print the
+one-time authorization URL. Use `--manual` in a private terminal when the URL
+must be opened manually; do not copy it to shared logs. Successful stdout
+contains only the profile, mode, site, verified account ID, config path, and
+browser-launch status; it never contains tokens. Browser launcher processes do
+not inherit Alibaba Cloud or OSS credential environment variables. Other
+advanced browser-backed modes such as CloudSSO are still configured with
+Alibaba Cloud CLI.
 
 `ecctl` keeps the selected credential provider for the complete command and
 refreshes temporary credentials before later signed requests when needed. The
 first renewable credential pins the canonical account, user, or role; a later
-credential for another identity is rejected before it can sign a request. It
-does not implement a second OAuth or CloudSSO browser-login flow. If
-interactive authentication has expired, authenticate that profile again with
-Alibaba Cloud CLI. Changing the selected profile's identity fields while a
-command is running fails closed instead of switching accounts mid-command.
+credential for another identity is rejected before it can sign a request. If
+native OAuth authentication has expired, run `ecctl configure --mode OAuth`
+again; reauthenticate an Aliyun-compatible OAuth profile with
+`aliyun configure`. Changing the selected profile's identity fields while a command is
+running fails closed instead of switching accounts mid-command.
 RAM role and OIDC profiles must use a complete
 `acs:ram::<16-digit-account-id>:role/<role-name>` ARN. `ecctl` derives the
 expected account from that ARN and verifies the initial credential through an
@@ -94,15 +132,23 @@ trusted to verify its own result. Set `sts_region` and `enable_vpc` when the
 independent identity check must use a regional or VPC STS endpoint.
 
 Cloud commands treat the compatible `aliyun` configuration as read-only.
-Rotated OAuth tokens and cached OAuth/CloudSSO STS credentials are stored as
+Native ecctl OAuth metadata takes precedence over a same-name Aliyun profile;
+otherwise the existing Aliyun profile remains available. Rotated OAuth tokens
+and cached OAuth/CloudSSO STS credentials are stored as
 per-profile entries under `~/.ecctl/credentials-v2/` with current-user-only
 permissions. The store uses the home directory resolved for the current
-process and does not move with `ECCTL_CONFIG_PATH`, so two ecctl config files
-that select the same resolved Aliyun config path and profile share one OAuth
-rotation owner. Entry names are hashes of that resolved source path and profile
-name. Removing an entry never modifies the source profile. If a server-side
-refresh-token rotation cannot be committed locally, `ecctl` stops without
-retrying the rotation and the profile must be authenticated again.
+process and does not move with `ECCTL_CONFIG_PATH`. Native OAuth entries have
+one per-user owner per profile; a changed login generation invalidates older
+metadata instead of switching identity. Aliyun-compatible entries remain keyed
+by their resolved source path and profile. If a server-side refresh-token
+rotation cannot be committed locally, `ecctl` stops without retrying the
+rotation and the profile must be authenticated again.
+
+Native OAuth cache writes compare the active generation under a per-profile
+lock. Login also keeps a private write-ahead transaction until the cache and
+ecctl metadata agree. If the process or host stops between those writes, the
+next login or credential load restores the previous generation or completes
+the new one before using any token.
 
 For OSS commands backed by a renewable credential, `ecctl` gives the local
 `ossutil` child access through a short-lived credential endpoint bound only to

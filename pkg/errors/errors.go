@@ -32,6 +32,7 @@ type ErrorPayload struct {
 	AcceptedValues  []string `json:"accepted_values,omitempty"`
 	CurrentState    string   `json:"current_state,omitempty"`
 	ExpectedStates  []string `json:"expected_states,omitempty"`
+	RecoveryCommand []string `json:"recovery_command,omitempty"`
 }
 
 type Action struct {
@@ -113,6 +114,12 @@ func WithCurrentState(state string) Option {
 func WithExpectedStates(states ...string) Option {
 	return func(err *AppError) {
 		err.payload.ExpectedStates = append([]string(nil), states...)
+	}
+}
+
+func WithRecoveryCommand(args ...string) Option {
+	return func(err *AppError) {
+		err.payload.RecoveryCommand = append([]string(nil), args...)
 	}
 }
 
