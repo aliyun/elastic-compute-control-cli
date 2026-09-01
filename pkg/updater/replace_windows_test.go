@@ -37,8 +37,11 @@ func TestWindowsSelfUpdateCompletesAfterParentExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	newPath := filepath.Join(newDirectory, "ecctl.exe")
-	buildWindowsUpdaterFixture(t, sourcePath, targetPath, "1.2.2")
-	buildWindowsUpdaterFixture(t, sourcePath, newPath, "1.2.3")
+	// Keep this helper-protocol test on the legacy release path. Signed update
+	// metadata is covered separately and the fixture intentionally serves only
+	// immutable GitHub Release metadata.
+	buildWindowsUpdaterFixture(t, sourcePath, targetPath, "0.2.1")
+	buildWindowsUpdaterFixture(t, sourcePath, newPath, "0.2.2")
 
 	newBinary, err := os.ReadFile(newPath)
 	if err != nil {
@@ -46,20 +49,20 @@ func TestWindowsSelfUpdateCompletesAfterParentExit(t *testing.T) {
 	}
 	archive := testZip(t, "ecctl.exe", newBinary)
 	digest := sha256.Sum256(archive)
-	filename := fmt.Sprintf("ecctl_1.2.3_windows_%s.zip", runtime.GOARCH)
+	filename := fmt.Sprintf("ecctl_0.2.2_windows_%s.zip", runtime.GOARCH)
 	checksums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(digest[:]), filename)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/oss/version.txt":
-			fmt.Fprint(w, "1.2.3")
-		case "/api/latest", "/api/tags/v1.2.3":
-			writeTestRelease(t, w, request, "1.2.3", false, false, true, map[string][]byte{
+			fmt.Fprint(w, "0.2.2")
+		case "/api/latest", "/api/tags/v0.2.2":
+			writeTestRelease(t, w, request, "0.2.2", false, false, true, map[string][]byte{
 				"checksums.txt": []byte(checksums),
 				filename:        archive,
 			})
-		case "/oss/1.2.3/checksums.txt":
+		case "/oss/0.2.2/checksums.txt":
 			fmt.Fprint(w, checksums)
-		case "/oss/1.2.3/" + filename:
+		case "/oss/0.2.2/" + filename:
 			_, _ = w.Write(archive)
 		case "/assets/" + filename:
 			_, _ = w.Write(archive)
@@ -86,7 +89,7 @@ func TestWindowsSelfUpdateCompletesAfterParentExit(t *testing.T) {
 	waitForWindowsUpdateHelper(t, targetPath, deadline)
 
 	versionOutput, versionErr := exec.Command(targetPath, "--version").CombinedOutput()
-	if versionErr != nil || strings.TrimSpace(string(versionOutput)) != "ecctl 1.2.3" {
+	if versionErr != nil || strings.TrimSpace(string(versionOutput)) != "ecctl 0.2.2" {
 		t.Fatalf("updated executable version: %v, %q", versionErr, versionOutput)
 	}
 
@@ -405,7 +408,7 @@ func main() {
 	if len(os.Args) == 5 && os.Args[1] == "self-update" {
 		result, err := updater.Update(context.Background(), updater.Options{
 			CurrentVersion: version,
-			TargetVersion: "1.2.3",
+			TargetVersion: "0.2.2",
 			Executable: executable,
 			GOOS: "windows",
 			GOARCH: runtime.GOARCH,
