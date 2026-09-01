@@ -48,6 +48,7 @@ type cleanup struct {
 	keep        bool
 	journal     string
 	execCfg     map[string]execpkg.Config
+	runCommand  func(context.Context, execpkg.Config, string) execpkg.Result
 	operations  *operationRuntime
 	logf        func(string, ...any)
 	manifest    []report.Resource
@@ -56,7 +57,7 @@ type cleanup struct {
 
 func newCleanup(cfg map[string]execpkg.Config, operations *operationRuntime, keep bool, journal string, meta report.CleanupJournal, logf func(string, ...any)) *cleanup {
 	meta.Version = 2
-	return &cleanup{keep: keep, journal: journal, execCfg: cfg, operations: operations, logf: logf, journalMeta: meta}
+	return &cleanup{keep: keep, journal: journal, execCfg: cfg, runCommand: execpkg.Run, operations: operations, logf: logf, journalMeta: meta}
 }
 
 // push registers a teardown command in a scope and records it in the manifest.
@@ -295,7 +296,7 @@ func (c *cleanup) run(scope []*cleanupItem) []string {
 		coordinationErr := c.operations.executeKeys(context.Background(), it.lockKeys, func() {
 			itemTimeout = cleanupCommandTimeout(it.cmd)
 			commandCtx, cancel := context.WithTimeout(context.Background(), itemTimeout)
-			res = execpkg.Run(commandCtx, c.execCfg[it.role], it.cmd)
+			res = c.runCommand(commandCtx, c.execCfg[it.role], it.cmd)
 			for attempt, delay := range cleanupRetryDelays {
 				if res.Exit == 0 || res.Exit == exitNotFound || !cleanupRetryable(res) {
 					break
@@ -306,7 +307,7 @@ func (c *cleanup) run(scope []*cleanupItem) []string {
 				case <-commandCtx.Done():
 					timer.Stop()
 				case <-timer.C:
-					res = execpkg.Run(commandCtx, c.execCfg[it.role], it.cmd)
+					res = c.runCommand(commandCtx, c.execCfg[it.role], it.cmd)
 				}
 				if commandCtx.Err() != nil {
 					break
