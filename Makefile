@@ -4,7 +4,8 @@ REVIEW_GOPATH ?= $(REVIEW_CACHE_DIR)/go
 REVIEW_GOCACHE ?= $(REVIEW_CACHE_DIR)/go-build
 REVIEW_GOMODCACHE ?= $(REVIEW_CACHE_DIR)/go-mod
 REVIEW_NPM_CACHE ?= $(REVIEW_CACHE_DIR)/npm
-REVIEW_ENV = env GOPATH="$(REVIEW_GOPATH)" GOCACHE="$(REVIEW_GOCACHE)" GOMODCACHE="$(REVIEW_GOMODCACHE)" npm_config_cache="$(REVIEW_NPM_CACHE)"
+REVIEW_GOPROXY ?= https://proxy.golang.org,direct
+REVIEW_ENV = env GOPATH="$(REVIEW_GOPATH)" GOCACHE="$(REVIEW_GOCACHE)" GOMODCACHE="$(REVIEW_GOMODCACHE)" GOPROXY="$(REVIEW_GOPROXY)" npm_config_cache="$(REVIEW_NPM_CACHE)"
 
 .PHONY: help install build test coverage ci-test lint fmt clean generate drift drift-baseline drift-check specdrift prepare-public-release check-public-release check-release-version review-final review-dsh-plugin review-e2e review-website
 
