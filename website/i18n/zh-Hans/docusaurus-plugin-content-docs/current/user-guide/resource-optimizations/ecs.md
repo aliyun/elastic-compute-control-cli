@@ -920,7 +920,61 @@ ecctl ecs keypair create \
   --public-key 'ssh-rsa AAAA...'
 ```
 
-不传 `--public-key` 时，同一个 ecctl 动作会通过 `CreateKeyPair` 生成新密钥对。
+不传 `--public-key` 时，同一个 ecctl 动作会通过 `CreateKeyPair` 生成新密钥对。未加密的
+私钥只会在本次创建结果的 `keypair.private_key` 中返回一次；ecctl 不会自动写入本地文件。
+该字段包含敏感的秘密材料，请勿记录到日志或与他人共享，并立即以受限权限保存。下面的
+示例会在创建云端密钥对之前检查依赖和目标路径，先保存完整 JSON 响应再提取私钥，拒绝
+覆盖已有的 `web-key.pem`；如果后续步骤失败，则保留可用于恢复的材料：
+
+```bash
+(
+  set -eu
+  command -v jq >/dev/null 2>&1 || {
+    printf 'jq is required\n' >&2
+    exit 1
+  }
+
+  umask 077
+  private_key_file=./web-key.pem
+  if [ -e "$private_key_file" ] || [ -L "$private_key_file" ]; then
+    printf 'Refusing to replace %s\n' "$private_key_file" >&2
+    exit 1
+  fi
+  response_file="$(mktemp "${TMPDIR:-/tmp}/ecctl-keypair-response.json.XXXXXX")"
+  private_key_temp="$(mktemp "${private_key_file}.XXXXXX")"
+
+  if ! ecctl ecs keypair create \
+    --region cn-hangzhou \
+    --name web-key \
+    --output json > "$response_file"; then
+    rm -f "$private_key_temp"
+    printf 'ecctl failed; response retained at %s\n' "$response_file" >&2
+    exit 1
+  fi
+
+  if ! jq -ejr \
+    '.keypair.private_key | select(type == "string" and length > 0)' \
+    "$response_file" > "$private_key_temp"; then
+    rm -f "$private_key_temp"
+    printf 'Private key extraction failed; response retained at %s\n' \
+      "$response_file" >&2
+    exit 1
+  fi
+
+  if ! ln "$private_key_temp" "$private_key_file"; then
+    printf 'Target exists; private key retained at %s\n' "$private_key_temp" >&2
+    printf 'Full response retained at %s\n' "$response_file" >&2
+    exit 1
+  fi
+  rm -f "$private_key_temp" "$response_file"
+)
+```
+
+云端创建与本地持久化是两个独立操作，通过 stdout 无法使二者完全原子化。如果 `ecctl`
+报告失败，且保留的响应中没有完整私钥，请勿使用该云端密钥对；应删除它，或改用其他名称
+创建替代密钥对。
+
+导入已有公钥时不会返回 `keypair.private_key`，后续 `get` 或 `list` 也无法取回该私钥。
 
 参见[密钥对参考](../../reference/resources/ecs/keypair.md)。
 

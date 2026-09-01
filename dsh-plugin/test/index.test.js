@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict'
+import { access, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
@@ -7,7 +11,9 @@ import { apply } from '../index.js'
 const fakeEcctl = fileURLToPath(new URL('./fixtures/fake-ecctl.mjs', import.meta.url))
 const config = {
   bin: fakeEcctl,
-  timeoutMs: 5_000,
+  // Leave headroom for cold Node startup on loaded CI hosts. Cancellation
+  // behavior has its own sub-two-second assertions below.
+  timeoutMs: 30_000,
   maxOutputBytes: 1024 * 1024,
 }
 
@@ -39,6 +45,47 @@ function execution(
   agentId = 'test-agent',
 ) {
   return { signal, callId, agent: { id: agentId } }
+}
+
+async function cancellationMarker(t) {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-ecctl-cancel-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  return join(directory, 'started')
+}
+
+async function waitForFile(path, timeoutMs = config.timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  while (true) {
+    try {
+      await access(path)
+      return
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`timed out waiting for ${path}`)
+    }
+    await delay(10)
+  }
+}
+
+async function abortAfterStarted(pending, controller, startedFile) {
+  try {
+    await Promise.race([
+      waitForFile(startedFile),
+      pending.then(
+        () => { throw new Error('ecctl completed before writing its start marker') },
+        (error) => { throw new Error('ecctl failed before writing its start marker', { cause: error }) },
+      ),
+    ])
+  } catch (error) {
+    controller.abort('test cleanup')
+    await pending.catch(() => {})
+    throw error
+  }
+  const started = Date.now()
+  controller.abort('test cancellation')
+  return started
 }
 
 test('registers four typed tools and returns structured discovery values', async () => {
@@ -245,28 +292,36 @@ test('turns ecctl exits and invalid JSON into failed tool executions', async () 
   )
 })
 
-test('forwards cancellation and settles after the child stops', async () => {
+test('forwards cancellation and settles after the child stops', async (t) => {
   const { tools } = harness()
   const controller = new AbortController()
-  const started = Date.now()
+  const startedFile = await cancellationMarker(t)
   const pending = tools.ecctl_run.execute(
-    { command: ['ecs', 'instance', 'slow'], region: 'cn-test' },
+    {
+      command: ['ecs', 'instance', 'slow'],
+      region: 'cn-test',
+      extra_args: ['--test-started-file', startedFile],
+    },
     execution(controller.signal),
   )
-  setTimeout(() => controller.abort('test cancellation'), 100)
+  const started = await abortAfterStarted(pending, controller, startedFile)
   assert.equal(await pending, null)
   assert.ok(Date.now() - started < 2_000)
 })
 
-test('reports an unknown mutation outcome and idempotency key after cancellation', async () => {
+test('reports an unknown mutation outcome and idempotency key after cancellation', async (t) => {
   const { tools } = harness()
   const controller = new AbortController()
-  const started = Date.now()
+  const startedFile = await cancellationMarker(t)
   const pending = tools.ecctl_run.execute(
-    { command: ['ecs', 'instance', 'slow-mutation'], region: 'cn-test' },
+    {
+      command: ['ecs', 'instance', 'slow-mutation'],
+      region: 'cn-test',
+      extra_args: ['--test-started-file', startedFile],
+    },
     execution(controller.signal, 'cancelled-mutation'),
   )
-  setTimeout(() => controller.abort('test cancellation'), 100)
+  const started = await abortAfterStarted(pending, controller, startedFile)
   await assert.rejects(
     pending,
     /mutation outcome is unknown.*Invocation idempotency key: dsh-[a-f0-9]{32}/s,

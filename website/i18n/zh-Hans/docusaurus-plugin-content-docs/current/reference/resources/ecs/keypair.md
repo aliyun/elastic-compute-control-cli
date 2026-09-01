@@ -19,7 +19,7 @@ description: "管理 SSH 密钥对"
 ecctl ecs keypair create [flags]
 ```
 
-创建或导入密钥对
+创建或导入密钥对；自动生成的私钥仅在创建输出中返回一次
 
 - 类型：`mutation` · 风险：medium
 
@@ -27,7 +27,7 @@ ecctl ecs keypair create [flags]
 |---|---|---|
 | `ImportKeyPair` | 指定 `--public-key` 时 | 执行资源操作。 |
 | `CreateKeyPair` | 未指定 `--public-key` 时 | 执行资源操作。 |
-| `DescribeKeyPairs` | 每次执行命令时 | 读取资源视图。 |
+| `DescribeKeyPairs` | 指定 `--public-key` 时 | 读取资源视图。 |
 
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|

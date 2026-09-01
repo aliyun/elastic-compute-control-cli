@@ -44,6 +44,11 @@ schema:
       description:
         en: key pair fingerprint
         zh-CN: 密钥对指纹
+    private_key:
+      type: string
+      description:
+        en: one-time private key returned only when CreateKeyPair generates the key pair; save it immediately
+        zh-CN: 仅在 CreateKeyPair 生成密钥对时返回一次的私钥；请立即保存
     public_key:
       type: string
       input_style: text|@file
@@ -130,6 +135,10 @@ bindings:
       - raw: $.id
     id_from: $.KeyPairName
     request_id_from: $.RequestId
+    context_from:
+      fingerprint: $.KeyPairFingerPrint
+      key_pair_id: $.KeyPairId
+      private_key: $.PrivateKeyBody
   import_to_available:
     api: ImportKeyPair
     request:
@@ -163,8 +172,8 @@ operations:
       - ecctl ecs keypair create --name my-keypair --tag env=prod
       - ecctl ecs keypair create --name my-keypair --public-key "ssh-rsa AAAA..."
     description:
-      en: Create or import a key pair
-      zh-CN: 创建或导入密钥对
+      en: Create or import a key pair; generated private keys are returned once in the create output
+      zh-CN: 创建或导入密钥对；自动生成的私钥仅在创建输出中返回一次
     input:
       fields:
         - id:
@@ -184,10 +193,14 @@ operations:
         ids:
           - $context.id
         as: final
+        when: input.public_key
       - emit:
           fields:
+            fingerprint: $context.fingerprint
             id: $context.id
+            key_pair_id: $context.key_pair_id
             name: $context.id
+            private_key: $context.private_key
             region: $context.region
   delete:
     examples:

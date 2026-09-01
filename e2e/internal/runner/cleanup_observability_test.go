@@ -141,20 +141,10 @@ func TestCleanupUsesOperationLocksAndParallelLimit(t *testing.T) {
 }
 
 func TestCleanupWaitDoesNotConsumeCommandTimeout(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fake uses a bash script")
-	}
 	oldTimeout := cleanupTimeout
 	cleanupTimeout = time.Second
 	defer func() { cleanupTimeout = oldTimeout }()
 
-	dir := t.TempDir()
-	fake := filepath.Join(dir, "ecctl")
-	if err := os.WriteFile(fake, []byte("#!/usr/bin/env bash\necho \"$*\" >> \"$FAKE_LOG\"\necho '{}'\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	logPath := filepath.Join(dir, "calls.log")
-	t.Setenv("FAKE_LOG", logPath)
 	operations := newOperationRuntime(2)
 	holderEntered := make(chan struct{})
 	releaseHolder := make(chan struct{})
@@ -168,9 +158,17 @@ func TestCleanupWaitDoesNotConsumeCommandTimeout(t *testing.T) {
 	<-holderEntered
 
 	cl := newCleanup(
-		map[string]execpkg.Config{"primary": {Bin: fake, Region: "cn-test"}},
+		map[string]execpkg.Config{"primary": {Region: "cn-test"}},
 		operations, false, "", report.CleanupJournal{}, func(string, ...any) {},
 	)
+	commandRan := make(chan struct{}, 1)
+	cl.runCommand = func(ctx context.Context, _ execpkg.Config, _ string) execpkg.Result {
+		commandRan <- struct{}{}
+		if err := ctx.Err(); err != nil {
+			return execpkg.Result{Exit: -1, Err: err}
+		}
+		return execpkg.Result{Exit: 0}
+	}
 	var scope []*cleanupItem
 	if err := cl.push(&scope, "case", "ecctl test delete", "primary", []string{"shared"}); err != nil {
 		t.Fatal(err)
@@ -183,14 +181,11 @@ func TestCleanupWaitDoesNotConsumeCommandTimeout(t *testing.T) {
 		t.Fatalf("cleanup wait consumed command timeout: %#v", failures)
 	case <-time.After(1250 * time.Millisecond):
 	}
-	if data, err := os.ReadFile(logPath); err == nil {
-		if strings.Contains(string(data), "test delete") {
-			close(releaseHolder)
-			t.Fatalf("delete ran before the resource lock was released:\n%s", data)
-		}
-	} else if !os.IsNotExist(err) {
+	select {
+	case <-commandRan:
 		close(releaseHolder)
-		t.Fatal(err)
+		t.Fatal("delete ran before the resource lock was released")
+	default:
 	}
 	close(releaseHolder)
 	if err := <-holderDone; err != nil {
@@ -204,12 +199,10 @@ func TestCleanupWaitDoesNotConsumeCommandTimeout(t *testing.T) {
 	case <-time.After(cleanupTimeout + 5*time.Second):
 		t.Fatal("cleanup did not run after the resource lock was released")
 	}
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "test delete") {
-		t.Fatalf("delete did not run after the resource lock was released:\n%s", data)
+	select {
+	case <-commandRan:
+	default:
+		t.Fatal("delete did not run after the resource lock was released")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)

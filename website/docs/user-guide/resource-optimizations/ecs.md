@@ -962,7 +962,65 @@ ecctl ecs keypair create \
 ```
 
 Without `--public-key`, the ecctl action generates a new key pair through
-`CreateKeyPair`.
+`CreateKeyPair`. The unencrypted private key is returned only once as
+`keypair.private_key`; ecctl does not write it to a local file. Save it
+immediately with restrictive permissions. This field contains sensitive secret
+material: do not log or share it. The following example checks its dependencies
+and target path before creating the cloud key pair, captures the complete JSON
+response before extracting the private key, refuses to replace an existing
+`web-key.pem`, and retains recovery material if a later step fails:
+
+```bash
+(
+  set -eu
+  command -v jq >/dev/null 2>&1 || {
+    printf 'jq is required\n' >&2
+    exit 1
+  }
+
+  umask 077
+  private_key_file=./web-key.pem
+  if [ -e "$private_key_file" ] || [ -L "$private_key_file" ]; then
+    printf 'Refusing to replace %s\n' "$private_key_file" >&2
+    exit 1
+  fi
+  response_file="$(mktemp "${TMPDIR:-/tmp}/ecctl-keypair-response.json.XXXXXX")"
+  private_key_temp="$(mktemp "${private_key_file}.XXXXXX")"
+
+  if ! ecctl ecs keypair create \
+    --region cn-hangzhou \
+    --name web-key \
+    --output json > "$response_file"; then
+    rm -f "$private_key_temp"
+    printf 'ecctl failed; response retained at %s\n' "$response_file" >&2
+    exit 1
+  fi
+
+  if ! jq -ejr \
+    '.keypair.private_key | select(type == "string" and length > 0)' \
+    "$response_file" > "$private_key_temp"; then
+    rm -f "$private_key_temp"
+    printf 'Private key extraction failed; response retained at %s\n' \
+      "$response_file" >&2
+    exit 1
+  fi
+
+  if ! ln "$private_key_temp" "$private_key_file"; then
+    printf 'Target exists; private key retained at %s\n' "$private_key_temp" >&2
+    printf 'Full response retained at %s\n' "$response_file" >&2
+    exit 1
+  fi
+  rm -f "$private_key_temp" "$response_file"
+)
+```
+
+The provider mutation and local persistence are separate operations, so a
+stdout workflow cannot make them fully atomic. If `ecctl` reports failure and
+the retained response does not contain a complete private key, do not use that
+cloud key pair; delete it or choose another name and create a replacement.
+
+Imported key pairs do not contain `keypair.private_key`, and later `get` or
+`list` calls cannot retrieve it.
 
 See the [key-pair reference](../../reference/resources/ecs/keypair.md).
 
