@@ -50,7 +50,7 @@ func TestClientDownloadsOSSArtifact(t *testing.T) {
 	client := &Client{HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest"}
 
 	version, err := client.LatestVersion(context.Background())
-	if err != nil || version != "1.2.3" {
+	if err != nil || version != "0.2.2" {
 		t.Fatalf("LatestVersion = %q, %v", version, err)
 	}
 	artifact, err := client.DownloadArtifact(context.Background(), version, "darwin", "arm64")
@@ -160,6 +160,301 @@ func TestClientChecksSignedOSSLatestWhenGitHubIsRateLimited(t *testing.T) {
 	}
 }
 
+func TestClientUsesGitHubSignedManifestWhenOSSMetadataIsMissing(t *testing.T) {
+	version := "1.2.3"
+	filename := "ecctl_1.2.3_darwin_arm64.tar.gz"
+	archive := testTarGzip(t, "ecctl", []byte("github-signed-metadata"))
+	manifest, checksums, assets := testUpdateManifestV2(t, version, map[string][]byte{filename: archive})
+	bundle := []byte(`{"test":"valid-bundle"}`)
+	var apiRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/oss/version.txt":
+			fmt.Fprintln(w, version)
+		case "/oss/1.2.3/ecctl-update-manifest-v2.json":
+			http.NotFound(w, request)
+		case "/releases/download/v1.2.3/ecctl-update-manifest-v2.json":
+			_, _ = w.Write(manifest)
+		case "/releases/download/v1.2.3/ecctl-update-manifest-v2.sigstore.json":
+			_, _ = w.Write(bundle)
+		case "/oss/1.2.3/checksums.txt":
+			_, _ = w.Write(checksums)
+		case "/oss/1.2.3/" + filename:
+			_, _ = w.Write(assets[filename])
+		case "/api/latest", "/api/tags/v1.2.3":
+			apiRequests.Add(1)
+			http.Error(w, "rate limited", http.StatusForbidden)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	client := &Client{
+		HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest",
+		githubReleaseBase: server.URL + "/releases",
+		verifyManifest: func(gotManifest, gotBundle []byte) error {
+			if !bytes.Equal(gotManifest, manifest) || !bytes.Equal(gotBundle, bundle) {
+				return errors.New("unexpected signed material")
+			}
+			return nil
+		},
+	}
+	result, err := Check(context.Background(), Options{
+		CurrentVersion: "1.2.2", Executable: filepath.Join(t.TempDir(), "ecctl"),
+		GOOS: "darwin", GOARCH: "arm64", Client: client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TargetVersion != version || result.Source != "oss" || !result.UpdateAvailable {
+		t.Fatalf("check result = %#v", result)
+	}
+	if got := apiRequests.Load(); got != 0 {
+		t.Fatalf("GitHub API requests = %d, want 0", got)
+	}
+}
+
+func TestClientUsesGitHubArchiveBoundBySignedManifestWithoutAPI(t *testing.T) {
+	version := "1.2.3"
+	filename := "ecctl_1.2.3_linux_amd64.tar.gz"
+	archive := testTarGzip(t, "ecctl", []byte("github-signed-archive"))
+	manifest, _, _ := testUpdateManifestV2(t, version, map[string][]byte{filename: archive})
+	bundle := []byte(`{"test":"valid-bundle"}`)
+	var apiRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/oss/1.2.3/ecctl-update-manifest-v2.json":
+			_, _ = w.Write(manifest)
+		case "/oss/1.2.3/ecctl-update-manifest-v2.sigstore.json":
+			_, _ = w.Write(bundle)
+		case "/oss/1.2.3/checksums.txt":
+			http.Error(w, "OSS unavailable", http.StatusServiceUnavailable)
+		case "/releases/download/v1.2.3/" + filename:
+			_, _ = w.Write(archive)
+		case "/api/tags/v1.2.3":
+			apiRequests.Add(1)
+			http.Error(w, "rate limited", http.StatusForbidden)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	client := &Client{
+		HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest",
+		githubReleaseBase: server.URL + "/releases",
+		verifyManifest: func(gotManifest, gotBundle []byte) error {
+			if !bytes.Equal(gotManifest, manifest) || !bytes.Equal(gotBundle, bundle) {
+				return errors.New("unexpected signed material")
+			}
+			return nil
+		},
+	}
+	artifact, err := client.DownloadArtifact(context.Background(), version, "linux", "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Source != "github" || !bytes.Equal(artifact.Archive, archive) {
+		t.Fatalf("artifact = %#v", artifact)
+	}
+	if got := apiRequests.Load(); got != 0 {
+		t.Fatalf("GitHub API requests = %d, want 0", got)
+	}
+}
+
+func TestLatestUsesGitHubSignedManifestWithoutRESTAPI(t *testing.T) {
+	version := "1.2.3"
+	manifest, _, _ := testUpdateManifestV2(t, version, nil)
+	bundle := []byte(`{"test":"valid-bundle"}`)
+	var apiRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/oss/version.txt":
+			http.Error(w, "OSS unavailable", http.StatusServiceUnavailable)
+		case "/releases/latest/download/ecctl-update-manifest-v2.json":
+			w.Header().Set("Location", "http://"+request.Host+"/releases/download/v1.2.3/ecctl-update-manifest-v2.json")
+			w.WriteHeader(http.StatusFound)
+		case "/releases/download/v1.2.3/ecctl-update-manifest-v2.json":
+			_, _ = w.Write(manifest)
+		case "/releases/download/v1.2.3/ecctl-update-manifest-v2.sigstore.json":
+			_, _ = w.Write(bundle)
+		case "/api/latest":
+			apiRequests.Add(1)
+			http.Error(w, "rate limited", http.StatusForbidden)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	client := &Client{
+		HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest",
+		githubReleaseBase: server.URL + "/releases",
+		verifyManifest: func(gotManifest, gotBundle []byte) error {
+			if !bytes.Equal(gotManifest, manifest) || !bytes.Equal(gotBundle, bundle) {
+				return errors.New("unexpected signed material")
+			}
+			return nil
+		},
+	}
+	got, err := client.ResolveLatestVersion(context.Background())
+	if err != nil || got != version {
+		t.Fatalf("ResolveLatestVersion = %q, %v", got, err)
+	}
+	if got := apiRequests.Load(); got != 0 {
+		t.Fatalf("GitHub API requests = %d, want 0", got)
+	}
+}
+
+func TestLatestSignedReleaseFailureDoesNotFallBackToRESTAPI(t *testing.T) {
+	var apiRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/oss/version.txt":
+			http.Error(w, "OSS unavailable", http.StatusServiceUnavailable)
+		case "/releases/latest/download/ecctl-update-manifest-v2.json":
+			w.Header().Set("X-RateLimit-Remaining", "0")
+			w.Header().Set("X-RateLimit-Reset", "1788235754")
+			http.Error(w, "rate limited", http.StatusForbidden)
+		case "/api/latest":
+			apiRequests.Add(1)
+			http.Error(w, "must not use REST API", http.StatusForbidden)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	client := &Client{
+		HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest",
+	}
+	_, err := client.ResolveLatestVersion(context.Background())
+	if err == nil || ErrorKindOf(err) != ErrorUnavailable || !strings.Contains(err.Error(), "rate limit exhausted") {
+		t.Fatalf("latest signed release error = %v, kind=%q", err, ErrorKindOf(err))
+	}
+	if got := apiRequests.Load(); got != 0 {
+		t.Fatalf("GitHub API requests = %d, want 0", got)
+	}
+}
+
+func TestLatestSignedReleasePinsRedirectVersion(t *testing.T) {
+	manifest, _, _ := testUpdateManifestV2(t, "1.2.4", nil)
+	bundle := []byte(`{"test":"valid-bundle"}`)
+	var apiRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/oss/version.txt":
+			http.Error(w, "OSS unavailable", http.StatusServiceUnavailable)
+		case "/releases/latest/download/ecctl-update-manifest-v2.json":
+			w.Header().Set("Location", "http://"+request.Host+"/releases/download/v1.2.3/ecctl-update-manifest-v2.json")
+			w.WriteHeader(http.StatusFound)
+		case "/releases/download/v1.2.3/ecctl-update-manifest-v2.json":
+			_, _ = w.Write(manifest)
+		case "/releases/download/v1.2.3/ecctl-update-manifest-v2.sigstore.json":
+			_, _ = w.Write(bundle)
+		case "/api/latest":
+			apiRequests.Add(1)
+			http.Error(w, "must not use REST API", http.StatusForbidden)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	client := &Client{
+		HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest",
+		githubReleaseBase: server.URL + "/releases",
+		verifyManifest:    func([]byte, []byte) error { return nil },
+	}
+	_, err := client.ResolveLatestVersion(context.Background())
+	if err == nil || ErrorKindOf(err) != ErrorIntegrity || !strings.Contains(err.Error(), `version "1.2.4" does not match requested version 1.2.3`) {
+		t.Fatalf("redirect race error = %v, kind=%q", err, ErrorKindOf(err))
+	}
+	if got := apiRequests.Load(); got != 0 {
+		t.Fatalf("GitHub API requests = %d, want 0", got)
+	}
+}
+
+func TestGitHubLatestManifestRedirectRequiresCanonicalStableTag(t *testing.T) {
+	base := "https://github.com/aliyun/elastic-compute-control-cli/releases"
+	tests := []struct {
+		name     string
+		location string
+		want     string
+	}{
+		{name: "stable", location: base + "/download/v1.2.3/ecctl-update-manifest-v2.json", want: "1.2.3"},
+		{name: "other host", location: "https://example.com/aliyun/elastic-compute-control-cli/releases/download/v1.2.3/ecctl-update-manifest-v2.json"},
+		{name: "query", location: base + "/download/v1.2.3/ecctl-update-manifest-v2.json?asset=other"},
+		{name: "prerelease", location: base + "/download/v1.2.4-rc.1/ecctl-update-manifest-v2.json"},
+		{name: "wrong asset", location: base + "/download/v1.2.3/checksums.txt"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			location, err := url.Parse(test.location)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := githubVersionFromManifestRedirect(base, location)
+			if test.want == "" {
+				if err == nil {
+					t.Fatalf("redirect %q resolved to %q", test.location, got)
+				}
+				return
+			}
+			if err != nil || got != test.want {
+				t.Fatalf("redirect %q = %q, %v", test.location, got, err)
+			}
+		})
+	}
+}
+
+func TestSignedManifestRequirementStartsAtFirstV2Release(t *testing.T) {
+	if requiresSignedUpdate("0.2.2") {
+		t.Fatal("v0.2.2 unexpectedly requires a signed manifest")
+	}
+	if !requiresSignedUpdate("0.2.3-rc.1") || !requiresSignedUpdate("0.2.3") || !requiresSignedUpdate("1.0.0") {
+		t.Fatal("v0.2.3+ does not require a signed manifest")
+	}
+}
+
+func TestRequiredSignedManifestDoesNotFallBackToGitHubAPI(t *testing.T) {
+	var apiRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/oss/version.txt":
+			fmt.Fprintln(w, "0.2.3")
+		case "/oss/0.2.3/ecctl-update-manifest-v2.json", "/releases/download/v0.2.3/ecctl-update-manifest-v2.json":
+			http.NotFound(w, request)
+		case "/api/latest":
+			apiRequests.Add(1)
+			http.Error(w, "must not use legacy API", http.StatusForbidden)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	client := &Client{
+		HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest",
+	}
+	_, err := client.ResolveLatestVersion(context.Background())
+	if err == nil || ErrorKindOf(err) != ErrorIntegrity || !strings.Contains(err.Error(), "signed update manifest") {
+		t.Fatalf("missing signed manifest error = %v, kind=%q", err, ErrorKindOf(err))
+	}
+	if got := apiRequests.Load(); got != 0 {
+		t.Fatalf("GitHub API requests = %d, want 0", got)
+	}
+}
+
+func TestGitHubRateLimitErrorIncludesReset(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset", "1788235754")
+		http.Error(w, "rate limited", http.StatusForbidden)
+	}))
+	defer server.Close()
+	client := &Client{HTTP: server.Client(), GitHubAPIBase: server.URL}
+	_, err := client.resolveRelease(context.Background(), "", true)
+	if err == nil || !strings.Contains(err.Error(), "rate limit exhausted") || !strings.Contains(err.Error(), "2026-09-01T04:09:14Z") {
+		t.Fatalf("rate-limit error = %v", err)
+	}
+}
+
 func TestClientChecksSignedOSSExplicitPrereleaseWithoutLatestMetadata(t *testing.T) {
 	version := "1.2.4-rc.1"
 	filename := "ecctl_1.2.4-rc.1_linux_amd64.tar.gz"
@@ -210,18 +505,27 @@ func TestClientChecksSignedOSSExplicitPrereleaseWithoutLatestMetadata(t *testing
 }
 
 func TestLatestFallsBackToGitHubWhenOSSPointerIsUnavailable(t *testing.T) {
-	version := "1.2.3"
-	filename := "ecctl_1.2.3_darwin_arm64.tar.gz"
+	version := "0.2.2"
+	filename := "ecctl_0.2.2_darwin_arm64.tar.gz"
 	archive := testTarGzip(t, "ecctl", []byte("github-fallback-binary"))
 	checksums := []byte(digestBytes(archive) + "  " + filename + "\n")
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+	var latestAPIRequests atomic.Int32
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
-		case "/oss/version.txt", "/oss/1.2.3/checksums.txt":
+		case "/oss/version.txt", "/oss/0.2.2/checksums.txt":
 			http.Error(w, "OSS unavailable", http.StatusServiceUnavailable)
-		case "/api/latest":
+		case "/releases/latest/download/" + releaseartifact.UpdateManifestV2Name:
+			http.Redirect(w, request, server.URL+"/releases/download/v0.2.2/"+releaseartifact.UpdateManifestV2Name, http.StatusFound)
+		case "/releases/download/v0.2.2/" + releaseartifact.UpdateManifestV2Name:
+			http.NotFound(w, request)
+		case "/api/tags/v0.2.2":
 			writeTestRelease(t, w, request, version, false, false, true, map[string][]byte{
 				"checksums.txt": checksums, filename: archive,
 			})
+		case "/api/latest":
+			latestAPIRequests.Add(1)
+			writeTestRelease(t, w, request, "0.2.3", false, false, true, nil)
 		case "/assets/" + filename:
 			_, _ = w.Write(archive)
 		default:
@@ -230,7 +534,7 @@ func TestLatestFallsBackToGitHubWhenOSSPointerIsUnavailable(t *testing.T) {
 	}))
 	defer server.Close()
 	result, err := Check(context.Background(), Options{
-		CurrentVersion: "1.2.2", Executable: filepath.Join(t.TempDir(), "ecctl"),
+		CurrentVersion: "0.2.1", Executable: filepath.Join(t.TempDir(), "ecctl"),
 		GOOS: "darwin", GOARCH: "arm64",
 		Client: &Client{HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest"},
 	})
@@ -239,6 +543,9 @@ func TestLatestFallsBackToGitHubWhenOSSPointerIsUnavailable(t *testing.T) {
 	}
 	if result.TargetVersion != version || result.Source != "github" || !result.UpdateAvailable {
 		t.Fatalf("fallback result = %#v", result)
+	}
+	if latestAPIRequests.Load() != 0 {
+		t.Fatal("legacy fallback consulted mutable latest API after resolving the exact redirect tag")
 	}
 }
 
@@ -348,14 +655,14 @@ func TestResolveLatestVersionRequiresMatchingImmutableStableRelease(t *testing.T
 		want       string
 		kind       ErrorKind
 	}{
-		{name: "match", oss: "1.2.3", tag: "v1.2.3", immutable: true, want: "1.2.3"},
-		{name: "oss propagation lag", oss: "1.2.2", tag: "v1.2.3", immutable: true, kind: ErrorUnavailable},
-		{name: "oss ahead", oss: "1.2.4", tag: "v1.2.3", immutable: true, kind: ErrorIntegrity},
-		{name: "mutable release", oss: "1.2.3", tag: "v1.2.3", kind: ErrorIntegrity},
-		{name: "draft release", oss: "1.2.3", tag: "v1.2.3", draft: true, immutable: true, kind: ErrorIntegrity},
-		{name: "prerelease metadata", oss: "1.2.3", tag: "v1.2.3", prerelease: true, immutable: true, kind: ErrorIntegrity},
-		{name: "prerelease tag", oss: "1.2.3", tag: "v1.2.3-rc.1", immutable: true, kind: ErrorIntegrity},
-		{name: "missing v prefix", oss: "1.2.3", tag: "1.2.3", immutable: true, kind: ErrorIntegrity},
+		{name: "match", oss: "0.2.2", tag: "v0.2.2", immutable: true, want: "0.2.2"},
+		{name: "oss propagation lag", oss: "0.2.1", tag: "v0.2.2", immutable: true, kind: ErrorUnavailable},
+		{name: "oss ahead", oss: "0.2.2", tag: "v0.2.1", immutable: true, kind: ErrorIntegrity},
+		{name: "mutable release", oss: "0.2.2", tag: "v0.2.2", kind: ErrorIntegrity},
+		{name: "draft release", oss: "0.2.2", tag: "v0.2.2", draft: true, immutable: true, kind: ErrorIntegrity},
+		{name: "prerelease metadata", oss: "0.2.2", tag: "v0.2.2", prerelease: true, immutable: true, kind: ErrorIntegrity},
+		{name: "prerelease tag", oss: "0.2.2", tag: "v0.2.2-rc.1", immutable: true, kind: ErrorIntegrity},
+		{name: "missing v prefix", oss: "0.2.2", tag: "0.2.2", immutable: true, kind: ErrorIntegrity},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -366,7 +673,7 @@ func TestResolveLatestVersionRequiresMatchingImmutableStableRelease(t *testing.T
 				case "/api/latest":
 					version := strings.TrimPrefix(test.tag, "v")
 					if _, err := NormalizeVersion(version); err != nil {
-						version = "1.2.3"
+						version = "0.2.2"
 					}
 					writeTestReleaseTag(t, w, request, version, test.tag, test.draft, test.prerelease, test.immutable, nil)
 				default:
@@ -397,19 +704,19 @@ func TestExplicitTargetRejectsUntrustedReleaseBeforeArtifact(t *testing.T) {
 		prerelease bool
 		immutable  bool
 	}{
-		{name: "mutable", tag: "v1.2.3"},
-		{name: "draft", tag: "v1.2.3", draft: true, immutable: true},
-		{name: "wrong tag", tag: "v1.2.4", immutable: true},
-		{name: "prerelease mismatch", tag: "v1.2.3", prerelease: true, immutable: true},
+		{name: "mutable", tag: "v0.2.2"},
+		{name: "draft", tag: "v0.2.2", draft: true, immutable: true},
+		{name: "wrong tag", tag: "v0.2.1", immutable: true},
+		{name: "prerelease mismatch", tag: "v0.2.2", prerelease: true, immutable: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var artifactRequests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 				switch request.URL.Path {
-				case "/oss/1.2.3/ecctl-update-manifest-v2.json":
+				case "/oss/0.2.2/ecctl-update-manifest-v2.json", "/releases/download/v0.2.2/ecctl-update-manifest-v2.json":
 					http.NotFound(w, request)
-				case "/api/tags/v1.2.3":
+				case "/api/tags/v0.2.2":
 					writeTestReleaseTag(t, w, request, strings.TrimPrefix(test.tag, "v"), test.tag, test.draft, test.prerelease, test.immutable, nil)
 				default:
 					artifactRequests.Add(1)
@@ -418,7 +725,7 @@ func TestExplicitTargetRejectsUntrustedReleaseBeforeArtifact(t *testing.T) {
 			}))
 			defer server.Close()
 			_, err := Check(context.Background(), Options{
-				CurrentVersion: "1.2.2", TargetVersion: "1.2.3", GOOS: "darwin", GOARCH: "arm64",
+				CurrentVersion: "0.2.1", TargetVersion: "0.2.2", GOOS: "darwin", GOARCH: "arm64",
 				Client:   &Client{HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest"},
 				LookPath: func(string) (string, error) { return "", os.ErrNotExist },
 			})
@@ -438,7 +745,7 @@ func TestClientFallsBackToGitHubWhenOSSUnavailable(t *testing.T) {
 	defer server.Close()
 	client := &Client{HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest"}
 
-	artifact, err := client.DownloadArtifact(context.Background(), "1.2.3", "darwin", "arm64")
+	artifact, err := client.DownloadArtifact(context.Background(), "0.2.2", "darwin", "arm64")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,12 +758,12 @@ func TestClientFallsBackToGitHubOnPartialOSSResponse(t *testing.T) {
 	archive := testTarGzip(t, "ecctl", []byte("binary"))
 	digest := sha256.Sum256(archive)
 	checksum := hex.EncodeToString(digest[:])
-	filename := "ecctl_1.2.3_darwin_arm64.tar.gz"
+	filename := "ecctl_0.2.2_darwin_arm64.tar.gz"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/api/tags/v1.2.3":
-			writeTestRelease(t, w, r, "1.2.3", false, false, true, map[string][]byte{"checksums.txt": []byte(checksum + "  " + filename + "\n"), filename: archive})
-		case r.URL.Path == "/oss/1.2.3/checksums.txt":
+		case r.URL.Path == "/api/tags/v0.2.2":
+			writeTestRelease(t, w, r, "0.2.2", false, false, true, map[string][]byte{"checksums.txt": []byte(checksum + "  " + filename + "\n"), filename: archive})
+		case r.URL.Path == "/oss/0.2.2/checksums.txt":
 			w.Header().Set("Content-Length", "500")
 			fmt.Fprint(w, "partial")
 		case r.URL.Path == "/assets/"+filename:
@@ -468,7 +775,7 @@ func TestClientFallsBackToGitHubOnPartialOSSResponse(t *testing.T) {
 	defer server.Close()
 	client := &Client{HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest"}
 
-	artifact, err := client.DownloadArtifact(context.Background(), "1.2.3", "darwin", "arm64")
+	artifact, err := client.DownloadArtifact(context.Background(), "0.2.2", "darwin", "arm64")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +790,7 @@ func TestClientDoesNotFallbackOnOSSIntegrityFailure(t *testing.T) {
 	defer server.Close()
 	client := &Client{HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest"}
 
-	_, err := client.DownloadArtifact(context.Background(), "1.2.3", "darwin", "arm64")
+	_, err := client.DownloadArtifact(context.Background(), "0.2.2", "darwin", "arm64")
 	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Fatalf("DownloadArtifact error = %v", err)
 	}
@@ -497,16 +804,16 @@ func TestClientRejectsSelfConsistentMaliciousOSSAgainstGitHubDigest(t *testing.T
 	maliciousArchive := testTarGzip(t, "ecctl", []byte("malicious-binary"))
 	cleanDigest := sha256.Sum256(cleanArchive)
 	maliciousDigest := sha256.Sum256(maliciousArchive)
-	filename := "ecctl_1.2.3_darwin_arm64.tar.gz"
+	filename := "ecctl_0.2.2_darwin_arm64.tar.gz"
 	var githubArchiveRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		cleanChecksums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(cleanDigest[:]), filename)
 		switch request.URL.Path {
-		case "/api/tags/v1.2.3":
-			writeTestRelease(t, w, request, "1.2.3", false, false, true, map[string][]byte{"checksums.txt": []byte(cleanChecksums), filename: cleanArchive})
-		case "/oss/1.2.3/checksums.txt":
+		case "/api/tags/v0.2.2":
+			writeTestRelease(t, w, request, "0.2.2", false, false, true, map[string][]byte{"checksums.txt": []byte(cleanChecksums), filename: cleanArchive})
+		case "/oss/0.2.2/checksums.txt":
 			fmt.Fprintf(w, "%s  %s\n", hex.EncodeToString(maliciousDigest[:]), filename)
-		case "/oss/1.2.3/" + filename:
+		case "/oss/0.2.2/" + filename:
 			_, _ = w.Write(maliciousArchive)
 		case "/assets/" + filename:
 			githubArchiveRequests.Add(1)
@@ -518,7 +825,7 @@ func TestClientRejectsSelfConsistentMaliciousOSSAgainstGitHubDigest(t *testing.T
 	defer server.Close()
 	client := &Client{HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest"}
 
-	_, err := client.DownloadArtifact(context.Background(), "1.2.3", "darwin", "arm64")
+	_, err := client.DownloadArtifact(context.Background(), "0.2.2", "darwin", "arm64")
 	if err == nil || ErrorKindOf(err) != ErrorIntegrity || !strings.Contains(err.Error(), "checksums.txt checksum mismatch") {
 		t.Fatalf("malicious OSS error = %v, kind=%q", err, ErrorKindOf(err))
 	}
@@ -550,7 +857,7 @@ func TestTLSFailureIsNotClassifiedAsFallback(t *testing.T) {
 func TestClientTimeoutFallsBackWhileCallerContextIsLive(t *testing.T) {
 	archive := testTarGzip(t, "ecctl", []byte("binary"))
 	digest := sha256.Sum256(archive)
-	filename := "ecctl_1.2.3_darwin_arm64.tar.gz"
+	filename := "ecctl_0.2.2_darwin_arm64.tar.gz"
 	var githubRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if strings.HasPrefix(request.URL.Path, "/oss/") {
@@ -559,9 +866,9 @@ func TestClientTimeoutFallsBackWhileCallerContextIsLive(t *testing.T) {
 		}
 		githubRequests.Add(1)
 		switch request.URL.Path {
-		case "/api/tags/v1.2.3":
+		case "/api/tags/v0.2.2":
 			checksums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(digest[:]), filename)
-			writeTestRelease(t, w, request, "1.2.3", false, false, true, map[string][]byte{"checksums.txt": []byte(checksums), filename: archive})
+			writeTestRelease(t, w, request, "0.2.2", false, false, true, map[string][]byte{"checksums.txt": []byte(checksums), filename: archive})
 		case "/assets/" + filename:
 			_, _ = w.Write(archive)
 		default:
@@ -570,7 +877,7 @@ func TestClientTimeoutFallsBackWhileCallerContextIsLive(t *testing.T) {
 	}))
 	defer server.Close()
 	client := &Client{HTTP: &http.Client{Timeout: 20 * time.Millisecond}, OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest"}
-	artifact, err := client.DownloadArtifact(context.Background(), "1.2.3", "darwin", "arm64")
+	artifact, err := client.DownloadArtifact(context.Background(), "0.2.2", "darwin", "arm64")
 	if err != nil || artifact.Source != "github" {
 		t.Fatalf("DownloadArtifact = %#v, %v", artifact, err)
 	}
@@ -806,13 +1113,13 @@ func TestUpdateDirectReplacesExecutable(t *testing.T) {
 			return nil, err
 		}
 		if string(raw) == "new-binary" {
-			return []byte("ecctl 1.2.3\n"), nil
+			return []byte("ecctl 0.2.2\n"), nil
 		}
-		return []byte("ecctl 1.2.2\n"), nil
+		return []byte("ecctl 0.2.1\n"), nil
 	}
 	client := &Client{HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest"}
 	result, err := Update(context.Background(), Options{
-		CurrentVersion: "1.2.2", Executable: executable, GOOS: "darwin", GOARCH: "arm64", Client: client, RunCommand: runner,
+		CurrentVersion: "0.2.1", Executable: executable, GOOS: "darwin", GOARCH: "arm64", Client: client, RunCommand: runner,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -846,7 +1153,7 @@ func TestCheckExplicitVersionValidatesPublishedArtifact(t *testing.T) {
 		CurrentVersion: "1.2.2", TargetVersion: "1.2.4", GOOS: "darwin", GOARCH: "arm64", Client: client,
 		LookPath: func(string) (string, error) { return "", os.ErrNotExist },
 	})
-	if err == nil || ErrorKindOf(err) != ErrorUnavailable {
+	if err == nil || ErrorKindOf(err) != ErrorIntegrity {
 		t.Fatalf("unpublished explicit target error = %v, kind=%q", err, ErrorKindOf(err))
 	}
 	if pointerRequests.Load() != 0 {
@@ -855,7 +1162,7 @@ func TestCheckExplicitVersionValidatesPublishedArtifact(t *testing.T) {
 }
 
 func TestCheckExplicitDirectTargetsUseExactImmutableReleaseOnly(t *testing.T) {
-	for _, target := range []string{"1.2.2", "1.2.4-rc.1"} {
+	for _, target := range []string{"0.2.1", "0.2.2-rc.1"} {
 		t.Run(target, func(t *testing.T) {
 			filename := "ecctl_" + target + "_darwin_arm64.tar.gz"
 			archive := []byte("archive-" + target)
@@ -878,7 +1185,7 @@ func TestCheckExplicitDirectTargetsUseExactImmutableReleaseOnly(t *testing.T) {
 			}))
 			defer server.Close()
 			result, err := Check(context.Background(), Options{
-				CurrentVersion: "1.2.1", TargetVersion: target, GOOS: "darwin", GOARCH: "arm64",
+				CurrentVersion: "0.2.0", TargetVersion: target, GOOS: "darwin", GOARCH: "arm64",
 				Client: &Client{
 					HTTP: server.Client(), OSSBase: server.URL + "/oss",
 					GitHubAPIBase: server.URL + "/api/latest",
@@ -901,7 +1208,7 @@ func TestCheckReportsGitHubWhenOSSArtifactIsUnavailable(t *testing.T) {
 	defer server.Close()
 	client := &Client{HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest"}
 	result, err := Check(context.Background(), Options{
-		CurrentVersion: "1.2.2", TargetVersion: "1.2.3", GOOS: "darwin", GOARCH: "arm64", Client: client,
+		CurrentVersion: "0.2.1", TargetVersion: "0.2.2", GOOS: "darwin", GOARCH: "arm64", Client: client,
 		LookPath: func(string) (string, error) { return "", os.ErrNotExist },
 	})
 	if err != nil {
@@ -915,15 +1222,15 @@ func TestCheckReportsGitHubWhenOSSArtifactIsUnavailable(t *testing.T) {
 func TestCheckReportsGitHubWhenOSSArchiveIsMissing(t *testing.T) {
 	archive := testTarGzip(t, "ecctl", []byte("binary"))
 	digest := sha256.Sum256(archive)
-	filename := "ecctl_1.2.3_darwin_arm64.tar.gz"
+	filename := "ecctl_0.2.2_darwin_arm64.tar.gz"
 	checksums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(digest[:]), filename)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
-		case "/api/tags/v1.2.3":
-			writeTestRelease(t, w, request, "1.2.3", false, false, true, map[string][]byte{"checksums.txt": []byte(checksums), filename: archive})
-		case "/oss/1.2.3/checksums.txt":
+		case "/api/tags/v0.2.2":
+			writeTestRelease(t, w, request, "0.2.2", false, false, true, map[string][]byte{"checksums.txt": []byte(checksums), filename: archive})
+		case "/oss/0.2.2/checksums.txt":
 			fmt.Fprint(w, checksums)
-		case "/oss/1.2.3/" + filename:
+		case "/oss/0.2.2/" + filename:
 			http.NotFound(w, request)
 		case "/assets/" + filename:
 			_, _ = w.Write(archive)
@@ -934,7 +1241,7 @@ func TestCheckReportsGitHubWhenOSSArchiveIsMissing(t *testing.T) {
 	defer server.Close()
 	client := &Client{HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest"}
 	result, err := Check(context.Background(), Options{
-		CurrentVersion: "1.2.2", TargetVersion: "1.2.3", GOOS: "darwin", GOARCH: "arm64", Client: client,
+		CurrentVersion: "0.2.1", TargetVersion: "0.2.2", GOOS: "darwin", GOARCH: "arm64", Client: client,
 		LookPath: func(string) (string, error) { return "", os.ErrNotExist },
 	})
 	if err != nil {
@@ -948,7 +1255,7 @@ func TestCheckReportsGitHubWhenOSSArchiveIsMissing(t *testing.T) {
 func TestCheckRejectsNonLatestExplicitVersionForHomebrew(t *testing.T) {
 	root := t.TempDir()
 	prefix := filepath.Join(root, "homebrew")
-	caskBinary := filepath.Join(prefix, "Caskroom", "ecctl", "1.2.2", "ecctl")
+	caskBinary := filepath.Join(prefix, "Caskroom", "ecctl", "0.2.1", "ecctl")
 	if err := os.MkdirAll(filepath.Dir(caskBinary), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -968,11 +1275,11 @@ func TestCheckRejectsNonLatestExplicitVersionForHomebrew(t *testing.T) {
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/oss/version.txt" {
-			fmt.Fprint(w, "1.2.3")
+			fmt.Fprint(w, "0.2.2")
 			return
 		}
 		if request.URL.Path == "/api/latest" {
-			writeTestRelease(t, w, request, "1.2.3", false, false, true, nil)
+			writeTestRelease(t, w, request, "0.2.2", false, false, true, nil)
 			return
 		}
 		http.NotFound(w, request)
@@ -988,7 +1295,7 @@ func TestCheckRejectsNonLatestExplicitVersionForHomebrew(t *testing.T) {
 		return nil, fmt.Errorf("unexpected command %v", args)
 	}
 	_, err := Check(context.Background(), Options{
-		CurrentVersion: "1.2.2", TargetVersion: "1.2.4-rc.1", Executable: link, GOOS: "darwin", GOARCH: "arm64",
+		CurrentVersion: "0.2.1", TargetVersion: "0.2.2-rc.1", Executable: link, GOOS: "darwin", GOARCH: "arm64",
 		Client:     &Client{HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api/latest"},
 		RunCommand: runner, LookPath: func(string) (string, error) { return "/usr/local/bin/brew", nil },
 	})
@@ -1489,22 +1796,22 @@ func releaseServer(t *testing.T, archive []byte, ossUnavailable, corruptOSS bool
 	t.Helper()
 	digest := sha256.Sum256(archive)
 	checksum := hex.EncodeToString(digest[:])
-	filename := "ecctl_1.2.3_darwin_arm64.tar.gz"
+	filename := "ecctl_0.2.2_darwin_arm64.tar.gz"
 	checksums := checksum + "  " + filename + "\n"
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/oss/version.txt":
-			fmt.Fprintln(w, "1.2.3")
-		case r.URL.Path == "/api/latest" || r.URL.Path == "/api/tags/v1.2.3":
-			writeTestRelease(t, w, r, "1.2.3", false, false, true, map[string][]byte{
+			fmt.Fprintln(w, "0.2.2")
+		case r.URL.Path == "/api/latest" || r.URL.Path == "/api/tags/v0.2.2":
+			writeTestRelease(t, w, r, "0.2.2", false, false, true, map[string][]byte{
 				"checksums.txt": []byte(checksums),
 				filename:        archive,
 			})
-		case ossUnavailable && strings.HasPrefix(r.URL.Path, "/oss/1.2.3/"):
+		case ossUnavailable && strings.HasPrefix(r.URL.Path, "/oss/0.2.2/"):
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
-		case r.URL.Path == "/oss/1.2.3/checksums.txt":
+		case r.URL.Path == "/oss/0.2.2/checksums.txt":
 			fmt.Fprint(w, checksums)
-		case r.URL.Path == "/oss/1.2.3/"+filename:
+		case r.URL.Path == "/oss/0.2.2/"+filename:
 			if corruptOSS && strings.HasPrefix(r.URL.Path, "/oss/") {
 				_, _ = w.Write([]byte("corrupt"))
 				return

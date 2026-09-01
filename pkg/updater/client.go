@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,10 @@ import (
 const (
 	DefaultOSSBaseURL = "https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/elastic-compute-control-cli"
 	githubLatestAPI   = "https://api.github.com/repos/aliyun/elastic-compute-control-cli/releases/latest"
+	githubReleasesURL = "https://github.com/aliyun/elastic-compute-control-cli/releases"
+	// firstSignedUpdate is the first immutable release whose asset contract
+	// requires the updater v2 manifest and Sigstore bundle.
+	firstSignedUpdate = "0.2.3-0"
 	maxVersionBytes   = 1024
 	maxReleaseBytes   = 1 << 20
 	maxReleaseAssets  = 64
@@ -34,10 +39,11 @@ const (
 var errUntrustedRedirect = errors.New("update redirect uses an untrusted HTTPS host")
 
 type Client struct {
-	HTTP           *http.Client
-	OSSBase        string
-	GitHubAPIBase  string
-	verifyManifest func([]byte, []byte) error
+	HTTP              *http.Client
+	OSSBase           string
+	GitHubAPIBase     string
+	githubReleaseBase string
+	verifyManifest    func([]byte, []byte) error
 }
 
 type Artifact struct {
@@ -62,8 +68,9 @@ type releaseDescriptor struct {
 }
 
 type sourceUnavailableError struct {
-	source string
-	err    error
+	source     string
+	err        error
+	statusCode int
 }
 
 func (e *sourceUnavailableError) Error() string {
@@ -88,8 +95,9 @@ func NewClient(timeout time.Duration) *Client {
 				return nil
 			},
 		},
-		OSSBase:       DefaultOSSBaseURL,
-		GitHubAPIBase: githubLatestAPI,
+		OSSBase:           DefaultOSSBaseURL,
+		GitHubAPIBase:     githubLatestAPI,
+		githubReleaseBase: githubReleasesURL,
 	}
 }
 
@@ -152,7 +160,20 @@ func (client *Client) resolveLatestRelease(ctx context.Context) (releaseDescript
 			return releaseDescriptor{}, ctxErr
 		}
 		if ErrorKindOf(err) == ErrorUnavailable {
-			return client.resolveRelease(ctx, "", true)
+			descriptor, version, signedErr := client.resolveLatestGitHubSignedRelease(ctx)
+			if signedErr == nil {
+				return descriptor, nil
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return releaseDescriptor{}, ctxErr
+			}
+			if version != "" && requiresSignedUpdate(version) {
+				return releaseDescriptor{}, requiredSignedReleaseError(version, signedErr)
+			}
+			if version == "" {
+				return releaseDescriptor{}, unavailableOrIntegrityError("resolve GitHub latest signed release", classifyAvailability(ctx, "github-release", signedErr))
+			}
+			return client.resolveRelease(ctx, version, false)
 		}
 		return releaseDescriptor{}, err
 	}
@@ -166,6 +187,19 @@ func (client *Client) resolveLatestRelease(ctx context.Context) (releaseDescript
 	var unavailable *sourceUnavailableError
 	if !errors.As(signedErr, &unavailable) {
 		return releaseDescriptor{}, WrapError(ErrorIntegrity, fmt.Errorf("verify OSS release v%s: %w", ossVersion, signedErr))
+	}
+	descriptor, githubErr := client.resolveGitHubSignedRelease(ctx, ossVersion)
+	if githubErr == nil {
+		return descriptor, nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return releaseDescriptor{}, ctxErr
+	}
+	if !errors.As(githubErr, &unavailable) {
+		return releaseDescriptor{}, WrapError(ErrorIntegrity, fmt.Errorf("verify GitHub signed release v%s: %w", ossVersion, githubErr))
+	}
+	if requiresSignedUpdate(ossVersion) {
+		return releaseDescriptor{}, requiredSignedReleaseError(ossVersion, githubErr)
 	}
 	descriptor, err = client.resolveRelease(ctx, "", true)
 	if err != nil {
@@ -200,6 +234,19 @@ func (client *Client) resolveReleaseForVersion(ctx context.Context, version stri
 	if !errors.As(signedErr, &unavailable) {
 		return releaseDescriptor{}, WrapError(ErrorIntegrity, fmt.Errorf("verify OSS release v%s: %w", normalized, signedErr))
 	}
+	descriptor, githubErr := client.resolveGitHubSignedRelease(ctx, normalized)
+	if githubErr == nil {
+		return descriptor, nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return releaseDescriptor{}, ctxErr
+	}
+	if !errors.As(githubErr, &unavailable) {
+		return releaseDescriptor{}, WrapError(ErrorIntegrity, fmt.Errorf("verify GitHub signed release v%s: %w", normalized, githubErr))
+	}
+	if requiresSignedUpdate(normalized) {
+		return releaseDescriptor{}, requiredSignedReleaseError(normalized, githubErr)
+	}
 	return client.resolveRelease(ctx, normalized, false)
 }
 
@@ -213,6 +260,86 @@ func (client *Client) resolveOSSRelease(ctx context.Context, version string) (re
 	if err != nil {
 		return releaseDescriptor{}, classifyAvailability(ctx, "oss", err)
 	}
+	return client.parseSignedRelease(version, manifestRaw, bundleRaw, "oss-v2")
+}
+
+func (client *Client) resolveLatestGitHubSignedRelease(ctx context.Context) (releaseDescriptor, string, error) {
+	version, err := client.resolveLatestGitHubReleaseVersion(ctx)
+	if err != nil {
+		return releaseDescriptor{}, "", err
+	}
+	descriptor, err := client.resolveGitHubSignedRelease(ctx, version)
+	return descriptor, version, err
+}
+
+func (client *Client) resolveLatestGitHubReleaseVersion(ctx context.Context) (string, error) {
+	base := client.effectiveGitHubReleaseBase()
+	request, err := http.NewRequestWithContext(ctx, http.MethodHead, base+"/latest/download/"+releaseartifact.UpdateManifestV2Name, nil)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("User-Agent", "ecctl-updater")
+	httpClient := client.HTTP
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	noRedirect := *httpClient
+	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	response, err := noRedirect.Do(request)
+	if err != nil {
+		return "", &sourceUnavailableError{source: "GitHub latest signed release", err: err}
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 300 || response.StatusCode >= 400 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		return "", responseUnavailableError("GitHub latest signed release", response)
+	}
+	location, err := response.Location()
+	if err != nil {
+		return "", fmt.Errorf("GitHub latest signed release redirect: %w", err)
+	}
+	return githubVersionFromManifestRedirect(base, location)
+}
+
+func githubVersionFromManifestRedirect(base string, location *url.URL) (string, error) {
+	baseURL, err := url.Parse(base)
+	if err != nil || baseURL.Hostname() == "" {
+		return "", errors.New("invalid GitHub release base URL")
+	}
+	if location.User != nil || location.RawQuery != "" || location.Fragment != "" ||
+		!strings.EqualFold(location.Scheme, baseURL.Scheme) || !strings.EqualFold(location.Host, baseURL.Host) {
+		return "", fmt.Errorf("GitHub latest signed release uses untrusted redirect %q", location.String())
+	}
+	prefix := strings.TrimRight(baseURL.Path, "/") + "/download/"
+	suffix := "/" + releaseartifact.UpdateManifestV2Name
+	if !strings.HasPrefix(location.Path, prefix+"v") || !strings.HasSuffix(location.Path, suffix) {
+		return "", fmt.Errorf("GitHub latest signed release uses invalid redirect path %q", location.Path)
+	}
+	tag := strings.TrimSuffix(strings.TrimPrefix(location.Path, prefix), suffix)
+	if strings.Contains(tag, "/") || !strings.HasPrefix(tag, "v") {
+		return "", fmt.Errorf("GitHub latest signed release uses invalid tag %q", tag)
+	}
+	version, err := NormalizeVersion(tag)
+	if err != nil || tag != "v"+version || isPrereleaseVersion(version) {
+		return "", fmt.Errorf("GitHub latest signed release uses invalid stable tag %q", tag)
+	}
+	return version, nil
+}
+
+func (client *Client) resolveGitHubSignedRelease(ctx context.Context, version string) (releaseDescriptor, error) {
+	base := client.effectiveGitHubReleaseBase() + "/download/v" + url.PathEscape(version)
+	manifestRaw, err := client.fetch(ctx, base+"/"+releaseartifact.UpdateManifestV2Name, maxReleaseBytes, "GitHub signed update manifest")
+	if err != nil {
+		return releaseDescriptor{}, classifyAvailability(ctx, "github-release", err)
+	}
+	bundleRaw, err := client.fetch(ctx, base+"/"+releaseartifact.UpdateManifestV2BundleName, maxReleaseBytes, "GitHub signed update manifest bundle")
+	if err != nil {
+		return releaseDescriptor{}, classifyAvailability(ctx, "github-release", err)
+	}
+	return client.parseSignedRelease(version, manifestRaw, bundleRaw, "github-v2")
+}
+
+func (client *Client) parseSignedRelease(version string, manifestRaw, bundleRaw []byte, source string) (releaseDescriptor, error) {
 	verifier := client.verifyManifest
 	if verifier == nil {
 		verifier = releaseartifact.VerifySignedUpdateManifest
@@ -226,19 +353,47 @@ func (client *Client) resolveOSSRelease(ctx context.Context, version string) (re
 	}
 	normalized, err := NormalizeVersion(manifest.Version)
 	if err != nil || normalized != version || manifest.Version != normalized {
-		return releaseDescriptor{}, fmt.Errorf("OSS update manifest version %q does not match requested version %s", manifest.Version, version)
+		return releaseDescriptor{}, fmt.Errorf("signed update manifest version %q does not match requested version %s", manifest.Version, version)
 	}
 	descriptor := releaseDescriptor{
-		Version: manifest.Version, Prerelease: manifest.Prerelease, Source: "oss-v2",
+		Version: manifest.Version, Prerelease: manifest.Prerelease, Source: source,
 		Assets: make(map[string]releaseAsset, len(manifest.Assets)),
 	}
 	for _, asset := range manifest.Assets {
 		descriptor.Assets[asset.Name] = releaseAsset{
 			Name: asset.Name, SHA256: asset.SHA256, Size: asset.Size,
-			URL: base + "/" + url.PathEscape(asset.Name),
+			URL: client.githubReleaseAssetURL(version, asset.Name),
 		}
 	}
 	return descriptor, nil
+}
+
+func (client *Client) githubReleaseAssetURL(version, name string) string {
+	return client.effectiveGitHubReleaseBase() + "/download/v" + url.PathEscape(version) + "/" + url.PathEscape(name)
+}
+
+func (client *Client) effectiveGitHubReleaseBase() string {
+	if client.githubReleaseBase != "" {
+		return strings.TrimRight(client.githubReleaseBase, "/")
+	}
+	if client.GitHubAPIBase != "" && client.GitHubAPIBase != githubLatestAPI {
+		if apiURL, err := url.Parse(client.GitHubAPIBase); err == nil && apiURL.Scheme != "" && apiURL.Host != "" {
+			return apiURL.Scheme + "://" + apiURL.Host + "/releases"
+		}
+	}
+	return githubReleasesURL
+}
+
+func requiresSignedUpdate(version string) bool {
+	order, err := CompareVersions(version, firstSignedUpdate)
+	return err == nil && order >= 0
+}
+
+func requiredSignedReleaseError(version string, err error) error {
+	if sourceHTTPStatus(err) == http.StatusNotFound {
+		return WrapError(ErrorIntegrity, fmt.Errorf("signed update manifest for v%s is missing from the GitHub release: %w", version, err))
+	}
+	return unavailableOrIntegrityError("read GitHub signed release v"+version, err)
 }
 
 func (client *Client) resolveRelease(ctx context.Context, version string, latest bool) (releaseDescriptor, error) {
@@ -396,16 +551,6 @@ func (client *Client) downloadArtifact(ctx context.Context, descriptor releaseDe
 		return Artifact{}, unavailableOrIntegrityError("download from OSS", err)
 	}
 	fallbackAsset := asset
-	if descriptor.Source == "oss-v2" {
-		fallback, fallbackErr := client.resolveRelease(ctx, descriptor.Version, false)
-		if fallbackErr != nil {
-			return Artifact{}, fallbackErr
-		}
-		fallbackAsset = fallback.Assets[filename]
-		if fallbackAsset.SHA256 != asset.SHA256 {
-			return Artifact{}, WrapError(ErrorIntegrity, fmt.Errorf("GitHub archive digest for %s does not match signed OSS manifest", filename))
-		}
-	}
 	archive, err := client.fetch(ctx, fallbackAsset.URL, maxArchiveBytes, "GitHub archive")
 	if err != nil {
 		return Artifact{}, unavailableOrIntegrityError("download from GitHub", classifyAvailability(ctx, "github", err))
@@ -418,7 +563,7 @@ func (client *Client) downloadArtifact(ctx context.Context, descriptor releaseDe
 
 // ValidateArtifact verifies that a platform artifact is published and returns
 // the source an update would use without downloading the archive itself. A v2
-// release is bound by its signed OSS manifest; legacy releases are bound by
+// release is bound by its signed v2 manifest; legacy releases are bound by
 // immutable GitHub Release digests.
 func (client *Client) ValidateArtifact(ctx context.Context, version, goos, goarch string) (string, error) {
 	normalized, err := NormalizeVersion(version)
@@ -454,16 +599,6 @@ func (client *Client) validateArtifact(ctx context.Context, descriptor releaseDe
 	}
 	if ossErr != nil {
 		fallbackAsset := asset
-		if descriptor.Source == "oss-v2" {
-			fallback, fallbackErr := client.resolveRelease(ctx, descriptor.Version, false)
-			if fallbackErr != nil {
-				return "", fallbackErr
-			}
-			fallbackAsset = fallback.Assets[filename]
-			if fallbackAsset.SHA256 != asset.SHA256 {
-				return "", WrapError(ErrorIntegrity, fmt.Errorf("GitHub archive digest for %s does not match signed OSS manifest", filename))
-			}
-		}
 		if probeErr := client.probe(ctx, fallbackAsset.URL, "github archive"); probeErr != nil {
 			return "", unavailableOrIntegrityError("validate GitHub artifact", classifyAvailability(ctx, "github", probeErr))
 		}
@@ -547,7 +682,7 @@ func (client *Client) probe(ctx context.Context, location, label string) error {
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-		return &sourceUnavailableError{source: label, err: fmt.Errorf("HTTP %d", response.StatusCode)}
+		return responseUnavailableError(label, response)
 	}
 	return nil
 }
@@ -569,7 +704,7 @@ func (client *Client) fetch(ctx context.Context, location string, limit int64, l
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-		return nil, &sourceUnavailableError{source: label, err: fmt.Errorf("HTTP %d", response.StatusCode)}
+		return nil, responseUnavailableError(label, response)
 	}
 	reader := io.LimitReader(response.Body, limit+1)
 	raw, err := io.ReadAll(reader)
@@ -597,13 +732,37 @@ func classifyAvailability(ctx context.Context, source string, err error) error {
 	}
 	var unavailable *sourceUnavailableError
 	if errors.As(err, &unavailable) {
-		return &sourceUnavailableError{source: source, err: err}
+		return &sourceUnavailableError{source: source, err: err, statusCode: sourceHTTPStatus(err)}
 	}
 	var urlError *url.Error
 	if errors.As(err, &urlError) && !isTLSFailure(urlError.Err) {
 		return &sourceUnavailableError{source: source, err: err}
 	}
 	return err
+}
+
+func responseUnavailableError(source string, response *http.Response) *sourceUnavailableError {
+	detail := fmt.Sprintf("HTTP %d", response.StatusCode)
+	if response.StatusCode == http.StatusForbidden && response.Header.Get("X-RateLimit-Remaining") == "0" {
+		detail += " (rate limit exhausted"
+		if raw := response.Header.Get("X-RateLimit-Reset"); raw != "" {
+			if seconds, err := strconv.ParseInt(raw, 10, 64); err == nil && seconds > 0 {
+				detail += "; resets at " + time.Unix(seconds, 0).UTC().Format(time.RFC3339)
+			}
+		}
+		detail += ")"
+	}
+	return &sourceUnavailableError{source: source, err: errors.New(detail), statusCode: response.StatusCode}
+}
+
+func sourceHTTPStatus(err error) int {
+	for err != nil {
+		if unavailable, ok := err.(*sourceUnavailableError); ok && unavailable.statusCode != 0 {
+			return unavailable.statusCode
+		}
+		err = errors.Unwrap(err)
+	}
+	return 0
 }
 
 func isTLSFailure(err error) bool {

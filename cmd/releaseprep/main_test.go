@@ -225,6 +225,32 @@ func TestReleaseWorkflowPublishesSignedUpdateManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	workflow := string(raw)
+	trustedRoot := filepath.Join(root, "internal", "releaseartifact", "trusted_root.json")
+	if _, err := os.Stat(trustedRoot); err != nil {
+		t.Fatalf("release trusted root is missing: %v", err)
+	}
+	for _, required := range []string{
+		`update_v2=$(go -C ../tooling run ./cmd/releaseprep`,
+		`--update-v2-required`,
+		`trusted_root=internal/releaseartifact/trusted_root.json`,
+		`if [[ "${update_v2}" == true && ! -f "${trusted_root}" ]]; then`,
+		`if [[ "${update_v2}" != true && -z "${RECOVERY_TAG}" ]]; then`,
+		`New releases must use signed updater metadata; ${tag} was classified as legacy.`,
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("release v2 capability gate is missing %q", required)
+		}
+	}
+	if strings.Contains(workflow, "pkg/updater/trusted_root.json") {
+		t.Fatal("release v2 capability gate references the obsolete trusted-root path")
+	}
+	updaterRaw, err := os.ReadFile(filepath.Join(root, "pkg", "updater", "client.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(updaterRaw), `firstSignedUpdate = "`+firstSignedUpdate+`"`) {
+		t.Fatalf("release tooling and updater disagree on the first signed update version %s", firstSignedUpdate)
+	}
 	publishStart := strings.Index(workflow, "\n  publish:\n")
 	notifyStart := strings.Index(workflow, "\n  notify:\n")
 	if publishStart < 0 || notifyStart < publishStart {
@@ -292,6 +318,31 @@ func TestReleaseWorkflowPublishesSignedUpdateManifest(t *testing.T) {
 	if strings.Contains(workflow[notifyStart:], `"${base_url}/${RELEASE_VERSION}/version.txt?${cache_bust}"`) ||
 		strings.Contains(workflow[notifyStart:], `release-metadata/version.txt`) {
 		t.Fatal("OSS mirror verification depends on a redundant versioned version.txt object")
+	}
+}
+
+func TestSignedUpdateV2RequiredUsesReleaseBoundary(t *testing.T) {
+	tests := []struct {
+		tag  string
+		want bool
+	}{
+		{tag: "v0.2.2"},
+		{tag: "v0.2.3-rc.1", want: true},
+		{tag: "v0.2.3", want: true},
+		{tag: "v1.0.0", want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.tag, func(t *testing.T) {
+			got, err := signedUpdateV2Required(test.tag)
+			if err != nil || got != test.want {
+				t.Fatalf("signedUpdateV2Required(%q) = %t, %v; want %t", test.tag, got, err, test.want)
+			}
+		})
+	}
+	for _, tag := range []string{"", "0.2.3", "v0.2"} {
+		if _, err := signedUpdateV2Required(tag); err == nil {
+			t.Fatalf("signedUpdateV2Required(%q) succeeded", tag)
+		}
 	}
 }
 

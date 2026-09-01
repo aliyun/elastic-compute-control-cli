@@ -22,6 +22,7 @@ const (
 	releaseManifestFile  = "dist/ecctl-update-manifest-v2.json"
 	releaseBundleFile    = "dist/ecctl-update-manifest-v2.sigstore.json"
 	releaseMetadataLimit = 1 << 20
+	firstSignedUpdate    = "0.2.3-0"
 )
 
 var (
@@ -44,6 +45,7 @@ func main() {
 	verifyHomebrew := flag.Bool("verify-homebrew-cask", false, "strictly validate a generated Homebrew Cask against immutable release checksums")
 	generateManifest := flag.Bool("generate-update-manifest", false, "generate the signed-updater v2 manifest from local release assets")
 	verifyManifest := flag.Bool("verify-update-manifest", false, "verify an updater v2 manifest with the production offline trust policy")
+	updateV2Required := flag.Bool("update-v2-required", false, "report whether a release tag requires signed updater v2 metadata")
 	checkTelemetry := flag.Bool("check-telemetry-config", false, "validate release telemetry environment configuration")
 	repository := flag.String("repository", "", "GitHub repository identity for public release checks")
 	releaseTag := flag.String("release-tag", "", "candidate release tag for version and Homebrew checks")
@@ -57,7 +59,7 @@ func main() {
 	flag.Parse()
 
 	selected := 0
-	for _, enabled := range []bool{*write, *check, *checkHomebrew, *checkVersion, *verifyHomebrew, *generateManifest, *verifyManifest, *checkTelemetry} {
+	for _, enabled := range []bool{*write, *check, *checkHomebrew, *checkVersion, *verifyHomebrew, *generateManifest, *verifyManifest, *updateV2Required, *checkTelemetry} {
 		if enabled {
 			selected++
 		}
@@ -116,9 +118,32 @@ func main() {
 		}
 		return
 	}
+	if *updateV2Required {
+		required, err := signedUpdateV2Required(*releaseTag)
+		if err != nil {
+			exitError(err)
+		}
+		fmt.Println(required)
+		return
+	}
 	if err := checkReleaseReady(root, *repository); err != nil {
 		exitError(err)
 	}
+}
+
+func signedUpdateV2Required(releaseTag string) (bool, error) {
+	if !strings.HasPrefix(releaseTag, "v") || strings.TrimPrefix(releaseTag, "v") == "" {
+		return false, fmt.Errorf("release tag %q must start with v", releaseTag)
+	}
+	version, err := parseSemVersion(strings.TrimPrefix(releaseTag, "v"))
+	if err != nil {
+		return false, fmt.Errorf("invalid release tag %q: %w", releaseTag, err)
+	}
+	floor, err := parseSemVersion(firstSignedUpdate)
+	if err != nil {
+		return false, fmt.Errorf("invalid signed update floor %q: %w", firstSignedUpdate, err)
+	}
+	return compareSemVersion(version, floor) >= 0, nil
 }
 
 func verifyUpdateManifestFiles() error {
