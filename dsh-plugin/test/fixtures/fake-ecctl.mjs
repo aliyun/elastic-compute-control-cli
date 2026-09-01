@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { writeFileSync } from 'node:fs'
+
 const args = process.argv.slice(2)
 
 if (args.includes('--version')) {
@@ -124,6 +126,10 @@ if (action === 'malformed') {
 }
 
 if (action === 'slow' || action === 'slow-mutation') {
+  const startedFileIndex = args.indexOf('--test-started-file')
+  if (startedFileIndex >= 0 && args[startedFileIndex + 1]) {
+    writeFileSync(args[startedFileIndex + 1], action, { flag: 'wx' })
+  }
   setTimeout(() => process.stdout.write(JSON.stringify({ argv: args })), 10_000)
 } else {
   process.stdout.write(JSON.stringify({
