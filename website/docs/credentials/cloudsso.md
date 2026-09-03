@@ -33,7 +33,7 @@ For native browser-backed login with `ecctl` itself, use
 
 | Field | Required | Notes |
 |---|---|---|
-| `mode` | Yes in practice | `CloudSSO`. Inferred when `cloud_sso_sign_in_url` is present |
+| `mode` | No | `CloudSSO`. Inferred when `cloud_sso_sign_in_url` is present |
 | `cloud_sso_sign_in_url` | Yes | The organization CloudSSO portal URL |
 | `cloud_sso_account_id` | Yes | The member account the credential targets |
 | `cloud_sso_access_config` | Yes | The access configuration name or ID |
@@ -61,12 +61,13 @@ the login flow. When the cached token is absent or its expiry has passed,
 
 ## Where renewable state lives
 
-Cloud commands treat the compatible `aliyun` configuration as read-only.
+Cloud commands treat the compatible `aliyun` configuration file as read-only.
 Rotated CloudSSO tokens and cached CloudSSO STS credentials are persisted only
 in the canonical per-user ecctl credential store under
 `~/.ecctl/credentials-v2/`, with current-user-only permissions. Entries are
-keyed by their resolved Aliyun source path and profile, so two different
-configuration files holding the same profile name do not share an entry.
+keyed by their resolved compatible `aliyun` configuration path and profile, so
+two different configuration files holding the same profile name do not share an
+entry.
 
 `ECCTL_CONFIG_PATH` does not create a second rotation owner for a CloudSSO
 profile, and the private store does not move with `ECCTL_CONFIG_PATH`.
@@ -79,9 +80,14 @@ request, so a changed CloudSSO assignment or a re-authentication into a
 different member account fails closed instead of switching accounts
 mid-command.
 
-Treat identity, target, or auth-field changes during credential refresh as
-fatal conflicts. Only a write-stage cache persistence failure may degrade to an
-in-memory credential for the remainder of the command.
+The pinning is not specific to CloudSSO. Every renewable credential is pinned
+for the duration of a command, and a refresh that comes back as a different
+identity fails the command rather than continuing under the new one.
+
+A failed cache write is the one problem that does not end a command. When a
+CloudSSO refresh succeeds but the new credential cannot be written to the
+private store, `ecctl` finishes the command with the credential in memory and
+signs in again next time. Any other persistence failure is fatal.
 
 ## Verify
 

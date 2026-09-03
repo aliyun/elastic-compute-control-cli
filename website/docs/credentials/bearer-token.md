@@ -21,7 +21,7 @@ aliyun configure --mode BearerToken --profile bearer
 
 `ecctl configure --mode BearerToken` is not supported. `--mode` accepts `OAuth`
 only, and an ecctl-native profile resolves only OAuth or a static credential.
-Put this profile in the Aliyun-compatible configuration file.
+Put this profile in the compatible `aliyun` configuration file.
 
 ## Configure with environment variables
 
@@ -59,7 +59,8 @@ header name. The default is what most bearer-authenticated product APIs expect.
 ## Scope limitation
 
 A bearer token is accepted only by APIs that support bearer authentication. An
-API that does not support it rejects the request at the service:
+API that does not support it rejects the request at the service, in wording
+that comes from the service rather than from `ecctl`:
 
 ```json
 {

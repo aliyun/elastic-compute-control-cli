@@ -15,9 +15,9 @@ description: 从 AccessKey 或 STS 源凭证扮演 RAM 角色。
 aliyun configure --mode RamRoleArn --profile cross-account
 ```
 
-不支持 `ecctl configure --mode RamRoleArn`。`--mode` 只接受 `OAuth`，而 ecctl 原生 profile 只能解析 OAuth 或静态凭证。请把该 profile 放在 Aliyun-compatible 配置文件中。
+不支持 `ecctl configure --mode RamRoleArn`。`--mode` 只接受 `OAuth`，而 ecctl 原生 profile 只能解析 OAuth 或静态凭证。请把该 profile 放在兼容 `aliyun` 的配置文件中。
 
-有一个值得点名的陷阱：ecctl 原生 profile 声明了 `mode: RamRoleArn`，但同时携带 `access_key_id` 和 `access_key_secret` 时，会直接使用这对 AccessKey，并忽略 `ram_role_arn`。不会扮演任何角色。请把该 profile 放在 Aliyun-compatible 文件中。
+有一个值得点名的陷阱：ecctl 原生 profile 声明了 `mode: RamRoleArn`，但同时携带 `access_key_id` 和 `access_key_secret` 时，会直接使用这对 AccessKey，并忽略 `ram_role_arn`。不会扮演任何角色。请把该 profile 放在兼容 `aliyun` 的配置文件中。
 
 ## 使用环境变量配置
 
@@ -35,13 +35,13 @@ export ALIBABA_CLOUD_ROLE_SESSION_NAME=ecctl-session
 | 字段 | 必填 | 说明 |
 |---|---|---|
 | `mode` | 否 | `RamRoleArn`。当 `ram_role_arn` 与 AccessKey 密钥对同时存在时推导得出 |
-| `access_key_id` | 是 | 源 AccessKey ID。fallback 到环境变量 |
-| `access_key_secret` | 是 | 源 AccessKey secret。fallback 到环境变量 |
+| `access_key_id` | 是 | 源 AccessKey ID。回退到环境变量 |
+| `access_key_secret` | 是 | 源 AccessKey secret。回退到环境变量 |
 | `sts_token` | 否 | 源本身是临时凭证时存在 |
 | `ram_role_arn` | 是 | 完整 ARN：`acs:ram::<16位账号ID>:role/<角色名>` |
-| `ram_session_name` | 否 | 角色会话名称。fallback 到 `ALIBABA_CLOUD_ROLE_SESSION_NAME` |
+| `ram_session_name` | 否 | 角色会话名称。回退到 `ALIBABA_CLOUD_ROLE_SESSION_NAME` |
 | `expired_seconds` | 否 | 请求的会话时长，单位为秒 |
-| `policy` | 否 | 进一步收窄所扮演会话的内联 policy |
+| `policy` | 否 | 进一步收窄所扮演会话的内联策略 |
 | `external_id` | 否 | 角色信任 policy 要求的 External ID |
 | `sts_endpoint` | 否 | 自定义 STS 端点。必须为 HTTPS |
 | `sts_region` | 否 | 选择地域 STS 端点 |
@@ -93,4 +93,4 @@ ecctl --profile cross-account --region cn-hangzhou ecs region list
 
 - [链式 RAM 角色 ARN](./chainable-ram-role-arn.md)：通过命名的源 profile 扮演角色
 - [OIDC](./oidc.md)：无需存储源密钥的工作负载身份
-- [凭证总览](./index.md)
+- [身份凭证](./index.md)：解析顺序

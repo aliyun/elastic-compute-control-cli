@@ -106,7 +106,7 @@ directory.
 
 Native OAuth entries have one per-user owner per profile. A changed login
 generation invalidates older metadata instead of switching identity. Tokens are
-never written into the Aliyun configuration file.
+never written into the compatible `aliyun` configuration file.
 
 Native OAuth cache writes compare the active generation under a per-profile
 lock. Login also keeps a private write-ahead transaction until the cache and
@@ -151,13 +151,15 @@ file. Such a profile carries `oauth_site_type`, `oauth_refresh_token`,
 `oauth_access_token_expire`. Rotated tokens and cached STS credentials for
 those profiles are stored as per-profile entries under
 `~/.ecctl/credentials-v2/`, keyed by their resolved source path and profile.
-The compatible `aliyun` file itself is treated as read-only during cloud
-commands.
+The compatible `aliyun` configuration file itself is treated as read-only
+during cloud commands.
 
-Native ecctl OAuth metadata takes precedence over a same-name Aliyun profile.
+Native ecctl OAuth metadata takes precedence over a same-name compatible
+`aliyun` profile.
 
 ## Related
 
-- [Credentials overview](./index.md)
+- [Credentials overview](./index.md) for resolution order
 - [CloudSSO](./cloudsso.md) for browser-backed enterprise single sign-on
-- [Configuration](../getting-started/configuration.md)
+- [Configuration](../getting-started/configuration.md) for region, language,
+  output, and profile management

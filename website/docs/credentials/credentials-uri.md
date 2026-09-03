@@ -23,7 +23,7 @@ aliyun configure --mode CredentialsURI --profile broker
 `OAuth` only, and an ecctl-native profile resolves only OAuth or a static
 credential. A profile in the ecctl configuration file that declares
 `CredentialsURI` without static credentials fails with `MissingCredentials`.
-Put this profile in the Aliyun-compatible configuration file.
+Put this profile in the compatible `aliyun` configuration file.
 
 ## Configure with environment variables
 
@@ -78,6 +78,12 @@ hostname that DNS could point anywhere. This makes a localhost sidecar
 workable while keeping credentials off plaintext transport for anything that
 leaves the machine.
 
+The request is a plain `GET` with a 15 second timeout, and the response body is
+read up to 1 MiB with anything past that discarded. Redirects are not followed.
+A `3xx` comes back as-is and fails the status check, so a broker sitting behind
+a redirect reports `returned HTTP 302` and the request is never sent to the
+second host. Point `credentials_uri` at the final URL.
+
 ## Response contract
 
 The endpoint must return HTTP 200 with a JSON body:
@@ -88,7 +94,7 @@ The endpoint must return HTTP 200 with a JSON body:
 | `AccessKeyId` | Yes | |
 | `AccessKeySecret` | Yes | |
 | `SecurityToken` | Yes | Always required, unlike the External helper contract |
-| `Expiration` | Yes | RFC 3339 UTC, must be in the future |
+| `Expiration` | Yes | RFC 3339 with an explicit offset, must be in the future |
 
 ```json
 {
@@ -121,6 +127,10 @@ response. Check the endpoint's own logs when you see it.
 `Expiration` is mandatory here. A CredentialsURI response without a valid
 future expiration is always rejected, which is what allows `ecctl` to treat the
 credential as renewable and schedule its own refresh.
+
+The offset is required but does not have to be UTC. `2026-09-03T12:00:00Z` and
+`2026-09-03T20:00:00+08:00` both parse. `2026-09-03T12:00:00` carries no
+offset and is rejected with `returned an invalid expiration`.
 
 ## Disabling this source
 
@@ -181,4 +191,4 @@ before it can sign a request.
 
 - [External process](./external.md) for the local-program equivalent
 - [STS token](./sts-token.md) for a fixed temporary credential
-- [Credentials overview](./index.md)
+- [Credentials overview](./index.md) for resolution order

@@ -23,7 +23,7 @@ aliyun configure --mode External --profile vault
 only, and an ecctl-native profile resolves only OAuth or a static credential.
 A profile in the ecctl configuration file that declares `External` without
 static credentials fails with `MissingCredentials`. Put this profile in the
-Aliyun-compatible configuration file.
+compatible `aliyun` configuration file.
 
 ## Profile fields
 
@@ -193,4 +193,4 @@ with a security token.
 ## Related
 
 - [Credentials URI](./credentials-uri.md) for the HTTP equivalent
-- [Credentials overview](./index.md)
+- [Credentials overview](./index.md) for resolution order

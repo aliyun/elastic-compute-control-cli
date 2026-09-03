@@ -22,7 +22,7 @@ aliyun configure --mode OIDC --profile rrsa
 
 `ecctl configure --mode OIDC` is not supported. `--mode` accepts `OAuth` only,
 and an ecctl-native profile resolves only OAuth or a static credential. Put
-this profile in the Aliyun-compatible configuration file.
+this profile in the compatible `aliyun` configuration file.
 
 ## Configure with environment variables
 
@@ -145,4 +145,4 @@ credential for a different identity is rejected before it can sign a request.
 
 - [ECS RAM role](./ecs-ram-role.md) for workloads on ECS without OIDC
 - [RAM role ARN](./ram-role-arn.md) for assuming from a stored source credential
-- [Credentials overview](./index.md)
+- [Credentials overview](./index.md) for resolution order

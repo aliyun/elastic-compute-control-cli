@@ -93,9 +93,9 @@ Each variable also accepts an `ALIBABACLOUD_`, `ALICLOUD_`, or bare
 | `access_key_id` | Yes | Falls back to the environment when empty |
 | `access_key_secret` | Yes | Sensitive. Falls back to the environment when empty |
 
-A profile in the Aliyun-compatible file that omits `mode` is classified by its
-fields. A profile carrying an access key pair and no `sts_token` or
-`ram_role_arn` resolves as `AK`.
+A profile in the compatible `aliyun` configuration file that omits `mode` is
+classified by its fields. A profile carrying an access key pair and no
+`sts_token` or `ram_role_arn` resolves as `AK`.
 
 ```json
 {
