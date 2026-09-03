@@ -17,6 +17,27 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Credentials',
+      link: {
+        type: 'doc',
+        id: 'credentials/index',
+      },
+      items: [
+        'credentials/oauth',
+        'credentials/ak',
+        'credentials/sts-token',
+        'credentials/ecs-ram-role',
+        'credentials/ram-role-arn',
+        'credentials/chainable-ram-role-arn',
+        'credentials/oidc',
+        'credentials/cloudsso',
+        'credentials/external',
+        'credentials/credentials-uri',
+        'credentials/bearer-token',
+      ],
+    },
+    {
+      type: 'category',
       label: 'User Guide',
       items: [
         'user-guide/concepts',
