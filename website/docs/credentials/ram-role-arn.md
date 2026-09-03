@@ -21,12 +21,12 @@ aliyun configure --mode RamRoleArn --profile cross-account
 
 `ecctl configure --mode RamRoleArn` is not supported. `--mode` accepts `OAuth`
 only, and an ecctl-native profile resolves only OAuth or a static credential.
-Put this profile in the Aliyun-compatible configuration file.
+Put this profile in the compatible `aliyun` configuration file.
 
 A trap worth naming: an ecctl-native profile that declares
 `mode: RamRoleArn` but also carries `access_key_id` and `access_key_secret`
 uses that access key pair directly and ignores `ram_role_arn`. No role is
-assumed. Keep this profile in the Aliyun-compatible file.
+assumed. Keep this profile in the compatible `aliyun` configuration file.
 
 ## Configure with environment variables
 
@@ -120,4 +120,4 @@ assume-role step.
 - [Chainable RAM role ARN](./chainable-ram-role-arn.md) for assuming through a
   named source profile
 - [OIDC](./oidc.md) for workload identity without a stored source key
-- [Credentials overview](./index.md)
+- [Credentials overview](./index.md) for resolution order

@@ -107,4 +107,4 @@ error, with no request ID, means the credential never resolved.
 
 - [AccessKey](./ak.md) for long-lived keys
 - [Credentials URI](./credentials-uri.md) for renewable STS over HTTP
-- [Credentials overview](./index.md)
+- [Credentials overview](./index.md) for resolution order

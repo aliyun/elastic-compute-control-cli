@@ -15,7 +15,7 @@ description: 在 ECS 实例上通过实例元数据服务获取可续期凭证�
 aliyun configure --mode EcsRamRole --profile instance
 ```
 
-不支持 `ecctl configure --mode EcsRamRole`。`--mode` 只接受 `OAuth`，而 ecctl 原生 profile 只能解析 OAuth 或静态凭证。请把该 profile 放在 Aliyun-compatible 配置文件中。
+不支持 `ecctl configure --mode EcsRamRole`。`--mode` 只接受 `OAuth`，而 ecctl 原生 profile 只能解析 OAuth 或静态凭证。请把该 profile 放在兼容 `aliyun` 的配置文件中。
 
 ## 使用环境变量配置
 
@@ -29,7 +29,7 @@ export ALIBABA_CLOUD_ECS_METADATA=<role-name>
 
 | 变量 | 作用 |
 |---|---|
-| `ALIBABA_CLOUD_IMDSV1_DISABLED` | 为 true 时拒绝 fallback 到 IMDSv1，要求走加固的 IMDSv2 路径 |
+| `ALIBABA_CLOUD_IMDSV1_DISABLED` | 为 true 时拒绝回退到 IMDSv1，要求走加固的 IMDSv2 路径 |
 | `ALIBABA_CLOUD_ECS_METADATA_DISABLED` | 为 true 时完全禁用元数据凭证获取 |
 
 两者都按布尔值读取；`1` 和 `true` 均可，不区分大小写。
@@ -39,7 +39,7 @@ export ALIBABA_CLOUD_ECS_METADATA=<role-name>
 | 字段 | 必填 | 说明 |
 |---|---|---|
 | `mode` | 否 | `EcsRamRole`。存在 `ram_role_name` 时推导得出 |
-| `ram_role_name` | 否 | 为空时 fallback 到 `ALIBABA_CLOUD_ECS_METADATA` |
+| `ram_role_name` | 否 | 为空时回退到 `ALIBABA_CLOUD_ECS_METADATA` |
 
 `ram_role_name` 可以留空。元数据服务能够报告已绑定的角色，因此空名称也能解析。提供名称更严格：当实例绑定的角色与 profile 期望的角色不一致时会失败。
 
@@ -71,4 +71,4 @@ ecctl --profile instance --region cn-hangzhou ecs region list
 
 - [OIDC](./oidc.md)：Kubernetes 及其他 OIDC 工作负载身份
 - [RAM 角色 ARN](./ram-role-arn.md)：从源凭证扮演 RAM 角色
-- [凭证总览](./index.md)
+- [身份凭证](./index.md)：解析顺序

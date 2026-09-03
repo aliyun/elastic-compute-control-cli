@@ -21,7 +21,7 @@ aliyun configure --mode EcsRamRole --profile instance
 
 `ecctl configure --mode EcsRamRole` is not supported. `--mode` accepts `OAuth`
 only, and an ecctl-native profile resolves only OAuth or a static credential.
-Put this profile in the Aliyun-compatible configuration file.
+Put this profile in the compatible `aliyun` configuration file.
 
 ## Configure with environment variables
 
@@ -88,4 +88,4 @@ role change on the instance cannot silently switch accounts mid-command.
 
 - [OIDC](./oidc.md) for Kubernetes and other OIDC workload identities
 - [RAM role ARN](./ram-role-arn.md) for assuming a role from a source credential
-- [Credentials overview](./index.md)
+- [Credentials overview](./index.md) for resolution order

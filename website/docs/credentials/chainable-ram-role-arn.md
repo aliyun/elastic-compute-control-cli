@@ -21,14 +21,14 @@ aliyun configure --mode ChainableRamRoleArn --profile workload
 ```
 
 `ecctl configure --mode ChainableRamRoleArn` is not supported. `--mode` accepts
-`OAuth` only. Put this profile in the Aliyun-compatible configuration file.
+`OAuth` only. Put this profile in the compatible `aliyun` configuration file.
 
 ## Profile fields
 
 | Field | Required | Notes |
 |---|---|---|
 | `mode` | Yes in practice | `ChainableRamRoleArn`. Not inferred from other fields |
-| `source_profile` | Yes | Name of another profile in the same Aliyun-compatible file |
+| `source_profile` | Yes | Name of another profile in the same compatible `aliyun` configuration file |
 | `ram_role_arn` | Yes | Complete ARN: `acs:ram::<16-digit-account-id>:role/<role-name>` |
 | `ram_session_name` | No | Falls back to `ALIBABA_CLOUD_ROLE_SESSION_NAME` |
 | `expired_seconds` | No | Requested session duration in seconds |
@@ -67,7 +67,7 @@ A two-hop chain from a browser login to a workload account:
 }
 ```
 
-`source_profile` must name a profile in the same Aliyun-compatible
+`source_profile` must name a profile in the same compatible `aliyun`
 configuration file. A missing source fails with `source profile <name> not
 found`, and an empty `source_profile` fails with `source_profile is required
 for ChainableRamRoleArn`.

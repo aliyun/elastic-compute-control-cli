@@ -159,7 +159,7 @@ Common global flags:
 |---|---|
 | `ECCTL_PROFILE`, `ALIBABACLOUD_PROFILE`, `ALIBABA_CLOUD_PROFILE`, `ALICLOUD_PROFILE` | Default profile when `--profile` is not passed |
 | `ECCTL_REGION`, `ALIBABA_CLOUD_REGION_ID`, `ALIBABACLOUD_REGION_ID`, `ALICLOUD_REGION_ID` | Region override when `--region` is not passed |
-| `ALIBABA_CLOUD_CONFIG_PATH`, `ALIBABACLOUD_CONFIG_PATH`, `ALICLOUD_CONFIG_PATH` | Path to a compatible `aliyun` CLI configuration file |
+| `ECCTL_ALIYUN_CONFIG_PATH`, `ALIBABA_CLOUD_CONFIG_PATH`, `ALIBABACLOUD_CONFIG_PATH`, `ALICLOUD_CONFIG_PATH` | Path to a compatible `aliyun` CLI configuration file, checked in this order |
 | `ALIBABA_CLOUD_IGNORE_PROFILE` | Set to `TRUE` to ignore stored credential profiles |
 | `ALIBABA_CLOUD_ACCESS_KEY_ID`, `ALIBABA_CLOUD_ACCESS_KEY_SECRET`, `ALIBABA_CLOUD_SECURITY_TOKEN` | AK or STS credentials |
 | `ALIBABA_CLOUD_ROLE_ARN`, `ALIBABA_CLOUD_ROLE_SESSION_NAME`, `ALIBABA_CLOUD_EXTERNAL_ID` | RAM role assumption |

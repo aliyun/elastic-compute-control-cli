@@ -93,14 +93,16 @@ Both configuration files use the same JSON shape:
 The private store uses the home directory resolved for the current process and
 does not move with `ECCTL_CONFIG_PATH`. Its entries are written with
 current-user-only permissions. Renewable OAuth and CloudSSO state is never
-written into the Aliyun configuration file.
+written into the compatible `aliyun` configuration file.
 
 Two capabilities differ between the files, and the difference matters:
 
-- A profile in the **Aliyun-compatible** file can use any of the eleven modes.
-- A profile in the **ecctl** file resolves only native `OAuth` (a profile with
-  `mode: OAuth` and a non-empty `oauth_generation`) or a static credential (a
-  profile carrying `access_key_id`, `access_key_secret`, or `sts_token`).
+- A profile in the **compatible `aliyun`** configuration file can use any of
+  the eleven modes.
+- A profile in the **ecctl** configuration file resolves only native `OAuth` (a
+  profile with `mode: OAuth` and a non-empty `oauth_generation`) or a static
+  credential (a profile carrying `access_key_id`, `access_key_secret`, or
+  `sts_token`).
 
 An ecctl profile that declares another mode is not resolved through that mode.
 A profile that also carries static credentials uses those credentials directly
@@ -109,7 +111,7 @@ ineffective. A profile that declares `External` or `CredentialsURI` without
 static credentials is routed to the environment credential chain: it resolves
 from environment credentials when those are present, and reports
 `MissingCredentials` only when the environment carries none either. Put any
-non-static, non-OAuth profile in the Aliyun-compatible file.
+non-static, non-OAuth profile in the compatible `aliyun` configuration file.
 
 ## Resolution order
 
@@ -126,7 +128,7 @@ Once a profile name is chosen, credential resolution follows this order:
    environment credentials.
 2. An ecctl profile that is a native OAuth login.
 3. An ecctl profile that carries a static credential override.
-4. An Aliyun-compatible profile of the same name, resolved through the full
+4. An compatible `aliyun` profile of the same name, resolved through the full
    eleven-mode chain.
 5. An ecctl profile with no credentials falls back to environment credentials.
 6. An explicitly requested profile, or a stored `current` profile, that matches

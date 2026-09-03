@@ -15,19 +15,19 @@ description: 使用另一个命名 profile 作为源凭证来扮演 RAM 角色�
 aliyun configure --mode ChainableRamRoleArn --profile workload
 ```
 
-不支持 `ecctl configure --mode ChainableRamRoleArn`。`--mode` 只接受 `OAuth`。请把该 profile 写入 Aliyun-compatible 配置文件。
+不支持 `ecctl configure --mode ChainableRamRoleArn`。`--mode` 只接受 `OAuth`。请把该 profile 写入兼容 `aliyun` 的配置文件。
 
 ## profile 字段
 
-| 字段 | 是否必需 | 说明 |
+| 字段 | 必填 | 说明 |
 |---|---|---|
 | `mode` | 实践中必需 | `ChainableRamRoleArn`。不会从其他字段推断 |
-| `source_profile` | 是 | 同一个 Aliyun-compatible 文件中另一个 profile 的名称 |
+| `source_profile` | 是 | 同一个兼容 `aliyun` 的配置文件中另一个 profile 的名称 |
 | `ram_role_arn` | 是 | 完整 ARN：`acs:ram::<16位账号ID>:role/<角色名>` |
-| `ram_session_name` | 否 | 未设置时 fallback 到 `ALIBABA_CLOUD_ROLE_SESSION_NAME` |
+| `ram_session_name` | 否 | 未设置时回退到 `ALIBABA_CLOUD_ROLE_SESSION_NAME` |
 | `expired_seconds` | 否 | 请求的会话有效期（秒） |
 | `policy` | 否 | 进一步收窄所扮演会话的内联策略 |
-| `external_id` | 否 | 未设置时 fallback 到 `ALIBABA_CLOUD_EXTERNAL_ID` |
+| `external_id` | 否 | 未设置时回退到 `ALIBABA_CLOUD_EXTERNAL_ID` |
 | `sts_endpoint` | 否 | 自定义 STS 端点。必须使用 HTTPS |
 | `sts_region` | 否 | 地域 STS 端点选择 |
 | `enable_vpc` | 否 | 使用 VPC STS 端点 |
@@ -60,7 +60,7 @@ aliyun configure --mode ChainableRamRoleArn --profile workload
 }
 ```
 
-`source_profile` 必须指向同一个 Aliyun-compatible 配置文件中的 profile。源缺失时以 `source profile <name> not found` 失败；`source_profile` 为空时以 `source_profile is required for ChainableRamRoleArn` 失败。
+`source_profile` 必须指向同一个兼容 `aliyun` 的配置文件中的 profile。源缺失时以 `source profile <name> not found` 失败；`source_profile` 为空时以 `source_profile is required for ChainableRamRoleArn` 失败。
 
 ## 循环检测
 
@@ -96,4 +96,4 @@ ecctl --profile workload --region cn-hangzhou ecs region list
 ## 相关文档
 
 - [RAM 角色 ARN](./ram-role-arn.md)：从内联凭证扮演 RAM 角色
-- [凭证总览](./index.md)：解析顺序
+- [身份凭证](./index.md)：解析顺序

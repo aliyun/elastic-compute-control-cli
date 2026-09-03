@@ -7,7 +7,7 @@ description: 为 ecctl 配置长期有效的阿里云 AccessKey 密钥对。
 
 `AK` 使用长期有效的 AccessKey ID 和 AccessKey secret。它是最简单的凭证模式，也最容易被误用：secret 不会过期，拥有其 RAM policy 允许的全部权限，并且落在你存放它的磁盘上。
 
-交互式工作请优先使用 [OAuth](./oauth.md)，自动化请使用 [OIDC](./oidc.md)、[ECS RAM 角色](./ecs-ram-role.md) 或 [RAM 角色 ARN](./ram-role-arn.md) 这类可续期模式。只有在确实无法使用可续期模式时才使用 `AK`。
+交互式工作请优先使用 [OAuth](./oauth.md)，自动化请使用 [OIDC](./oidc.md)、[ECS RAM 角色](./ecs-ram-role.md)或 [RAM 角色 ARN](./ram-role-arn.md) 这类可续期模式。只有在确实无法使用可续期模式时才使用 `AK`。
 
 `AK` 不可续期。对于长时间 OSS 传输或长时间运行的脚本，静态密钥没有问题，因为它不会在操作中途过期，但它也永远不会自动轮换。
 
@@ -42,7 +42,7 @@ ecctl --profile production configure set access-key-secret <secret>
 
 ## 使用阿里云 CLI 配置
 
-`ecctl` 会把兼容的 `aliyun` 配置作为只读 fallback 读取，因此已有的 profile 仍可继续使用：
+`ecctl` 会把兼容 `aliyun` 的配置文件作为只读的回退来源读取，因此已有的 profile 仍可继续使用：
 
 ```bash
 aliyun configure --mode AK --profile production
@@ -74,10 +74,10 @@ export ALIBABA_CLOUD_ACCESS_KEY_SECRET=<secret>
 | 字段 | 必填 | 说明 |
 |---|---|---|
 | `mode` | 否 | `AK`。缺失时由 `access_key_id` 和 `access_key_secret` 推导 |
-| `access_key_id` | 是 | 为空时 fallback 到环境变量 |
-| `access_key_secret` | 是 | 敏感。为空时 fallback 到环境变量 |
+| `access_key_id` | 是 | 为空时回退到环境变量 |
+| `access_key_secret` | 是 | 敏感。为空时回退到环境变量 |
 
-Aliyun-compatible 文件中省略 `mode` 的 profile 会按其字段分类。携带 AccessKey 密钥对、且没有 `sts_token` 或 `ram_role_arn` 的 profile 解析为 `AK`。
+兼容 `aliyun` 的配置文件中省略 `mode` 的 profile 会按其字段分类。携带 AccessKey 密钥对、且没有 `sts_token` 或 `ram_role_arn` 的 profile 解析为 `AK`。
 
 ```json
 {
@@ -120,5 +120,5 @@ ecctl configure get access-key-secret --show-secret
 ## 相关文档
 
 - [STS 令牌](./sts-token.md)：临时 AccessKey 凭证
-- [凭证总览](./index.md)：解析顺序
+- [身份凭证](./index.md)：解析顺序
 - [配置](../getting-started/configuration.md#支持的配置项)：可设置的配置项列表
