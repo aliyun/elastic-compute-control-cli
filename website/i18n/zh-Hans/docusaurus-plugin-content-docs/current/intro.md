@@ -36,6 +36,7 @@ ecctl schema ecs.instance.create --brief
 
 - [安装](./getting-started/installation.md)：构建并验证 CLI。
 - [配置](./getting-started/configuration.md)：设置地域、profile、语言和输出默认值。
+- [身份凭证](./credentials/index.md)：选择、配置并验证阿里云鉴权方式。
 - [快速开始](./getting-started/quick-start.md)：发现产品并读取一个命令契约。
 
 然后阅读：

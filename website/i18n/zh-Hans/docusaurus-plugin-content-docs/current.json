@@ -3,6 +3,10 @@
     "message": "快速开始",
     "description": "The label for category 'Getting Started' in sidebar 'docsSidebar'"
   },
+  "sidebar.docsSidebar.category.Credentials": {
+    "message": "身份凭证",
+    "description": "The label for category 'Credentials' in sidebar 'docsSidebar'"
+  },
   "sidebar.docsSidebar.category.User Guide": {
     "message": "用户指南",
     "description": "The label for category 'User Guide' in sidebar 'docsSidebar'"

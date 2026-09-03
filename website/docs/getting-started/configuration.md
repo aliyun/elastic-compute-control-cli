@@ -55,146 +55,30 @@ Expected shape:
 
 ## Credentials
 
-`ecctl` accepts the same current credential modes as Alibaba Cloud CLI when it
-reads `~/.aliyun/config.json`:
-
-| Mode | Typical use |
-|---|---|
-| `OAuth` | Browser-authenticated local users; cached tokens refresh automatically |
-| `EcsRamRole` | ECS instance RAM roles through IMDS |
-| `RamRoleArn` | Assume a RAM role from AK or STS source credentials |
-| `ChainableRamRoleArn` | Assume roles through a named source profile chain |
-| `OIDC` | OIDC/RRSA workload identity |
-| `CloudSSO` | CloudSSO access configurations |
-| `External` | Run an argv-based credential helper without a shell |
-| `CredentialsURI` | Retrieve renewable STS credentials from HTTPS or a loopback HTTP endpoint |
-| `StsToken` | Existing temporary AK, secret, and security token |
-| `BearerToken` | Product APIs that accept bearer authentication |
-| `AK` | Long-lived access key credentials |
-
-OAuth uses the same common command shape as Alibaba Cloud CLI and can be
-completed directly with `ecctl`:
+`ecctl` accepts the same eleven credential modes as Alibaba Cloud CLI, and it
+reads compatible `~/.aliyun/config.json` profiles as a read-only fallback. Only
+`OAuth` has an interactive `ecctl` setup flow:
 
 ```bash
 ecctl configure --mode OAuth --profile production
 ecctl --profile production ecs instance list --region cn-hangzhou
 ```
 
-The default site is `CN`. Select the international OAuth service or an explicit
-ecctl metadata config file when needed:
-
-```bash
-ecctl configure --mode OAuth --profile production --oauth-site-type INTL
-ecctl configure --mode OAuth --profile production --config-path /path/to/config.json
-```
-
-In a non-interactive terminal, or when the account is known in advance, bind
-the login to the intended 16-digit Alibaba Cloud account:
-
-```bash
-ecctl configure --mode OAuth --profile production --expected-account-id 1234567890123456
-```
-
-The first interactive login displays the verified account ID and asks you to
-type the complete value before credentials are stored. A later login must match
-the account already recorded for that profile. Supplying a different
-`--expected-account-id` is the explicit way to authorize an intentional account
-change.
-
-For later resource commands that should use a custom path, export
-`ECCTL_CONFIG_PATH=/path/to/config.json` and select the same profile. A native
-OAuth config path must not be the Aliyun CLI config path.
-
-The login uses PKCE and an HTTP callback bound only to `127.0.0.1` on ports
-12345 through 12349. A successful automatic browser launch does not print the
-one-time authorization URL. Use `--manual` in a private terminal when the URL
-must be opened manually; do not copy it to shared logs. Successful stdout
-contains only the profile, mode, site, verified account ID, config path, and
-browser-launch status; it never contains tokens. Browser launcher processes do
-not inherit Alibaba Cloud or OSS credential environment variables. Other
-advanced browser-backed modes such as CloudSSO are still configured with
-Alibaba Cloud CLI.
-
-`ecctl` keeps the selected credential provider for the complete command and
-refreshes temporary credentials before later signed requests when needed. The
-first renewable credential pins the canonical account, user, or role; a later
-credential for another identity is rejected before it can sign a request. If
-native OAuth authentication has expired, run `ecctl configure --mode OAuth`
-again; reauthenticate an Aliyun-compatible OAuth profile with
-`aliyun configure`. Changing the selected profile's identity fields while a command is
-running fails closed instead of switching accounts mid-command.
-RAM role and OIDC profiles must use a complete
-`acs:ram::<16-digit-account-id>:role/<role-name>` ARN. `ecctl` derives the
-expected account from that ARN and verifies the initial credential through an
-official STS `GetCallerIdentity` endpoint before the first business request.
-An explicit custom `sts_endpoint` may issue credentials, but it is never
-trusted to verify its own result. Set `sts_region` and `enable_vpc` when the
-independent identity check must use a regional or VPC STS endpoint.
-
-Cloud commands treat the compatible `aliyun` configuration as read-only.
-Native ecctl OAuth metadata takes precedence over a same-name Aliyun profile;
-otherwise the existing Aliyun profile remains available. Rotated OAuth tokens
-and cached OAuth/CloudSSO STS credentials are stored as
-per-profile entries under `~/.ecctl/credentials-v2/` with current-user-only
-permissions. The store uses the home directory resolved for the current
-process and does not move with `ECCTL_CONFIG_PATH`. Native OAuth entries have
-one per-user owner per profile; a changed login generation invalidates older
-metadata instead of switching identity. Aliyun-compatible entries remain keyed
-by their resolved source path and profile. If a server-side refresh-token
-rotation cannot be committed locally, `ecctl` stops without retrying the
-rotation and the profile must be authenticated again.
-
-Native OAuth cache writes compare the active generation under a per-profile
-lock. Login also keeps a private write-ahead transaction until the cache and
-ecctl metadata agree. If the process or host stops between those writes, the
-next login or credential load restores the previous generation or completes
-the new one before using any token.
-
-For OSS commands backed by a renewable credential, `ecctl` gives the local
-`ossutil` child access through a short-lived credential endpoint bound only to
-`127.0.0.1` and a temporary profile readable only by the current user. The
-endpoint uses an unguessable per-command path; both it and the profile are
-removed when the child exits, and credentials never appear in command
-arguments. External credential acquisition has a 60-second deadline. Unix
-process groups are terminated on cancellation; on every platform inherited
-output pipes are forcibly released after a further two-second grace period.
-An External AK without an expiration is passed to OSS as an operation-static
-AK; renewable OSS broker responses must be STS credentials with a security
-token.
-
-The upstream Dara request logger prints signed URLs and headers before
-`ecctl`'s final HTTP client can redact them. Credential-bearing commands
-therefore fail closed when the comma-separated `DEBUG` environment variable
-contains the exact token `dara`. Remove that token before retrying.
-
-For a local AK profile managed by `ecctl`:
+Every other mode is provisioned with `aliyun configure --mode <Mode>`, with
+environment variables, or by writing a profile into the compatible
+configuration file. A local AK or STS credential can also be set directly:
 
 ```bash
 ecctl configure set access-key-id <id>
 ecctl configure set access-key-secret <secret>
-```
-
-For STS access, also set the security token:
-
-```bash
 ecctl configure set security-token <token>
 ```
 
-`StsToken` credentials are used as-is and cannot refresh themselves. When the
-profile contains `sts_expiration`, `ecctl` rejects an expired token and rejects
-a token that cannot cover a known command deadline. For long OSS transfers,
-prefer a renewable mode such as OAuth, OIDC, a RAM role, an ECS role, External,
-or CredentialsURI.
-
-`External` and `CredentialsURI` may execute a local program or contact an
-external endpoint. Set `ALIBABA_CLOUD_DISABLE_EXTERNAL_PROCESS=true` to disable
-both sources. External commands are parsed into argv and executed directly;
-they are never evaluated through a shell. CredentialsURI requires HTTPS unless
-the URL uses a literal loopback IP address such as `127.0.0.1` or `::1`.
-
-A CredentialsURI endpoint follows the Alibaba Cloud CLI response contract: it
-must return HTTP 200 and JSON containing `Code: "Success"`, `AccessKeyId`,
-`AccessKeySecret`, `SecurityToken`, and `Expiration` in RFC 3339 UTC format.
+[Credentials](../credentials/index.md) is the reference for this area: mode
+selection, the two configuration files and how their capabilities differ,
+profile and credential resolution order, identity pinning, verification, and
+the `DEBUG=dara` fail-closed rule. Each mode has its own page, reached from
+that overview or from the sidebar.
 
 ## Supported Keys
 

@@ -51,6 +51,8 @@ Start with:
 - [Installation](./getting-started/installation.md) to build and verify the CLI.
 - [Configuration](./getting-started/configuration.md) to set region, profile,
   language, and output defaults.
+- [Credentials](./credentials/index.md) to choose, configure, and verify an
+  Alibaba Cloud authentication mode.
 - [Quick Start](./getting-started/quick-start.md) to discover products and read a
   command contract.
 
