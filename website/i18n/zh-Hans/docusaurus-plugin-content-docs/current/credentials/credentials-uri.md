@@ -130,7 +130,7 @@ ecctl --profile broker --region cn-hangzhou ecs region list
 curl -s 'https://broker.internal/credentials?role=ecctl'
 ```
 
-响应体是一份有效凭证。它会把可用的 access key secret 和 security token 打印到终端上，留在滚屏历史里，也留在任何会话录制里。旁边有人能看到屏幕时，只确认结构而不看具体值：
+响应体是一份有效凭证。它会把可用的 AccessKey secret 和 security token 打印到终端上，留在滚屏历史里，也留在任何会话录制里。旁边有人能看到屏幕时，只确认结构而不看具体值：
 
 ```bash
 curl -s 'https://broker.internal/credentials?role=ecctl' | jq 'keys'
