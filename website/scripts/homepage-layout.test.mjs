@@ -14,11 +14,10 @@ function ruleBody(selector) {
   return match[1];
 }
 
-test('homepage install command wraps without scrolling or truncation', () => {
+test('homepage install command stays on one line and scrolls without truncation', () => {
   const commandRule = ruleBody('.commandBar code');
 
-  assert.match(commandRule, /overflow-wrap:\s*anywhere;/);
-  assert.match(commandRule, /white-space:\s*normal;/);
-  assert.doesNotMatch(commandRule, /overflow-x:\s*auto;/);
+  assert.match(commandRule, /white-space:\s*nowrap;/);
+  assert.match(commandRule, /overflow-x:\s*auto;/);
   assert.doesNotMatch(commandRule, /text-overflow:\s*ellipsis;/);
 });
