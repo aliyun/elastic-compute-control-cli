@@ -122,12 +122,19 @@ itself.
 
 ## Storage and permissions
 
-The ecctl configuration file is written with current-user-only permissions.
-Confirm after a write:
+A newly created ecctl configuration file gets `0600`. A write to a file that
+already exists preserves the permissions that file already had, so an
+`0644` config stays `0644` across every later `configure set`. Check it and
+tighten it yourself if it is too open:
 
 ```bash
 ls -l ~/.ecctl/config.json
+chmod 600 ~/.ecctl/config.json
 ```
+
+The private credential store under `~/.ecctl/credentials-v2/`, which holds
+rotated OAuth and CloudSSO tokens and cached STS credentials, is always written
+with canonical current-user-only permissions.
 
 Read the stored secret back only when you deliberately need it:
 

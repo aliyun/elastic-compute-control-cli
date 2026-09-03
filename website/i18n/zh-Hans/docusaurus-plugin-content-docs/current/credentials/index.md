@@ -48,6 +48,8 @@ ecctl configure --mode AK --profile production
   "error": {
     "kind": "client",
     "code": "UnsupportedCredentialMode",
+    "message": "credential mode AK is not supported by ecctl configure",
+    "retryable": false,
     "accepted_values": ["OAuth"]
   }
 }
@@ -103,8 +105,9 @@ ecctl configure --mode AK --profile production
 声明其他模式的 ecctl profile 不会通过该模式解析。如果 profile
 同时带有静态凭证，`ecctl` 会直接使用这些凭证并忽略其余字段，因此
 ecctl profile 上的 `ram_role_arn` 会静默失效。声明 `External`
-或 `CredentialsURI` 却没有静态凭证的 profile 会以
-`MissingCredentials` 失败。任何非静态、非 OAuth 的 profile 都应放在
+或 `CredentialsURI` 却没有静态凭证的 profile 会被路由到环境变量凭证链：
+环境中存在凭证时按环境凭证解析，只有环境同样没有凭证时才报
+`MissingCredentials`。任何非静态、非 OAuth 的 profile 都应放在
 Aliyun-compatible 文件中。
 
 ## 解析顺序
@@ -131,12 +134,20 @@ profile 选择按以下顺序进行：
 
 有两点结论值得记住：
 
-- 匹配到的 Aliyun-compatible profile 永远不会 fallback 到环境变量
-  凭证，即使该 profile 自身没有携带任何凭证。这正是显式选择的 profile
-  不会静默切换身份的原因。
-- 所选 profile 优先于普通凭证环境变量。只有在没有选中任何已存储
-  profile 时，`ALIBABA_CLOUD_CREDENTIALS_URI` 等环境变量才会
-  生效。
+- 匹配到的 profile 绝不会切换到*另一种*凭证来源。声明了
+  `CredentialsURI` 但自身没有 `credentials_uri`、环境中也没有
+  `ALIBABA_CLOUD_CREDENTIALS_URI` 的 profile，会以
+  `InvalidCredentials` 失败，而不会悄悄退化成碰巧导出的 access key 对。
+- 但在自己的来源内部，匹配到的 profile 确实会用环境变量补齐空缺。
+  `AK`、`StsToken` 和 `RamRoleArn` 分支对每个字段都是先取 profile
+  的值、再取对应环境变量的值；profile 完全没有声明模式时，模式推断也走
+  同样的顺序。因此一个声明了 `AK` 却把 `access_key_id` 和
+  `access_key_secret` 留空的 profile，最终解析到的是环境变量里的 access
+  key 对。`credentials_uri` 和 `bearer_token` 也以同样的方式回退到各自的
+  环境变量。
+
+选中一个 profile 并不会关闭环境变量凭证。如果你需要某次命令只使用
+profile 自身携带的内容，请在该次调用前取消这些凭证环境变量。
 
 ### 环境变量凭证链
 
@@ -154,8 +165,17 @@ profile 选择按以下顺序进行：
 6. 来自 `ALIBABA_CLOUD_BEARER_TOKEN` 的 `BearerToken`。
 7. 否则为 `MissingCredentials`。
 
-access key、security token、OIDC 和 role 相关的每个变量也都接受
-`ALIBABACLOUD_`、`ALICLOUD_` 前缀或不带前缀的形式。
+这条链上的前缀别名并不统一：
+
+| 变量 | 接受的前缀 |
+|---|---|
+| `ACCESS_KEY_ID`、`ACCESS_KEY_SECRET`、`SECURITY_TOKEN` | `ALIBABA_CLOUD_`、`ALIBABACLOUD_`、`ALICLOUD_`，以及不带前缀 |
+| `ROLE_ARN`、`OIDC_PROVIDER_ARN`、`OIDC_TOKEN_FILE`、`EXTERNAL_ID` | `ALIBABA_CLOUD_` 和 `ALIBABACLOUD_` |
+| `ROLE_SESSION_NAME`、`STS_ENDPOINT`、`STS_REGION`、`VPC_ENDPOINT_ENABLED`、`ECS_METADATA`、`IMDSV1_DISABLED`、`CREDENTIALS_URI`、`BEARER_TOKEN`、`BEARER_TOKEN_HEADER_KEY` | 仅 `ALIBABA_CLOUD_` |
+
+这个差别很容易踩到。`ALICLOUD_ROLE_ARN` 根本不会被读取，因此把它和
+access key 对一起导出并不会选中 `RamRoleArn`。这对 key 会解析为普通的
+`AK`，命令以 RAM 用户自身而不是所扮演的角色执行，并且没有任何警告。
 
 ## 验证所选凭证
 
@@ -195,6 +215,10 @@ ecctl --profile production --region cn-hangzhou ecs region list
 ```bash
 ecctl configure get access-key-secret --show-secret
 ```
+
+`configure set` 把值当作位置参数接收，没有交互式输入。在命令行里直接敲出的
+密钥会写入 shell history，并且在命令执行期间对本机其他进程通过 `ps`
+可见。在共用机器上，优先使用 `OAuth`，或者把值直接写入配置文件。
 
 ## 身份固定
 

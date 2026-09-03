@@ -49,7 +49,7 @@ aliyun configure --mode CloudSSO --profile sso
 
 ## 可续期状态的存放位置
 
-云命令把兼容的 `aliyun` 配置视为只读。轮换后的 CloudSSO token 和缓存的 CloudSSO STS 凭证只持久化在 `~/.ecctl/credentials-v2/` 下 canonical 的 per-user ecctl 凭证存储中，权限仅限当前用户。条目按其解析到的 Aliyun 源路径和 profile 分别作为键，因此两个不同的配置文件即使持有同名 profile，也不会共享条目。
+云命令把兼容的 `aliyun` 配置视为只读。轮换后的 CloudSSO token 和缓存的 CloudSSO STS 凭证只持久化在 `~/.ecctl/credentials-v2/` 下规范化的、按用户隔离的 ecctl 凭证存储中，权限仅限当前用户。条目按其解析到的 Aliyun 源路径和 profile 分别作为键，因此两个不同的配置文件即使持有同名 profile，也不会共享条目。
 
 `ECCTL_CONFIG_PATH` 不会为 CloudSSO profile 创建第二个轮换所有者，私有存储也不会随 `ECCTL_CONFIG_PATH` 移动。
 

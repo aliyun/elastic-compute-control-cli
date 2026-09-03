@@ -76,7 +76,7 @@ ecctl --profile ci configure get
 ecctl --profile ci --region cn-hangzhou ecs region list
 ```
 
-格式错误的 security token 表现为客户端 `InvalidCredentials` 错误，并带上服务响应中的名称，例如 `Specified SecurityToken is malformed`。该消息包含 Request ID，说明凭证已在本地完成解析和签名。
+格式错误的 security token 由服务端拒绝，因此表现为 `CloudAPIError` 服务错误，并带上服务响应中的名称，例如 `Specified SecurityToken is malformed`。该响应携带 Request ID，说明凭证已在本地完成解析和签名，是服务本身拒绝了这个 token。如果没有 Request ID，而是客户端 `InvalidCredentials` 或 `MissingCredentials` 错误，则说明凭证根本没有解析出来。
 
 ## 相关文档
 

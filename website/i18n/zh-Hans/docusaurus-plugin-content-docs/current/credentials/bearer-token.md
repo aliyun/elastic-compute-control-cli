@@ -89,10 +89,14 @@ bearer 令牌只会被支持 bearer 鉴权的 API 接受。不支持它的 API �
 ecctl --profile bearer configure get
 ```
 
-只在确实需要时才把令牌读回来：
+`configure get` 没有对应 bearer 令牌的配置项。它接受的配置项只有
+`region`、`access-key-id`、`access-key-secret`、`security-token`、`lang`、
+`output` 和 `telemetry.enabled`，因此查询 `bearer_token` 会返回
+`UnknownConfigKey` 客户端错误。需要查看时改为直接读取配置文件，并且只在
+确实需要时才读：
 
 ```bash
-ecctl configure get bearer_token --show-secret
+grep bearer_token ~/.aliyun/config.json
 ```
 
 由于没有本地有效性检查，唯一真正的验证方式是向一个接受 bearer 鉴权的 API 发起

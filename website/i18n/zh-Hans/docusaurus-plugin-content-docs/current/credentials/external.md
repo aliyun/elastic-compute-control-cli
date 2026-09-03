@@ -39,7 +39,7 @@ Aliyun-compatible 配置文件中。
 }
 ```
 
-`process_command` 为空时以 `process_command is empty` 失败。
+profile 完全没有 `process_command` 时以 `process_command is required for External credentials` 失败。另一条消息 `process_command is empty` 表示该字段存在但分词后得到零个参数，出现在值全部由引号或空白组成的情况下。
 
 ### 引号与分词
 

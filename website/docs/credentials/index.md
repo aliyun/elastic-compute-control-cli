@@ -48,6 +48,8 @@ ecctl configure --mode AK --profile production
   "error": {
     "kind": "client",
     "code": "UnsupportedCredentialMode",
+    "message": "credential mode AK is not supported by ecctl configure",
+    "retryable": false,
     "accepted_values": ["OAuth"]
   }
 }
@@ -104,8 +106,10 @@ An ecctl profile that declares another mode is not resolved through that mode.
 A profile that also carries static credentials uses those credentials directly
 and ignores the rest, so `ram_role_arn` on an ecctl profile is silently
 ineffective. A profile that declares `External` or `CredentialsURI` without
-static credentials fails with `MissingCredentials`. Put any non-static,
-non-OAuth profile in the Aliyun-compatible file.
+static credentials is routed to the environment credential chain: it resolves
+from environment credentials when those are present, and reports
+`MissingCredentials` only when the environment carries none either. Put any
+non-static, non-OAuth profile in the Aliyun-compatible file.
 
 ## Resolution order
 
@@ -131,12 +135,22 @@ Once a profile name is chosen, credential resolution follows this order:
 
 Two consequences are worth internalizing:
 
-- A matched Aliyun-compatible profile never falls back to environment
-  credentials, even when the profile itself carries none. This is what keeps an
-  explicitly selected profile from silently switching identity.
-- The selected profile wins over ordinary credential environment variables.
-  Environment variables such as `ALIBABA_CLOUD_CREDENTIALS_URI` take effect only
-  when no stored profile is selected.
+- A matched profile never switches to a *different* credential source. A profile
+  that declares `CredentialsURI` but carries no `credentials_uri`, with no
+  `ALIBABA_CLOUD_CREDENTIALS_URI` in the environment either, fails with
+  `InvalidCredentials`. It does not quietly degrade to an access key pair that
+  happens to be exported.
+- Within its own source, a matched profile does fill gaps from the environment.
+  The `AK`, `StsToken`, and `RamRoleArn` branches take each field from the
+  profile first and from the matching environment variable second, and mode
+  inference does the same when a profile declares no mode at all. A matched
+  profile that declares `AK` and leaves `access_key_id` and `access_key_secret`
+  empty therefore resolves to the environment access key pair. `credentials_uri`
+  and `bearer_token` fall back to their own environment variables the same way.
+
+Selecting a profile does not switch off environment credentials. If you need a
+command to use only what the profile itself carries, unset the credential
+variables for that invocation.
 
 ### Environment credential chain
 
@@ -154,8 +168,18 @@ When `ecctl` uses environment credentials, it tests the sources in this order:
 6. `BearerToken` from `ALIBABA_CLOUD_BEARER_TOKEN`.
 7. Otherwise `MissingCredentials`.
 
-Each of the access key, security token, OIDC, and role variables also accepts
-an `ALIBABACLOUD_`, `ALICLOUD_`, or bare form.
+The prefix aliases are not uniform across this chain:
+
+| Variables | Accepted prefixes |
+|---|---|
+| `ACCESS_KEY_ID`, `ACCESS_KEY_SECRET`, `SECURITY_TOKEN` | `ALIBABA_CLOUD_`, `ALIBABACLOUD_`, `ALICLOUD_`, and bare |
+| `ROLE_ARN`, `OIDC_PROVIDER_ARN`, `OIDC_TOKEN_FILE`, `EXTERNAL_ID` | `ALIBABA_CLOUD_` and `ALIBABACLOUD_` |
+| `ROLE_SESSION_NAME`, `STS_ENDPOINT`, `STS_REGION`, `VPC_ENDPOINT_ENABLED`, `ECS_METADATA`, `IMDSV1_DISABLED`, `CREDENTIALS_URI`, `BEARER_TOKEN`, `BEARER_TOKEN_HEADER_KEY` | `ALIBABA_CLOUD_` only |
+
+The gap is easy to trip over. `ALICLOUD_ROLE_ARN` is never read, so exporting it
+alongside an access key pair does not select `RamRoleArn`. The pair resolves as
+plain `AK` and the command runs as the RAM user itself rather than the assumed
+role, with no warning.
 
 ## Verify a selection
 
@@ -195,6 +219,12 @@ Sensitive values are masked by default. Read one deliberately with
 ```bash
 ecctl configure get access-key-secret --show-secret
 ```
+
+`configure set` takes the value as a positional argument and has no interactive
+prompt. A secret typed on the command line is written to your shell history and
+is visible to other local processes through `ps` while the command runs. On a
+shared machine, prefer `OAuth`, or put the value in the configuration file
+directly.
 
 ## Identity pinning
 

@@ -95,10 +95,14 @@ commands, and reserve `BearerToken` for the API that asked for it.
 ecctl --profile bearer configure get
 ```
 
-Read the token back only when you deliberately need it:
+`configure get` has no key for the bearer token. The keys it accepts are
+`region`, `access-key-id`, `access-key-secret`, `security-token`, `lang`,
+`output`, and `telemetry.enabled`, so asking for `bearer_token` returns a client
+error with code `UnknownConfigKey`. Read the value back from the configuration
+file instead, and only when you deliberately need it:
 
 ```bash
-ecctl configure get bearer_token --show-secret
+grep bearer_token ~/.aliyun/config.json
 ```
 
 Because there is no local validity check, the only real verification is a

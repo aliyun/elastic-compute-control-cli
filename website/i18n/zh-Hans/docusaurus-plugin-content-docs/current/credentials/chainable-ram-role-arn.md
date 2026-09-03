@@ -60,7 +60,7 @@ aliyun configure --mode ChainableRamRoleArn --profile workload
 }
 ```
 
-`source_profile` 必须指向同一个 Aliyun-compatible 配置文件中的 profile。源缺失时失败退出并报 `source profile <name> not found`；`source_profile` 为空时失败退出并报 `source_profile is required for ChainableRamRoleArn`。
+`source_profile` 必须指向同一个 Aliyun-compatible 配置文件中的 profile。源缺失时以 `source profile <name> not found` 失败；`source_profile` 为空时以 `source_profile is required for ChainableRamRoleArn` 失败。
 
 ## 循环检测
 

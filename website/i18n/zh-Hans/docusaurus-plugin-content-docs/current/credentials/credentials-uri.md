@@ -28,12 +28,14 @@ ecctl 原生 profile 只能解析 OAuth 或静态凭证。ecctl 配置文件中�
 export ALIBABA_CLOUD_CREDENTIALS_URI=https://broker.internal/credentials
 ```
 
-只有在没有选中任何已存储 profile，或者 `ALIBABA_CLOUD_IGNORE_PROFILE=TRUE`
-强制走纯环境变量路径时，才会查询环境变量路径。匹配到的 Aliyun-compatible
-profile 永远不会回退到环境变量凭证，即使该 profile 本身没有携带任何凭证。在
-环境变量链中，该来源在一组 access key、一组完整的 OIDC 配置和
-`ALIBABA_CLOUD_ECS_METADATA` 之后测试，在 `ALIBABA_CLOUD_BEARER_TOKEN` 之前
-测试。
+有两条路径会走到这个来源。在环境变量链中，只有在没有选中任何已存储
+profile，或者 `ALIBABA_CLOUD_IGNORE_PROFILE=TRUE` 强制走纯环境变量路径时才会
+查询它；它在一组 access key、一组完整的 OIDC 配置和
+`ALIBABA_CLOUD_ECS_METADATA` 之后测试，在
+`ALIBABA_CLOUD_BEARER_TOKEN` 之前测试。第二条路径是匹配到的 profile
+声明了 `CredentialsURI` 却把 `credentials_uri` 留空，此时会回退到
+`ALIBABA_CLOUD_CREDENTIALS_URI`。两者都没有 URI 时，命令以
+`InvalidCredentials` 失败，而不会退化成碰巧导出的 access key 对。
 
 ## profile 字段
 
@@ -139,10 +141,19 @@ ecctl --profile broker configure get
 ecctl --profile broker --region cn-hangzhou ecs region list
 ```
 
-先独立检查端点：
+先独立检查端点。URL 要加引号：未加引号的 `?` 在 `bash` 和 `zsh`
+中是通配符，命令会在 `curl` 运行之前就中止。
 
 ```bash
-curl -s https://broker.internal/credentials?role=ecctl
+curl -s 'https://broker.internal/credentials?role=ecctl'
+```
+
+响应体是一份有效凭证。它会把可用的 access key secret 和 security token
+打印到终端上，留在滚屏历史里，也留在任何会话录制里。旁边有人能看到屏幕时，
+只确认结构而不看具体值：
+
+```bash
+curl -s 'https://broker.internal/credentials?role=ecctl' | jq 'keys'
 ```
 
 确认响应体带有 `Code: "Success"`、全部四个凭证字段，以及一个足够靠后的

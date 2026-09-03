@@ -8,7 +8,7 @@ description: Authenticate ecctl with a browser-based Alibaba Cloud OAuth login.
 `OAuth` is the recommended mode for a person working at a terminal. It
 exchanges a browser login for a refresh token, then mints short-lived STS
 credentials from that token as needed. No long-lived secret is stored on disk
-in the ecctl configuration file, and `ecctl` is the only credential mode with a
+in the ecctl configuration file, and `OAuth` is the only credential mode with a
 native interactive setup flow.
 
 `OAuth` is renewable, so it is suitable for long-running operations such as

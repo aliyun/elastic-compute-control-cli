@@ -31,12 +31,15 @@ Put this profile in the Aliyun-compatible configuration file.
 export ALIBABA_CLOUD_CREDENTIALS_URI=https://broker.internal/credentials
 ```
 
-The environment path is consulted only when no stored profile is selected, or
-when `ALIBABA_CLOUD_IGNORE_PROFILE=TRUE` forces the environment-only path. A
-matched Aliyun-compatible profile never falls back to environment credentials,
-even when the profile itself carries none. In the environment chain this source
-is tested after an access key pair, a complete OIDC set, and
-`ALIBABA_CLOUD_ECS_METADATA`, and before `ALIBABA_CLOUD_BEARER_TOKEN`.
+Two paths reach this source. In the environment chain it is consulted when no
+stored profile is selected, or when `ALIBABA_CLOUD_IGNORE_PROFILE=TRUE` forces
+the environment-only path; there it is tested after an access key pair, a
+complete OIDC set, and `ALIBABA_CLOUD_ECS_METADATA`, and before
+`ALIBABA_CLOUD_BEARER_TOKEN`. The second path is a matched profile that declares
+`CredentialsURI` but leaves `credentials_uri` empty, which falls back to
+`ALIBABA_CLOUD_CREDENTIALS_URI`. When neither carries a URI, the command fails
+with `InvalidCredentials`; it does not degrade to an access key pair that
+happens to be exported.
 
 ## Profile fields
 
@@ -147,10 +150,20 @@ ecctl --profile broker configure get
 ecctl --profile broker --region cn-hangzhou ecs region list
 ```
 
-Check the endpoint independently first:
+Check the endpoint independently first. Quote the URL: an unquoted `?` is a glob
+character in `bash` and `zsh`, and the command aborts before `curl` runs.
 
 ```bash
-curl -s https://broker.internal/credentials?role=ecctl
+curl -s 'https://broker.internal/credentials?role=ecctl'
+```
+
+The body is a live credential. It prints a usable access key secret and security
+token to your terminal, where they stay in scrollback and in any session
+recording. When someone else can see the screen, check the shape instead of the
+values:
+
+```bash
+curl -s 'https://broker.internal/credentials?role=ecctl' | jq 'keys'
 ```
 
 Confirm the body carries `Code: "Success"`, all four credential fields, and an

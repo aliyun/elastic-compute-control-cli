@@ -100,11 +100,14 @@ ecctl --profile production --region cn-hangzhou ecs region list
 
 ## 存储与权限
 
-ecctl 配置文件以仅当前用户可访问的权限写入。写入后确认：
+新建的 ecctl 配置文件权限为 `0600`。对已存在文件的写入则保留该文件原有的权限，因此一个 `0644` 的配置在之后每次 `configure set` 之后仍然是 `0644`。请自行确认，如果过于宽松就收紧：
 
 ```bash
 ls -l ~/.ecctl/config.json
+chmod 600 ~/.ecctl/config.json
 ```
+
+`~/.ecctl/credentials-v2/` 下的私有凭证存储保存轮换后的 OAuth 与 CloudSSO 令牌以及缓存的 STS 凭证，它始终以规范化的仅当前用户可访问权限写入。
 
 只在确实需要时才读回存储的 secret：
 

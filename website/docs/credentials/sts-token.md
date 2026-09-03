@@ -96,10 +96,12 @@ ecctl --profile ci configure get
 ecctl --profile ci --region cn-hangzhou ecs region list
 ```
 
-A malformed security token surfaces as a client-side `InvalidCredentials` error
-naming the service response, for example `Specified SecurityToken is malformed`.
-That message includes a request ID, which confirms the credential was resolved
-and signed locally.
+A malformed security token is rejected by the service, so it surfaces as a
+service error with code `CloudAPIError` naming the response, for example
+`Specified SecurityToken is malformed`. That response carries a request ID,
+which means resolution and signing succeeded locally and the service rejected
+the token itself. A client-side `InvalidCredentials` or `MissingCredentials`
+error, with no request ID, means the credential never resolved.
 
 ## Related
 

@@ -41,7 +41,10 @@ Aliyun-compatible configuration file.
 }
 ```
 
-An empty `process_command` fails with `process_command is empty`.
+A profile with no `process_command` fails with `process_command is required for
+External credentials`. The separate message `process_command is empty` means the
+field is present but tokenized to zero arguments, which happens for a value made
+entirely of quotes or whitespace.
 
 ### Quoting
 
