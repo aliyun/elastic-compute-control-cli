@@ -23,7 +23,7 @@ aliyun configure --mode CredentialsURI --profile broker
 export ALIBABA_CLOUD_CREDENTIALS_URI=https://broker.internal/credentials
 ```
 
-有两条路径会走到这个来源。在环境变量链中，只有在没有选中任何已存储 profile，或者 `ALIBABA_CLOUD_IGNORE_PROFILE=TRUE` 强制走纯环境变量路径时才会查询它；它在一组 access key、一组完整的 OIDC 配置和 `ALIBABA_CLOUD_ECS_METADATA` 之后测试，在 `ALIBABA_CLOUD_BEARER_TOKEN` 之前测试。第二条路径是匹配到的 profile 声明了 `CredentialsURI` 却把 `credentials_uri` 留空，此时会回退到 `ALIBABA_CLOUD_CREDENTIALS_URI`。两者都没有 URI 时，命令以 `InvalidCredentials` 失败，而不会退化成碰巧导出的 AccessKey 密钥对。
+有两条路径会走到这个来源。在环境变量链中，只有在没有选中任何已存储 profile，或者 `ALIBABA_CLOUD_IGNORE_PROFILE=TRUE` 强制走纯环境变量路径时才会查询它；它在一组 AccessKey、一组完整的 OIDC 配置和 `ALIBABA_CLOUD_ECS_METADATA` 之后测试，在 `ALIBABA_CLOUD_BEARER_TOKEN` 之前测试。第二条路径是匹配到的 profile 声明了 `CredentialsURI` 却把 `credentials_uri` 留空，此时会回退到 `ALIBABA_CLOUD_CREDENTIALS_URI`。两者都没有 URI 时，命令以 `InvalidCredentials` 失败，而不会退化成碰巧导出的 AccessKey 密钥对。
 
 ## profile 字段
 
