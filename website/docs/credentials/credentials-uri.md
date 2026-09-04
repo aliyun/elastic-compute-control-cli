@@ -33,12 +33,12 @@ export ALIBABA_CLOUD_CREDENTIALS_URI=https://broker.internal/credentials
 
 Two paths reach this source. In the environment chain it is consulted when no
 stored profile is selected, or when `ALIBABA_CLOUD_IGNORE_PROFILE=TRUE` forces
-the environment-only path; there it is tested after an access key pair, a
+the environment-only path; there it is tested after an AccessKey pair, a
 complete OIDC set, and `ALIBABA_CLOUD_ECS_METADATA`, and before
 `ALIBABA_CLOUD_BEARER_TOKEN`. The second path is a matched profile that declares
 `CredentialsURI` but leaves `credentials_uri` empty, which falls back to
 `ALIBABA_CLOUD_CREDENTIALS_URI`. When neither carries a URI, the command fails
-with `InvalidCredentials`; it does not degrade to an access key pair that
+with `InvalidCredentials`; it does not degrade to an AccessKey pair that
 happens to be exported.
 
 ## Profile fields
@@ -167,7 +167,7 @@ character in `bash` and `zsh`, and the command aborts before `curl` runs.
 curl -s 'https://broker.internal/credentials?role=ecctl'
 ```
 
-The body is a live credential. It prints a usable access key secret and security
+The body is a live credential. It prints a usable AccessKey secret and security
 token to your terminal, where they stay in scrollback and in any session
 recording. When someone else can see the screen, check the shape instead of the
 values:

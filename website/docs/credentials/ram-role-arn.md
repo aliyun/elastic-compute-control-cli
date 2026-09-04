@@ -25,7 +25,7 @@ Put this profile in the compatible `aliyun` configuration file.
 
 A trap worth naming: an ecctl-native profile that declares
 `mode: RamRoleArn` but also carries `access_key_id` and `access_key_secret`
-uses that access key pair directly and ignores `ram_role_arn`. No role is
+uses that AccessKey pair directly and ignores `ram_role_arn`. No role is
 assumed. Keep this profile in the compatible `aliyun` configuration file.
 
 ## Configure with environment variables
@@ -37,7 +37,7 @@ export ALIBABA_CLOUD_ROLE_ARN=acs:ram::1234567890123456:role/demo
 export ALIBABA_CLOUD_ROLE_SESSION_NAME=ecctl-session
 ```
 
-In the environment chain, an access key pair plus `ALIBABA_CLOUD_ROLE_ARN`
+In the environment chain, an AccessKey pair plus `ALIBABA_CLOUD_ROLE_ARN`
 becomes `RamRoleArn`. Without the role ARN the same pair stays
 [`AK`](./ak.md). `ALIBABA_CLOUD_EXTERNAL_ID`,
 `ALIBABA_CLOUD_STS_ENDPOINT`, and `ALIBABA_CLOUD_STS_REGION` are also read on
@@ -47,7 +47,7 @@ this path.
 
 | Field | Required | Notes |
 |---|---|---|
-| `mode` | No | `RamRoleArn`. Inferred when `ram_role_arn` is present alongside an access key pair |
+| `mode` | No | `RamRoleArn`. Inferred when `ram_role_arn` is present alongside an AccessKey pair |
 | `access_key_id` | Yes | Source AccessKey ID. Falls back to the environment |
 | `access_key_secret` | Yes | Source AccessKey secret. Falls back to the environment |
 | `sts_token` | No | Present when the source is itself a temporary credential |

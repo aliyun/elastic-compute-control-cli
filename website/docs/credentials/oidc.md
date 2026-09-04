@@ -34,7 +34,7 @@ export ALIBABA_CLOUD_ROLE_SESSION_NAME=ecctl-session
 ```
 
 All three of the provider ARN, token file, and role ARN are required together.
-In the environment chain this set is tested after an access key pair and before
+In the environment chain this set is tested after an AccessKey pair and before
 `ALIBABA_CLOUD_ECS_METADATA`.
 
 A partially populated set is a hard error, not a silent skip:

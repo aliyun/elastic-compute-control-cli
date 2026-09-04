@@ -6,9 +6,9 @@ description: Authenticate product APIs that accept bearer tokens with ecctl.
 # Bearer token
 
 `BearerToken` sends a token in a request header instead of signing the request
-with an access key. It applies only to the product APIs that accept bearer
+with an AccessKey. It applies only to the product APIs that accept bearer
 authentication. It is not a general-purpose credential and is not a way to work
-around a missing access key.
+around a missing AccessKey.
 
 The token is static. `ecctl` cannot renew it, and there is no expiration field
 to check.
@@ -31,7 +31,7 @@ export ALIBABA_CLOUD_BEARER_TOKEN_HEADER_KEY=<header-name>
 ```
 
 The header variable is optional. In the environment chain this is the last
-source consulted, after an access key pair, a complete OIDC set,
+source consulted, after an AccessKey pair, a complete OIDC set,
 `ALIBABA_CLOUD_ECS_METADATA`, and `ALIBABA_CLOUD_CREDENTIALS_URI`. Anything
 that resolves earlier wins.
 

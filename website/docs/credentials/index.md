@@ -17,7 +17,7 @@ Read this page first, then open the page for the mode you intend to use.
 | Mode | Credential lifetime | Typical use | Page |
 |---|---|---|---|
 | `OAuth` | Renewable | Browser login for a local human user | [OAuth](./oauth.md) |
-| `AK` | Static | Long-lived access key pair | [AccessKey](./ak.md) |
+| `AK` | Static | Long-lived AccessKey pair | [AccessKey](./ak.md) |
 | `StsToken` | Fixed expiry | A temporary token issued elsewhere | [STS token](./sts-token.md) |
 | `EcsRamRole` | Renewable | Workload on an ECS instance with an attached RAM role | [ECS RAM role](./ecs-ram-role.md) |
 | `RamRoleArn` | Renewable | Assume a role from an AK or STS source credential | [RAM role ARN](./ram-role-arn.md) |
@@ -140,14 +140,14 @@ Two consequences are worth internalizing:
 - A matched profile never switches to a *different* credential source. A profile
   that declares `CredentialsURI` but carries no `credentials_uri`, with no
   `ALIBABA_CLOUD_CREDENTIALS_URI` in the environment either, fails with
-  `InvalidCredentials`. It does not quietly degrade to an access key pair that
+  `InvalidCredentials`. It does not quietly degrade to an AccessKey pair that
   happens to be exported.
 - Within its own source, a matched profile does fill gaps from the environment.
   The `AK`, `StsToken`, and `RamRoleArn` branches take each field from the
   profile first and from the matching environment variable second, and mode
   inference does the same when a profile declares no mode at all. A matched
   profile that declares `AK` and leaves `access_key_id` and `access_key_secret`
-  empty therefore resolves to the environment access key pair. `credentials_uri`
+  empty therefore resolves to the environment AccessKey pair. `credentials_uri`
   and `bearer_token` fall back to their own environment variables the same way.
 
 Selecting a profile does not switch off environment credentials. If you need a
@@ -161,7 +161,7 @@ When `ecctl` uses environment credentials, it tests the sources in this order:
 1. `ALIBABA_CLOUD_ACCESS_KEY_ID` with `ALIBABA_CLOUD_ACCESS_KEY_SECRET`,
    becoming `StsToken` when `ALIBABA_CLOUD_SECURITY_TOKEN` is also present and
    `RamRoleArn` when `ALIBABA_CLOUD_ROLE_ARN` is also present. Setting only one
-   of the access key pair is a hard error.
+   of the AccessKey pair is a hard error.
 2. `OIDC`, requiring all three of `ALIBABA_CLOUD_OIDC_PROVIDER_ARN`,
    `ALIBABA_CLOUD_OIDC_TOKEN_FILE`, and `ALIBABA_CLOUD_ROLE_ARN`.
 3. `EcsRamRole` from `ALIBABA_CLOUD_ECS_METADATA`.
@@ -179,7 +179,7 @@ The prefix aliases are not uniform across this chain:
 | `ROLE_SESSION_NAME`, `STS_ENDPOINT`, `STS_REGION`, `VPC_ENDPOINT_ENABLED`, `ECS_METADATA`, `IMDSV1_DISABLED`, `CREDENTIALS_URI`, `BEARER_TOKEN`, `BEARER_TOKEN_HEADER_KEY` | `ALIBABA_CLOUD_` only |
 
 The gap is easy to trip over. `ALICLOUD_ROLE_ARN` is never read, so exporting it
-alongside an access key pair does not select `RamRoleArn`. The pair resolves as
+alongside an AccessKey pair does not select `RamRoleArn`. The pair resolves as
 plain `AK` and the command runs as the RAM user itself rather than the assumed
 role, with no warning.
 

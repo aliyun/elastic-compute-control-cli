@@ -31,7 +31,7 @@ export ALIBABA_CLOUD_ECS_METADATA=<role-name>
 
 The environment path is consulted when no stored profile is selected, or when
 `ALIBABA_CLOUD_IGNORE_PROFILE=TRUE` forces the environment-only path. In the
-environment chain it is tested after an access key pair and after a complete
+environment chain it is tested after an AccessKey pair and after a complete
 OIDC set.
 
 Two further variables control the metadata service itself:

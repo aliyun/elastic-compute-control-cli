@@ -11,7 +11,7 @@ identity provider once; `ecctl` then exchanges the resulting access token for
 STS credentials scoped to the selected account and access configuration.
 
 Use this mode when your organization manages Alibaba Cloud access through
-CloudSSO rather than through individual RAM users or long-lived access keys.
+CloudSSO rather than through individual RAM users or long-lived AccessKeys.
 
 `ecctl` consumes CloudSSO profiles but does not run the interactive CloudSSO
 login. Configure the profile with Alibaba Cloud CLI, then use it from `ecctl`.
