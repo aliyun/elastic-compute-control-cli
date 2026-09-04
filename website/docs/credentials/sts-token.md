@@ -25,7 +25,7 @@ ecctl configure set security-token <token>
 ```
 
 `security-token` is stored as `sts_token`. Setting it on a profile that already
-holds an access key pair switches that profile from `AK` to `StsToken`.
+holds an AccessKey pair switches that profile from `AK` to `StsToken`.
 
 `ecctl configure --mode StsToken` is not supported. `--mode` accepts `OAuth`
 only.
@@ -44,7 +44,7 @@ export ALIBABA_CLOUD_ACCESS_KEY_SECRET=<temporary-secret>
 export ALIBABA_CLOUD_SECURITY_TOKEN=<token>
 ```
 
-All three are required. An access key pair without a security token resolves as
+All three are required. An AccessKey pair without a security token resolves as
 [`AK`](./ak.md), not as a partial `StsToken`. Each variable also accepts an
 `ALIBABACLOUD_`, `ALICLOUD_`, or bare spelling.
 
@@ -52,7 +52,7 @@ All three are required. An access key pair without a security token resolves as
 
 | Field | Required | Notes |
 |---|---|---|
-| `mode` | No | `StsToken`. Inferred when `sts_token` is present alongside an access key pair |
+| `mode` | No | `StsToken`. Inferred when `sts_token` is present alongside an AccessKey pair |
 | `access_key_id` | Yes | Temporary AccessKey ID, usually prefixed `STS.` |
 | `access_key_secret` | Yes | Temporary AccessKey secret |
 | `sts_token` | Yes | The security token |

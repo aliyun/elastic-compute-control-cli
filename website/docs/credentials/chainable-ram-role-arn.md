@@ -11,7 +11,7 @@ uses, and its credential becomes the source for `AssumeRole`.
 
 This is how you build a chain: an [OAuth](./oauth.md) login assumes a role in a
 shared account, which then assumes a role in a workload account. It also keeps
-a single source credential in one place instead of duplicating an access key
+a single source credential in one place instead of duplicating an AccessKey
 into every downstream profile.
 
 ## Configure with Alibaba Cloud CLI

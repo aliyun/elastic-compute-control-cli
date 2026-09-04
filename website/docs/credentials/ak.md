@@ -1,6 +1,6 @@
 ---
 title: AccessKey
-description: Configure a long-lived Alibaba Cloud access key pair for ecctl.
+description: Configure a long-lived Alibaba Cloud AccessKey pair for ecctl.
 ---
 
 # AccessKey
@@ -49,7 +49,7 @@ ecctl --profile production configure set access-key-secret <secret>
 ```
 
 `ecctl configure --mode AK` is not supported. `--mode` accepts `OAuth` only;
-the `AK` mode is derived from the presence of an access key pair.
+the `AK` mode is derived from the presence of an AccessKey pair.
 
 ## Configure with Alibaba Cloud CLI
 
@@ -94,7 +94,7 @@ Each variable also accepts an `ALIBABACLOUD_`, `ALICLOUD_`, or bare
 | `access_key_secret` | Yes | Sensitive. Falls back to the environment when empty |
 
 A profile in the compatible `aliyun` configuration file that omits `mode` is
-classified by its fields. A profile carrying an access key pair and no
+classified by its fields. A profile carrying an AccessKey pair and no
 `sts_token` or `ram_role_arn` resolves as `AK`.
 
 ```json
@@ -147,7 +147,7 @@ list`, and every other output path.
 
 ## Related
 
-- [STS token](./sts-token.md) for temporary access key credentials
+- [STS token](./sts-token.md) for temporary AccessKey credentials
 - [Credentials overview](./index.md) for resolution order
 - [Configuration](../getting-started/configuration.md#supported-keys) for the
   settable key list
