@@ -14,7 +14,7 @@ description: 选择、配置并验证 ecctl 接受的阿里云凭证模式。
 | 模式 | 凭证生命周期 | 典型场景 | 页面 |
 |---|---|---|---|
 | `OAuth` | 可续期 | 本地用户通过浏览器登录 | [OAuth](./oauth.md) |
-| `AK` | 静态 | 长期 AccessKey 凭证 | [AccessKey](./ak.md) |
+| `AK` | 静态 | 长期 AccessKey 密钥对 | [AccessKey](./ak.md) |
 | `StsToken` | 固定过期时间 | 在别处签发的临时令牌 | [STS 令牌](./sts-token.md) |
 | `EcsRamRole` | 可续期 | 绑定 RAM 角色的 ECS 实例上的工作负载 | [ECS RAM 角色](./ecs-ram-role.md) |
 | `RamRoleArn` | 可续期 | 从 AK 或 STS 源凭证扮演 RAM 角色 | [RAM 角色 ARN](./ram-role-arn.md) |
