@@ -7,7 +7,7 @@ description: 使用另一个命名 profile 作为源凭证来扮演 RAM 角色�
 
 `ChainableRamRoleArn` 从一个源 *profile* 扮演 RAM 角色，而不是从内联凭证扮演。源 profile 会先按它自身使用的任意凭证模式完成解析，其凭证随后成为 `AssumeRole` 的源凭证。
 
-这就是构建角色链的方式：一次 [OAuth](./oauth.md) 登录扮演共享账号中的角色，该角色再扮演工作负载账号中的角色。它同时把单一源凭证保存在一处，而不必把 access key 复制到每个下游 profile。
+这就是构建角色链的方式：一次 [OAuth](./oauth.md) 登录扮演共享账号中的角色，该角色再扮演工作负载账号中的角色。它同时把单一源凭证保存在一处，而不必把 AccessKey 复制到每个下游 profile。
 
 ## 使用阿里云 CLI 配置
 

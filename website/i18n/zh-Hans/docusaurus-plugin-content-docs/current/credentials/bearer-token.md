@@ -5,7 +5,7 @@ description: 用 ecctl 鉴权那些接受 bearer 令牌的产品 API。
 
 # Bearer 令牌
 
-`BearerToken` 在请求头中发送一个令牌，而不是用 access key 为请求签名。它只适用于接受 bearer 鉴权的产品 API。它不是通用凭证，也不是绕过缺失 access key 的办法。
+`BearerToken` 在请求头中发送一个令牌，而不是用 AccessKey 为请求签名。它只适用于接受 bearer 鉴权的产品 API。它不是通用凭证，也不是绕过缺失 AccessKey 的办法。
 
 令牌是静态的。`ecctl` 无法续期它，也没有过期时间字段可供检查。
 
@@ -24,7 +24,7 @@ export ALIBABA_CLOUD_BEARER_TOKEN=<token>
 export ALIBABA_CLOUD_BEARER_TOKEN_HEADER_KEY=<header-name>
 ```
 
-请求头变量是可选的。在环境变量链中，这是最后查询的来源，排在一组 access key、一组完整的 OIDC 配置、`ALIBABA_CLOUD_ECS_METADATA` 和 `ALIBABA_CLOUD_CREDENTIALS_URI` 之后。任何更早解析成功的来源都会胜出。
+请求头变量是可选的。在环境变量链中，这是最后查询的来源，排在一组 AccessKey、一组完整的 OIDC 配置、`ALIBABA_CLOUD_ECS_METADATA` 和 `ALIBABA_CLOUD_CREDENTIALS_URI` 之后。任何更早解析成功的来源都会胜出。
 
 ## profile 字段
 

@@ -7,7 +7,7 @@ description: 在 ecctl 中使用阿里云 CloudSSO 访问配置。
 
 `CloudSSO` 使用企业的 CloudSSO 访问配置，为成员账号获取临时凭证。用户只需通过组织的身份 provider 登录一次，随后 `ecctl` 把得到的 access token 换取为限定在所选账号和访问配置范围内的 STS 凭证。
 
-当你的组织通过 CloudSSO 而不是通过单独的 RAM 用户或长期 access key 来管理阿里云访问时，请使用该凭证模式。
+当你的组织通过 CloudSSO 而不是通过单独的 RAM 用户或长期 AccessKey 来管理阿里云访问时，请使用该凭证模式。
 
 `ecctl` 会消费 CloudSSO profile，但不会执行交互式的 CloudSSO 登录。请先用阿里云 CLI 配置该 profile，再从 `ecctl` 使用它。
 

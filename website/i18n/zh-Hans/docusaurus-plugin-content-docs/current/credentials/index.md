@@ -23,7 +23,7 @@ description: 选择、配置并验证 ecctl 接受的阿里云凭证模式。
 | `CloudSSO` | 可续期 | 企业 CloudSSO 访问配置 | [CloudSSO](./cloudsso.md) |
 | `External` | 取决于辅助程序 | 输出凭证的本地程序 | [External 进程](./external.md) |
 | `CredentialsURI` | 可续期 | HTTPS 或 loopback HTTP 凭证端点 | [Credentials URI](./credentials-uri.md) |
-| `BearerToken` | 静态 | 接受 Bearer 鉴权的产品 API | [Bearer 令牌](./bearer-token.md) |
+| `BearerToken` | 静态 | 接受 bearer 鉴权的产品 API | [Bearer 令牌](./bearer-token.md) |
 
 长时间运行的操作应优先选择可续期模式。可续期凭证在临近过期时，会在后续已签名请求之前完成刷新，因此持续数小时的 OSS 传输或长时间运行的 `ecctl` 脚本不会中途失败。`AK`、`StsToken` 和 `BearerToken` 无法自行刷新。
 
