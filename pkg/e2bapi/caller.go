@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
@@ -27,6 +28,9 @@ const (
 type operation struct {
 	method string
 	path   string
+	// FC's legacy list must be a single, unambiguous complete array. Keep
+	// strict decoding scoped to that operation; native E2B stays unchanged.
+	completeArray bool
 }
 
 var operations = map[string]operation{
@@ -58,9 +62,12 @@ var operations = map[string]operation{
 
 // Caller adapts the E2B REST API to ecctl's spec execution engine.
 type Caller struct {
-	endpoint *url.URL
-	apiKey   string
-	client   *http.Client
+	endpoint      *url.URL
+	apiKey        string
+	client        *http.Client
+	lookupCNAME   cnameLookup
+	backendMu     sync.Mutex
+	backendResult *backendDetection
 }
 
 // NewCaller resolves the E2B endpoint and project API key from the standard
@@ -111,7 +118,7 @@ func NewCallerWithClient(rawEndpoint, apiKey string, client *http.Client) (*Call
 	clientCopy.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
-	return &Caller{endpoint: endpoint, apiKey: apiKey, client: &clientCopy}, nil
+	return &Caller{endpoint: endpoint, apiKey: apiKey, client: &clientCopy, lookupCNAME: lookupSystemCNAME}, nil
 }
 
 func validateEndpoint(raw string) (*url.URL, error) {
@@ -141,6 +148,14 @@ func (c *Caller) Call(ctx context.Context, operationName string, request map[str
 	op, ok := operations[operationName]
 	if !ok {
 		return nil, ecerrors.Client("UnsupportedOperation", fmt.Sprintf("E2B operation %q is not supported", operationName))
+	}
+	if operationName == "ListTemplates" {
+		if _, ok := ctx.Deadline(); !ok {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, defaultTimeout)
+			defer cancel()
+		}
+		return c.listTemplates(ctx, request)
 	}
 	result, err := c.call(ctx, operationName, op, request)
 	if err != nil {
@@ -218,7 +233,13 @@ func (c *Caller) call(ctx context.Context, operationName string, op operation, r
 	}
 
 	result := map[string]any{}
-	if response.StatusCode != http.StatusNoContent {
+	if op.completeArray {
+		items, err := decodeCompleteJSONArray(response.Body)
+		if err != nil {
+			return nil, invalidFCResponse()
+		}
+		result = map[string]any{"items": items, arrayMarker: true}
+	} else if response.StatusCode != http.StatusNoContent {
 		decoder := json.NewDecoder(response.Body)
 		decoder.UseNumber()
 		var decoded any
