@@ -169,6 +169,11 @@ func ProductList(product string) (ProductSurface, bool) {
 }
 
 func ProductListForLanguage(product string, lang string) (ProductSurface, bool) {
+	canonical, ok := spec.CanonicalProduct(specDir(), product)
+	if !ok {
+		return ProductSurface{}, false
+	}
+	product = canonical
 	refs, err := discoveredResources()
 	if err != nil {
 		return ProductSurface{}, false
@@ -198,6 +203,11 @@ func ProductListForLanguage(product string, lang string) (ProductSurface, bool) 
 }
 
 func ResourceForLanguage(product string, requested string, lang string) (ResourceSurface, bool) {
+	canonical, ok := spec.CanonicalProduct(specDir(), product)
+	if !ok {
+		return ResourceSurface{}, false
+	}
+	product = canonical
 	return resourceForLanguagePath(product, "", requested, lang)
 }
 
@@ -226,6 +236,11 @@ func resourceForLanguagePath(product string, parent string, requested string, la
 
 func ResourceForLanguageName(name string, lang string) (ResourceSurface, bool) {
 	parts := strings.Split(name, ".")
+	if len(parts) > 0 {
+		if canonical, ok := spec.CanonicalProduct(specDir(), parts[0]); ok {
+			parts[0] = canonical
+		}
+	}
 	switch len(parts) {
 	case 2:
 		return resourceForLanguagePath(parts[0], "", parts[1], lang)
@@ -323,6 +338,11 @@ func CommandForLanguageMode(name string, lang string, mode CommandSchemaMode) (C
 	if !ok {
 		return CommandSchema{}, false
 	}
+	canonical, ok := spec.CanonicalProduct(specDir(), product)
+	if !ok {
+		return CommandSchema{}, false
+	}
+	product = canonical
 	resourceName, parent, ok = commandResource(product, parent, resourceName)
 	if !ok {
 		return CommandSchema{}, false
@@ -339,8 +359,8 @@ func CommandForLanguageMode(name string, lang string, mode CommandSchemaMode) (C
 	positionals := commandPositionals(resource, operation, lang, mode)
 	command := CommandSchema{
 		SchemaVersion: 1,
-		Command:       name,
-		SchemaID:      commandSchemaID(name, actionName, positionals),
+		Command:       canonicalCommandName(product, parent, resourceName, actionName),
+		SchemaID:      commandSchemaID(canonicalCommandName(product, parent, resourceName, actionName), actionName, positionals),
 		CLI:           commandCLI(resource, actionName),
 		Usage:         commandUsage(resource, actionName, positionals),
 		Kind:          kind,
@@ -552,6 +572,18 @@ func parseCommandName(name string) (product string, parent string, resource stri
 	}
 }
 
+func canonicalCommandName(product, parent, resource, action string) string {
+	parts := []string{product}
+	if parent != "" {
+		parts = append(parts, parent)
+	}
+	if resource != "" {
+		parts = append(parts, resource)
+	}
+	parts = append(parts, action)
+	return strings.Join(parts, ".")
+}
+
 func specDir() string {
 	return os.Getenv("ECCTL_SPEC_DIR")
 }
@@ -701,7 +733,7 @@ func waitContract(resource spec.ResourceSpec, operation spec.Operation) *WaitCon
 	if operationHasControl(operation, "timeout") {
 		contract.TimeoutFlag = "timeout"
 	}
-	if pollCommand := pollCommand(resource); pollCommand != "" {
+	if pollCommand := pollCommand(resource, waiters); pollCommand != "" {
 		contract.PollCommand = pollCommand
 	}
 	return contract
@@ -768,9 +800,16 @@ func operationHasControl(operation spec.Operation, name string) bool {
 	return false
 }
 
-func pollCommand(resource spec.ResourceSpec) string {
-	if !operationHasPositionalID(resource.Operations["get"]) {
+func pollCommand(resource spec.ResourceSpec, waiters []WaiterContract) string {
+	getOperation := resource.Operations["get"]
+	if !operationHasPositionalID(getOperation) {
 		return ""
+	}
+	for _, waiter := range waiters {
+		probe, ok := resource.Probes[waiter.Probe]
+		if !ok || requestNeedsOperationContext(probe.Request) {
+			return ""
+		}
 	}
 	parts := resourceCLIPath(resource)
 	parts = append(parts, "get", "<id>")
@@ -779,6 +818,37 @@ func pollCommand(resource spec.ResourceSpec) string {
 	}
 	parts = append(parts, "--output", "json")
 	return strings.Join(parts, " ")
+}
+
+func requestNeedsOperationContext(value any) bool {
+	switch typed := value.(type) {
+	case string:
+		for _, part := range strings.Split(typed, "$context.")[1:] {
+			fields := strings.FieldsFunc(part, func(r rune) bool {
+				return r == '.' || r == ']' || r == ')' || r == ',' || r == ' '
+			})
+			if len(fields) == 0 {
+				return true
+			}
+			name := fields[0]
+			if name != "id" && name != "region" {
+				return true
+			}
+		}
+	case map[string]any:
+		for _, child := range typed {
+			if requestNeedsOperationContext(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if requestNeedsOperationContext(child) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func operationHasPositionalID(operation spec.Operation) bool {

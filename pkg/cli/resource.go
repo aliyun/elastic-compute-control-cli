@@ -17,6 +17,7 @@ import (
 
 	"github.com/aliyun/elastic-compute-control-cli/pkg/aliyun"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/config"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/e2bapi"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
@@ -56,6 +57,9 @@ func defaultResourceCallerFactory(profileName, configPath string, resource spec.
 }
 
 func defaultResourceCallerFactoryResolved(profileName, configPath string, resource spec.ResourceSpec, region config.ResolvedRegion, getenv func(string) string) (engine.Caller, error) {
+	if resource.Provider == "e2b" {
+		return e2bapi.NewCaller(getenv)
+	}
 	caller, err := aliyun.NewOpenAPICallerWithRegionSource(profileName, configPath, resourceAPIProduct(resource), region, getenv)
 	if err != nil {
 		return nil, err
@@ -95,6 +99,7 @@ const (
 	resourceCommandGroupSubResources = "sub-resources"
 	flagOrderedAnnotation            = "ecctl.flag.ordered"
 	actionKeyAnnotation              = "ecctl.action"
+	resourceKindAnnotation           = "ecctl.resource.kind"
 	fieldSelectorInputName           = "fields"
 	idempotencyKeyInputName          = "idempotency_key"
 )
@@ -193,7 +198,9 @@ func loadDiscoveredResources(specDir string, refs []spec.ResourceRef) []discover
 }
 
 func newProductStub(product string, productSpec discoveredProduct, lang string) *cobra.Command {
-	return groupCommandForLanguage(product, productCommandShort(product, productSpec.spec, lang), lang)
+	cmd := groupCommandForLanguage(product, productCommandShort(product, productSpec.spec, lang), lang)
+	cmd.Aliases = append([]string(nil), productSpec.spec.Aliases...)
+	return cmd
 }
 
 func newResourceStub(resource spec.ResourceSpec, lang string) *cobra.Command {
@@ -235,13 +242,14 @@ func newProductCommand(options *globalOptions, stdout io.Writer, product string,
 		}
 		break
 	}
-	exposeDefaultResource := defaultResource != nil && product == "vpc" && defaultResource.Resource == product
+	exposeDefaultResource := defaultResource != nil && productSpec.spec.ExposeDefaultResource && defaultResource.Resource == product
 	if defaultResource != nil && (len(defaultResource.Aliases) > 0 || exposeDefaultResource) {
 		hasChildResources = true
 	}
 	if cmd == nil {
 		cmd = groupCommandForLanguage(product, productCommandShort(product, productSpec.spec, options.lang), options.lang)
 	}
+	cmd.Aliases = append([]string(nil), productSpec.spec.Aliases...)
 	if productSpec.err != nil {
 		return resourceSpecErrorCommand(product, productCommandShort(product, productSpec.spec, options.lang), productSpec.err)
 	}
@@ -329,6 +337,7 @@ func newProductCommand(options *globalOptions, stdout io.Writer, product string,
 }
 
 func publicCLIResource(product string, resource string) bool {
+	product = canonicalCLIProduct(product)
 	if !publicCLIProduct(product) {
 		return false
 	}
@@ -343,6 +352,7 @@ func publicCLIResource(product string, resource string) bool {
 }
 
 func publicCLIResourceAction(product string, resource string, action string) bool {
+	product = canonicalCLIProduct(product)
 	if !publicCLIResource(product, resource) {
 		return false
 	}
@@ -361,6 +371,8 @@ func publicCLICommandAllowed(args []string) bool {
 		positionals = positionals[1:]
 	}
 	product := positionals[0]
+	product = canonicalCLIProduct(product)
+	positionals[0] = product
 	if isBuiltinRootCommand(product) {
 		return true
 	}
@@ -369,7 +381,7 @@ func publicCLICommandAllowed(args []string) bool {
 		return true
 	case "vpc":
 		return true
-	case "ack", "agentrun", "lingjun", "rg", "tag":
+	case "ack", "agentrun", "lingjun", "rg", "sandbox", "tag":
 		if len(positionals) == 1 {
 			return true
 		}
@@ -390,18 +402,19 @@ func publicCLICommandAllowed(args []string) bool {
 }
 
 func publicCLIDefaultResourceAction(product string, action string) bool {
-	if product != "ack" || !publicCLIResource(product, product) {
+	product = canonicalCLIProduct(product)
+	if !publicCLIResource(product, product) {
 		return false
 	}
-	switch action {
-	case "create", "delete", "get", "list", "update", "upgrade":
-		return true
-	default:
+	surface, ok := schema.ResourceForLanguage(product, product, "en")
+	if !ok {
 		return false
 	}
+	return containsString(surface.Actions, action) && publicCLIResourceAction(product, product, action)
 }
 
 func publicCLIResourceIdentifier(product string, requested string) bool {
+	product = canonicalCLIProduct(product)
 	if publicCLIResource(product, requested) {
 		return true
 	}
@@ -449,10 +462,12 @@ func publicCLIExample(example string) bool {
 		return true
 	}
 	product := positionals[0]
+	product = canonicalCLIProduct(product)
+	positionals[0] = product
 	switch product {
 	case "ecs", "vpc":
 		return true
-	case "ack", "agentrun", "lingjun", "rg", "tag":
+	case "ack", "agentrun", "lingjun", "rg", "sandbox", "tag":
 		resource, action, ok := publicCLIExampleResourceAction(positionals)
 		if !ok {
 			return false
@@ -471,6 +486,8 @@ func publicCLIExampleResourceAction(positionals []string) (resource, action stri
 		return "", "", false
 	}
 	product := positionals[0]
+	product = canonicalCLIProduct(product)
+	positionals[0] = product
 	surface, found := schema.ProductList(product)
 	if !found {
 		return "", "", false
@@ -724,6 +741,7 @@ func newResourceActionCommand(options *globalOptions, stdout io.Writer, resource
 		cmd.Annotations = map[string]string{}
 	}
 	cmd.Annotations[actionKeyAnnotation] = resource.Product + "." + resource.Resource + "." + actionName
+	cmd.Annotations[resourceKindAnnotation] = resource.Kind
 	addResourceActionFlags(cmd, resource, operation, options.lang)
 	return cmd
 }
@@ -1203,11 +1221,15 @@ func requiredFlagStatuses(resource spec.ResourceSpec, params map[string]spec.Par
 }
 
 func runResourceAction(cmd *cobra.Command, options *globalOptions, stdout io.Writer, resource spec.ResourceSpec, actionName string, operation spec.Operation, args []string) error {
-	region, err := resolveRegion(options)
-	if err != nil {
-		return err
+	region := config.ResolvedRegion{}
+	var err error
+	if resource.Kind == "regional" {
+		region, err = resolveRegion(options)
+		if err != nil {
+			return err
+		}
+		region = resourceEffectiveResolvedRegion(resource, region)
 	}
-	region = resourceEffectiveResolvedRegion(resource, region)
 	input, timeout, err := resourceActionInput(cmd, resource, actionName, operation, args)
 	if err != nil {
 		return err

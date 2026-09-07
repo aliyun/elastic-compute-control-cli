@@ -203,6 +203,7 @@ func CollectBaseline(specDir string, opts Options) (Baseline, error) {
 	if err != nil {
 		return Baseline{}, err
 	}
+	resources = aliyunResources(resources)
 	lang := normalizeLanguage(opts.Language)
 	baseline := Baseline{Language: lang}
 	resolver, err := aliyun.NewOpenAPIMetadataResolver(lang, resourceProductCodes(resources))
@@ -271,6 +272,7 @@ func DetectResources(resources []spec.ResourceSpec, baseline Baseline, opts Opti
 		return Report{}, fmt.Errorf("validate drift baseline: %w", err)
 	}
 	report := Report{Language: lang}
+	resources = aliyunResources(resources)
 	resolver, err := aliyun.NewOpenAPIMetadataResolver(lang, resourceProductCodes(resources))
 	if err != nil {
 		return Report{}, fmt.Errorf("load OpenAPI metadata: %w", err)
@@ -325,6 +327,19 @@ func DetectResources(resources []spec.ResourceSpec, baseline Baseline, opts Opti
 		return a.Binding < b.Binding
 	})
 	return report, nil
+}
+
+// aliyunResources keeps the OpenAPI drift detector scoped to the provider it
+// can resolve. Other providers have their own API contracts and are validated
+// by their caller/spec tests instead of Alibaba Cloud metadata.
+func aliyunResources(resources []spec.ResourceSpec) []spec.ResourceSpec {
+	filtered := make([]spec.ResourceSpec, 0, len(resources))
+	for _, resource := range resources {
+		if resource.Provider == "" || resource.Provider == "aliyun" {
+			filtered = append(filtered, resource)
+		}
+	}
+	return filtered
 }
 
 func (r *Report) addSkipped(resource spec.ResourceSpec, bindingName string, binding spec.Binding, reason string) {

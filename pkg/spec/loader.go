@@ -58,6 +58,10 @@ type ResourceSpec struct {
 	SchemaVersion int    `yaml:"schema_version"`
 	Product       string `yaml:"product"`
 	APIProduct    string `yaml:"api_product"`
+	// Provider selects the request transport. Empty and "aliyun" use the
+	// Alibaba Cloud OpenAPI caller; other providers must be explicitly
+	// supported by the CLI.
+	Provider string `yaml:"provider"`
 	// FixedRegion pins the effective region for every operation of this
 	// resource, overriding the user-configured region. Used for API families
 	// served in a single region only: both the RegionId parameter and the
@@ -82,12 +86,14 @@ type ResourceSpec struct {
 }
 
 type ProductSpec struct {
-	SchemaVersion int           `yaml:"schema_version"`
-	Product       string        `yaml:"product"`
-	Priority      int           `yaml:"priority"`
-	Resources     []string      `yaml:"resources"`
-	Description   LocalizedText `yaml:"description"`
-	Examples      []string      `yaml:"examples"`
+	SchemaVersion         int           `yaml:"schema_version"`
+	Product               string        `yaml:"product"`
+	Aliases               []string      `yaml:"aliases"`
+	Priority              int           `yaml:"priority"`
+	Resources             []string      `yaml:"resources"`
+	ExposeDefaultResource bool          `yaml:"expose_default_resource"`
+	Description           LocalizedText `yaml:"description"`
+	Examples              []string      `yaml:"examples"`
 }
 
 type ResourceRef struct {
@@ -773,6 +779,43 @@ func LoadProduct(specDir, product string) (ProductSpec, error) {
 	return loaded, nil
 }
 
+// CanonicalProduct resolves a product name or declared product alias to the
+// canonical product name used by specs and machine-readable schemas.
+func CanonicalProduct(specDir, requested string) (string, bool) {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return "", false
+	}
+	refs, err := ListResources(specDir)
+	if err != nil {
+		return "", false
+	}
+	seen := map[string]bool{}
+	products := make([]string, 0)
+	for _, ref := range refs {
+		if seen[ref.Product] {
+			continue
+		}
+		seen[ref.Product] = true
+		products = append(products, ref.Product)
+		if ref.Product == requested {
+			return ref.Product, true
+		}
+	}
+	for _, productName := range products {
+		product, err := LoadProduct(specDir, productName)
+		if err != nil {
+			continue
+		}
+		for _, alias := range product.Aliases {
+			if alias == requested {
+				return productName, true
+			}
+		}
+	}
+	return "", false
+}
+
 func LoadProductFile(path string) (ProductSpec, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -937,6 +980,15 @@ func Validate(spec ResourceSpec) error {
 	}
 	if spec.Kind == "" {
 		return fmt.Errorf("kind is required")
+	}
+	if spec.Kind != "regional" && spec.Kind != "global" {
+		return fmt.Errorf("kind must be regional or global")
+	}
+	if spec.Kind == "global" && spec.FixedRegion != "" {
+		return fmt.Errorf("global resources cannot set fixed_region")
+	}
+	if spec.Provider != "" && spec.Provider != "aliyun" && spec.Provider != "e2b" {
+		return fmt.Errorf("provider %q is not supported", spec.Provider)
 	}
 	if len(spec.Schema.Fields) == 0 {
 		return fmt.Errorf("schema.fields is required")
@@ -1477,6 +1529,19 @@ func ValidateProduct(spec ProductSpec) error {
 	}
 	if spec.Description.Text("en") == "" {
 		return fmt.Errorf("description is required")
+	}
+	seenAliases := map[string]bool{}
+	for _, alias := range spec.Aliases {
+		if strings.TrimSpace(alias) == "" {
+			return fmt.Errorf("product aliases cannot be empty")
+		}
+		if alias == spec.Product {
+			return fmt.Errorf("product alias %q duplicates the product name", alias)
+		}
+		if seenAliases[alias] {
+			return fmt.Errorf("duplicate product alias %q", alias)
+		}
+		seenAliases[alias] = true
 	}
 	if len(spec.Examples) < 2 || len(spec.Examples) > 4 {
 		return fmt.Errorf("examples must contain 2 to 4 entries")

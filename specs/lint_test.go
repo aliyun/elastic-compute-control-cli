@@ -95,7 +95,7 @@ func TestSpecLintOperationsOrder(t *testing.T) {
 		orderIndex[name] = i
 	}
 
-	reOp := regexp.MustCompile(`(?m)^  ([a-z][a-z_]*):\s*$`)
+	reOp := regexp.MustCompile(`(?m)^  ([a-z][a-z0-9-]*):\s*$`)
 
 	for _, sf := range loadAllSpecs(t) {
 		t.Run(sf.product+"/"+sf.resource, func(t *testing.T) {
@@ -528,6 +528,13 @@ func TestSpecLintActionVocabulary(t *testing.T) {
 		"reset": true, "reinit": true, "redeploy": true,
 		"upgrade": true, "repair": true,
 		"cancel": true, "end": true,
+		// E2B exposes these as first-class lifecycle, observability, build,
+		// visibility, and tag operations. They remain resource operations and
+		// follow the same base-action ordering and schema contracts.
+		"refresh": true, "fork": true, "logs": true, "metrics": true, "snapshot": true,
+		"publish": true, "unpublish": true,
+		"build-status": true, "build-logs": true,
+		"tag-list": true, "tag-assign": true, "tag-delete": true,
 	}
 
 	for _, sf := range loadAllSpecs(t) {
@@ -1118,7 +1125,7 @@ func TestSpecLintDesignDocOperationsMatch(t *testing.T) {
 					continue
 				}
 				if inOps {
-					m := regexp.MustCompile(`^  ([a-z][a-z_]*):`).FindStringSubmatch(line)
+					m := regexp.MustCompile(`^  ([a-z][a-z0-9-]*):`).FindStringSubmatch(line)
 					if m != nil {
 						specOps[m[1]] = true
 					} else if len(line) > 0 && line[0] != ' ' && line[0] != '#' {

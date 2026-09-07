@@ -783,6 +783,8 @@ func TestProductSpecLoadsDescriptionAndExamples(t *testing.T) {
 	raw := []byte(`
 schema_version: 1
 product: ecs
+aliases: [compute]
+expose_default_resource: true
 description:
   en: Manage ECS resources
   zh-CN: 管理 ECS 资源
@@ -801,6 +803,61 @@ examples:
 	requireLocalizedText(t, "description", loaded.Description)
 	if len(loaded.Examples) != 2 {
 		t.Fatalf("examples len = %d, want 2", len(loaded.Examples))
+	}
+	if len(loaded.Aliases) != 1 || loaded.Aliases[0] != "compute" || !loaded.ExposeDefaultResource {
+		t.Fatalf("product routing fields = %#v, expose=%v", loaded.Aliases, loaded.ExposeDefaultResource)
+	}
+}
+
+func TestValidateAcceptsSupportedGlobalProvider(t *testing.T) {
+	resource := ResourceSpec{
+		SchemaVersion: 2,
+		Product:       "sandbox",
+		Provider:      "e2b",
+		Resource:      "sandbox",
+		Kind:          "global",
+		Schema:        ResourceSchema{Fields: map[string]SchemaField{"id": {Type: "string"}}},
+	}
+	if err := Validate(resource); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	resource.FixedRegion = "cn-hangzhou"
+	if err := Validate(resource); err == nil {
+		t.Fatal("global resource with fixed_region validated")
+	}
+	resource.FixedRegion = ""
+	resource.Provider = "unknown"
+	if err := Validate(resource); err == nil {
+		t.Fatal("unknown provider validated")
+	}
+}
+
+func TestCanonicalProductResolvesBuiltInAlias(t *testing.T) {
+	canonical, ok := CanonicalProduct("", "sbx")
+	if !ok || canonical != "sandbox" {
+		t.Fatalf("CanonicalProduct(sbx) = %q, %v", canonical, ok)
+	}
+}
+
+func TestCanonicalProductPrefersExactProductOverAnotherProductAlias(t *testing.T) {
+	dir := t.TempDir()
+	for product, aliases := range map[string]string{"alpha": "aliases: [sandbox]\n", "sandbox": ""} {
+		productDir := filepath.Join(dir, product)
+		if err := os.MkdirAll(productDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		productSpec := fmt.Sprintf("schema_version: 1\nproduct: %s\n%sdescription: Manage %s\nexamples:\n  - ecctl %s list\n  - ecctl %s get test\n", product, aliases, product, product, product)
+		if err := os.WriteFile(filepath.Join(productDir, "product.yaml"), []byte(productSpec), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		resourceSpec := fmt.Sprintf("schema_version: 2\nproduct: %s\nresource: %s\nkind: global\ndescription: Manage %s\nidentity:\n  field: id\n  output_root: {one: item, many: items}\nschema:\n  fields:\n    id: {type: string}\noperations: {}\n", product, product, product)
+		if err := os.WriteFile(filepath.Join(productDir, product+".yaml"), []byte(resourceSpec), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	canonical, ok := CanonicalProduct(dir, "sandbox")
+	if !ok || canonical != "sandbox" {
+		t.Fatalf("CanonicalProduct(sandbox) = %q, %v", canonical, ok)
 	}
 }
 
@@ -1288,6 +1345,8 @@ func TestValidateProductRejectsInvalidSpecs(t *testing.T) {
 		{name: "missing description", edit: func(s *ProductSpec) { s.Description = nil }},
 		{name: "too few examples", edit: func(s *ProductSpec) { s.Examples = []string{"one"} }},
 		{name: "too many examples", edit: func(s *ProductSpec) { s.Examples = []string{"1", "2", "3", "4", "5"} }},
+		{name: "alias duplicates product", edit: func(s *ProductSpec) { s.Aliases = []string{"ecs"} }},
+		{name: "duplicate alias", edit: func(s *ProductSpec) { s.Aliases = []string{"compute", "compute"} }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1953,7 +2012,7 @@ func TestECSAuxiliaryProbeUsesTokenPaginationWhenSupported(t *testing.T) {
 }
 
 func TestBuiltInProductSpecsHaveBilingualDescriptionsAndExamples(t *testing.T) {
-	for _, product := range []string{"ecs", "rg", "tag", "vpc"} {
+	for _, product := range []string{"ecs", "rg", "sandbox", "tag", "vpc"} {
 		t.Run(product, func(t *testing.T) {
 			loaded, err := LoadProductFile(filepath.Join("../../specs", product, "product.yaml"))
 			if err != nil {

@@ -1,0 +1,102 @@
+# Requires E2B_API_KEY. The case creates a base-image template and leaves all
+# current bytes offline until this exact case passes against E2B.
+resource: sandbox/template
+serial: true
+timeout: 25m
+
+steps:
+  - name: create
+    run: >
+      ecctl sandbox template create
+      --name {{.resource_prefix}}-template
+      --from-image e2bdev/base:ubuntu
+      --cpu-count 2
+      --memory-mb 1024
+      --timeout 20m
+    at: $.template
+    expect:
+      id: {type: string, min_len: 1}
+      build_id: {type: string, min_len: 1}
+      build_status: {eq: ready}
+    capture:
+      template_id: id
+      template_build_id: build_id
+    teardown: ecctl sandbox template delete {{.template_id}}
+
+  - name: get
+    run: ecctl sandbox template get {{.template_id}}
+    at: $.template
+    expect:
+      id: {eq: "{{.template_id}}"}
+      builds: {type: array}
+
+  - name: list
+    run: ecctl sandbox template list --limit 100
+    assert:
+      - len($.templates) >= 1
+
+  - name: update
+    run: ecctl sandbox template update {{.template_id}} --public=false
+    at: $.template
+    expect:
+      id: {eq: "{{.template_id}}"}
+      public: {eq: false}
+
+  - name: publish
+    run: ecctl sandbox template publish {{.template_id}}
+    at: $.template
+    expect:
+      id: {eq: "{{.template_id}}"}
+      public: {eq: true}
+
+  - name: unpublish
+    run: ecctl sandbox template unpublish {{.template_id}}
+    at: $.template
+    expect:
+      id: {eq: "{{.template_id}}"}
+      public: {eq: false}
+
+  - name: build-status
+    run: >
+      ecctl sandbox template build-status {{.template_id}}
+      --build-id {{.template_build_id}}
+    at: $.template
+    expect:
+      id: {eq: "{{.template_id}}"}
+      build_id: {eq: "{{.template_build_id}}"}
+      build_status: {eq: ready}
+
+  - name: build-logs
+    run: >
+      ecctl sandbox template build-logs {{.template_id}}
+      --build-id {{.template_build_id}}
+      --limit 100
+    at: $.template
+    expect:
+      logs: {type: array}
+
+  - name: tag-assign
+    run: >
+      ecctl sandbox template tag-assign
+      --name {{.resource_prefix}}-template:default
+      --tag ecctl-e2e
+    assert:
+      - len($.actions) >= 1
+
+  - name: tag-list
+    run: ecctl sandbox template tag-list {{.template_id}}
+    assert:
+      - len($.tags) >= 1
+
+  - name: tag-delete
+    run: >
+      ecctl sandbox template tag-delete
+      --name {{.resource_prefix}}-template
+      --tag ecctl-e2e
+    expect:
+      $.deleted: {eq: true}
+
+  - name: delete
+    run: ecctl sandbox template delete {{.template_id}}
+    expect:
+      $.deleted: {eq: true}
