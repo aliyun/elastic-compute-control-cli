@@ -68,6 +68,7 @@ type Caller struct {
 	lookupCNAME   cnameLookup
 	backendMu     sync.Mutex
 	backendResult *backendDetection
+	backend       backendKind
 }
 
 // NewCaller resolves the E2B endpoint and project API key from the standard
@@ -92,7 +93,23 @@ func NewCaller(getenv func(string) string) (*Caller, error) {
 		}
 		rawEndpoint = "https://api." + domain
 	}
-	return NewCallerWithClient(rawEndpoint, apiKey, &http.Client{})
+	backend := backendKind(strings.TrimSpace(getenv("ECCTL_SANDBOX_BACKEND")))
+	switch backend {
+	case "", backendAuto, backendE2B, backendFC, backendACS:
+	default:
+		return nil, ecerrors.Client("InvalidSandboxBackend", e2bMessage("InvalidSandboxBackend"),
+			ecerrors.WithField("ECCTL_SANDBOX_BACKEND"), ecerrors.WithAcceptedValues("auto", "e2b", "fc", "acs"))
+	}
+	client, err := clientWithCA(strings.TrimSpace(getenv("ECCTL_SANDBOX_CA_FILE")))
+	if err != nil {
+		return nil, err
+	}
+	caller, err := NewCallerWithClient(rawEndpoint, apiKey, client)
+	if err != nil {
+		return nil, err
+	}
+	caller.backend = backend
+	return caller, nil
 }
 
 // NewCallerWithClient is an explicit constructor used by tests and self-hosted
@@ -148,6 +165,9 @@ func (c *Caller) Call(ctx context.Context, operationName string, request map[str
 	op, ok := operations[operationName]
 	if !ok {
 		return nil, ecerrors.Client("UnsupportedOperation", fmt.Sprintf("E2B operation %q is not supported", operationName))
+	}
+	if err := c.validateAPIOperation(operationName, request); err != nil {
+		return nil, err
 	}
 	if operationName == "ListTemplates" {
 		if _, ok := ctx.Deadline(); !ok {
@@ -229,16 +249,23 @@ func (c *Caller) call(ctx context.Context, operationName string, op operation, r
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, responseError(operationName, response, c.apiKey)
+		return nil, c.responseError(operationName, response)
 	}
 
 	result := map[string]any{}
 	if op.completeArray {
 		items, err := decodeCompleteJSONArray(response.Body)
 		if err != nil {
-			return nil, invalidFCResponse()
+			return nil, c.invalidTemplateResponse()
 		}
 		result = map[string]any{"items": items, arrayMarker: true}
+	} else if hasResponseContract(operationName) {
+		var err error
+		result, err = decodeContractResponse(response.Body, operationName, request)
+		if err != nil {
+			return nil, ecerrors.Service("InvalidResponse", e2bMessage("InvalidSandboxResponse"), false,
+				ecerrors.WithDetail(operationName), ecerrors.WithRequestID(redactString(firstHeader(response.Header, "X-Request-ID", "Request-ID"), c.apiKey)))
+		}
 	} else if response.StatusCode != http.StatusNoContent {
 		decoder := json.NewDecoder(response.Body)
 		decoder.UseNumber()
@@ -334,7 +361,8 @@ func forkResultError(result map[string]any, apiKey string) error {
 	return ecerrors.WithActions(err, actions)
 }
 
-func responseError(operationName string, response *http.Response, apiKey string) error {
+func (c *Caller) responseError(operationName string, response *http.Response) error {
+	apiKey := c.apiKey
 	readLimit := int64(maxErrorBodyLen)
 	if keyLength := len(apiKey); keyLength > 1 && keyLength <= maxErrorBodyLen {
 		// Read enough look-ahead to redact a key that starts immediately before
@@ -369,6 +397,11 @@ func responseError(operationName string, response *http.Response, apiKey string)
 	}
 	if requestID := redactString(firstHeader(response.Header, "X-Request-ID", "Request-ID"), apiKey); requestID != "" {
 		options = append(options, ecerrors.WithRequestID(requestID))
+	}
+	if c.backend == backendACS && operationName == "DeleteTemplate" &&
+		(response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) &&
+		strings.Contains(message, "Deleting SandboxSet-backed templates through the E2B API is not supported") {
+		return ecerrors.Client("UnsupportedACSTemplateDeletion", e2bMessage("UnsupportedACSTemplateDeletion"), options...)
 	}
 	switch response.StatusCode {
 	case http.StatusBadRequest, http.StatusConflict, http.StatusUnprocessableEntity:

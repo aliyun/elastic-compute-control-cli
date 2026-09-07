@@ -12,12 +12,22 @@ const fcDomain = "e2b.fc.aliyuncs.com"
 const backendLookupTimeout = 3 * time.Second
 const maxCNAMEHops = 8
 
+type backendKind string
+
+const (
+	backendAuto backendKind = "auto"
+	backendE2B  backendKind = "e2b"
+	backendFC   backendKind = "fc"
+	backendACS  backendKind = "acs"
+)
+
 // A lookup returns answer-section CNAME owner -> target pairs, not a final
 // canonical name. FC hostnames themselves can alias to non-FC NLB hostnames.
 type cnameLookup func(context.Context, string) (map[string]string, error)
 
 type backendDetection struct {
 	fc     bool
+	acs    bool
 	reason string
 }
 
@@ -30,6 +40,14 @@ func domainWithin(name, suffix string) bool {
 }
 
 func (c *Caller) detectBackend(ctx context.Context) backendDetection {
+	switch c.backend {
+	case backendE2B:
+		return backendDetection{reason: "explicit_e2b"}
+	case backendFC:
+		return backendDetection{fc: true}
+	case backendACS:
+		return backendDetection{acs: true}
+	}
 	c.backendMu.Lock()
 	cached := c.backendResult
 	c.backendMu.Unlock()

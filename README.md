@@ -17,6 +17,10 @@
 JSON-first output, machine-readable schemas, waiters, and spec-driven cloud
 behavior.
 
+The Sandbox trial guide covers setup, sandbox/template creation, and backend
+limitations for E2B, FC, and ACS: [简体中文](docs/sandbox-guide.zh-CN.md).
+Use the matching branch trial build when testing unreleased Sandbox features.
+
 ## Installation
 
 Install the latest public release with Homebrew:

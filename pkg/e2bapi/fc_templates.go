@@ -18,6 +18,7 @@ import (
 )
 
 const fcTemplateTokenPrefix = "ecctl:fc-templates:v1:"
+const acsTemplateTokenPrefix = "ecctl:acs-templates:v1:"
 
 type fcTemplateCursor struct {
 	Endpoint string `json:"endpoint"`
@@ -45,43 +46,50 @@ func (c *Caller) listTemplates(ctx context.Context, request map[string]any) (map
 	query := requestObject(request, "query")
 	token := stringValue(query["nextToken"])
 	detected := c.detectBackend(ctx)
-	if !detected.fc {
+	if !detected.fc && !detected.acs {
 		// A local FC cursor must never be sent to another backend. Native E2B
 		// cursors remain opaque and are passed through without transformation.
+		if strings.HasPrefix(token, "ecctl:acs-templates:") {
+			return nil, ecerrors.Client("InvalidACSTemplateToken", e2bMessage("InvalidACSTemplateToken"), ecerrors.WithField("next_token"))
+		}
 		if strings.HasPrefix(token, "ecctl:fc-templates:") {
 			return nil, invalidFCToken()
 		}
 		result, err := c.call(ctx, "ListTemplates", operations["ListTemplates"], request)
-		if err != nil && detected.reason != "e2b_domain" {
+		if err != nil && detected.reason != "e2b_domain" && detected.reason != "explicit_e2b" {
 			detail := i18n.NewLocalizer("en").MessageData("E2BBackendUnidentifiedDetail", map[string]any{"Host": redactString(c.endpoint.Hostname(), c.apiKey), "Reason": detected.reason})
 			err = ecerrors.WithDetails(err, ecerrors.WithDetail(detail))
 		}
 		return result, err
 	}
+	tokenPrefix := fcTemplateTokenPrefix
+	if detected.acs {
+		tokenPrefix = acsTemplateTokenPrefix
+	}
 	limit := 100
 	if raw, ok := query["limit"]; ok {
 		parsed, err := strconv.Atoi(stringValue(raw))
 		if err != nil || parsed < 1 || parsed > 100 {
-			return nil, ecerrors.Client("InvalidFCTemplateLimit", e2bMessage("InvalidFCTemplateLimit"), ecerrors.WithField("limit"))
+			return nil, c.invalidTemplateLimit()
 		}
 		limit = parsed
 	}
 	cursor := fcTemplateCursor{Endpoint: c.templateEndpointFingerprint()}
 	if token != "" {
-		if !strings.HasPrefix(token, fcTemplateTokenPrefix) || len(token) > 8192 {
-			return nil, invalidFCToken()
+		if !strings.HasPrefix(token, tokenPrefix) || len(token) > 8192 {
+			return nil, c.invalidTemplateToken()
 		}
-		data, err := base64.RawURLEncoding.Strict().DecodeString(strings.TrimPrefix(token, fcTemplateTokenPrefix))
+		data, err := base64.RawURLEncoding.Strict().DecodeString(strings.TrimPrefix(token, tokenPrefix))
 		if err != nil {
-			return nil, invalidFCToken()
+			return nil, c.invalidTemplateToken()
 		}
 		var parsed fcTemplateCursor
 		if json.Unmarshal(data, &parsed) != nil || parsed.Endpoint != cursor.Endpoint || parsed.After == "" {
-			return nil, invalidFCToken()
+			return nil, c.invalidTemplateToken()
 		}
 		cursor = parsed
 	}
-	// The FC compatibility API lists all templates. Do not send native v2
+	// FC and ACS compatibility APIs list all templates. Do not send native v2
 	// pagination controls, and do not silently truncate a server-paged response.
 	delete(query, "limit")
 	delete(query, "nextToken")
@@ -90,21 +98,21 @@ func (c *Caller) listTemplates(ctx context.Context, request map[string]any) (map
 		return nil, err
 	}
 	if result[arrayMarker] != true || stringValue(result["nextToken"]) != "" {
-		return nil, invalidFCResponse()
+		return nil, c.invalidTemplateResponse()
 	}
 	items, ok := result["items"].([]any)
 	if !ok {
-		return nil, invalidFCResponse()
+		return nil, c.invalidTemplateResponse()
 	}
 	ids := make(map[string]bool, len(items))
 	for _, raw := range items {
 		item, ok := raw.(map[string]any)
 		if !ok {
-			return nil, invalidFCResponse()
+			return nil, c.invalidTemplateResponse()
 		}
 		id, ok := item["templateID"].(string)
 		if !ok || id == "" || len(id) > 1024 || ids[id] {
-			return nil, invalidFCResponse()
+			return nil, c.invalidTemplateResponse()
 		}
 		ids[id] = true
 	}
@@ -117,7 +125,7 @@ func (c *Caller) listTemplates(ctx context.Context, request map[string]any) (map
 	if end < len(items) {
 		cursor.After = items[end-1].(map[string]any)["templateID"].(string)
 		data, _ := json.Marshal(cursor)
-		result["nextToken"] = fcTemplateTokenPrefix + base64.RawURLEncoding.EncodeToString(data)
+		result["nextToken"] = tokenPrefix + base64.RawURLEncoding.EncodeToString(data)
 	}
 	return result, nil
 }
@@ -191,4 +199,25 @@ func decodeUnambiguousJSON(decoder *json.Decoder, depth int) (any, error) {
 	default:
 		return token, nil
 	}
+}
+
+func (c *Caller) invalidTemplateToken() error {
+	if c.backend == backendACS {
+		return ecerrors.Client("InvalidACSTemplateToken", e2bMessage("InvalidACSTemplateToken"), ecerrors.WithField("next_token"))
+	}
+	return invalidFCToken()
+}
+
+func (c *Caller) invalidTemplateResponse() error {
+	if c.backend == backendACS {
+		return ecerrors.Service("InvalidACSTemplateResponse", e2bMessage("InvalidACSTemplateResponse"), false)
+	}
+	return invalidFCResponse()
+}
+
+func (c *Caller) invalidTemplateLimit() error {
+	if c.backend == backendACS {
+		return ecerrors.Client("InvalidACSTemplateLimit", e2bMessage("InvalidACSTemplateLimit"), ecerrors.WithField("limit"))
+	}
+	return ecerrors.Client("InvalidFCTemplateLimit", e2bMessage("InvalidFCTemplateLimit"), ecerrors.WithField("limit"))
 }

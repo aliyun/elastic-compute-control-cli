@@ -1,0 +1,77 @@
+# Snapshot template lifecycle; the pre-existing SandboxSet is read-only.
+resource: sandbox/template
+serial: true
+timeout: 6m
+steps:
+  - name: discover template
+    run: ecctl sandbox template list --limit 1
+    at: $.templates[0]
+    expect:
+      id: {type: string, min_len: 1}
+    capture:
+      template_id: id
+  - name: get template
+    run: ecctl sandbox template get {{.template_id}}
+    at: $.template
+    expect:
+      id: {eq: "{{.template_id}}"}
+  - name: create snapshot source
+    run: >
+      ecctl sandbox create --template {{.template_id}}
+      --timeout-seconds 300 --timeout 180s
+      --metadata '{"ecctl_run_id":"{{.run_id}}","case":"snapshot"}'
+    at: $.sandbox
+    expect:
+      id: {type: string, min_len: 1}
+      state: {eq: running}
+    capture:
+      source_id: id
+    teardown: ecctl sandbox delete {{.source_id}}
+  - name: snapshot
+    run: ecctl sandbox snapshot {{.source_id}} --snapshot-name {{.run_id}}-snapshot
+    at: $.sandbox
+    expect:
+      id: {eq: "{{.source_id}}"}
+      snapshot_template: {type: string, min_len: 1}
+    capture:
+      snapshot_id: snapshot_template
+    teardown: ecctl sandbox template delete {{.snapshot_id}}
+  - name: verify source still running
+    run: ecctl sandbox get {{.source_id}}
+    at: $.sandbox
+    expect:
+      id: {eq: "{{.source_id}}"}
+      state: {eq: running}
+  - name: create from snapshot
+    run: >
+      ecctl sandbox create --template {{.snapshot_id}}
+      --timeout-seconds 300 --timeout 300s
+      --metadata '{"ecctl_run_id":"{{.run_id}}","case":"snapshot-clone"}'
+    at: $.sandbox
+    expect:
+      id: {type: string, min_len: 1}
+      state: {eq: running}
+    capture:
+      clone_id: id
+    teardown: ecctl sandbox delete {{.clone_id}}
+  - name: verify cloned sandbox
+    run: ecctl sandbox get {{.clone_id}}
+    at: $.sandbox
+    expect:
+      id: {eq: "{{.clone_id}}"}
+      state: {eq: running}
+  - name: delete cloned sandbox
+    run: ecctl sandbox delete {{.clone_id}}
+    expect:
+      $.deleted: {eq: true}
+  - name: delete snapshot template
+    run: ecctl sandbox template delete {{.snapshot_id}}
+    expect:
+      $.deleted: {eq: true}
+  - name: delete snapshot source
+    run: ecctl sandbox delete {{.source_id}}
+    expect:
+      $.deleted: {eq: true}
+  - name: verify no owned sandboxes
+    run: ecctl sandbox list --filter metadata.ecctl_run_id={{.run_id}}
+    assert: ["len($.sandboxes) == 0"]

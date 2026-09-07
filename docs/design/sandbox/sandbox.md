@@ -47,7 +47,9 @@ HTTP。
 
 ## `ecctl sandbox delete`
 
-终止 sandbox；兼容 E2B 的 `kill` 名称作为命令别名。
+终止 sandbox，默认等待 `get` 确认不存在，最长 300 秒；`--timeout` 可调整等待时间，
+`--no-wait` 在删除请求被接受后立即返回。超时或查询失败不会输出删除完成。
+兼容 E2B 的 `kill` 名称作为命令别名。
 
 ## `ecctl sandbox get`
 
@@ -96,3 +98,41 @@ E2B 顶层数组响应统一映射为 ecctl 的资源数组；`X-Next-Token`、
 `X-Total-Running` 和请求 ID 进入标准分页/动作输出。404 映射为
 `not_found`，429 和服务端 5xx 映射为可重试服务错误，认证错误给出检查
 `E2B_API_KEY` 的恢复建议。错误和输出都不得包含 API Key。
+
+## ACS 兼容模式
+
+设置 `ECCTL_SANDBOX_BACKEND=acs` 使用 ACS sandbox-manager 的 E2B 控制面。
+该配置可选值为 `auto`（默认）、`e2b`、`fc`、`acs`，显式选择优先；
+`auto` 保留原来的 FC 主机名/CNAME 检测，不根据自定义域名或 HTTP 404
+推断 ACS。端点仍优先使用 `E2B_API_URL`，否则使用
+`https://api.${E2B_DOMAIN}`，域名默认 `e2b.app`。选择后端不会改变请求目标。
+
+ACS 的 `E2B_API_KEY` 对应 sandbox-manager 的管理密钥。CLI 不读取
+kubeconfig，也不从 Deployment/Secret 自动提取密钥。私有 CA 可通过
+`ECCTL_SANDBOX_CA_FILE` 指定 PEM 文件，追加到当前客户端的系统信任池；
+保持域名验证、系统代理及禁止携带密钥跟随重定向的行为。
+未设置 CA 文件时保持系统信任；无效配置在请求前失败。
+
+当前兼容模式支持 create/get/list/delete、TTL update、pause/resume、
+snapshot 和从快照 ID 创建。网络更新、logs、metrics、refresh、fork
+返回 `UnsupportedOperation`。create 的 network、volume_mounts 参数同样
+不受支持；其他高级参数未逐项实测，不应由基础生命周期通过推断其生效。
+一条 update 同时携带 TTL 和 network 时，首次写请求之前即拒绝整条操作。
+
+快照 ID 按 API 返回值原样传递，不假定它等于 Kubernetes Checkpoint 名称。
+快照创建时长依赖集群驱动；本地客户端不会因超时自动重试创建。
+删除完成指 API 已确认不存在，Kubernetes 对象的异步回收由 E2E 单独验证。
+
+从快照启动可能超过一分钟。经过 ALB 的请求还受监听器超时限制，
+`--timeout 300s` 仅扩大 CLI 的等待预算，不能延长网关预算。
+ACS 的 [AlbConfig 监听器配置](https://help.aliyun.com/zh/cs/user-guide/alb-ingress-configuration-dictionary)
+中 `spec.listeners[].requestTimeout` 默认 60 秒；集群管理员应根据恢复耗时
+配置请求及空闲超时，并重新验证 HTTPS 恢复流程。排障时可通过受信任的
+Kubernetes port-forward 访问管理服务，以区分入口超时和恢复失败。
+收到 504 后创建结果仍可能不确定，应先按本次创建的 metadata 查询资源，
+确认状态并清理；不要直接重复创建。
+
+[ACS 官方兼容范围](https://help.aliyun.com/zh/cs/user-guide/connect-to-agent-sandbox-using-the-e2b-sdk)
+及 [OpenKruise 快照约定](https://openkruise.io/kruiseagents/user-manuals/checkpoint)
+是兼容依据；部署版本差异以对应版本的实测证据为准。
+独立 ACS 用例和证据规范位于 `e2e/compat/acs/`。

@@ -305,6 +305,11 @@ probes:
         error: $.error
 
 waiters:
+  deleted:
+    probe: detail
+    target: absent
+    interval: 1s
+    timeout: 300s
   running:
     probe: detail
     target: running
@@ -343,6 +348,7 @@ bindings:
     request:
       path: {sandboxID: $.id}
     require_all: [{request: path.sandboxID}]
+    wait: deleted
     request_id_from: $.requestID
   pause:
     api: PauseSandbox
@@ -445,8 +451,10 @@ operations:
     input:
       fields:
         - id: {required: true, positional: true}
+      controls: [no_wait, timeout]
     workflow:
       - binding: delete
+        wait_unless: input.no_wait
       - emit:
           fields: {id: $input.id}
           deleted: true

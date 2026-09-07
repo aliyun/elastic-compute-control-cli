@@ -1,0 +1,7 @@
+version: 2
+regions:
+  candidates:
+    - id: cn-hongkong
+paths:
+  cases: cases
+  coverage: coverage.yaml

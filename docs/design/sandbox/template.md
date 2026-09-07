@@ -99,7 +99,8 @@ DNS 查询使用系统配置，最多跟随 8 跳，总预算 3 秒。macOS 读�
 DNS，也不依赖 `dig`。成功的检测结果仅缓存在当前 Caller 中；超时、循环、
 解析失败不会被缓存。API 主机未被确认为 FC 时继续使用原生路径，HTTP 错误
 不会触发回退；失败详情包含未识别原因。仅提供 A/AAAA、隐藏 CNAME 的代理
-或 DNS flattening 无法据此自动识别 FC，应配置可验证的 FC API 主机名。
+或 DNS flattening 无法据此自动识别 FC，可设置 `ECCTL_SANDBOX_BACKEND=fc`
+显式选择兼容路径，或配置可验证的 FC API 主机名。
 
 FC 列表按 `templateID` 排序后在本地分页，`--limit` 范围为 1–100，默认 100。
 返回的 `pagination.next_token` 带有版本和端点指纹，下一页可直接传给
@@ -145,3 +146,27 @@ O(N log N)。分页不是快照：并发新增且 ID 排在游标之前的模板
 
 E2B CLI 的 `template init` 和 `template migrate` 只生成或迁移本地工程文件，
 不读取或变更远端 template 资源，因此不进入 ecctl 资源操作面。
+
+## ACS 兼容模式
+
+连接配置沿用 sandbox 资源的 `ECCTL_SANDBOX_BACKEND=acs`、端点、密钥和
+可选 CA 文件。ACS 的模板来自已有 SandboxSet；`get` 使用原接口，
+`list` 使用 `GET /templates` 返回完整数组，再按 templateID 排序、本地分页。
+limit 默认 100、范围 1–100。重复字段、缺失/重复 ID、非数组、尾随 JSON
+和服务端分页 token 均报错。每页需要 O(N) 读取和 O(N log N) 排序；
+游标不提供一致性快照。
+
+ACS 游标使用 `ecctl:acs-templates:v1:` 前缀并绑定 API 端点；FC 的既有
+`ecctl:fc-templates:v1:` 格式不变。不同后端和端点的游标不可混用。
+显式后端优先于域名检测，HTTP 失败不触发协议回退。
+
+`delete` 允许删除快照模板；服务端明确拒绝 SandboxSet 模板时，返回
+`UnsupportedACSTemplateDeletion`，保留原始错误及请求 ID，不提示更换密钥。
+真正的认证失败仍按原认证错误返回。
+
+ACS 模式下 create、update、publish、unpublish、build-status、build-logs、
+tag-list、tag-assign、tag-delete 返回 `UnsupportedOperation`。
+其他后端的构建状态、日志和标签接口在字段映射之前验证响应契约；
+缺失必需字段、类型错误、错误构建 ID 或返回模板详情不能归一化为成功空结果。
+合法的空日志/标签数组继续成功。GetSandbox 同样要求有效 sandboxID，避免
+删除等待将错误结构的 HTTP 200 误判为资源不存在。
