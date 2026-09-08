@@ -2848,7 +2848,7 @@ func TestLangFlagLocalizesRootHelp(t *testing.T) {
 		"云产品命令:",
 		"辅助命令:",
 		"capabilities 描述机器可读的 CLI 能力",
-		"completion   生成指定 shell 的自动补全脚本",
+		"completion   配置 shell 自动补全",
 		"help         显示命令帮助",
 		"参数:",
 		"显示语言（支持：en, zh-CN）",
@@ -3190,6 +3190,7 @@ func TestAutomaticUpdateCheckCoversEveryUserInvocation(t *testing.T) {
 }
 
 func TestAutomaticUpdateCheckRunsForHelpVersionCompletionAndUpdate(t *testing.T) {
+	completionTestHome(t)
 	oldVersion := version
 	oldAutoCheck := autoCheckUpdate
 	oldCheck := checkUpdate
@@ -3217,7 +3218,7 @@ func TestAutomaticUpdateCheckRunsForHelpVersionCompletionAndUpdate(t *testing.T)
 		{name: "help flag", args: []string{"--help"}},
 		{name: "version", args: []string{"--version"}},
 		{name: "help command", args: []string{"help", "ecs"}},
-		{name: "completion script", args: []string{"completion", "zsh"}},
+		{name: "completion installation", args: []string{"completion", "zsh"}},
 		{name: "dynamic completion", args: []string{"__complete", "ecs", ""}},
 		{name: "dynamic completion without descriptions", args: []string{"__completeNoDesc", "ecs", ""}},
 		{name: "update", args: []string{"update", "--check"}},
@@ -3377,9 +3378,9 @@ func TestLangFlagLocalizesCompletionHelp(t *testing.T) {
 		t.Fatalf("completion help exit %d stderr=%s stdout=%s", code, stderr, stdout)
 	}
 	for _, want := range []string{
-		"生成指定 shell 的自动补全脚本",
+		"配置 shell 自动补全",
 		"bash        生成 bash 自动补全脚本",
-		"zsh         生成 zsh 自动补全脚本",
+		"zsh         安装 zsh 自动补全",
 		"显示此命令的帮助",
 	} {
 		if !strings.Contains(stdout, want) {

@@ -50,6 +50,32 @@ ecctl --version
 ecctl --help
 ```
 
+## Enable Zsh Completion
+
+Install completion for commands and flags:
+
+```zsh
+ecctl completion zsh
+```
+
+This saves the script to `~/.zfunc/_ecctl` and adds a loading block to
+`~/.zshrc`. If `ZDOTDIR` is set, both files use that directory instead of your
+home directory. Existing shell settings and permissions are preserved, and
+running the command again updates the setup without appending duplicate blocks.
+An empty `ZDOTDIR` is rejected; run `unset ZDOTDIR` to use your home directory.
+
+The result includes the saved paths and a `reload_command`. Run that command
+in your current terminal, or open a new zsh terminal. For the default paths:
+
+```zsh
+source ~/.zfunc/_ecctl
+```
+
+The script initializes zsh completion if needed. Use
+`ecctl completion zsh --no-descriptions` to omit candidate descriptions.
+`ecctl completion zsh` installs completion directly; it does not print a script
+for redirection or process substitution.
+
 ## Build from Source
 
 Clone the repository and build from its root:

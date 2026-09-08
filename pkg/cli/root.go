@@ -428,6 +428,7 @@ func newRootCommand(options *globalOptions, stdout io.Writer, args []string) *co
 	root.AddCommand(productCommands...)
 	root.InitDefaultHelpCmd()
 	root.InitDefaultCompletionCmd()
+	configureZshCompletion(root, options, stdout)
 	localizeHelp(root, options.lang, requestedNoColor)
 	return root
 }
