@@ -46,6 +46,30 @@ ecctl --version
 ecctl --help
 ```
 
+## 启用 zsh 自动补全
+
+安装命令和参数的自动补全：
+
+```zsh
+ecctl completion zsh
+```
+
+命令会将脚本保存到 `~/.zfunc/_ecctl`，并在 `~/.zshrc` 中添加加载配置段。
+如果设置了 `ZDOTDIR`，这两个文件会使用该目录，而不是用户主目录。
+已有 shell 设置和文件权限会保留，重复执行会更新配置，不会重复追加配置段。
+如果 `ZDOTDIR` 已设置但为空，安装会报错；执行 `unset ZDOTDIR` 可改用用户主目录。
+
+安装结果会显示文件位置和 `reload_command`。在当前终端执行该加载命令，
+或打开新的 zsh 终端，即可启用补全。默认路径对应的加载命令是：
+
+```zsh
+source ~/.zfunc/_ecctl
+```
+
+脚本会在需要时初始化 zsh 补全系统。使用
+`ecctl completion zsh --no-descriptions` 可省略候选项描述。
+`ecctl completion zsh` 会直接安装补全，不再输出供重定向或进程替换使用的脚本。
+
 ## 从源码构建
 
 克隆仓库并在根目录构建：
