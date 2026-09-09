@@ -26,15 +26,19 @@ cd "ecctl_${PACKAGE_VERSION}_darwin_arm64"
 
 ## 2. 选择后端并配置连接
 
-Sandbox 命令从环境变量读取连接配置，不使用阿里云 AK、`ecctl configure` 的账号配置或 kubeconfig 登录。
+Sandbox 命令使用环境变量 `E2B_API_KEY` 鉴权，不使用阿里云 AK 或 kubeconfig 登录。未显式指定端点时，会只读 ecctl / Aliyun CLI 配置中的地域，用于选择 FC 云沙箱地址。
 
 | 环境变量 | 用途 |
 | --- | --- |
 | `ECCTL_SANDBOX_BACKEND` | `e2b`、`fc`、`acs` 或 `auto`。建议试用时显式选择。 |
 | `E2B_API_KEY` | 对应后端的项目或管理密钥。不是阿里云 AccessKey，也不读取旧变量 `E2B_ACCESS_TOKEN`。 |
-| `E2B_API_URL` | 完整 API 地址，优先级高于 `E2B_DOMAIN`。 |
-| `E2B_DOMAIN` | 未指定 API URL 时，拼出 `https://api.<domain>`。默认 `e2b.app`。 |
+| `E2B_API_URL` | 完整 API 地址，优先级最高。 |
+| `E2B_DOMAIN` | 未指定 API URL 时，拼出 `https://api.<domain>`。两者均未配置时按下述地域规则生成 FC 地址。 |
 | `ECCTL_SANDBOX_CA_FILE` | 可选的 PEM CA 文件，追加到系统信任池，仍校验域名。 |
+
+未设置 `E2B_API_URL` / `E2B_DOMAIN` 时，默认地址为 `https://api.<region>.e2b.fc.aliyuncs.com`。地域按 ecctl 现有优先级读取：`--region` → `ECCTL_REGION` → 当前或 `--profile` 指定的 profile（ecctl 的 `region_id` 优先于同名 Aliyun CLI profile）→ 阿里云地域环境变量。设置 `ALIBABA_CLOUD_IGNORE_PROFILE=true` 或 `ALIBABACLOUD_IGNORE_PROFILE=true` 时跳过 profile。缺少地域、配置读取失败、地域查询失败或地域不受云沙箱支持时，回退 `https://api.cn-hangzhou.e2b.fc.aliyuncs.com`。
+
+支持地域通过 [FCSandbox 公共端点元数据](https://api.aliyun.com/meta/v1/products/FCSandbox/endpoints.json) 动态获取，不需要额外的阿里云凭据。查询最长等待 2 秒；缺少有效地域、地域已是杭州或已显式配置 E2B 地址时跳过。接口返回的是 OpenAPI 地址，ecctl 仅据此确认地域，再拼接 E2B 地址。2026-09-09 查询返回北京、杭州、上海、深圳、香港、新加坡、弗吉尼亚和硅谷，与 [FC 云沙箱使用约束](https://help.aliyun.com/zh/functioncompute/usage-constraints-of-fc-agent-sandbox) 一致。
 
 先在 Bash 中交互输入密钥，避免把真实密钥写进命令历史或共享文件：
 

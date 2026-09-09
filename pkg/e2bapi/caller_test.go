@@ -17,22 +17,77 @@ import (
 )
 
 func TestNewCallerUsesStandardE2BEnvironment(t *testing.T) {
-	values := map[string]string{
-		"E2B_API_KEY": "project-key",
-		"E2B_DOMAIN":  "example.test",
-	}
-	caller, err := NewCaller(func(key string) string { return values[key] })
-	if err != nil {
-		t.Fatalf("NewCaller: %v", err)
-	}
-	if caller.endpoint.String() != "https://api.example.test" {
-		t.Fatalf("endpoint = %q", caller.endpoint.String())
+	for _, tt := range []struct {
+		name, api, domain, want string
+	}{
+		{name: "default", want: "https://api.cn-hangzhou.e2b.fc.aliyuncs.com"},
+		{name: "domain", domain: "example.test", want: "https://api.example.test"},
+		{name: "api URL overrides domain", api: "https://api.e2b.app", domain: "example.test", want: "https://api.e2b.app"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			values := map[string]string{
+				"E2B_API_KEY": "project-key",
+				"E2B_API_URL": tt.api,
+				"E2B_DOMAIN":  tt.domain,
+			}
+			caller, err := NewCaller(func(key string) string { return values[key] })
+			if err != nil {
+				t.Fatalf("NewCaller: %v", err)
+			}
+			if caller.endpoint.String() != tt.want {
+				t.Fatalf("endpoint = %q, want %q", caller.endpoint.String(), tt.want)
+			}
+		})
 	}
 }
 
 func TestNewCallerRequiresCredential(t *testing.T) {
 	_, err := NewCaller(func(string) string { return "" })
 	assertAppError(t, err, "MissingCredential")
+}
+
+func TestNewCallerWithRegion(t *testing.T) {
+	previous := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = previous })
+	http.DefaultTransport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != fcSandboxEndpointsURL || r.Header.Get("X-API-Key") != "" || r.Header.Get("Authorization") != "" {
+			t.Fatalf("unexpected metadata request: %s", r.URL)
+		}
+		return testJSONResponse(http.StatusOK, fcRegionMetadata("cn-beijing", "cn-shanghai", "cn-hangzhou", "cn-shenzhen",
+			"cn-hongkong", "ap-southeast-1", "us-east-1", "us-west-1", "cn-future-1")), nil
+	})
+	for _, region := range []string{
+		"cn-beijing", "cn-shanghai", "cn-hangzhou", "cn-shenzhen",
+		"cn-hongkong", "ap-southeast-1", "us-east-1", "us-west-1", "cn-future-1",
+		"", "cn-qingdao", "eu-central-1", "../cn-beijing", "cn-beijing.attacker.example",
+	} {
+		t.Run(region, func(t *testing.T) {
+			caller, err := NewCallerWithRegion(context.Background(), region, func(key string) string {
+				if key == "E2B_API_KEY" {
+					return "project-key"
+				}
+				return ""
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantRegion := region
+			switch region {
+			case "", "cn-qingdao", "eu-central-1", "../cn-beijing", "cn-beijing.attacker.example":
+				wantRegion = "cn-hangzhou"
+			}
+			if got, want := caller.endpoint.String(), "https://api."+wantRegion+".e2b.fc.aliyuncs.com"; got != want {
+				t.Fatalf("endpoint = %q, want %q", got, want)
+			}
+			caller.lookupCNAME = func(context.Context, string) (map[string]string, error) {
+				t.Fatal("FC default must not need DNS discovery")
+				return nil, nil
+			}
+			if !caller.detectBackend(context.Background()).fc {
+				t.Fatal("default endpoint was not identified as FC")
+			}
+		})
+	}
 }
 
 func TestNewCallerRejectsOversizedCredential(t *testing.T) {

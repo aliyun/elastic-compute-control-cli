@@ -74,7 +74,10 @@ FC 的 E2B 兼容接口使用 `GET /templates` 返回完整模板数组，原生
 [E2B OpenAPI](https://github.com/e2b-dev/E2B/blob/main/spec/openapi.yml)。
 
 端点沿用现有配置：优先使用 `E2B_API_URL`；未配置时使用
-`https://api.${E2B_DOMAIN}`，其中 `E2B_DOMAIN` 默认是 `e2b.app`。
+`https://api.${E2B_DOMAIN}`；两者均未设置时，按 [Sandbox 地域解析规则](sandbox.md)
+读取当前或指定 profile 等配置中的地域，生成 `https://api.<region>.e2b.fc.aliyuncs.com`。
+支持地域从 FCSandbox 公共端点元数据动态查询；缺少地域、配置读取失败、
+地域查询失败或地域不受支持时回退杭州。
 例如北京地域的 FC 端点可配置为：
 
 ```bash

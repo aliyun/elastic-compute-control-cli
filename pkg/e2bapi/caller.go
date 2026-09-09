@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	defaultDomain   = "e2b.app"
+	defaultDomain   = "cn-hangzhou.e2b.fc.aliyuncs.com"
 	defaultTimeout  = 30 * time.Second
 	maxErrorBodyLen = 64 << 10
 	arrayMarker     = "__ecctl_top_level_array_response"
@@ -74,6 +74,12 @@ type Caller struct {
 // NewCaller resolves the E2B endpoint and project API key from the standard
 // E2B environment variables.
 func NewCaller(getenv func(string) string) (*Caller, error) {
+	return NewCallerWithRegion(context.Background(), "", getenv)
+}
+
+// NewCallerWithRegion uses a supported FC sandbox region only when neither
+// E2B_API_URL nor E2B_DOMAIN is set. Missing or unsupported regions use Hangzhou.
+func NewCallerWithRegion(ctx context.Context, region string, getenv func(string) string) (*Caller, error) {
 	if getenv == nil {
 		getenv = func(string) string { return "" }
 	}
@@ -86,7 +92,7 @@ func NewCaller(getenv func(string) string) (*Caller, error) {
 	if rawEndpoint == "" {
 		domain := strings.TrimSpace(getenv("E2B_DOMAIN"))
 		if domain == "" {
-			domain = defaultDomain
+			domain = defaultFCDomain(ctx, region)
 		}
 		if strings.Contains(domain, "://") || strings.ContainsAny(domain, "/?#@") {
 			return nil, invalidEndpoint("E2B_DOMAIN must be a hostname")

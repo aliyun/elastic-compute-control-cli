@@ -134,7 +134,7 @@ func TestEffectiveAPIEndpointSelectsBackend(t *testing.T) {
 		{domain: "cn-beijing.e2b.fc.aliyuncs.com", fc: true},
 		{api: "https://api.e2b.app", domain: "cn-beijing.e2b.fc.aliyuncs.com"},
 		{api: "https://api.cn-beijing.e2b.fc.aliyuncs.com", domain: "e2b.app", fc: true},
-		{},
+		{fc: true},
 	} {
 		caller, err := NewCaller(func(key string) string {
 			return map[string]string{"E2B_API_KEY": "test-key", "E2B_API_URL": tt.api, "E2B_DOMAIN": tt.domain}[key]

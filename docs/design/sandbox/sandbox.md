@@ -9,11 +9,32 @@
 `ecctl sandbox sandbox list` 指向同一资源。它与阿里云 AgentRun 的
 `ecctl agentrun sandbox` 不是同一产品或 API。
 
-该资源是全局资源，不解析或要求阿里云地域。请求使用 E2B 的标准
-`E2B_API_KEY` 项目密钥和 `X-API-Key` 请求头。默认端点是
-`https://api.e2b.app`；自托管环境可使用 `E2B_DOMAIN` 或
-`E2B_API_URL`。自定义 URL 必须使用 HTTPS，仅允许字面量环回地址使用
-HTTP。
+该资源是全局资源，不要求阿里云地域，也不发送 `RegionId` 请求字段。
+请求使用 E2B 的标准 `E2B_API_KEY` 项目密钥和 `X-API-Key` 请求头。
+端点优先使用 `E2B_API_URL`，其次使用 `https://api.${E2B_DOMAIN}`。
+两者均未设置时，只读复用 ecctl 的地域解析规则：`--region` → `ECCTL_REGION` →
+当前或指定 profile（ecctl 优先于同名 Aliyun CLI profile）→ 阿里云地域环境变量，
+并遵守 `ALIBABA_CLOUD_IGNORE_PROFILE` / `ALIBABACLOUD_IGNORE_PROFILE`。
+若地域受云沙箱支持，使用 `https://api.<region>.e2b.fc.aliyuncs.com`；
+缺少地域、读取配置失败、地域查询失败或地域不受支持时回退 `https://api.cn-hangzhou.e2b.fc.aliyuncs.com`。
+此过程不获取、刷新或写入阿里云凭据。自定义 URL 必须使用 HTTPS，
+仅允许字面量环回地址使用 HTTP。
+
+支持地域从 [OpenAPI Portal 的 FCSandbox 端点元数据](https://api.aliyun.com/meta/v1/products/FCSandbox/endpoints.json)
+匿名获取，读取 `data.endpoints[].regionId` 及其公共端点记录，不维护硬编码地域名单。
+该接口无需阿里云 AccessKey 或 `E2B_API_KEY`。
+[FCSandbox 服务区域页面](https://api.aliyun.com/product/FCSandbox?tab=endpoints)
+读取版本 [overview 元数据](https://api.aliyun.com/meta/v1/products/FCSandbox/versions/2026-05-09/overview.json)
+中的 `endpoints`；2026-09-09 实测其数组与独立端点接口的数组完全一致。
+这里采用独立端点接口，避免绑定 API 版本。
+返回的 `fcsandbox.<region>.aliyuncs.com` 是 OpenAPI 端点，不能作为 E2B API Key 的请求目标；
+确认地域后在本地拼接 `api.<region>.e2b.fc.aliyuncs.com`。
+查询超时为 2 秒，继承命令取消，不跟随重定向，限制响应为 1 MiB，不写入磁盘缓存。
+缺少有效地域、地域已是杭州或显式设置 `E2B_API_URL` / `E2B_DOMAIN` 时跳过查询。
+显式地址保持原有优先级，不受自动地域查询结果限制。
+
+2026-09-09 实测元数据返回的 8 个地域与 [云沙箱 API/SDK 使用约束](https://help.aliyun.com/zh/functioncompute/usage-constraints-of-fc-agent-sandbox)
+一致。FC 自身的 `DescribeRegions` 只返回整个 FC 产品的地域，不用于此处判断。
 
 官方契约：
 
@@ -104,8 +125,8 @@ E2B 顶层数组响应统一映射为 ecctl 的资源数组；`X-Next-Token`、
 设置 `ECCTL_SANDBOX_BACKEND=acs` 使用 ACS sandbox-manager 的 E2B 控制面。
 该配置可选值为 `auto`（默认）、`e2b`、`fc`、`acs`，显式选择优先；
 `auto` 保留原来的 FC 主机名/CNAME 检测，不根据自定义域名或 HTTP 404
-推断 ACS。端点仍优先使用 `E2B_API_URL`，否则使用
-`https://api.${E2B_DOMAIN}`，域名默认 `e2b.app`。选择后端不会改变请求目标。
+推断 ACS。端点遵循上述 URL、域名、地域默认地址的优先级。
+选择后端不会改变请求目标；ACS 应显式配置自己的端点。
 
 ACS 的 `E2B_API_KEY` 对应 sandbox-manager 的管理密钥。CLI 不读取
 kubeconfig，也不从 Deployment/Secret 自动提取密钥。私有 CA 可通过

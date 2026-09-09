@@ -9,6 +9,7 @@ import (
 )
 
 const fcDomain = "e2b.fc.aliyuncs.com"
+const nativeE2BDomain = "e2b.app"
 const backendLookupTimeout = 3 * time.Second
 const maxCNAMEHops = 8
 
@@ -70,7 +71,7 @@ func identifyBackend(ctx context.Context, host string, lookup cnameLookup) (back
 	if domainWithin(current, fcDomain) {
 		return backendDetection{fc: true}, nil
 	}
-	if domainWithin(current, defaultDomain) {
+	if domainWithin(current, nativeE2BDomain) {
 		return backendDetection{reason: "e2b_domain"}, nil
 	}
 	if net.ParseIP(current) != nil {

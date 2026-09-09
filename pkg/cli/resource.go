@@ -53,12 +53,18 @@ func resourceCallerFactoryFromContext(ctx context.Context) ResourceCallerFactory
 }
 
 func defaultResourceCallerFactory(profileName, configPath string, resource spec.ResourceSpec, region string, getenv func(string) string) (engine.Caller, error) {
-	return defaultResourceCallerFactoryResolved(profileName, configPath, resource, config.ResolvedRegion{Value: region, Source: config.RegionSourceExplicit}, getenv)
+	return defaultResourceCallerFactoryResolved(context.Background(), profileName, configPath, resource, config.ResolvedRegion{Value: region, Source: config.RegionSourceExplicit}, getenv)
 }
 
-func defaultResourceCallerFactoryResolved(profileName, configPath string, resource spec.ResourceSpec, region config.ResolvedRegion, getenv func(string) string) (engine.Caller, error) {
+func defaultResourceCallerFactoryResolved(ctx context.Context, profileName, configPath string, resource spec.ResourceSpec, region config.ResolvedRegion, getenv func(string) string) (engine.Caller, error) {
 	if resource.Provider == "e2b" {
-		return e2bapi.NewCaller(getenv)
+		if getenv == nil || (strings.TrimSpace(getenv("E2B_API_URL")) == "" && strings.TrimSpace(getenv("E2B_DOMAIN")) == "") {
+			// Region is an optional endpoint hint. Reading profile metadata must
+			// not acquire Aliyun credentials or make sandbox use depend on them.
+			resolved, _ := config.ResolveRegionForProfileWithSource(region.Value, profileName, configPath, getenv)
+			region = resolved
+		}
+		return e2bapi.NewCallerWithRegion(ctx, region.Value, getenv)
 	}
 	caller, err := aliyun.NewOpenAPICallerWithRegionSource(profileName, configPath, resourceAPIProduct(resource), region, getenv)
 	if err != nil {
@@ -1256,7 +1262,13 @@ func runResourceAction(cmd *cobra.Command, options *globalOptions, stdout io.Wri
 	if callerFactory, ok := cmd.Context().Value(resourceCallerFactoryKey{}).(ResourceCallerFactory); ok {
 		caller, err = callerFactory(profileName, configPath, resource, region.Value, os.Getenv)
 	} else {
-		caller, err = defaultResourceCallerFactoryResolved(profileName, configPath, resource, region, os.Getenv)
+		callerRegion := region
+		if resource.Provider == "e2b" {
+			// Sandbox specs remain global; --region only supplies the default
+			// endpoint hint, not a RegionId request field or output attribute.
+			callerRegion = config.ResolvedRegion{Value: options.region, Source: config.RegionSourceExplicit}
+		}
+		caller, err = defaultResourceCallerFactoryResolved(cmd.Context(), profileName, configPath, resource, callerRegion, os.Getenv)
 	}
 	if err != nil {
 		return err
