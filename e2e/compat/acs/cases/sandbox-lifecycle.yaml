@@ -1,0 +1,92 @@
+# ACS compatibility profile; discovers an existing warm-pool template.
+resource: sandbox/sandbox
+serial: true
+timeout: 6m
+steps:
+  - name: discover template
+    run: ecctl sandbox template list --limit 1
+    at: $.templates[0]
+    expect:
+      id: {type: string, min_len: 1}
+    capture:
+      template_id: id
+  - name: create controls fixture
+    run: >
+      ecctl sandbox create --template {{.template_id}}
+      --timeout-seconds 300 --timeout 180s
+      --metadata '{"ecctl_run_id":"{{.run_id}}","case":"controls"}'
+    at: $.sandbox
+    expect:
+      id: {type: string, min_len: 1}
+      state: {eq: running}
+      end_at: {type: string}
+    capture:
+      sandbox_id: id
+      initial_end_at: end_at
+    teardown: ecctl sandbox delete {{.sandbox_id}}
+  - name: update timeout
+    run: ecctl sandbox update {{.sandbox_id}} --timeout-seconds 600
+    at: $.sandbox
+    expect:
+      id: {eq: "{{.sandbox_id}}"}
+      state: {eq: running}
+      end_at: {type: string}
+    capture:
+      updated_end_at: end_at
+    assert: ['$.sandbox.end_at > "{{.initial_end_at}}"']
+  - name: verify updated timeout
+    run: ecctl sandbox get {{.sandbox_id}}
+    at: $.sandbox
+    expect:
+      id: {eq: "{{.sandbox_id}}"}
+      state: {eq: running}
+      end_at: {type: string}
+  - name: reject mixed timeout and network update
+    run: ecctl sandbox update {{.sandbox_id}} --timeout-seconds 1200 --network '{}'
+    exit: 1
+    at: $.error
+    expect:
+      code: {eq: UnsupportedOperation}
+  - name: verify rejected update changed nothing
+    run: ecctl sandbox get {{.sandbox_id}}
+    at: $.sandbox
+    expect:
+      end_at: {eq: "{{.updated_end_at}}"}
+  - name: list owned sandbox
+    run: ecctl sandbox list --filter metadata.ecctl_run_id={{.run_id}}
+    at: $.sandboxes[0]
+    expect:
+      id: {eq: "{{.sandbox_id}}"}
+  - name: pause
+    run: ecctl sandbox pause {{.sandbox_id}} --timeout 120s
+    at: $.sandbox
+    expect:
+      id: {eq: "{{.sandbox_id}}"}
+  - name: verify paused
+    run: ecctl sandbox get {{.sandbox_id}}
+    at: $.sandbox
+    expect:
+      id: {eq: "{{.sandbox_id}}"}
+      state: {eq: paused}
+  - name: resume
+    run: ecctl sandbox resume {{.sandbox_id}} --timeout-seconds 600 --timeout 150s
+    at: $.sandbox
+    expect:
+      id: {eq: "{{.sandbox_id}}"}
+      state: {eq: running}
+  - name: verify resumed
+    run: ecctl sandbox get {{.sandbox_id}}
+    at: $.sandbox
+    expect:
+      id: {eq: "{{.sandbox_id}}"}
+      state: {eq: running}
+  - name: delete controls fixture
+    run: ecctl sandbox delete {{.sandbox_id}}
+    expect:
+      $.deleted: {eq: true}
+  - name: verify deletion
+    run: ecctl sandbox get {{.sandbox_id}}
+    exit: 4
+    at: $.error
+    expect:
+      kind: {eq: not_found}

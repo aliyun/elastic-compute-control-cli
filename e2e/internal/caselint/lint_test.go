@@ -166,6 +166,32 @@ steps:
 			resource: "ack/template",
 		},
 		{
+			name: "E2B sandbox uses metadata instead of Alibaba Cloud resource tags",
+			caseBody: `
+resource: sandbox/sandbox
+steps:
+  - name: create
+    run: ecctl sandbox create --template base --metadata '{"run-id":"{{.run_id}}"}'
+    capture:
+      sandbox_id: id
+    teardown: ecctl sandbox delete {{.sandbox_id}}
+`,
+			resource: "sandbox/sandbox",
+		},
+		{
+			name: "E2B template tags are build labels rather than sweeper key value tags",
+			caseBody: `
+resource: sandbox/template
+steps:
+  - name: create
+    run: ecctl sandbox template create --name t --from-image e2bdev/base:ubuntu
+    capture:
+      template_id: id
+    teardown: ecctl sandbox template delete {{.template_id}}
+`,
+			resource: "sandbox/template",
+		},
+		{
 			name: "ack diagnosis is owned by the disposable cluster fixture",
 			caseBody: `
 resource: ack/diagnosis

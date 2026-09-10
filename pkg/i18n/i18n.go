@@ -109,6 +109,18 @@ func buildLocalizer(tag string, specs map[string]map[string]string) *Localizer {
 		&i18n.Message{ID: "InvalidFilter", Other: "filter is invalid"},
 		&i18n.Message{ID: "InvalidIDs", Other: "IDs must be comma-separated, not JSON arrays"},
 		&i18n.Message{ID: "InvalidLimit", Other: "limit must be greater than zero"},
+		&i18n.Message{ID: "InvalidSandboxBackend", Other: "ECCTL_SANDBOX_BACKEND must be auto, e2b, fc, or acs"},
+		&i18n.Message{ID: "InvalidSandboxCA", Other: "Cannot load the sandbox CA file or system certificate pool; provide a readable PEM certificate file"},
+		&i18n.Message{ID: "UnsupportedACSOperation", Other: "The selected ACS compatibility profile does not support this operation or parameter"},
+		&i18n.Message{ID: "InvalidSandboxResponse", Other: "The sandbox API response does not match the requested operation"},
+		&i18n.Message{ID: "UnsupportedACSTemplateDeletion", Other: "SandboxSet-backed templates must be managed through Kubernetes; snapshot templates can be deleted through this API"},
+		&i18n.Message{ID: "InvalidACSTemplateLimit", Other: "ACS template limit must be between 1 and 100"},
+		&i18n.Message{ID: "InvalidACSTemplateToken", Other: "Invalid ACS template pagination token; restart listing without next_token for this endpoint"},
+		&i18n.Message{ID: "InvalidACSTemplateResponse", Other: "ACS template listing must return one complete JSON array with unique non-empty templateID values and no server pagination token"},
+		&i18n.Message{ID: "InvalidFCTemplateLimit", Other: "FC template limit must be between 1 and 100"},
+		&i18n.Message{ID: "InvalidFCTemplateToken", Other: "Invalid FC template pagination token; restart listing without next_token for this endpoint"},
+		&i18n.Message{ID: "InvalidFCTemplateResponse", Other: "FC template listing must return one complete JSON array without duplicate fields, with unique, non-empty templateID values and no server pagination token"},
+		&i18n.Message{ID: "E2BBackendUnidentifiedDetail", Other: "FC was not identified for API host {{.Host}} ({{.Reason}}); the native E2B endpoint was used without fallback"},
 		&i18n.Message{ID: "InvalidOSSUtilOutput", Other: "OSS call returned invalid JSON output"},
 		&i18n.Message{ID: "InvalidPage", Other: "page must be greater than zero"},
 		&i18n.Message{ID: "InvalidParameter", Other: "parameter is invalid"},
@@ -382,6 +394,18 @@ func buildLocalizer(tag string, specs map[string]map[string]string) *Localizer {
 		&i18n.Message{ID: "InvalidFilter", Other: "过滤条件无效"},
 		&i18n.Message{ID: "InvalidIDs", Other: "ID 必须是逗号分隔列表，不能是 JSON 数组"},
 		&i18n.Message{ID: "InvalidLimit", Other: "limit 必须大于 0"},
+		&i18n.Message{ID: "InvalidSandboxBackend", Other: "ECCTL_SANDBOX_BACKEND 必须是 auto、e2b、fc 或 acs"},
+		&i18n.Message{ID: "InvalidSandboxCA", Other: "无法加载沙箱 CA 文件或系统证书池；请提供可读取的 PEM 证书文件"},
+		&i18n.Message{ID: "UnsupportedACSOperation", Other: "当前 ACS 兼容模式不支持此操作或参数"},
+		&i18n.Message{ID: "InvalidSandboxResponse", Other: "沙箱 API 响应与请求的操作不匹配"},
+		&i18n.Message{ID: "UnsupportedACSTemplateDeletion", Other: "SandboxSet 模板需要通过 Kubernetes 管理；快照模板可以通过此 API 删除"},
+		&i18n.Message{ID: "InvalidACSTemplateLimit", Other: "ACS 模板列表的 limit 必须介于 1 和 100 之间"},
+		&i18n.Message{ID: "InvalidACSTemplateToken", Other: "ACS 模板分页 token 无效；请去掉 next_token 后重新查询当前端点"},
+		&i18n.Message{ID: "InvalidACSTemplateResponse", Other: "ACS 模板列表必须返回单个完整 JSON 数组，每项 templateID 非空且唯一，并且不含服务端分页 token"},
+		&i18n.Message{ID: "InvalidFCTemplateLimit", Other: "FC 模板列表的 limit 必须介于 1 和 100 之间"},
+		&i18n.Message{ID: "InvalidFCTemplateToken", Other: "FC 模板分页 token 无效；请去掉 next_token 后重新查询当前端点"},
+		&i18n.Message{ID: "InvalidFCTemplateResponse", Other: "FC 模板列表必须返回单个完整 JSON 数组，不含重复字段，每项 templateID 非空且唯一，并且不含服务端分页 token"},
+		&i18n.Message{ID: "E2BBackendUnidentifiedDetail", Other: "未将 API 主机 {{.Host}} 识别为 FC（{{.Reason}}）；已使用原生 E2B 路径，未尝试回退"},
 		&i18n.Message{ID: "InvalidOSSUtilOutput", Other: "OSS 调用返回了无效的 JSON 输出"},
 		&i18n.Message{ID: "InvalidPage", Other: "page 必须大于 0"},
 		&i18n.Message{ID: "InvalidParameter", Other: "参数无效"},
@@ -776,6 +800,13 @@ func (l *Localizer) ErrorPayload(payload ecerrors.ErrorPayload, hasActions bool)
 	}
 	if !l.ShouldLocalizeHelp() {
 		return payload
+	}
+	// Preserve provider-specific messages that share a stable generic error code.
+	for _, id := range []string{"UnsupportedACSOperation", "InvalidSandboxResponse"} {
+		if payload.Message == NewLocalizer("en").Message(id) {
+			payload.Message = l.Message(id)
+			return payload
+		}
 	}
 	if payload.Code == "NotFound" {
 		payload.Message = l.NotFoundMessage(payload.Message)

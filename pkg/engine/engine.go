@@ -23,6 +23,12 @@ type operationContextPreparer interface {
 	PrepareOperationContext(context.Context) (context.Context, error)
 }
 
+// operationValidator lets a provider reject an unsupported combination before
+// any step in a multi-request workflow changes remote state.
+type operationValidator interface {
+	ValidateOperation(context.Context, string, string, map[string]any) error
+}
+
 var timeScale float64 = 1.0
 
 func SetTimeScaleForTest(scale float64) func() {
@@ -89,6 +95,11 @@ func (e *Executor) Execute(ctx context.Context, req Request) (Result, error) {
 	}
 
 	if operation, ok := e.spec.Operations[req.Action]; ok {
+		if validator, ok := e.caller.(operationValidator); ok {
+			if err := validator.ValidateOperation(ctx, e.spec.Resource, req.Action, cloneMap(req.Input)); err != nil {
+				return Result{}, err
+			}
+		}
 		if operation.Call.Probe != "" {
 			return e.executeOperationCall(ctx, req, operation)
 		}

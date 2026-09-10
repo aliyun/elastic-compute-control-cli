@@ -1,11 +1,14 @@
 package spec_resource
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/aliyun/elastic-compute-control-cli/pkg/cli"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
@@ -137,6 +140,245 @@ operations:
 	}
 	if len(fake.calls) != 1 || fake.calls[0].operation != "ListWidgets" {
 		t.Fatalf("calls = %#v", fake.calls)
+	}
+}
+
+func TestProductAliasAndGlobalResourceDoNotRequireRegion(t *testing.T) {
+	specDir := t.TempDir()
+	writeCLIResourceSpec(t, filepath.Join(specDir, "demo", "product.yaml"), `schema_version: 1
+product: demo
+aliases: [dm]
+expose_default_resource: true
+description:
+  en: Manage global demos
+examples:
+  - ecctl demo list
+  - ecctl dm demo list
+`)
+	writeCLIResourceSpec(t, filepath.Join(specDir, "demo", "demo.yaml"), `schema_version: 2
+product: demo
+resource: demo
+kind: global
+description:
+  en: Manage global demo resources
+identity:
+  field: id
+  output_root: {one: demo, many: demos}
+schema:
+  fields:
+    id: {type: string}
+probes:
+  list:
+    api: ListDemos
+    request: {}
+    response:
+      items: $.items
+      fields: {id: $.id}
+operations:
+  list:
+    description: {en: List demos}
+    examples: [ecctl demo list]
+    workflow:
+      - probe: list
+        many: true
+`)
+	t.Setenv("ECCTL_SPEC_DIR", specDir)
+
+	fake := &fakeSpecCaller{responses: []map[string]any{{"items": []any{}}}}
+	runCLI := withCaller(func(_ string, _ string, resource spec.ResourceSpec, region string, _ func(string) string) (engine.Caller, error) {
+		if resource.Kind != "global" || region != "" {
+			t.Fatalf("resource kind=%q region=%q", resource.Kind, region)
+		}
+		return fake, nil
+	})
+	stdout, stderr, code := runCLI("dm", "demo", "list")
+	if code != 0 {
+		t.Fatalf("dm demo list exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if len(fake.calls) != 1 || fake.calls[0].operation != "ListDemos" {
+		t.Fatalf("calls = %#v", fake.calls)
+	}
+}
+
+func TestBuiltInSandboxAliasesAndTemplateCreate(t *testing.T) {
+	t.Setenv("ECCTL_SPEC_DIR", "")
+	fake := &fakeSpecCaller{responses: []map[string]any{
+		{"templateID": "tpl-1", "buildID": "build-1"},
+		{},
+		{"templateID": "tpl-1", "buildID": "build-1", "status": "ready", "logEntries": []any{}},
+	}}
+	runCLI := withCaller(func(_ string, _ string, resource spec.ResourceSpec, region string, _ func(string) string) (engine.Caller, error) {
+		if resource.Product != "sandbox" || resource.Resource != "template" || resource.Provider != "e2b" || region != "" {
+			t.Fatalf("resource=%#v region=%q", resource, region)
+		}
+		return fake, nil
+	})
+	stdout, stderr, code := runCLI("sbx", "tpl", "create", "--name", "python", "--from-image", "python:3.12")
+	if code != 0 {
+		t.Fatalf("sbx tpl create exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if len(fake.calls) != 3 || fake.calls[0].operation != "CreateTemplate" || fake.calls[1].operation != "StartTemplateBuild" || fake.calls[2].operation != "GetTemplateBuildStatus" {
+		t.Fatalf("calls = %#v", fake.calls)
+	}
+	if fake.calls[0].request["body.name"] != "python" || fake.calls[1].request["body.fromImage"] != "python:3.12" || fake.calls[1].request["path.templateID"] != "tpl-1" || fake.calls[1].request["path.buildID"] != "build-1" {
+		t.Fatalf("create requests = %#v", fake.calls)
+	}
+	template, _ := decodeObject(t, stdout)["template"].(map[string]any)
+	if template["build_status"] != "ready" || template["id"] != "tpl-1" {
+		t.Fatalf("stdout = %s", stdout)
+	}
+}
+
+func TestBuiltInSandboxTemplateCreateNoWaitEmitsBuildIdentity(t *testing.T) {
+	t.Setenv("ECCTL_SPEC_DIR", "")
+	fake := &fakeSpecCaller{responses: []map[string]any{{
+		"templateID": "tpl-1", "buildID": "build-1",
+	}, {}}}
+	runCLI := withCaller(func(_ string, _ string, resource spec.ResourceSpec, region string, _ func(string) string) (engine.Caller, error) {
+		if resource.Product != "sandbox" || resource.Resource != "template" || region != "" {
+			t.Fatalf("resource=%s/%s region=%q", resource.Product, resource.Resource, region)
+		}
+		return fake, nil
+	})
+	stdout, stderr, code := runCLI("sbx", "tpl", "create", "--name", "python", "--from-image", "python:3.12", "--no-wait")
+	if code != 0 {
+		t.Fatalf("create --no-wait exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if len(fake.calls) != 2 || fake.calls[0].operation != "CreateTemplate" || fake.calls[1].operation != "StartTemplateBuild" {
+		t.Fatalf("calls = %#v", fake.calls)
+	}
+	template, _ := decodeObject(t, stdout)["template"].(map[string]any)
+	if template["id"] != "tpl-1" || template["build_id"] != "build-1" || template["build_status"] != "waiting" {
+		t.Fatalf("template = %#v; stdout=%s", template, stdout)
+	}
+}
+
+func TestBuiltInSandboxSnapshotKeepsSandboxIdentityAndEmitsTemplateID(t *testing.T) {
+	t.Setenv("ECCTL_SPEC_DIR", "")
+	fake := &fakeSpecCaller{responses: []map[string]any{{"snapshotID": "tpl-snapshot"}}}
+	runCLI := withCaller(func(_ string, _ string, _ spec.ResourceSpec, region string, _ func(string) string) (engine.Caller, error) {
+		if region != "" {
+			t.Fatalf("region = %q", region)
+		}
+		return fake, nil
+	})
+	stdout, stderr, code := runCLI("sandbox", "snapshot", "sbx-1", "--snapshot-name", "checkpoint")
+	if code != 0 {
+		t.Fatalf("snapshot exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	sandbox, _ := decodeObject(t, stdout)["sandbox"].(map[string]any)
+	if sandbox["id"] != "sbx-1" || sandbox["snapshot_template"] != "tpl-snapshot" || sandbox["snapshot_name"] != "checkpoint" {
+		t.Fatalf("sandbox = %#v; stdout=%s", sandbox, stdout)
+	}
+}
+
+func TestBuiltInGlobalSandboxAllowsExplicitEmptyRegion(t *testing.T) {
+	t.Setenv("ECCTL_SPEC_DIR", "")
+	fake := &fakeSpecCaller{responses: []map[string]any{{"items": []any{}}}}
+	runCLI := withCaller(func(_ string, _ string, resource spec.ResourceSpec, region string, _ func(string) string) (engine.Caller, error) {
+		if resource.Kind != "global" || region != "" {
+			t.Fatalf("resource kind=%q region=%q", resource.Kind, region)
+		}
+		return fake, nil
+	})
+	stdout, stderr, code := runCLI("--region=", "sandbox", "list")
+	if code != 0 {
+		t.Fatalf("sandbox list exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+}
+
+func TestPublicSandboxAliasMapsFiltersAndLogDirectionWithoutRegion(t *testing.T) {
+	t.Setenv("ECCTL_SPEC_DIR", "")
+	fake := &fakeSpecCaller{responses: []map[string]any{{"items": []any{}}, {"logs": []any{}}}}
+	factory := func(_ string, _ string, resource spec.ResourceSpec, region string, _ func(string) string) (engine.Caller, error) {
+		if resource.Product != "sandbox" || resource.Resource != "sandbox" || region != "" {
+			t.Fatalf("resource=%s/%s region=%q", resource.Product, resource.Resource, region)
+		}
+		return fake, nil
+	}
+	var stdout, stderr bytes.Buffer
+	ctx := cli.WithResourceCallerFactory(context.Background(), factory)
+	code := cli.Run(ctx, []string{"--lang", "en", "sbx", "list", "--filter", "state=running", "--filter", "metadata.owner=a b", "--filter", "order=asc"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("sbx list exit %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if len(fake.calls) != 1 {
+		t.Fatalf("calls = %#v", fake.calls)
+	}
+	request := fake.calls[0].request
+	metadata, ok := request["query.metadata"].([]string)
+	if !ok || len(metadata) != 1 || metadata[0] != "owner=a b" {
+		t.Fatalf("metadata request = %#v", request["query.metadata"])
+	}
+	states, ok := request["query.state"].([]string)
+	if !ok || len(states) != 1 || states[0] != "running" {
+		t.Fatalf("state request = %#v", request["query.state"])
+	}
+	if request["query.order"] != "asc" {
+		t.Fatalf("order request = %#v", request["query.order"])
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = cli.Run(ctx, []string{"--lang", "en", "sbx", "logs", "sbx-1", "--direction", "backward", "--limit", "1000"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("sbx logs exit %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	logs, _ := decodeObject(t, stdout.String())["sandbox"].(map[string]any)["logs"].([]any)
+	if logs == nil || len(logs) != 0 {
+		t.Fatalf("empty sandbox logs must be preserved as an array: %s", stdout.String())
+	}
+	if len(fake.calls) != 2 || fake.calls[1].request["query.direction"] != "backward" || fake.calls[1].request["query.limit"] != 1000 {
+		t.Fatalf("logs request = %#v", fake.calls)
+	}
+}
+
+func TestE2BLimitBoundaries(t *testing.T) {
+	t.Setenv("ECCTL_SPEC_DIR", "")
+	fake := &fakeSpecCaller{responses: []map[string]any{
+		{"items": []any{}},
+		{"logs": []any{}},
+		{"logs": []any{}},
+	}}
+	runCLI := withCaller(func(_ string, _ string, _ spec.ResourceSpec, region string, _ func(string) string) (engine.Caller, error) {
+		if region != "" {
+			t.Fatalf("region = %q", region)
+		}
+		return fake, nil
+	})
+
+	if stdout, stderr, code := runCLI("sandbox", "list", "--limit", "100"); code != 0 {
+		t.Fatalf("sandbox list --limit 100 exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if _, _, code := runCLI("sandbox", "list", "--limit", "101"); code == 0 {
+		t.Fatal("sandbox list --limit 101 succeeded")
+	}
+	if len(fake.calls) != 1 {
+		t.Fatalf("invalid sandbox list reached caller: %#v", fake.calls)
+	}
+
+	if stdout, stderr, code := runCLI("sandbox", "logs", "sbx-1", "--limit", "1000"); code != 0 {
+		t.Fatalf("sandbox logs --limit 1000 exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	} else if logs, _ := decodeObject(t, stdout)["sandbox"].(map[string]any)["logs"].([]any); logs == nil || len(logs) != 0 {
+		t.Fatalf("empty sandbox logs must be preserved as an array: %s", stdout)
+	}
+	if _, _, code := runCLI("sandbox", "logs", "sbx-1", "--limit", "1001"); code == 0 {
+		t.Fatal("sandbox logs --limit 1001 succeeded")
+	}
+	if len(fake.calls) != 2 {
+		t.Fatalf("invalid sandbox logs reached caller: %#v", fake.calls)
+	}
+
+	if stdout, stderr, code := runCLI("sandbox", "template", "build-logs", "tpl-1", "--build-id", "build-1", "--limit", "100"); code != 0 {
+		t.Fatalf("template build-logs --limit 100 exit %d stderr=%s stdout=%s", code, stderr, stdout)
+	} else if logs, _ := decodeObject(t, stdout)["template"].(map[string]any)["logs"].([]any); logs == nil || len(logs) != 0 {
+		t.Fatalf("empty template build logs must be preserved as an array: %s", stdout)
+	}
+	if _, _, code := runCLI("sandbox", "template", "build-logs", "tpl-1", "--build-id", "build-1", "--limit", "101"); code == 0 {
+		t.Fatal("template build-logs --limit 101 succeeded")
+	}
+	if len(fake.calls) != 3 {
+		t.Fatalf("invalid template build-logs reached caller: %#v", fake.calls)
 	}
 }
 

@@ -1431,8 +1431,18 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 		td, terr := vars.Render(st.Teardown, mergeCaptures(data, res, st))
 		if terr != nil {
 			// Failed creates commonly have no resource ID. Preserve the command
-			// error; teardown rendering is authoritative only after the command
-			// reached its expected exit status.
+			// error. A structured recovery delete from ecctl is safe to journal
+			// after the same strict validation used for ordinary teardown.
+			if res.Exit != 0 {
+				if recovery, ok := recoveryDeleteCommand(res.JSON); ok {
+					if err := cl.push(scope, caseScope(data), recovery, st.TeardownRegion, lockKeys); err != nil {
+						sr.Status, sr.Error = report.StatusError, "cleanup journal: "+err.Error()
+						return sr, false
+					}
+				}
+			}
+			// Teardown rendering is authoritative only after the command reached
+			// its expected exit status.
 			if res.Err == nil && exitOK(res.Exit) {
 				sr.Status, sr.Error = report.StatusError, "render teardown: "+terr.Error()
 				return sr, false
@@ -1490,6 +1500,34 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 		}
 	}
 	return sr, true
+}
+
+func recoveryDeleteCommand(doc any) (string, bool) {
+	root, ok := doc.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	payload, ok := root["error"].(map[string]any)
+	if !ok {
+		return "", false
+	}
+	rawArgs, ok := payload["recovery_command"].([]any)
+	if !ok || len(rawArgs) == 0 {
+		return "", false
+	}
+	args := make([]string, 0, len(rawArgs))
+	for _, rawArg := range rawArgs {
+		arg, ok := rawArg.(string)
+		if !ok || arg == "" || strings.ContainsAny(arg, " \t\r\n'\"\\`$;&|<>") {
+			return "", false
+		}
+		args = append(args, arg)
+	}
+	command := strings.Join(args, " ")
+	if !isReplayableTeardown(command) {
+		return "", false
+	}
+	return command, true
 }
 
 // isTransientNetworkError reports whether the step failure looks like a

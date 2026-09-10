@@ -1174,7 +1174,12 @@ func TestRunPreservesCommandFailureWhenTeardownCaptureIsMissing(t *testing.T) {
 	dir := t.TempDir()
 	fake := filepath.Join(dir, "ecctl")
 	if err := os.WriteFile(fake, []byte(`#!/usr/bin/env bash
-echo '{"error":{"code":"CreateRejected","message":"cloud rejected create"}}'
+if [[ "$*" == *" delete "* ]]; then
+  echo "$*" >> "$FAKE_LOG"
+  echo '{}'
+  exit 0
+fi
+echo '{"error":{"code":"CreateRejected","message":"cloud rejected create","recovery_command":["ecctl","t","thing","delete","res-partial"]}}'
 exit 2
 `), 0o755); err != nil {
 		t.Fatal(err)
@@ -1195,6 +1200,8 @@ steps:
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	logPath := filepath.Join(dir, "calls.log")
+	t.Setenv("FAKE_LOG", logPath)
 
 	run, err := Run(context.Background(), Options{
 		CasesDir: filepath.Join(dir, "cases"), InputsDir: filepath.Join(dir, "inputs"),
@@ -1206,6 +1213,13 @@ steps:
 	step := run.Cases[0].Steps[0]
 	if !strings.Contains(step.Error, "CreateRejected") || strings.Contains(step.Error, "render teardown") {
 		t.Fatalf("command failure was obscured by teardown rendering: %+v", step)
+	}
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(log), "t thing delete res-partial") {
+		t.Fatalf("recovery delete was not replayed: %s", log)
 	}
 }
 

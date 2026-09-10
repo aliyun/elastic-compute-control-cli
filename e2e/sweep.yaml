@@ -203,6 +203,15 @@ kinds:
     delete: ecctl rg group delete {{.id}}
 
 non_sweepable:
+  # E2B templates expose build tags rather than the key/value resource-tag
+  # contract used by this sweeper, and sandboxes use metadata. Both cases keep
+  # immediate teardown plus cleanup-journal commands.
+  - resource: sandbox/template
+    reason: provider-limitation
+    review_after: "2026-12-03"
+  - resource: sandbox/sandbox
+    reason: provider-limitation
+    review_after: "2026-12-03"
   # AgentRun template and sandbox APIs do not expose the repository tag-based
   # sweeper contract. Their explicit teardown and cleanup journals remain the
   # recovery path.

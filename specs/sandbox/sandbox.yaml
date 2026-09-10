@@ -1,0 +1,574 @@
+schema_version: 2
+product: sandbox
+provider: e2b
+resource: sandbox
+kind: global
+display_name:
+  en: E2B sandbox
+  zh-CN: E2B 沙箱
+description:
+  en: Manage the lifecycle and control-plane state of E2B sandboxes.
+  zh-CN: 管理 E2B 沙箱的生命周期和控制面状态。
+examples:
+  - ecctl sandbox list --filter state=running
+  - ecctl sandbox get <sandbox-id>
+  - ecctl sandbox create --template base --timeout-seconds 300
+  - ecctl sandbox pause <sandbox-id>
+
+identity:
+  field: id
+  output_root:
+    one: sandbox
+    many: sandboxes
+
+schema:
+  fields:
+    id:
+      type: string
+      description: {en: sandbox ID, zh-CN: 沙箱 ID}
+    template:
+      type: string
+      description: {en: template ID or alias, zh-CN: 模板 ID 或别名}
+    alias:
+      type: string
+      description: {en: template alias, zh-CN: 模板别名}
+    state:
+      type: string
+      enum: [running, paused]
+      description: {en: sandbox state, zh-CN: 沙箱状态}
+    started_at:
+      type: string
+      description: {en: sandbox start time, zh-CN: 沙箱启动时间}
+    end_at:
+      type: string
+      description: {en: sandbox expiration time, zh-CN: 沙箱过期时间}
+    cpu_count:
+      type: integer
+      description: {en: sandbox CPU count, zh-CN: 沙箱 CPU 数量}
+    memory_mb:
+      type: integer
+      description: {en: sandbox memory in MiB, zh-CN: 沙箱内存（MiB）}
+    disk_size_mb:
+      type: integer
+      description: {en: sandbox disk size in MiB, zh-CN: 沙箱磁盘大小（MiB）}
+    envd_version:
+      type: string
+      description: {en: envd version, zh-CN: envd 版本}
+    metadata:
+      type: object
+      description: {en: sandbox metadata as JSON or @file, zh-CN: 沙箱元数据，使用 JSON 或 @file}
+    env_vars:
+      type: object
+      description: {en: environment variables as JSON or @file, zh-CN: 环境变量，使用 JSON 或 @file}
+    secure:
+      type: boolean
+      description: {en: secure system communication with the sandbox, zh-CN: 保护与沙箱的系统通信}
+    timeout_seconds:
+      type: integer
+      description: {en: time to live in seconds, zh-CN: 生存时间（秒）}
+    auto_pause:
+      type: boolean
+      description: {en: automatically pause the sandbox on timeout, zh-CN: 超时后自动暂停沙箱}
+    auto_pause_memory:
+      type: boolean
+      description: {en: preserve memory when auto-pausing, zh-CN: 自动暂停时保留内存状态}
+    auto_resume:
+      type: object
+      description: {en: automatic resume configuration as JSON or @file, zh-CN: 自动恢复配置，使用 JSON 或 @file}
+    allow_internet_access:
+      type: boolean
+      description: {en: allow sandbox internet access, zh-CN: 允许沙箱访问互联网}
+    network:
+      type: object
+      description: {en: network configuration as JSON or @file, zh-CN: 网络配置，使用 JSON 或 @file}
+    mcp:
+      type: object
+      description: {en: MCP configuration as JSON or @file, zh-CN: MCP 配置，使用 JSON 或 @file}
+    iam:
+      type: object
+      description: {en: workload identity configuration as JSON or @file, zh-CN: 工作负载身份配置，使用 JSON 或 @file}
+    volume_mounts:
+      type: array
+      items: {type: object}
+      description: {en: volume mounts as a JSON array or @file, zh-CN: 卷挂载，使用 JSON 数组或 @file}
+    memory:
+      type: boolean
+      description: {en: preserve memory when pausing, zh-CN: 暂停时保留内存状态}
+    duration:
+      type: integer
+      max: 3600
+      description: {en: refresh duration in seconds, zh-CN: 续期时长（秒）}
+    count:
+      type: integer
+      max: 100
+      description: {en: number of sandbox forks, zh-CN: 分叉沙箱数量}
+    cursor:
+      type: integer
+      description: {en: log cursor in milliseconds, zh-CN: 日志游标（毫秒）}
+    direction:
+      type: string
+      enum: [forward, backward]
+      description: {en: log direction, zh-CN: 日志方向}
+    order:
+      type: string
+      enum: [asc, desc]
+      description: {en: sandbox start-time sort order, zh-CN: 沙箱启动时间排序方向}
+    level:
+      type: string
+      description: {en: minimum log level, zh-CN: 最低日志级别}
+    search:
+      type: string
+      description: {en: log message substring, zh-CN: 日志消息子串}
+    start:
+      type: integer
+      description: {en: metrics start time in Unix seconds, zh-CN: 指标开始时间（Unix 秒）}
+    end:
+      type: integer
+      description: {en: metrics end time in Unix seconds, zh-CN: 指标结束时间（Unix 秒）}
+    logs:
+      type: array
+      items: {type: object}
+      description: {en: sandbox logs, zh-CN: 沙箱日志}
+    metrics:
+      type: array
+      items: {type: object}
+      description: {en: sandbox metrics, zh-CN: 沙箱指标}
+    timestamp:
+      type: string
+      description: {en: metric timestamp, zh-CN: 指标时间戳}
+    timestamp_unix:
+      type: integer
+      description: {en: metric Unix timestamp, zh-CN: 指标 Unix 时间戳}
+    cpu_used_pct:
+      type: number
+      description: {en: CPU usage percentage, zh-CN: CPU 使用率}
+    mem_used:
+      type: integer
+      description: {en: used memory in bytes, zh-CN: 已用内存（字节）}
+    mem_total:
+      type: integer
+      description: {en: total memory in bytes, zh-CN: 总内存（字节）}
+    mem_cache:
+      type: integer
+      description: {en: cached memory in bytes, zh-CN: 缓存内存（字节）}
+    disk_used:
+      type: integer
+      description: {en: used disk space in bytes, zh-CN: 已用磁盘空间（字节）}
+    disk_total:
+      type: integer
+      description: {en: total disk space in bytes, zh-CN: 总磁盘空间（字节）}
+    snapshot_name:
+      type: string
+      description: {en: snapshot name, zh-CN: 快照名称}
+    snapshot_template:
+      type: string
+      description: {en: snapshot template ID, zh-CN: 快照模板 ID}
+    names:
+      type: array
+      items: {type: string}
+      description: {en: snapshot names, zh-CN: 快照名称列表}
+    error:
+      type: object
+      description: {en: fork error, zh-CN: 分叉错误}
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description: {en: filter expression key=value, zh-CN: 过滤表达式 key=value}
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description: {en: maximum results to return, zh-CN: 最多返回结果数}
+  logs_limit:
+    type: integer
+    default: 1000
+    max: 1000
+    description: {en: maximum sandbox logs to return, zh-CN: 最多返回沙箱日志数}
+  next_token:
+    type: string
+    description: {en: pagination token, zh-CN: 分页令牌}
+  no_wait:
+    type: boolean
+    description: {en: return before the target state is observed, zh-CN: 在观测到目标状态前返回}
+  timeout:
+    type: duration
+    default: 300s
+    description: {en: operation wait timeout, zh-CN: 操作等待超时}
+
+probes:
+  detail:
+    api: GetSandbox
+    request:
+      path:
+        sandboxID: $.id
+    response:
+      item: $
+      request_id: $.requestID
+      id: $.sandboxID
+      state: $.state
+      fields:
+        id: $.sandboxID
+        template: $.templateID
+        alias: $.alias
+        state: $.state
+        started_at: $.startedAt
+        end_at: $.endAt
+        cpu_count: $.cpuCount
+        memory_mb: $.memoryMB
+        disk_size_mb: $.diskSizeMB
+        envd_version: $.envdVersion
+        metadata: $.metadata
+        network: $.network
+        volume_mounts: $.volumeMounts
+  list:
+    api: ListSandboxes
+    request:
+      query:
+        metadata: $.metadata
+        state: $list($.state)
+        order: $.order
+        startedAfter: $.started_at
+        template: $.template
+        limit: $.limit
+        nextToken: $.next_token
+    response:
+      items: $.items
+      total: $.total
+      next_token: $.nextToken
+      request_id: $.requestID
+      id: $.sandboxID
+      state: $.state
+      fields:
+        id: $.sandboxID
+        template: $.templateID
+        alias: $.alias
+        state: $.state
+        started_at: $.startedAt
+        end_at: $.endAt
+        cpu_count: $.cpuCount
+        memory_mb: $.memoryMB
+        disk_size_mb: $.diskSizeMB
+        envd_version: $.envdVersion
+        metadata: $.metadata
+        volume_mounts: $.volumeMounts
+  logs:
+    api: GetSandboxLogs
+    request:
+      path: {sandboxID: $.id}
+      query:
+        cursor: $.cursor
+        limit: $.logs_limit
+        direction: $.direction
+        level: $.level
+        search: $.search
+    response:
+      item: $
+      request_id: $.requestID
+      fields:
+        logs:
+          path: $.logs
+          default_empty_array: true
+  metrics:
+    api: GetSandboxMetrics
+    request:
+      path: {sandboxID: $.id}
+      query: {start: $.start, end: $.end}
+    response:
+      items: $.items
+      request_id: $.requestID
+      fields:
+        timestamp: $.timestamp
+        timestamp_unix: $.timestampUnix
+        cpu_count: $.cpuCount
+        cpu_used_pct: $.cpuUsedPct
+        mem_used: $.memUsed
+        mem_total: $.memTotal
+        mem_cache: $.memCache
+        disk_used: $.diskUsed
+        disk_total: $.diskTotal
+  forks:
+    api: ForkSandbox
+    request:
+      path: {sandboxID: $.id}
+      body: {timeout: $.timeout_seconds, count: $.count}
+    response:
+      items: $.items
+      request_id: $.requestID
+      id: $.sandbox.sandboxID
+      fields:
+        id: $.sandbox.sandboxID
+        template: $.sandbox.templateID
+        alias: $.sandbox.alias
+        envd_version: $.sandbox.envdVersion
+        error: $.error
+
+waiters:
+  deleted:
+    probe: detail
+    target: absent
+    interval: 1s
+    timeout: 300s
+  running:
+    probe: detail
+    target: running
+    interval: 1s
+    timeout: 300s
+  paused:
+    probe: detail
+    target: paused
+    interval: 1s
+    timeout: 300s
+
+bindings:
+  create:
+    api: CreateSandbox
+    request:
+      body:
+        templateID: $.template
+        timeout: $.timeout_seconds
+        autoPause: $.auto_pause
+        autoPauseMemory: $.auto_pause_memory
+        autoResume: {from: $.auto_resume}
+        secure: $.secure
+        allow_internet_access: $.allow_internet_access
+        network: {from: $.network}
+        metadata: {from: $.metadata}
+        envVars: {from: $.env_vars}
+        mcp: {from: $.mcp}
+        iam: {from: $.iam}
+        volumeMounts: $.volume_mounts
+    require_all: [{request: body.templateID}]
+    id_from: $.sandboxID
+    request_id_from: $.requestID
+    wait: running
+  delete:
+    api: KillSandbox
+    request:
+      path: {sandboxID: $.id}
+    require_all: [{request: path.sandboxID}]
+    wait: deleted
+    request_id_from: $.requestID
+  pause:
+    api: PauseSandbox
+    request:
+      path: {sandboxID: $.id}
+      body: {memory: $.memory}
+    require_all: [{request: path.sandboxID}]
+    request_id_from: $.requestID
+    wait: paused
+  resume:
+    api: ConnectSandbox
+    request:
+      path: {sandboxID: $.id}
+      body: {timeout: $.timeout_seconds}
+    require_all:
+      - {request: path.sandboxID}
+      - {request: body.timeout}
+    request_id_from: $.requestID
+    wait: running
+  update_timeout:
+    api: UpdateSandboxTimeout
+    request:
+      path: {sandboxID: $.id}
+      body: {timeout: $.timeout_seconds}
+    require_all:
+      - {request: path.sandboxID}
+      - {request: body.timeout}
+    request_id_from: $.requestID
+  update_network:
+    api: UpdateSandboxNetwork
+    request:
+      path: {sandboxID: $.id}
+      body: {from: $.network}
+    require_all:
+      - {request: path.sandboxID}
+      - {request: body}
+    request_id_from: $.requestID
+  refresh:
+    api: RefreshSandbox
+    request:
+      path: {sandboxID: $.id}
+      body: {duration: $.duration}
+    require_all: [{request: path.sandboxID}]
+    request_id_from: $.requestID
+  snapshot:
+    api: CreateSandboxSnapshot
+    request:
+      path: {sandboxID: $.id}
+      body: {name: $.snapshot_name}
+    require_all: [{request: path.sandboxID}]
+    id_from: $.snapshotID
+    request_id_from: $.requestID
+
+operations:
+  create:
+    aliases: [new]
+    description: {en: Create an E2B sandbox, zh-CN: 创建 E2B 沙箱}
+    examples: [ecctl sandbox create --template base --timeout-seconds 300]
+    input:
+      fields:
+        - template: {required: true}
+        - timeout_seconds: {default: 300}
+        - auto_pause
+        - auto_pause_memory
+        - auto_resume
+        - secure
+        - allow_internet_access
+        - network
+        - metadata
+        - env_vars
+        - mcp
+        - iam
+        - volume_mounts
+      controls: [no_wait, timeout]
+    workflow:
+      - binding: create
+        wait_unless: input.no_wait
+  update:
+    description: {en: Update an E2B sandbox timeout or network, zh-CN: 更新 E2B 沙箱的超时或网络配置}
+    examples: [ecctl sandbox update <sandbox-id> --timeout-seconds 600]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - timeout_seconds
+        - network
+    require_any:
+      - {raw: $.timeout_seconds}
+      - {raw: $.network}
+    workflow:
+      - binding: update_timeout
+        when: has(input.timeout_seconds)
+      - binding: update_network
+        when: has(input.network)
+      - probe: detail
+        ids: [$input.id]
+  delete:
+    aliases: [kill, remove, rm]
+    description: {en: Kill an E2B sandbox, zh-CN: 终止 E2B 沙箱}
+    examples: [ecctl sandbox delete <sandbox-id>]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+      controls: [no_wait, timeout]
+    workflow:
+      - binding: delete
+        wait_unless: input.no_wait
+      - emit:
+          fields: {id: $input.id}
+          deleted: true
+  get:
+    aliases: [show, describe, info]
+    description: {en: Get an E2B sandbox, zh-CN: 获取 E2B 沙箱}
+    examples: [ecctl sandbox get <sandbox-id>]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+    workflow:
+      - probe: detail
+        ids: [$input.id]
+        not_found: error
+  list:
+    aliases: [ls]
+    description: {en: List E2B sandboxes, zh-CN: 列出 E2B 沙箱}
+    examples: [ecctl sandbox list --filter state=running --limit 100]
+    input:
+      controls: [filter, limit, next_token]
+    filters:
+      state: {target: state}
+      template: {target: template}
+      started-after: {target: started_at}
+      order: {target: order}
+      metadata.: {target: metadata, type: key_value, key_prefix: metadata.}
+    workflow:
+      - probe: list
+        many: true
+  pause:
+    description: {en: Pause an E2B sandbox, zh-CN: 暂停 E2B 沙箱}
+    examples: [ecctl sandbox pause <sandbox-id>]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - memory: {default: true}
+      controls: [no_wait, timeout]
+    workflow:
+      - binding: pause
+        wait_unless: input.no_wait
+      - emit:
+          fields: {id: $input.id}
+  resume:
+    description: {en: Resume an E2B sandbox through the control plane, zh-CN: 通过控制面恢复 E2B 沙箱}
+    examples: [ecctl sandbox resume <sandbox-id> --timeout-seconds 300]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - timeout_seconds: {default: 300}
+      controls: [no_wait, timeout]
+    workflow:
+      - binding: resume
+        wait_unless: input.no_wait
+  refresh:
+    description: {en: Extend an E2B sandbox lifetime, zh-CN: 延长 E2B 沙箱生存时间}
+    examples: [ecctl sandbox refresh <sandbox-id> --duration 600]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - duration: {required: true}
+    workflow:
+      - binding: refresh
+      - probe: detail
+        ids: [$input.id]
+  fork:
+    description: {en: Fork an E2B sandbox, zh-CN: 分叉 E2B 沙箱}
+    examples: [ecctl sandbox fork <sandbox-id> --count 1 --timeout-seconds 300]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - count: {default: 1}
+        - timeout_seconds: {default: 300}
+    workflow:
+      - probe: forks
+        many: true
+  logs:
+    description: {en: Read E2B sandbox logs, zh-CN: 读取 E2B 沙箱日志}
+    examples: [ecctl sandbox logs <sandbox-id> --limit 100]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - cursor
+        - direction
+        - level
+        - search
+      controls:
+        - logs_limit: {flag_name: limit}
+    workflow:
+      - probe: logs
+  metrics:
+    description: {en: Read E2B sandbox metrics, zh-CN: 读取 E2B 沙箱指标}
+    examples: [ecctl sandbox metrics <sandbox-id>]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - start
+        - end
+    workflow:
+      - probe: metrics
+        many: true
+    output:
+      fields:
+        metrics: $result.items
+  snapshot:
+    description: {en: Create a persistent snapshot from an E2B sandbox, zh-CN: 从 E2B 沙箱创建持久快照}
+    examples: [ecctl sandbox snapshot <sandbox-id> --snapshot-name checkpoint]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - snapshot_name
+    workflow:
+      - binding: snapshot
+      - emit:
+          fields:
+            id: $input.id
+            snapshot_name: $input.snapshot_name
+            snapshot_template: $context.id

@@ -1,5 +1,6 @@
 schema_version: 1
 product: vpc
+expose_default_resource: true
 priority: 2
 resources:
   - vpc

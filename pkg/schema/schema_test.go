@@ -12,7 +12,7 @@ import (
 )
 
 func TestProductSurfacesStayUnderAgentBudget(t *testing.T) {
-	for _, product := range []string{"ack", "agentrun", "ecs", "lingjun", "rg", "tag", "vpc"} {
+	for _, product := range []string{"ack", "agentrun", "ecs", "lingjun", "rg", "sandbox", "tag", "vpc"} {
 		surface, ok := ProductList(product)
 		if !ok {
 			t.Fatalf("ProductList(%q) not found", product)
@@ -54,7 +54,7 @@ func TestProductSurfacesStayUnderAgentBudget(t *testing.T) {
 
 func TestProductsReturnsSupportedSurfaces(t *testing.T) {
 	got := Products()
-	want := []string{"ack", "agentrun", "ecs", "lingjun", "rg", "tag", "vpc"}
+	want := []string{"ack", "agentrun", "ecs", "lingjun", "rg", "sandbox", "tag", "vpc"}
 	if len(got) != len(want) {
 		t.Fatalf("Products() = %#v, want %#v", got, want)
 	}
@@ -65,6 +65,21 @@ func TestProductsReturnsSupportedSurfaces(t *testing.T) {
 		if _, ok := ProductList(got[i]); !ok {
 			t.Fatalf("Products()[%d] = %q has no ProductList surface", i, got[i])
 		}
+	}
+}
+
+func TestSandboxProductAliasResolvesToCanonicalSchemas(t *testing.T) {
+	surface, ok := ProductList("sbx")
+	if !ok || surface.Product != "sandbox" {
+		t.Fatalf("ProductList(sbx) = %#v, %v", surface, ok)
+	}
+	resource, ok := ResourceForLanguage("sbx", "template", "en")
+	if !ok || resource.Product != "sandbox" || resource.Name != "template" {
+		t.Fatalf("ResourceForLanguage(sbx, template) = %#v, %v", resource, ok)
+	}
+	command, ok := Command("sbx.template.list")
+	if !ok || command.Command != "sandbox.template.list" || command.CLI != "ecctl sandbox template list" {
+		t.Fatalf("Command(sbx.template.list) = %#v, %v", command, ok)
 	}
 }
 
@@ -833,6 +848,27 @@ func TestRootResourcePollCommandDoesNotRepeatResourceName(t *testing.T) {
 	wait := schemaObject(t, contract, "wait")
 	if wait["poll_command"] != "ecctl vpc get <id> --region <region> --output json" {
 		t.Fatalf("poll_command = %#v", wait["poll_command"])
+	}
+}
+
+func TestTemplateBuildWaitDoesNotAdvertiseUnrelatedGetPollCommand(t *testing.T) {
+	command, ok := CommandForLanguageMode("sandbox.template.create", "en", CommandSchemaFull)
+	if !ok {
+		t.Fatal("sandbox.template.create schema not found")
+	}
+	decoded := marshalCommandObject(t, command)
+	contract := schemaObject(t, decoded, "contract")
+	wait := schemaObject(t, contract, "wait")
+	if poll, ok := wait["poll_command"]; ok {
+		t.Fatalf("poll_command = %#v, want omitted because template get cannot poll a build", poll)
+	}
+	var apis []string
+	for _, call := range command.APICalls {
+		apis = append(apis, call.API)
+	}
+	joined := strings.Join(apis, ",")
+	if !strings.Contains(joined, "CreateTemplate") || !strings.Contains(joined, "StartTemplateBuild") || !strings.Contains(joined, "GetTemplateBuildStatus") {
+		t.Fatalf("api_calls = %v", apis)
 	}
 }
 

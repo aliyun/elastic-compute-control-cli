@@ -1,0 +1,126 @@
+# Requires E2B_API_KEY. The fixture template, sandbox, fork, and snapshot are
+# all run-scoped and have explicit cleanup commands.
+resource: sandbox/sandbox
+serial: true
+timeout: 30m
+
+steps:
+  - name: create template fixture
+    run: >
+      ecctl sandbox template create
+      --name {{.resource_prefix}}-sandbox-fixture
+      --from-image e2bdev/base:ubuntu
+      --timeout 20m
+    at: $.template
+    expect:
+      id: {type: string, min_len: 1}
+      build_status: {eq: ready}
+    capture:
+      sandbox_template_id: id
+    teardown: ecctl sandbox template delete {{.sandbox_template_id}}
+
+  - name: create
+    run: >
+      ecctl sandbox create
+      --template {{.sandbox_template_id}}
+      --timeout-seconds 600
+      --metadata '{"ecctl_run_id":"{{.run_id}}"}'
+      --timeout 10m
+    at: $.sandbox
+    expect:
+      id: {type: string, min_len: 1}
+      state: {eq: running}
+      template: {eq: "{{.sandbox_template_id}}"}
+    capture:
+      sandbox_id: id
+    teardown: ecctl sandbox delete {{.sandbox_id}}
+
+  - name: get
+    run: ecctl sandbox get {{.sandbox_id}}
+    at: $.sandbox
+    expect:
+      id: {eq: "{{.sandbox_id}}"}
+      state: {eq: running}
+
+  - name: list
+    run: ecctl sandbox list --filter state=running --filter metadata.ecctl_run_id={{.run_id}} --limit 100
+    assert:
+      - len($.sandboxes) >= 1
+
+  - name: logs
+    run: ecctl sandbox logs {{.sandbox_id}} --limit 100
+    at: $.sandbox
+    expect:
+      logs: {type: array}
+
+  - name: metrics
+    run: ecctl sandbox metrics {{.sandbox_id}}
+    expect:
+      $.metrics: {type: array}
+
+  - name: update
+    run: ecctl sandbox update {{.sandbox_id}} --timeout-seconds 900
+    at: $.sandbox
+    expect:
+      id: {eq: "{{.sandbox_id}}"}
+      state: {eq: running}
+
+  - name: refresh
+    run: ecctl sandbox refresh {{.sandbox_id}} --duration 600
+    at: $.sandbox
+    expect:
+      id: {eq: "{{.sandbox_id}}"}
+      state: {eq: running}
+
+  - name: pause
+    run: ecctl sandbox pause {{.sandbox_id}} --timeout 10m
+    at: $.sandbox
+    expect:
+      id: {eq: "{{.sandbox_id}}"}
+      state: {eq: paused}
+
+  - name: resume
+    run: ecctl sandbox resume {{.sandbox_id}} --timeout-seconds 900 --timeout 10m
+    at: $.sandbox
+    expect:
+      id: {eq: "{{.sandbox_id}}"}
+      state: {eq: running}
+
+  - name: snapshot
+    run: ecctl sandbox snapshot {{.sandbox_id}} --snapshot-name {{.resource_prefix}}-snapshot
+    at: $.sandbox
+    expect:
+      id: {eq: "{{.sandbox_id}}"}
+      snapshot_template: {type: string, min_len: 1}
+    capture:
+      snapshot_template_id: snapshot_template
+    teardown: ecctl sandbox template delete {{.snapshot_template_id}}
+
+  - name: fork
+    run: ecctl sandbox fork {{.sandbox_id}} --count 1 --timeout-seconds 600
+    at: $.sandboxes[0]
+    expect:
+      id: {type: string, min_len: 1}
+    capture:
+      forked_sandbox_id: id
+    teardown: ecctl sandbox delete {{.forked_sandbox_id}}
+
+  - name: delete fork
+    run: ecctl sandbox delete {{.forked_sandbox_id}}
+    expect:
+      $.deleted: {eq: true}
+
+  - name: delete
+    run: ecctl sandbox delete {{.sandbox_id}}
+    expect:
+      $.deleted: {eq: true}
+
+  - name: delete snapshot fixture
+    run: ecctl sandbox template delete {{.snapshot_template_id}}
+    expect:
+      $.deleted: {eq: true}
+
+  - name: delete template fixture
+    run: ecctl sandbox template delete {{.sandbox_template_id}}
+    expect:
+      $.deleted: {eq: true}

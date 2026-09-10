@@ -1,0 +1,493 @@
+schema_version: 2
+product: sandbox
+provider: e2b
+resource: template
+kind: global
+aliases: [tpl]
+display_name:
+  en: E2B sandbox template
+  zh-CN: E2B 沙箱模板
+description:
+  en: Manage E2B sandbox templates, builds, visibility, and tags.
+  zh-CN: 管理 E2B 沙箱模板、构建、可见性和标签。
+examples:
+  - ecctl sandbox template list
+  - ecctl sandbox template get <template-id>
+  - ecctl sandbox template create --name python --from-image python:3.12
+  - ecctl sandbox template publish <template-id>
+
+identity:
+  field: id
+  output_root:
+    one: template
+    many: templates
+
+schema:
+  fields:
+    id:
+      type: string
+      description: {en: template ID, zh-CN: 模板 ID}
+    name:
+      type: string
+      description: {en: template name, zh-CN: 模板名称}
+    names:
+      type: array
+      items: {type: string}
+      description: {en: template names, zh-CN: 模板名称列表}
+    aliases:
+      type: array
+      items: {type: string}
+      description: {en: template aliases, zh-CN: 模板别名列表}
+    tag:
+      type: string_array
+      description: {en: template tags, zh-CN: 模板标签}
+    public:
+      type: boolean
+      description: {en: whether the template is public, zh-CN: 模板是否公开}
+    cpu_count:
+      type: integer
+      description: {en: template CPU count, zh-CN: 模板 CPU 数量}
+    memory_mb:
+      type: integer
+      description: {en: template memory in MiB, zh-CN: 模板内存（MiB）}
+    disk_size_mb:
+      type: integer
+      description: {en: template disk size in MiB, zh-CN: 模板磁盘大小（MiB）}
+    build_id:
+      type: string
+      description: {en: template build ID, zh-CN: 模板构建 ID}
+    build_status:
+      type: string
+      enum: [building, waiting, ready, error]
+      description: {en: template build status, zh-CN: 模板构建状态}
+    builds:
+      type: array
+      items: {type: object}
+      description: {en: template builds, zh-CN: 模板构建列表}
+    created_at:
+      type: string
+      description: {en: template creation time, zh-CN: 模板创建时间}
+    updated_at:
+      type: string
+      description: {en: template update time, zh-CN: 模板更新时间}
+    last_spawned_at:
+      type: string
+      description: {en: last sandbox spawn time, zh-CN: 最近沙箱创建时间}
+    spawn_count:
+      type: integer
+      description: {en: number of spawned sandboxes, zh-CN: 已创建沙箱数量}
+    build_count:
+      type: integer
+      description: {en: number of template builds, zh-CN: 模板构建数量}
+    envd_version:
+      type: string
+      description: {en: envd version, zh-CN: envd 版本}
+    from_image:
+      type: string
+      description: {en: base container image, zh-CN: 基础容器镜像}
+    from_template:
+      type: string
+      description: {en: base E2B template, zh-CN: 基础 E2B 模板}
+    from_image_registry:
+      type: object
+      description: {en: private registry credentials as JSON or @file, zh-CN: 私有镜像仓库凭证，使用 JSON 或 @file}
+    force:
+      type: boolean
+      description: {en: bypass template build cache, zh-CN: 跳过模板构建缓存}
+    steps:
+      type: array
+      items: {type: object}
+      description: {en: E2B build steps as a JSON array or @file, zh-CN: E2B 构建步骤，使用 JSON 数组或 @file}
+    start_cmd:
+      type: string
+      description: {en: template start command, zh-CN: 模板启动命令}
+    ready_cmd:
+      type: string
+      description: {en: template readiness command, zh-CN: 模板就绪检查命令}
+    logs:
+      type: array
+      items: {type: object}
+      description: {en: template build logs, zh-CN: 模板构建日志}
+    reason:
+      type: object
+      description: {en: template build failure reason, zh-CN: 模板构建失败原因}
+    cursor:
+      type: integer
+      description: {en: build log cursor in milliseconds, zh-CN: 构建日志游标（毫秒）}
+    created_by:
+      type: object
+      description: {en: template creator, zh-CN: 模板创建者}
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description: {en: filter expression key=value, zh-CN: 过滤表达式 key=value}
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description: {en: maximum results to return, zh-CN: 最多返回结果数}
+  next_token:
+    type: string
+    description: {en: pagination token, zh-CN: 分页令牌}
+  no_wait:
+    type: boolean
+    description: {en: return before the build completes, zh-CN: 在构建完成前返回}
+  timeout:
+    type: duration
+    default: 15m
+    description: {en: template build wait timeout, zh-CN: 模板构建等待超时}
+
+probes:
+  list:
+    api: ListTemplates
+    request:
+      query: {limit: $.limit, nextToken: $.next_token}
+    response:
+      items: $.items
+      next_token: $.nextToken
+      request_id: $.requestID
+      id: $.templateID
+      state: $.buildStatus
+      fields:
+        id: $.templateID
+        names: $.names
+        aliases: $.aliases
+        tag: $.tags
+        public: $.public
+        cpu_count: $.cpuCount
+        memory_mb: $.memoryMB
+        disk_size_mb: $.diskSizeMB
+        build_id: $.buildID
+        build_status: $.buildStatus
+        created_at: $.createdAt
+        updated_at: $.updatedAt
+        last_spawned_at: $.lastSpawnedAt
+        spawn_count: $.spawnCount
+        build_count: $.buildCount
+        envd_version: $.envdVersion
+        created_by: $.createdBy
+  detail:
+    api: GetTemplate
+    request:
+      path: {templateID: $.id}
+      query: {limit: $.limit, nextToken: $.next_token}
+    response:
+      item: $
+      request_id: $.requestID
+      id: $.templateID
+      fields:
+        id: $.templateID
+        names: $.names
+        aliases: $.aliases
+        public: $.public
+        builds: $.builds
+        created_at: $.createdAt
+        updated_at: $.updatedAt
+        last_spawned_at: $.lastSpawnedAt
+        spawn_count: $.spawnCount
+  build_status:
+    api: GetTemplateBuildStatus
+    request:
+      path:
+        templateID: $.id
+        buildID: $context.build_id
+      query: {limit: 100}
+    response:
+      item: $
+      request_id: $.requestID
+      id: $.templateID
+      state: $.status
+      fields:
+        id: $.templateID
+        build_id: $.buildID
+        build_status: $.status
+        logs:
+          path: $.logEntries
+          default_empty_array: true
+        reason: $.reason
+  build_status_input:
+    api: GetTemplateBuildStatus
+    request:
+      path:
+        templateID: $.id
+        buildID: $.build_id
+      query: {limit: 100}
+    response:
+      item: $
+      request_id: $.requestID
+      id: $.templateID
+      state: $.status
+      fields:
+        id: $.templateID
+        build_id: $.buildID
+        build_status: $.status
+        logs:
+          path: $.logEntries
+          default_empty_array: true
+        reason: $.reason
+  build_logs:
+    api: GetTemplateBuildLogs
+    request:
+      path: {templateID: $.id, buildID: $.build_id}
+      query: {limit: $.limit, cursor: $.cursor}
+    response:
+      item: $
+      request_id: $.requestID
+      fields:
+        logs:
+          path: $.logs
+          default_empty_array: true
+  tags:
+    api: ListTemplateTags
+    request:
+      path: {templateID: $.id}
+    response:
+      items: $.items
+      request_id: $.requestID
+      fields:
+        tag: $.tag
+        build_id: $.buildID
+        created_at: $.createdAt
+
+waiters:
+  build_ready:
+    probe: build_status
+    target: ready
+    interval: 2s
+    timeout: 15m
+    failure:
+      states: [error]
+
+bindings:
+  create_template:
+    api: CreateTemplate
+    request:
+      body:
+        name: $.name
+        tags: $list($.tag)
+        cpuCount: $.cpu_count
+        memoryMB: $.memory_mb
+    require_all: [{request: body.name}]
+    id_from: $.templateID
+    context_from: {build_id: $.buildID}
+    request_id_from: $.requestID
+  start_build:
+    api: StartTemplateBuild
+    request:
+      path:
+        templateID: $context.id
+        buildID: $context.build_id
+      body:
+        fromImage: $.from_image
+        fromTemplate: $.from_template
+        fromImageRegistry: {from: $.from_image_registry}
+        force: $.force
+        steps: $.steps
+        startCmd: $.start_cmd
+        readyCmd: $.ready_cmd
+    require_all:
+      - {request: path.templateID}
+      - {request: path.buildID}
+    require_any:
+      - {request: body.fromImage}
+      - {request: body.fromTemplate}
+    request_id_from: $.requestID
+    wait: build_ready
+  delete:
+    api: DeleteTemplate
+    request:
+      path: {templateID: $.id}
+    require_all: [{request: path.templateID}]
+    request_id_from: $.requestID
+  update:
+    api: UpdateTemplate
+    request:
+      path: {templateID: $.id}
+      body: {public: $.public}
+    require_all:
+      - {request: path.templateID}
+      - {request: body.public}
+    request_id_from: $.requestID
+  publish:
+    api: UpdateTemplate
+    request:
+      path: {templateID: $.id}
+      body: {public: true}
+    require_all: [{request: path.templateID}]
+    request_id_from: $.requestID
+  unpublish:
+    api: UpdateTemplate
+    request:
+      path: {templateID: $.id}
+      body: {public: false}
+    require_all: [{request: path.templateID}]
+    request_id_from: $.requestID
+  assign_tags:
+    api: AssignTemplateTags
+    request:
+      body: {target: $.name, tags: $list($.tag)}
+    require_all:
+      - {request: body.target}
+      - {request: body.tags}
+    request_id_from: $.requestID
+  delete_tags:
+    api: DeleteTemplateTags
+    request:
+      body: {name: $.name, tags: $list($.tag)}
+    require_all:
+      - {request: body.name}
+      - {request: body.tags}
+    request_id_from: $.requestID
+
+operations:
+  create:
+    aliases: [new]
+    description: {en: Create and build an E2B sandbox template, zh-CN: 创建并构建 E2B 沙箱模板}
+    examples: [ecctl sandbox template create --name python --from-image python:3.12]
+    input:
+      fields:
+        - name: {required: true}
+        - tag
+        - cpu_count: {default: 2}
+        - memory_mb: {default: 1024}
+        - from_image
+        - from_template
+        - from_image_registry
+        - force
+        - steps
+        - start_cmd
+        - ready_cmd
+      controls: [no_wait, timeout]
+    require_any:
+      - {raw: $.from_image}
+      - {raw: $.from_template}
+    conflicts:
+      - {any: [from_image], with_any: [from_template]}
+    workflow:
+      - binding: create_template
+      - binding: start_build
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.id
+            build_id: $context.build_id
+            build_status: waiting
+        when: input.no_wait
+  update:
+    description: {en: Update E2B template visibility, zh-CN: 更新 E2B 模板可见性}
+    examples: [ecctl sandbox template update <template-id> --public]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - public: {required: true}
+    workflow:
+      - binding: update
+      - probe: detail
+        ids: [$input.id]
+  delete:
+    aliases: [remove, rm]
+    description: {en: Delete an E2B sandbox template, zh-CN: 删除 E2B 沙箱模板}
+    examples: [ecctl sandbox template delete <template-id>]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+    workflow:
+      - binding: delete
+      - emit:
+          fields: {id: $input.id}
+          deleted: true
+  get:
+    aliases: [show, describe]
+    description: {en: Get an E2B sandbox template and its builds, zh-CN: 获取 E2B 沙箱模板及其构建}
+    examples: [ecctl sandbox template get <template-id>]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+      controls: [limit, next_token]
+    workflow:
+      - probe: detail
+        ids: [$input.id]
+        not_found: error
+  list:
+    aliases: [ls]
+    description: {en: List E2B sandbox templates, zh-CN: 列出 E2B 沙箱模板}
+    examples: [ecctl sandbox template list --limit 100]
+    input:
+      controls: [limit, next_token]
+    workflow:
+      - probe: list
+        many: true
+  publish:
+    description: {en: Publish an E2B sandbox template, zh-CN: 公开 E2B 沙箱模板}
+    examples: [ecctl sandbox template publish <template-id>]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+    workflow:
+      - binding: publish
+      - probe: detail
+        ids: [$input.id]
+  unpublish:
+    description: {en: Make an E2B sandbox template private, zh-CN: 将 E2B 沙箱模板设为私有}
+    examples: [ecctl sandbox template unpublish <template-id>]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+    workflow:
+      - binding: unpublish
+      - probe: detail
+        ids: [$input.id]
+  build-status:
+    description: {en: Get an E2B template build status, zh-CN: 获取 E2B 模板构建状态}
+    examples: [ecctl sandbox template build-status <template-id> --build-id <build-id>]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - build_id: {required: true}
+    workflow:
+      - probe: build_status_input
+  build-logs:
+    description: {en: Read E2B template build logs, zh-CN: 读取 E2B 模板构建日志}
+    examples: [ecctl sandbox template build-logs <template-id> --build-id <build-id>]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - build_id: {required: true}
+        - cursor
+      controls: [limit]
+    workflow:
+      - probe: build_logs
+  tag-list:
+    description: {en: List tags assigned to E2B template builds, zh-CN: 列出 E2B 模板构建标签}
+    examples: [ecctl sandbox template tag-list <template-id>]
+    input:
+      fields:
+        - id: {required: true, positional: true}
+    workflow:
+      - probe: tags
+        many: true
+    output:
+      fields: {tags: $result.items}
+  tag-assign:
+    description: {en: Assign tags to an E2B template build, zh-CN: 为 E2B 模板构建分配标签}
+    examples: [ecctl sandbox template tag-assign --name python:default --tag stable]
+    input:
+      fields:
+        - name: {required: true}
+        - tag: {required: true}
+    workflow:
+      - binding: assign_tags
+  tag-delete:
+    description: {en: Delete tags from E2B templates, zh-CN: 删除 E2B 模板标签}
+    examples: [ecctl sandbox template tag-delete --name python --tag stable]
+    input:
+      fields:
+        - name: {required: true}
+        - tag: {required: true}
+    workflow:
+      - binding: delete_tags
+      - emit:
+          fields: {name: $input.name}
+          deleted: true

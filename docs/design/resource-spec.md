@@ -33,22 +33,28 @@ specs/<product>/product.yaml
 
 ```yaml
 schema_version: 1
-product: vpc
+product: sandbox
+aliases: [sbx]
+expose_default_resource: true
 description:
-  en: Manage VPC resources
-  zh-CN: 管理 VPC 资源
+  en: Manage E2B sandboxes and templates
+  zh-CN: 管理 E2B 沙箱及沙箱模板
 examples:
-  - ecctl vpc list
-  - ecctl vpc create --name prod-vpc --cidr 10.0.0.0/16
+  - ecctl sandbox list
+  - ecctl sbx template list
 ```
 
 产品帮助页从这里读取产品说明和关键示例。资源 YAML 不应重复产品说明。
+`aliases` 声明一级产品命令别名；canonical 产品名始终优先于其他产品的
+alias。`expose_default_resource` 为 `true` 时，允许 `resource == product`
+的默认资源直接暴露其操作，同时仍保留同一产品下的子资源命令。
 
 ## 3. 资源顶层字段
 
 ```yaml
 schema_version: 2
 product: ecs
+provider: aliyun
 resource: instance
 kind: regional
 aliases: [vm]
@@ -79,7 +85,7 @@ operations: {}
 | `schema_version` | 当前资源规格为 `2` |
 | `product` | 产品名，也是一级命令名，例如 `ecs`、`vpc` |
 | `resource` | 资源名；如果等于 `product`，直接生成产品命令 |
-| `kind` | 资源类型；当前区域资源使用 `regional` |
+| `kind` | 资源类型；`regional` 需要阿里云地域，`global` 不解析或要求地域 |
 | `schema.fields` | 资源输入字段的唯一类型和描述来源 |
 
 可选字段：
@@ -87,6 +93,7 @@ operations: {}
 | 字段 | 含义 |
 | --- | --- |
 | `api_product` | OpenAPI 产品代码；为空时使用 `product`。用于 CLI 产品名和云产品代码不一致的治理产品，例如 `rg` -> `ResourceManager`。 |
+| `provider` | API transport；为空或 `aliyun` 使用阿里云 OpenAPI caller，其他值必须由 CLI 显式实现，例如 `e2b`。 |
 | `fixed_region` | 固定资源生效区域；为空时使用用户配置区域。用于仅部署在单一区域的 API 族（如 `tag/associated-resource-rule` 仅杭州）。设置后所有操作的 `RegionId` 参数与 endpoint 都解析为该区域，忽略用户配置。 |
 | `aliases` | 资源子命令别名 |
 | `display_name` | 展示名称 |

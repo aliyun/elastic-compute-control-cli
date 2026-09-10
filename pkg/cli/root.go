@@ -23,6 +23,7 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/output"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/schema"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/updater"
 )
@@ -176,7 +177,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) (exitCode
 	if helpRequested(args) {
 		allowHelpWithUnknownFlags(root)
 	}
+	var resolvedCommand *cobra.Command
 	if command, _, findErr := root.Find(args); findErr == nil && command != nil {
+		resolvedCommand = command
 		telemetryCommand = command.CommandPath()
 	}
 	if !options.fullSurface && os.Getenv("ECCTL_SPEC_DIR") == "" && !publicCLICommandAllowed(args) {
@@ -185,7 +188,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) (exitCode
 	if mode, ok := requestedOutputMode(args); !helpRequested(args) && ok && mode != "" && !output.IsSupportedMode(mode) {
 		return writeRunError(stdout, options, unsupportedOutputModeError(fmt.Sprintf("output mode %q is not supported", mode)))
 	}
-	if !helpRequested(args) && explicitEmptyRegion(args) {
+	if !helpRequested(args) && explicitEmptyRegion(args) && !commandUsesGlobalResource(resolvedCommand) {
 		return writeRunError(stdout, options, ecerrors.Client("MissingRegion", "region is required"))
 	}
 	if !helpRequested(args) && callCommandRequested(args) {
@@ -703,12 +706,20 @@ func publicCLIFilterEnabled(options *globalOptions) bool {
 }
 
 func publicCLIProduct(product string) bool {
+	product = canonicalCLIProduct(product)
 	switch product {
-	case "ack", "agentrun", "ecs", "lingjun", "rg", "tag", "vpc":
+	case "ack", "agentrun", "ecs", "lingjun", "rg", "sandbox", "tag", "vpc":
 		return true
 	default:
 		return false
 	}
+}
+
+func canonicalCLIProduct(product string) string {
+	if canonical, ok := spec.CanonicalProduct(os.Getenv("ECCTL_SPEC_DIR"), product); ok {
+		return canonical
+	}
+	return product
 }
 
 func publicCLIProductSummaries(products []schema.ProductSummary) []schema.ProductSummary {
@@ -2274,6 +2285,7 @@ func productCommandBuildTarget(args []string) productBuildTarget {
 		return productBuildTarget{buildAll: true}
 	case "help":
 		if len(positional) >= 2 && !isBuiltinRootCommand(positional[1]) {
+			positional[1] = canonicalCLIProduct(positional[1])
 			resource := ""
 			if len(positional) >= 3 {
 				resource = positional[2]
@@ -2282,6 +2294,7 @@ func productCommandBuildTarget(args []string) productBuildTarget {
 		}
 		return productBuildTarget{stubsOnly: true}
 	default:
+		first = canonicalCLIProduct(first)
 		resource := ""
 		if len(positional) >= 2 {
 			resource = positional[1]
@@ -2405,6 +2418,10 @@ func explicitEmptyRegion(args []string) bool {
 		}
 	}
 	return false
+}
+
+func commandUsesGlobalResource(command *cobra.Command) bool {
+	return command != nil && command.Annotations != nil && command.Annotations[resourceKindAnnotation] == "global"
 }
 
 func writeCommandOutput(options *globalOptions, w io.Writer, value any) error {

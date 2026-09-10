@@ -248,6 +248,21 @@ func TestDetectFailsWhenBaselineMetadataDisappears(t *testing.T) {
 	}
 }
 
+func TestDetectIgnoresNonAliyunProviders(t *testing.T) {
+	resource := spec.ResourceSpec{
+		Product: "sandbox", Provider: "e2b", Resource: "sandbox",
+		Bindings: map[string]spec.Binding{"create": {API: "CreateSandbox"}},
+	}
+
+	report, err := DetectResources([]spec.ResourceSpec{resource}, Baseline{Language: "en"}, Options{})
+	if err != nil {
+		t.Fatalf("DetectResources: %v", err)
+	}
+	if report.BindingsChecked != 0 || report.BaselineGaps != 0 || len(report.Skipped) != 0 {
+		t.Fatalf("non-Aliyun resource affected drift report: %#v", report)
+	}
+}
+
 func TestCollectBaselineRejectsUnresolvableBinding(t *testing.T) {
 	dir := t.TempDir()
 	productDir := filepath.Join(dir, "missing-product")

@@ -15,6 +15,7 @@ func TestOpenBrowserURLRejectsUntrustedURL(t *testing.T) {
 
 func TestPrepareBrowserCommandScrubsCredentialEnvironment(t *testing.T) {
 	t.Setenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "must-not-leak")
+	t.Setenv("E2B_API_KEY", "must-not-leak")
 	t.Setenv("OSS_SESSION_TOKEN", "must-not-leak")
 	t.Setenv("DISPLAY", ":99")
 	command, err := prepareBrowserCommand("https://signin.example.com")

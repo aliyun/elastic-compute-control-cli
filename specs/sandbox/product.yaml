@@ -1,0 +1,16 @@
+schema_version: 1
+product: sandbox
+aliases: [sbx]
+priority: 7
+resources:
+  - sandbox
+  - template
+expose_default_resource: true
+description:
+  en: Manage E2B sandboxes and sandbox templates.
+  zh-CN: 管理 E2B 沙箱及沙箱模板。
+examples:
+  - ecctl sandbox list --filter state=running
+  - ecctl sbx create --template base --timeout-seconds 300
+  - ecctl sandbox template list
+  - ecctl sbx template create --name python --from-image python:3.12

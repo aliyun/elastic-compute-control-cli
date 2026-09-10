@@ -1,0 +1,83 @@
+version: 3
+generated:
+  specs_dir: ../../../specs
+  cases_dir: cases
+summary:
+  surface: public
+  resources: 61
+  operations: 289
+  missing_cases: 278
+  passed: 11
+  not_passed: 0
+resources:
+  sandbox:
+    sandbox:
+      operations:
+        create:
+          status: live-pass
+          case: cases/sandbox-lifecycle.yaml
+          fingerprint: sha256:9963b0f782594e5852bc4c8d17224e70cb55746a46abf4827e852ff422a92922
+          time: "2026-09-07T08:37:00.523877+00:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/sandbox-lifecycle.yaml
+          fingerprint: sha256:9963b0f782594e5852bc4c8d17224e70cb55746a46abf4827e852ff422a92922
+          time: "2026-09-07T08:37:00.523877+00:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/sandbox-lifecycle.yaml
+          fingerprint: sha256:9963b0f782594e5852bc4c8d17224e70cb55746a46abf4827e852ff422a92922
+          time: "2026-09-07T08:37:00.523877+00:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/sandbox-lifecycle.yaml
+          fingerprint: sha256:9963b0f782594e5852bc4c8d17224e70cb55746a46abf4827e852ff422a92922
+          time: "2026-09-07T08:37:00.523877+00:00"
+          reason: live-verified
+        pause:
+          status: live-pass
+          case: cases/sandbox-lifecycle.yaml
+          fingerprint: sha256:9963b0f782594e5852bc4c8d17224e70cb55746a46abf4827e852ff422a92922
+          time: "2026-09-07T08:37:00.523877+00:00"
+          reason: live-verified
+        resume:
+          status: live-pass
+          case: cases/sandbox-lifecycle.yaml
+          fingerprint: sha256:9963b0f782594e5852bc4c8d17224e70cb55746a46abf4827e852ff422a92922
+          time: "2026-09-07T08:37:00.523877+00:00"
+          reason: live-verified
+        snapshot:
+          status: live-pass
+          case: cases/template-lifecycle.yaml
+          fingerprint: sha256:d55ad858b0eaa875533ece81593d5411b34381ad595b00f51641b9b2ad14be41
+          time: "2026-09-07T08:37:00.523877+00:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/sandbox-lifecycle.yaml
+          fingerprint: sha256:9963b0f782594e5852bc4c8d17224e70cb55746a46abf4827e852ff422a92922
+          time: "2026-09-07T08:37:00.523877+00:00"
+          reason: live-verified
+    template:
+      operations:
+        delete:
+          status: live-pass
+          case: cases/template-lifecycle.yaml
+          fingerprint: sha256:d55ad858b0eaa875533ece81593d5411b34381ad595b00f51641b9b2ad14be41
+          time: "2026-09-07T08:37:00.523877+00:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/template-lifecycle.yaml
+          fingerprint: sha256:d55ad858b0eaa875533ece81593d5411b34381ad595b00f51641b9b2ad14be41
+          time: "2026-09-07T08:37:00.523877+00:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/template-lifecycle.yaml
+          fingerprint: sha256:d55ad858b0eaa875533ece81593d5411b34381ad595b00f51641b9b2ad14be41
+          time: "2026-09-07T08:37:00.523877+00:00"
+          reason: live-verified
