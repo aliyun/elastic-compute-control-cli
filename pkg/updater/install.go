@@ -322,12 +322,31 @@ func updateWithHomebrew(ctx context.Context, options Options, installer installe
 	}); err != nil {
 		return WrapError(ErrorIntegrity, fmt.Errorf("unsafe Homebrew Cask: %w", err))
 	}
-	caskFile, err := os.CreateTemp("", "ecctl-verified-cask-*.rb")
+	// Homebrew rejects standalone Casks outside a tap. Stage the exact verified
+	// bytes inside the existing official tap, preserving its identity without
+	// overwriting its mutable Cask or relying on a tap refresh.
+	repositoryRaw, err := options.RunCommand(ctx, nil, brew, "--repository")
+	if err != nil {
+		return commandError("brew --repository", repositoryRaw, err)
+	}
+	repository := strings.TrimSpace(string(repositoryRaw))
+	if !filepath.IsAbs(repository) {
+		return errors.New("Homebrew repository path must be absolute")
+	}
+	tapPath, err := canonicalExistingPath(filepath.Join(repository, "Library", "Taps", "aliyun", "homebrew-ecctl"))
+	if err != nil {
+		return fmt.Errorf("locate aliyun/ecctl Homebrew tap (restore it with `brew tap aliyun/ecctl https://github.com/aliyun/elastic-compute-control-cli`): %w", err)
+	}
+	stagingDir, err := os.MkdirTemp(tapPath, ".ecctl-verified-cask-*")
+	if err != nil {
+		return fmt.Errorf("stage verified Homebrew Cask: %w", err)
+	}
+	defer os.RemoveAll(stagingDir)
+	caskPath := filepath.Join(stagingDir, "ecctl.rb")
+	caskFile, err := os.OpenFile(caskPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("create verified Homebrew Cask: %w", err)
 	}
-	caskPath := caskFile.Name()
-	defer os.Remove(caskPath)
 	if _, err := caskFile.Write(caskRaw); err != nil {
 		caskFile.Close()
 		return fmt.Errorf("write verified Homebrew Cask: %w", err)
@@ -338,10 +357,6 @@ func updateWithHomebrew(ctx context.Context, options Options, installer installe
 	}
 	if err := caskFile.Close(); err != nil {
 		return fmt.Errorf("close verified Homebrew Cask: %w", err)
-	}
-	caskPath, err = filepath.Abs(caskPath)
-	if err != nil || !filepath.IsAbs(caskPath) || !strings.Contains(caskPath, string(filepath.Separator)) {
-		return errors.New("verified Homebrew Cask path must be absolute")
 	}
 	command := "upgrade"
 	if options.Force {
@@ -452,7 +467,10 @@ func requireMissingPath(path string) error {
 }
 
 func verifyExecutableVersion(ctx context.Context, options Options, executable, target string) error {
-	output, err := options.RunCommand(ctx, nil, executable, "--version")
+	// Internal probes must report the binary's own version, without the
+	// advisory on stderr being mistaken for it by the combined-output parser.
+	env := replaceEnvironmentValue(os.Environ(), "ECCTL_DISABLE_UPDATE_CHECK", "1")
+	output, err := options.RunCommand(ctx, env, executable, "--version")
 	if err != nil {
 		return commandError("validate updated ecctl", output, err)
 	}

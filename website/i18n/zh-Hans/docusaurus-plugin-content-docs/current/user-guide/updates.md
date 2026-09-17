@@ -81,17 +81,30 @@ Windows 不允许直接替换正在运行的可执行文件。ecctl 会启动辅
 
 ## Homebrew 安装
 
-检测到受支持的 Homebrew 安装时，`ecctl update` 会通过对应的 Homebrew 完成更新，
-无需先运行 `brew update`。
+检测到受支持的 Homebrew 安装时，`ecctl update` 会通过对应的 Homebrew 完成更新。
+已校验的发布 Cask 会暂存到现有 `aliyun/ecctl` tap 的独立临时目录中，更新结束后清理，
+不会覆盖 tap 原有的 Cask 文件，无需先运行 `brew update`。
+
+如果旧版 ecctl 更新时报 `Homebrew requires casks to be in a tap`，可先通过 Homebrew 升级：
+
+```bash
+brew update
+brew upgrade --cask aliyun/ecctl/ecctl
+```
+
+上述命令安装 tap 当前发布的版本；安装包含修复的新版后，更新器修复才会生效。
 
 `--force` 会重新安装当前稳定版本。如果无法安全识别对应的 Homebrew，更新会返回
 错误，不会直接覆盖由 Homebrew 管理的可执行文件。
 
 ## 自动版本检测
 
-执行操作类命令时，ecctl 会定期检查是否存在新的稳定版本。建议性检查失败不会阻塞
-原命令。更新提示只写入交互式终端的 stderr，同一版本每天最多一次，因此不会污染
-JSON stdout。
+每次执行用户命令时都会检查是否存在新的稳定版本，包括 `-h`、`-v`、帮助、补全和
+update。确认有新版后，每次调用都会向 stderr 提示，重定向 stderr 时也会输出，
+JSON stdout 保持不变。可通过 `ECCTL_DISABLE_UPDATE_CHECK=1` 关闭。
+
+成功的检查结果缓存 24 小时，重复提示不会重复下载。没有可用缓存时，检查最多等待
+3 秒。网络或校验失败不会导致原命令失败；无法确认有新版时不显示提示。
 
 自动检测与显式更新检查使用相同的签名 v2 解析或不可变 GitHub 回退路径。缓存只保存
 `verified_latest_version`，不会用较低的已验证版本覆盖它；升级后会忽略旧客户端写入的

@@ -1304,92 +1304,135 @@ func TestCheckRejectsNonLatestExplicitVersionForHomebrew(t *testing.T) {
 	}
 }
 
-func TestUpdateWithHomebrewUsesVerifiedAbsoluteCask(t *testing.T) {
-	root := t.TempDir()
-	prefix := filepath.Join(root, "homebrew")
-	caskBinary := filepath.Join(prefix, "Caskroom", "ecctl", "1.2.2", "ecctl")
-	if err := os.MkdirAll(filepath.Dir(caskBinary), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(caskBinary, []byte("binary"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(prefix, "bin"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	brew := filepath.Join(prefix, "bin", "brew")
-	if err := os.WriteFile(brew, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	link := filepath.Join(prefix, "bin", "ecctl")
-	if err := os.Symlink(caskBinary, link); err != nil {
-		t.Fatal(err)
-	}
-	canonicalPrefix, err := canonicalExistingPath(prefix)
-	if err != nil {
-		t.Fatal(err)
-	}
-	canonicalBrew := filepath.Join(canonicalPrefix, "bin", "brew")
-	canonicalLink := filepath.Join(canonicalPrefix, "bin", "ecctl")
-	intelSHA := strings.Repeat("a", 64)
-	armSHA := strings.Repeat("b", 64)
-	caskRaw := testCask("1.2.3", intelSHA, armSHA)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/assets/ecctl_1.2.3_cask.rb" {
-			_, _ = w.Write(caskRaw)
-			return
-		}
-		http.NotFound(w, request)
-	}))
-	defer server.Close()
-	descriptor := releaseDescriptor{Version: "1.2.3", Assets: map[string]releaseAsset{
-		"ecctl_1.2.3_cask.rb":             {Name: "ecctl_1.2.3_cask.rb", SHA256: digestBytes(caskRaw), URL: server.URL + "/assets/ecctl_1.2.3_cask.rb"},
-		"ecctl_1.2.3_darwin_amd64.tar.gz": {SHA256: intelSHA},
-		"ecctl_1.2.3_darwin_arm64.tar.gz": {SHA256: armSHA},
-	}}
-	var calls []string
-	runner := func(_ context.Context, env []string, name string, args ...string) ([]byte, error) {
-		call := strings.Join(append([]string{name}, args...), " ")
-		calls = append(calls, call)
-		switch {
-		case len(args) == 1 && args[0] == "--prefix":
-			return []byte(prefix + "\n"), nil
-		case len(args) == 1 && args[0] == "--caskroom":
-			return []byte(filepath.Join(prefix, "Caskroom") + "\n"), nil
-		case len(args) > 0 && args[0] == "upgrade":
-			if len(args) != 4 || args[1] != "--cask" || !filepath.IsAbs(args[2]) || !strings.Contains(args[2], string(filepath.Separator)) || args[3] != "--quiet" {
-				return nil, fmt.Errorf("unsafe brew arguments %v", args)
+func TestUpdateWithHomebrewUsesVerifiedCaskInsideTap(t *testing.T) {
+	for _, test := range []struct {
+		name                             string
+		force, brewFailure, wrongVersion bool
+	}{
+		{name: "upgrade"},
+		{name: "reinstall", force: true},
+		{name: "brew failure", brewFailure: true},
+		{name: "wrong installed version", wrongVersion: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			prefix := filepath.Join(root, "homebrew")
+			caskBinary := filepath.Join(prefix, "Caskroom", "ecctl", "1.2.2", "ecctl")
+			if err := os.MkdirAll(filepath.Dir(caskBinary), 0o755); err != nil {
+				t.Fatal(err)
 			}
-			if raw, readErr := os.ReadFile(args[2]); readErr != nil || !bytes.Equal(raw, caskRaw) {
-				return nil, fmt.Errorf("brew Cask bytes are not verified: %v", readErr)
+			if err := os.WriteFile(caskBinary, []byte("binary"), 0o755); err != nil {
+				t.Fatal(err)
 			}
-			if !slices.Contains(env, "HOMEBREW_NO_AUTO_UPDATE=1") {
-				return nil, errors.New("HOMEBREW_NO_AUTO_UPDATE is not set")
+			if err := os.MkdirAll(filepath.Join(prefix, "bin"), 0o755); err != nil {
+				t.Fatal(err)
 			}
-			return nil, nil
-		case name == canonicalLink:
-			return []byte("ecctl 1.2.3\n"), nil
-		default:
-			return nil, fmt.Errorf("unexpected command %s", call)
-		}
-	}
-	options := Options{
-		CurrentVersion: "1.2.2", Executable: link, GOOS: "darwin", GOARCH: "arm64",
-		Client: &Client{HTTP: server.Client()}, RunCommand: runner, LookPath: func(string) (string, error) { return "/usr/local/bin/brew", nil },
-	}
-	installer, err := detectInstaller(context.Background(), options)
-	if err != nil || installer.Kind != "homebrew" || installer.BrewPath != canonicalBrew {
-		t.Fatalf("installer = %#v, %v", installer, err)
-	}
-	if err := updateWithHomebrew(context.Background(), options, installer, descriptor); err != nil {
-		t.Fatal(err)
-	}
-	joined := strings.Join(calls, "\n")
-	if strings.Contains(joined, " update ") || strings.Contains(joined, " info ") || strings.Contains(joined, "aliyun/ecctl/ecctl") {
-		t.Fatalf("mutable Tap was consulted:\n%s", joined)
-	}
-	if !strings.Contains(joined, canonicalBrew+" upgrade --cask ") {
-		t.Fatalf("verified Cask upgrade is missing:\n%s", joined)
+			brew := filepath.Join(prefix, "bin", "brew")
+			if err := os.WriteFile(brew, []byte("#!/bin/sh\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			link := filepath.Join(prefix, "bin", "ecctl")
+			if err := os.Symlink(caskBinary, link); err != nil {
+				t.Fatal(err)
+			}
+			canonicalPrefix, err := canonicalExistingPath(prefix)
+			if err != nil {
+				t.Fatal(err)
+			}
+			canonicalBrew := filepath.Join(canonicalPrefix, "bin", "brew")
+			canonicalLink := filepath.Join(canonicalPrefix, "bin", "ecctl")
+			intelSHA := strings.Repeat("a", 64)
+			armSHA := strings.Repeat("b", 64)
+			caskRaw := testCask("1.2.3", intelSHA, armSHA)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				if request.URL.Path == "/assets/ecctl_1.2.3_cask.rb" {
+					_, _ = w.Write(caskRaw)
+					return
+				}
+				http.NotFound(w, request)
+			}))
+			defer server.Close()
+			descriptor := releaseDescriptor{Version: "1.2.3", Assets: map[string]releaseAsset{
+				"ecctl_1.2.3_cask.rb":             {Name: "ecctl_1.2.3_cask.rb", SHA256: digestBytes(caskRaw), URL: server.URL + "/assets/ecctl_1.2.3_cask.rb"},
+				"ecctl_1.2.3_darwin_amd64.tar.gz": {SHA256: intelSHA},
+				"ecctl_1.2.3_darwin_arm64.tar.gz": {SHA256: armSHA},
+			}}
+			// Intel Homebrew's repository can differ from its installation prefix.
+			repository := filepath.Join(canonicalPrefix, "Homebrew")
+			tapPath := filepath.Join(repository, "Library", "Taps", "aliyun", "homebrew-ecctl")
+			if err := os.MkdirAll(filepath.Join(tapPath, "Casks"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			originalCask := filepath.Join(tapPath, "Casks", "ecctl.rb")
+			if err := os.WriteFile(originalCask, []byte("original tap content"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			command := "upgrade"
+			if test.force {
+				command = "reinstall"
+			}
+			var calls []string
+			var stagedCask string
+			runner := func(_ context.Context, env []string, name string, args ...string) ([]byte, error) {
+				call := strings.Join(append([]string{name}, args...), " ")
+				calls = append(calls, call)
+				switch {
+				case len(args) == 1 && args[0] == "--prefix":
+					return []byte(prefix + "\n"), nil
+				case len(args) == 1 && args[0] == "--caskroom":
+					return []byte(filepath.Join(prefix, "Caskroom") + "\n"), nil
+				case len(args) == 1 && args[0] == "--repository":
+					return []byte(repository + "\n"), nil
+				case len(args) > 0 && args[0] == command:
+					if len(args) != 4 || args[1] != "--cask" || !filepath.IsAbs(args[2]) || filepath.Base(args[2]) != "ecctl.rb" || filepath.Dir(filepath.Dir(args[2])) != tapPath || args[3] != "--quiet" {
+						return nil, fmt.Errorf("unsafe brew arguments %v", args)
+					}
+					stagedCask = args[2]
+					if raw, readErr := os.ReadFile(stagedCask); readErr != nil || !bytes.Equal(raw, caskRaw) {
+						return nil, fmt.Errorf("brew Cask bytes are not verified: %v", readErr)
+					}
+					if !slices.Contains(env, "HOMEBREW_NO_AUTO_UPDATE=1") {
+						return nil, errors.New("Homebrew must not replace the verified Cask")
+					}
+					if test.brewFailure {
+						return []byte("install failed"), errors.New("exit status 1")
+					}
+					return nil, nil
+				case name == canonicalLink:
+					if test.wrongVersion {
+						return []byte("ecctl 1.2.2\n"), nil
+					}
+					return []byte("ecctl 1.2.3\n"), nil
+				default:
+					return nil, fmt.Errorf("unexpected command %s", call)
+				}
+			}
+			options := Options{
+				CurrentVersion: "1.2.2", Force: test.force, Executable: link, GOOS: "darwin", GOARCH: "arm64",
+				Client: &Client{HTTP: server.Client()}, RunCommand: runner, LookPath: func(string) (string, error) { return "/usr/local/bin/brew", nil },
+			}
+			installer, err := detectInstaller(context.Background(), options)
+			if err != nil || installer.Kind != "homebrew" || installer.BrewPath != canonicalBrew {
+				t.Fatalf("installer = %#v, %v", installer, err)
+			}
+			updateErr := updateWithHomebrew(context.Background(), options, installer, descriptor)
+			if wantErr := test.brewFailure || test.wrongVersion; (updateErr != nil) != wantErr {
+				t.Fatalf("update error = %v, want error = %t", updateErr, wantErr)
+			}
+			if _, err := os.Stat(filepath.Dir(stagedCask)); !os.IsNotExist(err) {
+				t.Fatalf("staged Cask directory remains: %v", err)
+			}
+			if raw, err := os.ReadFile(originalCask); err != nil || string(raw) != "original tap content" {
+				t.Fatalf("original tap changed: %q, %v", raw, err)
+			}
+			joined := strings.Join(calls, "\n")
+			if strings.Contains(joined, " update ") || strings.Contains(joined, " info ") {
+				t.Fatalf("unexpected Homebrew metadata command:\n%s", joined)
+			}
+			if !strings.Contains(joined, canonicalBrew+" "+command+" --cask "+stagedCask+" --quiet") {
+				t.Fatalf("verified Cask upgrade is missing:\n%s", joined)
+			}
+		})
 	}
 }
 
@@ -1487,6 +1530,49 @@ func TestDetectInstallerRejectsMismatchedDerivedBrewLayout(t *testing.T) {
 	if err == nil || descriptor.Kind == "direct" {
 		t.Fatalf("descriptor = %#v, error = %v", descriptor, err)
 	}
+}
+
+func TestVerifyExecutableVersionIgnoresUpdateAdvisory(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ECCTL_VERSION_PROBE_HELPER", "1")
+	t.Setenv("ECCTL_DISABLE_UPDATE_CHECK", "0")
+	options := Options{RunCommand: func(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
+		if name != executable || len(args) != 1 || args[0] != "--version" {
+			t.Fatalf("unexpected version probe: %s %v", name, args)
+		}
+		return runCommand(ctx, env, name, "-test.run=^TestExecutableVersionProbeHelper$")
+	}}
+	for _, test := range []struct {
+		target    string
+		wantError bool
+	}{
+		{target: "1.2.2"},
+		{target: "1.2.3", wantError: true},
+	} {
+		t.Run(test.target, func(t *testing.T) {
+			err := verifyExecutableVersion(context.Background(), options, executable, test.target)
+			if (err != nil) != test.wantError {
+				t.Fatalf("verify %s: error=%v, want error=%t", test.target, err, test.wantError)
+			}
+		})
+	}
+	if os.Getenv("ECCTL_DISABLE_UPDATE_CHECK") != "0" {
+		t.Fatal("version probe changed the parent environment")
+	}
+}
+
+func TestExecutableVersionProbeHelper(t *testing.T) {
+	if os.Getenv("ECCTL_VERSION_PROBE_HELPER") != "1" {
+		return
+	}
+	if os.Getenv("ECCTL_DISABLE_UPDATE_CHECK") != "1" {
+		fmt.Fprintln(os.Stderr, "ecctl 1.2.3 is available (current: 1.2.2). Run `ecctl update`.")
+	}
+	fmt.Fprintln(os.Stdout, "ecctl 1.2.2 (commit test, built test)")
+	os.Exit(0)
 }
 
 func TestReplaceEnvironmentValueRemovesDuplicates(t *testing.T) {

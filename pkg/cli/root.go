@@ -182,6 +182,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) (exitCode
 		resolvedCommand = command
 		telemetryCommand = command.CommandPath()
 	}
+	maybeCheckForUpdate(ctx, args, stderr, options)
 	if !options.fullSurface && os.Getenv("ECCTL_SPEC_DIR") == "" && !publicCLICommandAllowed(args) {
 		return writeRunError(stdout, options, ecerrors.Client("UnknownCommand", "command is not supported"))
 	}
@@ -195,7 +196,6 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) (exitCode
 		options.output = output.ModeJSON
 		options.forceJSON = true
 	}
-	maybeCheckForUpdate(ctx, args, stderr, options)
 
 	err := root.ExecuteContext(ctx)
 	if err == nil {
@@ -521,15 +521,14 @@ func maybeCheckForUpdate(ctx context.Context, args []string, stderr io.Writer, o
 	if _, err := updater.NormalizeVersion(current); err != nil {
 		return
 	}
-	interactive := writerIsTerminal(stderr)
-	checkCtx, cancel := context.WithTimeout(ctx, 900*time.Millisecond)
+	const checkTimeout = 3 * time.Second
+	checkCtx, cancel := context.WithTimeout(ctx, checkTimeout)
 	defer cancel()
 	result, err := autoCheckUpdate(checkCtx, updater.AutoCheckOptions{
-		CurrentVersion:   current,
-		Client:           updater.NewClient(800 * time.Millisecond),
-		MarkNotification: interactive,
+		CurrentVersion: current,
+		Client:         updater.NewClient(checkTimeout),
 	})
-	if err != nil || !interactive || !result.Notify {
+	if err != nil || !result.Available {
 		return
 	}
 	localizer := i18n.NewLocalizer(options.lang)
