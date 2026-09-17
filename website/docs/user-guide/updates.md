@@ -97,8 +97,21 @@ does not overlap their embedded roots.
 ## Homebrew Installations
 
 When ecctl detects a supported Homebrew-managed installation, `ecctl update`
-updates it through the matching Homebrew installation. You do not need to run
-`brew update` first.
+updates it through the matching Homebrew installation. It stages the verified
+release Cask in a temporary directory inside the existing `aliyun/ecctl` tap,
+then removes that directory after the update attempt. The tap's original Cask
+is unchanged. You do not need to run `brew update` first.
+
+If an older ecctl version fails with `Homebrew requires casks to be in a tap`,
+bootstrap the upgrade through Homebrew:
+
+```bash
+brew update
+brew upgrade --cask aliyun/ecctl/ecctl
+```
+
+This installs the version currently published in the tap; the updater fix takes
+effect once a release containing it is installed.
 
 `--force` reinstalls the current stable version. If the Homebrew installation
 cannot be identified safely, the update stops with an error instead of
@@ -106,10 +119,15 @@ overwriting a managed executable directly.
 
 ## Automatic Version Checks
 
-Operational commands periodically check whether a newer stable version is
-available. This advisory check never blocks the requested command. Notices are
-written only to an interactive terminal on stderr, at most once per version per
-day, so JSON stdout remains unchanged.
+Every user invocation, including `-h`, `-v`, help, completion, and update,
+checks whether a newer stable version is available. Once an update is known,
+every invocation prints a notice to stderr, including when stderr is redirected.
+JSON stdout remains unchanged. Set `ECCTL_DISABLE_UPDATE_CHECK=1` to opt out.
+
+Successful checks are cached for 24 hours; printing a notice does not trigger
+another download. An uncached check has a 3-second time budget. Network or
+verification failures do not fail the requested command, and no notice is
+printed when a newer version cannot be confirmed.
 
 Automatic checks use the same signed v2 resolution or immutable GitHub fallback
 as an explicit update check. The cache stores only

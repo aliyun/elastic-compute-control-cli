@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 	"unicode"
 
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -3232,6 +3233,99 @@ func TestAutomaticUpdateCheckRunsForHelpVersionCompletionAndUpdate(t *testing.T)
 			}
 			if autoChecks != before+1 {
 				t.Fatalf("automatic checks = %d, want %d after runCLI(%v)", autoChecks, before+1, test.args)
+			}
+		})
+	}
+}
+
+func TestEveryCommandPrintsAvailableUpdateOnStderr(t *testing.T) {
+	completionTestHome(t)
+	oldVersion, oldAutoCheck := version, autoCheckUpdate
+	oldWriterIsTerminal := writerIsTerminal
+	version = "1.2.2"
+	autoCheckUpdate = func(_ context.Context, options updater.AutoCheckOptions) (updater.AutoCheckResult, error) {
+		if options.CurrentVersion != "1.2.2" {
+			t.Fatalf("auto check options = %#v", options)
+		}
+		// A previous notification must not suppress any invocation's notice.
+		return updater.AutoCheckResult{LatestVersion: "1.2.3", Available: true, Notify: false}, nil
+	}
+	t.Cleanup(func() { version, autoCheckUpdate = oldVersion, oldAutoCheck; writerIsTerminal = oldWriterIsTerminal })
+	t.Setenv("ECCTL_DISABLE_UPDATE_CHECK", "")
+	for _, terminal := range []bool{true, false} {
+		writerIsTerminal = func(io.Writer) bool { return terminal }
+		for _, args := range [][]string{
+			{"-v"}, {"--version"}, {"-h"}, {"--help"}, {},
+			{"help", "ecs"}, {"ecs", "--help"}, {"schema", "--list", "vpc"},
+			{"not-a-command"}, {"--output", "invalid", "schema", "--list"},
+		} {
+			t.Run(fmt.Sprintf("terminal=%t/%v", terminal, args), func(t *testing.T) {
+				stdout, stderr, _ := runCLI(append([]string{"--lang", "en"}, args...)...)
+				if !strings.Contains(stderr, "ecctl 1.2.3 is available") || !strings.Contains(stderr, "ecctl update") {
+					t.Fatalf("update notice missing: %q", stderr)
+				}
+				if strings.Contains(stdout, "is available") {
+					t.Fatalf("notice leaked into stdout: %s", stdout)
+				}
+				if len(args) > 0 && args[0] == "schema" {
+					decodeObject(t, stdout)
+				}
+			})
+		}
+	}
+}
+
+func TestAutomaticUpdateCheckAllowsColdLookupOverOneSecond(t *testing.T) {
+	oldVersion, oldAutoCheck := version, autoCheckUpdate
+	t.Cleanup(func() { version, autoCheckUpdate = oldVersion, oldAutoCheck })
+	version = "1.2.2"
+	t.Setenv("ECCTL_DISABLE_UPDATE_CHECK", "")
+	autoCheckUpdate = func(ctx context.Context, _ updater.AutoCheckOptions) (updater.AutoCheckResult, error) {
+		// A cold lookup fetches a pointer, manifest, and signature bundle.
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return updater.AutoCheckResult{}, ctx.Err()
+		case <-timer.C:
+			return updater.AutoCheckResult{LatestVersion: "1.2.3", Available: true}, nil
+		}
+	}
+	var stderr bytes.Buffer
+	maybeCheckForUpdate(context.Background(), []string{"-v"}, &stderr, &globalOptions{lang: "en"})
+	if !strings.Contains(stderr.String(), "ecctl 1.2.3 is available") {
+		t.Fatalf("cold lookup notice missing: %q", stderr.String())
+	}
+}
+
+func TestAutomaticUpdateNoticeSkipsUnavailableDisabledAndInternal(t *testing.T) {
+	oldVersion, oldAutoCheck := version, autoCheckUpdate
+	t.Cleanup(func() { version, autoCheckUpdate = oldVersion, oldAutoCheck })
+	for _, test := range []struct {
+		name, version, disabled string
+		args                    []string
+		result                  updater.AutoCheckResult
+		err                     error
+		wantCheck               bool
+	}{
+		{name: "current", version: "1.2.3", result: updater.AutoCheckResult{LatestVersion: "1.2.3"}, wantCheck: true},
+		{name: "offline", version: "1.2.2", err: context.DeadlineExceeded, wantCheck: true},
+		{name: "disabled", version: "1.2.2", disabled: "1"},
+		{name: "development", version: "dev"},
+		{name: "internal helper", version: "1.2.2", args: []string{"__update", "apply"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			version = test.version
+			t.Setenv("ECCTL_DISABLE_UPDATE_CHECK", test.disabled)
+			called := false
+			autoCheckUpdate = func(context.Context, updater.AutoCheckOptions) (updater.AutoCheckResult, error) {
+				called = true
+				return test.result, test.err
+			}
+			var stderr bytes.Buffer
+			maybeCheckForUpdate(context.Background(), test.args, &stderr, &globalOptions{lang: "en"})
+			if called != test.wantCheck || stderr.Len() != 0 {
+				t.Fatalf("checked=%t, stderr=%q", called, stderr.String())
 			}
 		})
 	}
