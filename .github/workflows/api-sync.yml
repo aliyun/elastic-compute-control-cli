@@ -7,6 +7,19 @@ name: api-sync
 # remains an explicit maintainer action through `specdrift sync` so canonical
 # resource specs, lifecycle cases, fixtures, and cleanup evidence stay under
 # review.
+#
+# Drift is measured against the metadata snapshot pinned in go.mod, which
+# `make lint` already enforces on every pull request. The added value here is
+# the scheduled upstream-staleness signal: a notice when aliyun-openapi-meta
+# has advanced past the pin.
+#
+# Staleness is reported as a commit-SHA comparison rather than by diffing
+# metadata content. Upstream is no longer a Go module (its default branch has
+# no go.mod and no .go files) and its layout and schema are declared unstable,
+# so any content-level probe would break on the next upstream restructure.
+# Re-cutting the pin is a deliberate migration: it requires adapting
+# pkg/aliyun to the upstream `canonical/<product>/<api-version>/` layout and
+# schema, then refreshing drift-baseline.json via `make drift-baseline`.
 
 on:
   schedule:
@@ -52,17 +65,42 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: refresh OpenAPI metadata in the isolated runner
+      - name: report pinned OpenAPI metadata snapshot
         id: metadata
         shell: bash
         run: |
           set -euo pipefail
-          go get github.com/aliyun/aliyun-openapi-meta@latest
-          go mod tidy
           version=$(go list -m -f '{{.Version}}' github.com/aliyun/aliyun-openapi-meta)
           test -n "$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          git diff -- go.mod go.sum > metadata-dependency.patch
+          echo "pinned_sha=${version##*-}" >> "$GITHUB_OUTPUT"
+
+      - name: compare pinned snapshot with upstream metadata
+        id: staleness
+        env:
+          PINNED_SHA: ${{ steps.metadata.outputs.pinned_sha }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          upstream=$(git ls-remote https://github.com/aliyun/aliyun-openapi-meta refs/heads/master 2>/dev/null \
+            | awk 'NR==1 { print substr($1, 1, 12) }')
+          if [ -z "$upstream" ]; then
+            echo "state=unreachable" >> "$GITHUB_OUTPUT"
+            echo "::warning::cannot reach aliyun-openapi-meta upstream; metadata staleness unknown"
+            exit 0
+          fi
+          echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
+          if [ "$upstream" = "$PINNED_SHA" ]; then
+            echo "state=current" >> "$GITHUB_OUTPUT"
+          else
+            echo "state=stale" >> "$GITHUB_OUTPUT"
+            echo "::notice::OpenAPI metadata snapshot is behind upstream (pinned ${PINNED_SHA}, upstream ${upstream}). Re-cutting the pin requires the canonical/ layout migration; no action is needed to keep CI green."
+          fi
+          {
+            printf '## OpenAPI metadata snapshot\n\n'
+            printf -- '- pinned commit: %s\n' "$PINNED_SHA"
+            printf -- '- upstream master: %s\n' "$upstream"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: build specdrift
         shell: bash
@@ -128,7 +166,6 @@ jobs:
             drift.json
             drift.err
             drift-plan.json
-            metadata-dependency.patch
             specsync.patch
 
       - name: upsert drift monitor issue
