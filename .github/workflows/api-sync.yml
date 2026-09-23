@@ -8,18 +8,16 @@ name: api-sync
 # resource specs, lifecycle cases, fixtures, and cleanup evidence stay under
 # review.
 #
-# Drift is measured against the metadata snapshot pinned in go.mod, which
-# `make lint` already enforces on every pull request. The added value here is
-# the scheduled upstream-staleness signal: a notice when aliyun-openapi-meta
-# has advanced past the pin.
+# Drift is measured against the embedded compressed metadata snapshot, retaining
+# every product's default API version. internal/openapimeta/manifest.json records
+# its repository and full commit SHA; `make lint` checks that fixed snapshot
+# offline, not the latest upstream content on every run.
 #
-# Staleness is reported as a commit-SHA comparison rather than by diffing
-# metadata content. Upstream is no longer a Go module (its default branch has
-# no go.mod and no .go files) and its layout and schema are declared unstable,
-# so any content-level probe would break on the next upstream restructure.
-# Re-cutting the pin is a deliberate migration: it requires adapting
-# pkg/aliyun to the upstream `canonical/<product>/<api-version>/` layout and
-# schema, then refreshing drift-baseline.json via `make drift-baseline`.
+# The scheduled upstream-staleness signal only compares the manifest revision
+# with the full SHA of upstream master. A different or unreachable upstream is
+# non-fatal. Updating the snapshot is an explicit maintainer action using a
+# tarball downloaded at a full SHA and `make metadata-sync`; triage drift before
+# accepting a new baseline. This workflow never refreshes either automatically.
 
 on:
   schedule:
@@ -33,9 +31,13 @@ on:
       - "go.sum"
       - "drift-baseline.json"
       - "specs/**"
+      - "pkg/aliyun/**"
+      - "internal/openapimeta/**"
+      - "cmd/openapimeta-sync/**"
       - "cmd/specdrift/**"
       - "internal/drift/**"
       - "internal/specsync/**"
+      - ".github/workflows/api-sync.yml"
 
 concurrency:
   group: api-sync-plan
@@ -70,23 +72,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version=$(go list -m -f '{{.Version}}' github.com/aliyun/aliyun-openapi-meta)
-          test -n "$version"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "pinned_sha=${version##*-}" >> "$GITHUB_OUTPUT"
+          pinned_sha=$(jq -er '
+            select(.repository == "aliyun/aliyun-openapi-meta")
+            | .revision
+            | select(type == "string")
+            | select(length == 40 and test("^[0-9a-f]{40}$"))
+          ' internal/openapimeta/manifest.json)
+          echo "pinned_sha=$pinned_sha" >> "$GITHUB_OUTPUT"
 
       - name: compare pinned snapshot with upstream metadata
         id: staleness
         env:
+          GH_TOKEN: ${{ github.token }}
           PINNED_SHA: ${{ steps.metadata.outputs.pinned_sha }}
         shell: bash
         run: |
-          set -uo pipefail
-          upstream=$(git ls-remote https://github.com/aliyun/aliyun-openapi-meta refs/heads/master 2>/dev/null \
-            | awk 'NR==1 { print substr($1, 1, 12) }')
-          if [ -z "$upstream" ]; then
+          set -euo pipefail
+          {
+            printf '## OpenAPI metadata snapshot\n\n'
+            printf -- '- embedded snapshot commit: %s\n' "$PINNED_SHA"
+            printf -- '- drift detection uses this fixed snapshot, not the latest upstream content.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if ! upstream=$(gh api repos/aliyun/aliyun-openapi-meta/commits/master --jq .sha) \
+            || [[ ! "$upstream" =~ ^[0-9a-f]{40}$ ]]; then
             echo "state=unreachable" >> "$GITHUB_OUTPUT"
-            echo "::warning::cannot reach aliyun-openapi-meta upstream; metadata staleness unknown"
+            echo "::warning::cannot obtain a valid full SHA from aliyun-openapi-meta upstream; metadata staleness unknown"
+            printf -- '- upstream master: unavailable\n' >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
@@ -94,13 +105,9 @@ jobs:
             echo "state=current" >> "$GITHUB_OUTPUT"
           else
             echo "state=stale" >> "$GITHUB_OUTPUT"
-            echo "::notice::OpenAPI metadata snapshot is behind upstream (pinned ${PINNED_SHA}, upstream ${upstream}). Re-cutting the pin requires the canonical/ layout migration; no action is needed to keep CI green."
+            echo "::notice::OpenAPI metadata snapshot differs from upstream (pinned ${PINNED_SHA}, upstream ${upstream}). Updating the embedded snapshot is manual; triage drift before accepting a new baseline. This notice does not fail CI."
           fi
-          {
-            printf '## OpenAPI metadata snapshot\n\n'
-            printf -- '- pinned commit: %s\n' "$PINNED_SHA"
-            printf -- '- upstream master: %s\n' "$upstream"
-          } >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- upstream master: %s\n' "$upstream" >> "$GITHUB_STEP_SUMMARY"
 
       - name: build specdrift
         shell: bash
@@ -137,7 +144,7 @@ jobs:
       - name: build dry-run sync plan and bounded issue body
         if: steps.detect.outputs.has_drift == 'true'
         env:
-          METADATA_VERSION: ${{ steps.metadata.outputs.version }}
+          METADATA_REVISION: ${{ steps.metadata.outputs.pinned_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         shell: bash
         run: |
@@ -152,7 +159,7 @@ jobs:
             -plan drift-plan.json \
             -format markdown \
             -limit 50 > issue.md
-          printf '\n- metadata module: %s\n' "$METADATA_VERSION" >> issue.md
+          printf '\n- embedded metadata snapshot commit: %s (fixed snapshot, not a live upstream content probe)\n' "$METADATA_REVISION" >> issue.md
           printf -- '- workflow run: %s\n' "$RUN_URL" >> issue.md
 
       - name: upload complete drift evidence
@@ -173,7 +180,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           HAS_DRIFT: ${{ steps.detect.outputs.has_drift }}
-          METADATA_VERSION: ${{ steps.metadata.outputs.version }}
+          METADATA_REVISION: ${{ steps.metadata.outputs.pinned_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         shell: bash
         run: |
@@ -201,7 +208,7 @@ jobs:
                 printf '%s\n\n' "$marker"
                 printf '# OpenAPI drift monitor\n\n'
                 printf 'Drift detection succeeded, but dry-run planning or bounded rendering failed.\n\n'
-                printf -- '- metadata module: %s\n' "$METADATA_VERSION"
+                printf -- '- embedded metadata snapshot commit: %s (fixed snapshot, not a live upstream content probe)\n' "$METADATA_REVISION"
                 printf -- '- workflow run: %s\n' "$RUN_URL"
                 printf '\nDownload the workflow artifact for the complete drift.json and available diagnostics.\n'
               } > issue.md
@@ -217,8 +224,8 @@ jobs:
             fi
           elif [ -n "$number" ] && [ "$state" = "OPEN" ]; then
             gh issue comment "$number" \
-              --body "Resolved against aliyun-openapi-meta ${METADATA_VERSION} in run ${RUN_URL}."
+              --body "Resolved against embedded aliyun-openapi-meta snapshot ${METADATA_REVISION} (fixed snapshot, not a live upstream content probe) in run ${RUN_URL}."
             gh issue close "$number" --reason completed
           else
-            echo "No OpenAPI drift and no open monitor issue." >> "$GITHUB_STEP_SUMMARY"
+            echo "No OpenAPI drift against the embedded snapshot and no open monitor issue." >> "$GITHUB_STEP_SUMMARY"
           fi

@@ -5,7 +5,6 @@ go 1.25.8
 require (
 	github.com/alibabacloud-go/darabonba-openapi/v2 v2.1.16
 	github.com/alibabacloud-go/tea v1.4.0
-	github.com/aliyun/aliyun-openapi-meta v0.0.0-20260421122526-2563691c2222
 	github.com/goccy/go-yaml v1.19.2
 	github.com/gofrs/flock v0.13.0
 	github.com/nicksnyder/go-i18n/v2 v2.6.1

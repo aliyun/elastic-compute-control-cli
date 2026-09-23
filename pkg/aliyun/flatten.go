@@ -13,54 +13,14 @@ import "strings"
 //   - a parameter with no child information (a bare Struct or RepeatList)
 //     contributes a single leaf under its own name.
 //
-// OpenAPIOperationDetailFor supplies the authoritative current parameter set
-// and falls back to legacy metadata only when the current operation is absent.
-// When the current detail exposes a bare group without dotted children, the
-// legacy subtree enriches that group so drift detection retains field-level
-// coverage. Legacy-only top-level parameters are never copied into the current
-// set, so newly added and removed parameters remain observable.
+// OpenAPIOperationDetailFor supplies the authoritative canonical parameter set;
+// no older snapshot supplies missing operations, parameters, or group children.
 func OpenAPIOperationLeaves(lang string, product OpenAPIProduct, operation string) ([]OpenAPIParameter, bool) {
 	detail, ok := OpenAPIOperationDetailFor(lang, product, operation)
 	if !ok {
 		return nil, false
 	}
-	return enrichedOpenAPIOperationLeaves(lang, product, operation, detail), true
-}
-
-func enrichedOpenAPIOperationLeaves(lang string, product OpenAPIProduct, operation string, detail OpenAPIOperationDetail) []OpenAPIParameter {
-	if legacy, legacyOK := legacyOpenAPIOperationDetail(lang, product, operation); legacyOK {
-		detail.Parameters = enrichCurrentParameters(detail.Parameters, legacy.Parameters)
-	}
-	return flattenOpenAPIParameters(detail)
-}
-
-func enrichCurrentParameters(current, legacy []OpenAPIParameter) []OpenAPIParameter {
-	legacyByName := make(map[string]OpenAPIParameter, len(legacy))
-	for _, param := range legacy {
-		legacyByName[param.Name] = param
-	}
-	currentAncestors := map[string]bool{}
-	for _, param := range current {
-		name := param.Name
-		for index := strings.LastIndex(name, "."); index >= 0; index = strings.LastIndex(name, ".") {
-			name = name[:index]
-			currentAncestors[name] = true
-		}
-	}
-
-	out := append([]OpenAPIParameter(nil), current...)
-	for index, param := range out {
-		if len(param.SubParameters) > 0 || currentAncestors[param.Name] {
-			continue
-		}
-		legacyParam, ok := legacyByName[param.Name]
-		if !ok || len(legacyParam.SubParameters) == 0 ||
-			(param.Type != "" && legacyParam.Type != "" && !strings.EqualFold(param.Type, legacyParam.Type)) {
-			continue
-		}
-		out[index].SubParameters = legacyParam.SubParameters
-	}
-	return out
+	return flattenOpenAPIParameters(detail), true
 }
 
 func flattenOpenAPIParameters(detail OpenAPIOperationDetail) []OpenAPIParameter {

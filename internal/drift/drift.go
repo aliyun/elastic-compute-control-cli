@@ -514,28 +514,22 @@ func loadResources(specDir string) ([]spec.ResourceSpec, error) {
 func resourceProductCodes(resources []spec.ResourceSpec) []string {
 	codes := map[string]bool{}
 	for _, resource := range resources {
+		// Operations and waiters only reference bindings and probes. Descriptors
+		// without either make no API calls and may use CLI-only product aliases.
+		if len(resource.Bindings) == 0 && len(resource.Probes) == 0 {
+			continue
+		}
 		code := resource.APIProduct
 		if code == "" {
 			code = resource.Product
 		}
-		codes[code] = true
+		codes[strings.ToLower(strings.TrimSpace(code))] = true
 	}
 	return sortedKeys(codes)
 }
 
 func resolveLeaves(resolver *aliyun.OpenAPIMetadataResolver, code, api string) ([]aliyun.OpenAPIParameter, string, error) {
-	return resolver.OperationLeaves(code, api, legacyOnlyOperationAllowed(code, api))
-}
-
-var legacyOnlyOpenAPIOperations = map[string]bool{
-	// CloneDisks exists in the legacy ECS metadata but is intentionally absent
-	// from the current ECS version manifest in the pinned metadata module.
-	"ecs.clonedisks": true,
-}
-
-func legacyOnlyOperationAllowed(code, api string) bool {
-	key := strings.ToLower(strings.TrimSpace(code)) + "." + strings.ToLower(strings.TrimSpace(api))
-	return legacyOnlyOpenAPIOperations[key]
+	return resolver.OperationLeaves(code, api, false)
 }
 
 func normalizeLanguage(lang string) string {

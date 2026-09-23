@@ -38,7 +38,7 @@ func TestOpenAPIOperationLeavesRunInstances(t *testing.T) {
 	names := leafNames(leaves)
 
 	for _, want := range []string{
-		// RepeatList children expanded from legacy sub-parameters.
+		// Groups are expanded exclusively from canonical fields/element.fields.
 		"DataDisk.Category", "DataDisk.Size", "DataDisk.BurstingEnabled",
 		"NetworkInterface.VSwitchId", "NetworkInterface.NetworkCardIndex",
 		"Arn.AssumeRoleFor", "Arn.RoleType", "Arn.Rolearn",
@@ -46,8 +46,8 @@ func TestOpenAPIOperationLeavesRunInstances(t *testing.T) {
 		// Dotted flat leaves survive.
 		"CpuOptions.Core", "CpuOptions.Numa", "SystemDisk.Category",
 		"SystemDisk.Size", "PrivatePoolOptions.Id", "SecurityOptions.TrustedSystemMode",
-		// Opaque Struct placeholders with no child information stay as leaves.
-		"ClockOptions", "ImageOptions", "NetworkOptions", "PrivateDnsNameOptions",
+		// Canonical now supplies children for these formerly opaque groups.
+		"ClockOptions.PtpStatus", "ImageOptions.LoginAsNonRoot", "NetworkOptions.EnableJumboFrame", "PrivateDnsNameOptions.HostnameType",
 		// Scalar RepeatList parameters without children stay as leaves.
 		"Ipv6Address", "HostNames", "SecurityGroupIds",
 		// Plain scalars.
@@ -101,33 +101,30 @@ func TestOpenAPIOperationLeavesStrictUsesCurrentMetadata(t *testing.T) {
 	requireNoLeaf(t, names, "DataDisk")
 }
 
-func TestEnrichCurrentParametersUsesLegacyStructureWithoutRestoringLegacyOnlyParameters(t *testing.T) {
-	current := []OpenAPIParameter{
-		{Name: "Group", Type: "RepeatList", Description: "current group"},
-		{Name: "CurrentOnly", Type: "String"},
+func TestCanonicalLeavesDoNotRestoreMissingGroupChildren(t *testing.T) {
+	product, ok := OpenAPIProductByCode("ecs", "en")
+	if !ok {
+		t.Fatal("Ecs metadata missing")
 	}
-	legacy := []OpenAPIParameter{
-		{Name: "Group", Type: "RepeatList", SubParameters: []OpenAPIParameter{{Name: "Child", Type: "String"}}},
-		{Name: "LegacyOnly", Type: "String"},
+	resolver := &OpenAPIMetadataResolver{
+		language: "en", products: map[string]OpenAPIProduct{"ecs": product},
+		read: func(language, path string) ([]byte, error) {
+			return []byte(`{"name":"RunInstances","parameters":[{"name":"DataDisk","type":"RepeatList"},{"name":"CurrentOnly","type":"String"}]}`), nil
+		},
 	}
-
-	got := enrichCurrentParameters(current, legacy)
-	leaves := flattenOpenAPIParameters(OpenAPIOperationDetail{Parameters: got})
-	assertLeafNames(t, leaves, []string{"CurrentOnly", "Group.Child"})
+	leaves, _, err := resolver.OperationLeaves("ecs", "RunInstances", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertLeafNames(t, leaves, []string{"CurrentOnly", "DataDisk"})
 }
 
-func TestEnrichCurrentParametersKeepsCurrentDottedChildrenAuthoritative(t *testing.T) {
-	current := []OpenAPIParameter{
-		{Name: "Group", Type: "RepeatList"},
+func TestFlattenCurrentDottedChildrenAreAuthoritative(t *testing.T) {
+	detail := OpenAPIOperationDetail{Parameters: []OpenAPIParameter{
+		{Name: "Group", Type: "Struct"},
 		{Name: "Group.CurrentChild", Type: "String"},
-	}
-	legacy := []OpenAPIParameter{
-		{Name: "Group", Type: "RepeatList", SubParameters: []OpenAPIParameter{{Name: "LegacyChild", Type: "String"}}},
-	}
-
-	got := enrichCurrentParameters(current, legacy)
-	leaves := flattenOpenAPIParameters(OpenAPIOperationDetail{Parameters: got})
-	assertLeafNames(t, leaves, []string{"Group.CurrentChild"})
+	}}
+	assertLeafNames(t, flattenOpenAPIParameters(detail), []string{"Group.CurrentChild"})
 }
 
 func assertLeafNames(t *testing.T, leaves []OpenAPIParameter, want []string) {

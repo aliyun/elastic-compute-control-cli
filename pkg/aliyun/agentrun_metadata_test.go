@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestAgentRunManualMetadataExposesSandboxOperations(t *testing.T) {
+func TestAgentRunCanonicalMetadataExposesSandboxOperations(t *testing.T) {
 	t.Parallel()
 
 	resolver, err := NewOpenAPIMetadataResolver("en", []string{"AgentRun"})
@@ -23,7 +23,7 @@ func TestAgentRunManualMetadataExposesSandboxOperations(t *testing.T) {
 	for _, leaf := range leaves {
 		names = append(names, leaf.Name)
 	}
-	for _, want := range []string{"body.cpu", "body.memory", "body.networkConfiguration", "body.templateName", "body.templateType"} {
+	for _, want := range []string{"body.cpu", "body.memory", "body.networkConfiguration.networkMode", "body.templateName", "body.templateType"} {
 		if !containsString(names, want) {
 			t.Fatalf("CreateTemplate metadata missing %s: %v", want, names)
 		}
@@ -33,19 +33,21 @@ func TestAgentRunManualMetadataExposesSandboxOperations(t *testing.T) {
 	if !ok {
 		t.Fatal("OpenAPIProductByCode(agentrun) failed")
 	}
-	if product.Version != "2025-09-10" || !stringsEqualFold(product.Style, "ROA") {
+	if product.Version != "2025-09-10" || openAPIStyle(product.Style) != "ROA" {
 		t.Fatalf("AgentRun product = version:%q style:%q", product.Version, product.Style)
 	}
 	detail, ok := OpenAPIOperationDetailFor("en", product, "ActivateTemplateMCP")
 	if !ok {
 		t.Fatal("ActivateTemplateMCP detail missing")
 	}
-	if detail.Method != "PATCH" || detail.PathPattern != "/2025-09-10/templates/{templateName}/mcp/activate" {
+	if detail.Method != "PATCH" || detail.PathPattern != "/2025-09-10/templates/[templateName]/mcp/activate" {
 		t.Fatalf("ActivateTemplateMCP detail = %#v", detail)
 	}
-	for _, removed := range []string{"PauseSandbox", "ResumeSandbox"} {
-		if _, ok := OpenAPIOperationDetailFor("en", product, removed); ok {
-			t.Fatalf("removed AgentRun operation %s is still exposed", removed)
+	// Canonical includes operations absent from the historical manual subset.
+	for _, operation := range []string{"PauseSandbox", "ResumeSandbox"} {
+		detail, ok := OpenAPIOperationDetailFor("en", product, operation)
+		if !ok || detail.Method != "PUT" || detail.FindParameter("sandboxId") == nil {
+			t.Fatalf("canonical AgentRun operation %s is missing: %#v", operation, detail)
 		}
 	}
 }
@@ -105,23 +107,4 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
-}
-
-func stringsEqualFold(left, right string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		a, b := left[i], right[i]
-		if a >= 'a' && a <= 'z' {
-			a -= 'a' - 'A'
-		}
-		if b >= 'a' && b <= 'z' {
-			b -= 'a' - 'A'
-		}
-		if a != b {
-			return false
-		}
-	}
-	return true
 }

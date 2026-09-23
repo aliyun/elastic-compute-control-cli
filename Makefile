@@ -7,7 +7,7 @@ REVIEW_NPM_CACHE ?= $(REVIEW_CACHE_DIR)/npm
 REVIEW_GOPROXY ?= https://proxy.golang.org,direct
 REVIEW_ENV = env GOPATH="$(REVIEW_GOPATH)" GOCACHE="$(REVIEW_GOCACHE)" GOMODCACHE="$(REVIEW_GOMODCACHE)" GOPROXY="$(REVIEW_GOPROXY)" npm_config_cache="$(REVIEW_NPM_CACHE)"
 
-.PHONY: help install build test coverage ci-test lint fmt clean generate drift drift-baseline drift-check specdrift prepare-public-release check-public-release check-release-version review-final review-dsh-plugin review-e2e review-website
+.PHONY: help install build test coverage ci-test lint fmt clean generate metadata-sync drift drift-baseline drift-check specdrift prepare-public-release check-public-release check-release-version review-final review-dsh-plugin review-e2e review-website
 
 install: ## Install git pre-commit hook
 	git config core.hooksPath .githooks
@@ -46,6 +46,11 @@ ci-test: ## Run CI tests and write reports
 generate: ## Generate Go catalog from resource specs
 	go run ./cmd/specgen -spec-dir specs -out pkg/spec/catalog_generated.go
 
+metadata-sync: ## Rebuild the embedded metadata snapshot from an explicit archive and full revision
+	@test -n "$(METADATA_ARCHIVE)" || (echo "METADATA_ARCHIVE is required (downloaded tar.gz)" >&2; exit 1)
+	@test -n "$(METADATA_REVISION)" || (echo "METADATA_REVISION is required (full 40-hex commit SHA)" >&2; exit 1)
+	go run ./cmd/openapimeta-sync -archive "$(METADATA_ARCHIVE)" -revision "$(METADATA_REVISION)" -out internal/openapimeta
+
 drift: specdrift ## Report OpenAPI metadata changes unmatched by resource bindings
 	bin/specdrift detect -spec-dir specs
 
@@ -69,7 +74,7 @@ check-public-release: ## Check public release readiness gates
 check-release-version: ## Check the canonical release version file
 	go run ./cmd/releaseprep --check-version-file --version-file version.txt
 
-lint: specdrift ## Run formatting, vet, generated-code, and spec drift checks
+lint: specdrift ## Run formatting, vet, generated-code, and offline spec drift checks
 	@test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './bin/*'))"
 	go vet ./...
 	go run ./cmd/specgen -spec-dir specs -out pkg/spec/catalog_generated.go -check
