@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -642,8 +643,65 @@ func setOpenAPIParam(req *openAPIRequest, api *OpenAPIOperationDetail, key strin
 }
 
 func setOpenAPIParamValue(out map[string]string, param *OpenAPIParameter, key string, value any) error {
-	if param != nil && strings.EqualFold(param.Type, "Json") {
+	if param == nil {
+		return setQueryParam(out, key, value)
+	}
+	if strings.EqualFold(param.Type, "Json") || param.ParamStyle == "json" {
 		return setJSONParam(out, key, value)
+	}
+	v := reflect.ValueOf(value)
+	if param.Type == "RepeatList" && param.ParamStyle == "simple" && v.IsValid() && (v.Kind() == reflect.Slice || v.Kind() == reflect.Array) {
+		if v.Len() > 0 {
+			items := make([]string, v.Len())
+			for i := range items {
+				items[i] = fmt.Sprint(v.Index(i).Interface())
+			}
+			out[key] = strings.Join(items, ",")
+		}
+		return nil
+	}
+	if param.ParamStyle == "flat" || param.ParamStyle == "repeatList" {
+		if param.Type == "RepeatList" && v.IsValid() && (v.Kind() == reflect.Slice || v.Kind() == reflect.Array) {
+			// Keep the existing tag-assignment shorthand at the CLI boundary.
+			if tags, ok := value.([]string); ok && (key == "Tag" || key == "TemplateTag") {
+				return setTagParams(out, key, tags)
+			}
+			item := param.Element
+			if item == nil && len(param.SubParameters) > 0 {
+				// Compatibility for metadata that predates explicit elements.
+				item = &OpenAPIParameter{Type: "Struct", SubParameters: param.SubParameters}
+			}
+			if item != nil && item.ParamStyle == "" {
+				inherited := *item
+				inherited.ParamStyle = param.ParamStyle
+				item = &inherited
+			}
+			for i := 0; i < v.Len(); i++ {
+				if err := setOpenAPIParamValue(out, item, key+"."+strconv.Itoa(i+1), v.Index(i).Interface()); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if param.Type == "Struct" && v.IsValid() && v.Kind() == reflect.Map && v.Type().Key().Kind() == reflect.String {
+			iter := v.MapRange()
+			for iter.Next() {
+				name := iter.Key().String()
+				child := findOpenAPIParameter(param.SubParameters, name)
+				if child == nil {
+					child = param.Value
+				}
+				if child != nil && child.ParamStyle == "" {
+					inherited := *child
+					inherited.ParamStyle = param.ParamStyle
+					child = &inherited
+				}
+				if err := setOpenAPIParamValue(out, child, key+"."+name, iter.Value().Interface()); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 	}
 	return setQueryParam(out, key, value)
 }
@@ -889,10 +947,11 @@ func metadataEndpoint(endpoints map[string]OpenAPIEndpoint, region string, endpo
 		return ""
 	}
 	endpoint := endpoints[region]
+	global := endpoints[""]
 	if strings.EqualFold(endpointType, "vpc") {
-		return firstNonEmptyString(endpoint.VPC, endpoint.Public)
+		return firstNonEmptyString(endpoint.VPC, endpoint.Public, global.VPC, global.Public)
 	}
-	return endpoint.Public
+	return firstNonEmptyString(endpoint.Public, global.Public)
 }
 
 func fallbackGlobalEndpoint(productCode string) string {

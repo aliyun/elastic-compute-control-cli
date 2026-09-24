@@ -1,0 +1,2120 @@
+{
+  "format_version": 1,
+  "repository": "aliyun/aliyun-openapi-meta",
+  "revision": "3c5b9bdc7d9f06fe06b5793713845820121f1f17",
+  "archive_sha256": "97ca083e16f5278a0c3756868b2c0771d0c67c0f062fa556f06ad6b1edb11fcd",
+  "snapshot_sha256": "3a6b2f447c6ff7699a2cd7de1f5249f5946c5ed169074276b8fc7b68dae25f4b",
+  "products": 351,
+  "operations": 26231,
+  "files": 26584,
+  "uncompressed_bytes": 176644613,
+  "snapshot_bytes": 60692014,
+  "default_versions": [
+    {
+      "code": "acc",
+      "canonical_code": "acc",
+      "version": "2024-04-02",
+      "operations": 4
+    },
+    {
+      "code": "AccessAnalyzer",
+      "canonical_code": "accessanalyzer",
+      "version": "2024-02-01",
+      "operations": 20
+    },
+    {
+      "code": "AccountCenter",
+      "canonical_code": "accountcenter",
+      "version": "2024-12-09",
+      "operations": 12
+    },
+    {
+      "code": "Actiontrail",
+      "canonical_code": "actiontrail",
+      "version": "2020-07-06",
+      "operations": 48
+    },
+    {
+      "code": "Ada",
+      "canonical_code": "ada",
+      "version": "2026-07-01",
+      "operations": 12
+    },
+    {
+      "code": "adb",
+      "canonical_code": "adb",
+      "version": "2019-03-15",
+      "operations": 144
+    },
+    {
+      "code": "ADBAI",
+      "canonical_code": "adbai",
+      "version": "2025-08-12",
+      "operations": 15
+    },
+    {
+      "code": "adcp",
+      "canonical_code": "adcp",
+      "version": "2022-01-01",
+      "operations": 23
+    },
+    {
+      "code": "address-purification",
+      "canonical_code": "address-purification",
+      "version": "2019-11-18",
+      "operations": 8
+    },
+    {
+      "code": "Advisor",
+      "canonical_code": "advisor",
+      "version": "2018-01-20",
+      "operations": 16
+    },
+    {
+      "code": "Agency",
+      "canonical_code": "agency",
+      "version": "2025-02-27",
+      "operations": 11
+    },
+    {
+      "code": "AgentCore",
+      "canonical_code": "agentcore",
+      "version": "2026-08-04",
+      "operations": 121
+    },
+    {
+      "code": "AgentExplorer",
+      "canonical_code": "agentexplorer",
+      "version": "2026-03-17",
+      "operations": 3
+    },
+    {
+      "code": "AgenticBAS",
+      "canonical_code": "agenticbas",
+      "version": "2026-06-30",
+      "operations": 4
+    },
+    {
+      "code": "AgentLoop",
+      "canonical_code": "agentloop",
+      "version": "2026-05-20",
+      "operations": 66
+    },
+    {
+      "code": "AgentRetailVision",
+      "canonical_code": "agentretailvision",
+      "version": "2026-05-06",
+      "operations": 6
+    },
+    {
+      "code": "AgentRun",
+      "canonical_code": "agentrun",
+      "version": "2025-09-10",
+      "operations": 100
+    },
+    {
+      "code": "AgentTeams",
+      "canonical_code": "agentteams",
+      "version": "2026-06-05",
+      "operations": 73
+    },
+    {
+      "code": "ahas-openapi",
+      "canonical_code": "ahas-openapi",
+      "version": "2019-09-01",
+      "operations": 42
+    },
+    {
+      "code": "aiccs",
+      "canonical_code": "aiccs",
+      "version": "2023-05-16",
+      "operations": 31
+    },
+    {
+      "code": "AIDeepSign",
+      "canonical_code": "aideepsign",
+      "version": "2026-05-11",
+      "operations": 20
+    },
+    {
+      "code": "Aidge",
+      "canonical_code": "aidge",
+      "version": "2026-04-28",
+      "operations": 32
+    },
+    {
+      "code": "AIMath",
+      "canonical_code": "aimath",
+      "version": "2024-11-14",
+      "operations": 8
+    },
+    {
+      "code": "AiMiaoBi",
+      "canonical_code": "aimiaobi",
+      "version": "2023-08-01",
+      "operations": 219
+    },
+    {
+      "code": "AIPodcast",
+      "canonical_code": "aipodcast",
+      "version": "2025-02-28",
+      "operations": 2
+    },
+    {
+      "code": "Airec",
+      "canonical_code": "airec",
+      "version": "2020-11-26",
+      "operations": 144
+    },
+    {
+      "code": "AIRegistry",
+      "canonical_code": "airegistry",
+      "version": "2026-03-17",
+      "operations": 32
+    },
+    {
+      "code": "airticketOpen",
+      "canonical_code": "airticketopen",
+      "version": "2023-01-17",
+      "operations": 66
+    },
+    {
+      "code": "AISC",
+      "canonical_code": "aisc",
+      "version": "2026-01-01",
+      "operations": 15
+    },
+    {
+      "code": "AiSearchEngine",
+      "canonical_code": "aisearchengine",
+      "version": "2026-04-17",
+      "operations": 4
+    },
+    {
+      "code": "AIWorkSpace",
+      "canonical_code": "aiworkspace",
+      "version": "2021-02-04",
+      "operations": 127
+    },
+    {
+      "code": "Alb",
+      "canonical_code": "alb",
+      "version": "2020-06-16",
+      "operations": 85
+    },
+    {
+      "code": "Alidns",
+      "canonical_code": "alidns",
+      "version": "2015-01-09",
+      "operations": 261
+    },
+    {
+      "code": "alikafka",
+      "canonical_code": "alikafka",
+      "version": "2019-09-16",
+      "operations": 54
+    },
+    {
+      "code": "AlikafkaKopilot",
+      "canonical_code": "alikafkakopilot",
+      "version": "2026-04-14",
+      "operations": 5
+    },
+    {
+      "code": "AlikafkaStreaming",
+      "canonical_code": "alikafkastreaming",
+      "version": "2026-02-02",
+      "operations": 18
+    },
+    {
+      "code": "alimt",
+      "canonical_code": "alimt",
+      "version": "2018-10-12",
+      "operations": 23
+    },
+    {
+      "code": "amqp-open",
+      "canonical_code": "amqp-open",
+      "version": "2019-12-12",
+      "operations": 39
+    },
+    {
+      "code": "antiddos-public",
+      "canonical_code": "antiddos-public",
+      "version": "2017-05-18",
+      "operations": 13
+    },
+    {
+      "code": "AnyTrans",
+      "canonical_code": "anytrans",
+      "version": "2025-07-07",
+      "operations": 12
+    },
+    {
+      "code": "apds",
+      "canonical_code": "apds",
+      "version": "2022-03-31",
+      "operations": 33
+    },
+    {
+      "code": "APIG",
+      "canonical_code": "apig",
+      "version": "2024-03-27",
+      "operations": 185
+    },
+    {
+      "code": "appflow",
+      "canonical_code": "appflow",
+      "version": "2023-09-04",
+      "operations": 16
+    },
+    {
+      "code": "appstream-center",
+      "canonical_code": "appstream-center",
+      "version": "2021-09-03",
+      "operations": 9
+    },
+    {
+      "code": "ARMS",
+      "canonical_code": "arms",
+      "version": "2019-08-08",
+      "operations": 255
+    },
+    {
+      "code": "avatar",
+      "canonical_code": "avatar",
+      "version": "2022-01-30",
+      "operations": 30
+    },
+    {
+      "code": "Baas",
+      "canonical_code": "baas",
+      "version": "2018-12-21",
+      "operations": 124
+    },
+    {
+      "code": "bailian",
+      "canonical_code": "bailian",
+      "version": "2023-12-29",
+      "operations": 55
+    },
+    {
+      "code": "BailianVoiceBot",
+      "canonical_code": "bailianvoicebot",
+      "version": "2025-01-01",
+      "operations": 36
+    },
+    {
+      "code": "BDRC",
+      "canonical_code": "bdrc",
+      "version": "2023-08-08",
+      "operations": 35
+    },
+    {
+      "code": "BPStudio",
+      "canonical_code": "bpstudio",
+      "version": "2021-09-31",
+      "operations": 38
+    },
+    {
+      "code": "brain-industrial",
+      "canonical_code": "brain-industrial",
+      "version": "2020-09-20",
+      "operations": 13
+    },
+    {
+      "code": "BssOpenApi",
+      "canonical_code": "bssopenapi",
+      "version": "2017-12-14",
+      "operations": 94
+    },
+    {
+      "code": "btripOpen",
+      "canonical_code": "btripopen",
+      "version": "2022-05-20",
+      "operations": 232
+    },
+    {
+      "code": "cams",
+      "canonical_code": "cams",
+      "version": "2020-06-06",
+      "operations": 173
+    },
+    {
+      "code": "captcha",
+      "canonical_code": "captcha",
+      "version": "2023-03-05",
+      "operations": 2
+    },
+    {
+      "code": "CarbonFootprint",
+      "canonical_code": "carbonfootprint",
+      "version": "2023-07-11",
+      "operations": 5
+    },
+    {
+      "code": "cas",
+      "canonical_code": "cas",
+      "version": "2020-04-07",
+      "operations": 87
+    },
+    {
+      "code": "Cassandra",
+      "canonical_code": "cassandra",
+      "version": "2019-01-01",
+      "operations": 53
+    },
+    {
+      "code": "Cbn",
+      "canonical_code": "cbn",
+      "version": "2017-09-12",
+      "operations": 150
+    },
+    {
+      "code": "CC5G",
+      "canonical_code": "cc5g",
+      "version": "2022-03-14",
+      "operations": 63
+    },
+    {
+      "code": "CCC",
+      "canonical_code": "ccc",
+      "version": "2017-07-05",
+      "operations": 104
+    },
+    {
+      "code": "cddc",
+      "canonical_code": "cddc",
+      "version": "2020-03-20",
+      "operations": 35
+    },
+    {
+      "code": "Cdn",
+      "canonical_code": "cdn",
+      "version": "2018-05-10",
+      "operations": 171
+    },
+    {
+      "code": "CGCS",
+      "canonical_code": "cgcs",
+      "version": "2021-11-11",
+      "operations": 31
+    },
+    {
+      "code": "Chatbot",
+      "canonical_code": "chatbot",
+      "version": "2017-10-11",
+      "operations": 71
+    },
+    {
+      "code": "clickhouse",
+      "canonical_code": "clickhouse",
+      "version": "2023-05-22",
+      "operations": 70
+    },
+    {
+      "code": "cloud-siem",
+      "canonical_code": "cloud-siem",
+      "version": "2022-06-16",
+      "operations": 90
+    },
+    {
+      "code": "CloudAPI",
+      "canonical_code": "cloudapi",
+      "version": "2016-07-14",
+      "operations": 219
+    },
+    {
+      "code": "Cloudauth",
+      "canonical_code": "cloudauth",
+      "version": "2019-03-07",
+      "operations": 101
+    },
+    {
+      "code": "Cloudauth-intl",
+      "canonical_code": "cloudauth-intl",
+      "version": "2022-08-09",
+      "operations": 50
+    },
+    {
+      "code": "cloudcontrol",
+      "canonical_code": "cloudcontrol",
+      "version": "2022-08-30",
+      "operations": 14
+    },
+    {
+      "code": "cloudesl",
+      "canonical_code": "cloudesl",
+      "version": "2020-02-01",
+      "operations": 36
+    },
+    {
+      "code": "Cloudfw",
+      "canonical_code": "cloudfw",
+      "version": "2017-12-07",
+      "operations": 281
+    },
+    {
+      "code": "cloudphone",
+      "canonical_code": "cloudphone",
+      "version": "2020-12-30",
+      "operations": 35
+    },
+    {
+      "code": "cloudsso",
+      "canonical_code": "cloudsso",
+      "version": "2021-05-15",
+      "operations": 87
+    },
+    {
+      "code": "Cms",
+      "canonical_code": "cms",
+      "version": "2019-01-01",
+      "operations": 163
+    },
+    {
+      "code": "cms-export",
+      "canonical_code": "cms-export",
+      "version": "2021-11-01",
+      "operations": 2
+    },
+    {
+      "code": "CodeSec",
+      "canonical_code": "codesec",
+      "version": "2026-04-01",
+      "operations": 9
+    },
+    {
+      "code": "companyreg",
+      "canonical_code": "companyreg",
+      "version": "2026-04-23",
+      "operations": 1
+    },
+    {
+      "code": "composer",
+      "canonical_code": "composer",
+      "version": "2018-12-12",
+      "operations": 17
+    },
+    {
+      "code": "ComputeNest",
+      "canonical_code": "computenest",
+      "version": "2021-06-01",
+      "operations": 65
+    },
+    {
+      "code": "ComputeNestSupplier",
+      "canonical_code": "computenestsupplier",
+      "version": "2021-05-21",
+      "operations": 84
+    },
+    {
+      "code": "Config",
+      "canonical_code": "config",
+      "version": "2019-01-08",
+      "operations": 25
+    },
+    {
+      "code": "ContactCenterAI",
+      "canonical_code": "contactcenterai",
+      "version": "2024-06-03",
+      "operations": 13
+    },
+    {
+      "code": "cr",
+      "canonical_code": "cr",
+      "version": "2018-12-01",
+      "operations": 119
+    },
+    {
+      "code": "CS",
+      "canonical_code": "cs",
+      "version": "2015-12-15",
+      "operations": 146
+    },
+    {
+      "code": "csas",
+      "canonical_code": "csas",
+      "version": "2023-01-20",
+      "operations": 219
+    },
+    {
+      "code": "DAS",
+      "canonical_code": "das",
+      "version": "2020-01-16",
+      "operations": 115
+    },
+    {
+      "code": "DataAnalysisGBI",
+      "canonical_code": "dataanalysisgbi",
+      "version": "2024-08-23",
+      "operations": 29
+    },
+    {
+      "code": "datahub",
+      "canonical_code": "datahub",
+      "version": "2024-06-20",
+      "operations": 22
+    },
+    {
+      "code": "DataLake",
+      "canonical_code": "datalake",
+      "version": "2020-07-10",
+      "operations": 94
+    },
+    {
+      "code": "dataphin-public",
+      "canonical_code": "dataphin-public",
+      "version": "2023-06-30",
+      "operations": 365
+    },
+    {
+      "code": "dataworks-public",
+      "canonical_code": "dataworks-public",
+      "version": "2024-05-18",
+      "operations": 394
+    },
+    {
+      "code": "DBFS",
+      "canonical_code": "dbfs",
+      "version": "2020-04-18",
+      "operations": 35
+    },
+    {
+      "code": "Dbs",
+      "canonical_code": "dbs",
+      "version": "2019-03-06",
+      "operations": 36
+    },
+    {
+      "code": "dcdn",
+      "canonical_code": "dcdn",
+      "version": "2018-01-15",
+      "operations": 226
+    },
+    {
+      "code": "ddosbgp",
+      "canonical_code": "ddosbgp",
+      "version": "2018-07-20",
+      "operations": 40
+    },
+    {
+      "code": "ddoscoo",
+      "canonical_code": "ddoscoo",
+      "version": "2020-01-01",
+      "operations": 187
+    },
+    {
+      "code": "DdosDiversion",
+      "canonical_code": "ddosdiversion",
+      "version": "2023-07-01",
+      "operations": 3
+    },
+    {
+      "code": "Dds",
+      "canonical_code": "dds",
+      "version": "2015-12-01",
+      "operations": 135
+    },
+    {
+      "code": "devops",
+      "canonical_code": "devops",
+      "version": "2021-06-25",
+      "operations": 241
+    },
+    {
+      "code": "Devs",
+      "canonical_code": "devs",
+      "version": "2023-07-14",
+      "operations": 46
+    },
+    {
+      "code": "DFS",
+      "canonical_code": "dfs",
+      "version": "2018-06-20",
+      "operations": 34
+    },
+    {
+      "code": "DianJin",
+      "canonical_code": "dianjin",
+      "version": "2024-06-28",
+      "operations": 50
+    },
+    {
+      "code": "DlfNext",
+      "canonical_code": "dlfnext",
+      "version": "2025-03-10",
+      "operations": 80
+    },
+    {
+      "code": "Dm",
+      "canonical_code": "dm",
+      "version": "2015-11-23",
+      "operations": 72
+    },
+    {
+      "code": "Dms",
+      "canonical_code": "dms",
+      "version": "2025-04-14",
+      "operations": 113
+    },
+    {
+      "code": "dms-dg",
+      "canonical_code": "dms-dg",
+      "version": "2023-09-14",
+      "operations": 20
+    },
+    {
+      "code": "dms-enterprise",
+      "canonical_code": "dms-enterprise",
+      "version": "2018-11-01",
+      "operations": 338
+    },
+    {
+      "code": "documentAutoml",
+      "canonical_code": "documentautoml",
+      "version": "2022-12-29",
+      "operations": 6
+    },
+    {
+      "code": "DocumentParseService",
+      "canonical_code": "documentparseservice",
+      "version": "2026-04-14",
+      "operations": 1
+    },
+    {
+      "code": "Domain",
+      "canonical_code": "domain",
+      "version": "2018-01-29",
+      "operations": 127
+    },
+    {
+      "code": "Drds",
+      "canonical_code": "drds",
+      "version": "2019-01-23",
+      "operations": 106
+    },
+    {
+      "code": "Dts",
+      "canonical_code": "dts",
+      "version": "2020-01-01",
+      "operations": 124
+    },
+    {
+      "code": "DtsAI",
+      "canonical_code": "dtsai",
+      "version": "2026-04-01",
+      "operations": 6
+    },
+    {
+      "code": "Dyplsapi",
+      "canonical_code": "dyplsapi",
+      "version": "2017-05-25",
+      "operations": 60
+    },
+    {
+      "code": "Dypnsapi",
+      "canonical_code": "dypnsapi",
+      "version": "2017-05-25",
+      "operations": 18
+    },
+    {
+      "code": "Dypnsapi-intl",
+      "canonical_code": "dypnsapi-intl",
+      "version": "2017-07-25",
+      "operations": 3
+    },
+    {
+      "code": "Dysmsapi",
+      "canonical_code": "dysmsapi",
+      "version": "2018-05-01",
+      "operations": 6
+    },
+    {
+      "code": "Dytnsapi",
+      "canonical_code": "dytnsapi",
+      "version": "2023-01-01",
+      "operations": 6
+    },
+    {
+      "code": "Dyvmsapi",
+      "canonical_code": "dyvmsapi",
+      "version": "2017-05-25",
+      "operations": 155
+    },
+    {
+      "code": "Dyvmsapi-intl",
+      "canonical_code": "dyvmsapi-intl",
+      "version": "2021-10-15",
+      "operations": 6
+    },
+    {
+      "code": "eais",
+      "canonical_code": "eais",
+      "version": "2019-06-24",
+      "operations": 23
+    },
+    {
+      "code": "eas",
+      "canonical_code": "eas",
+      "version": "2021-07-01",
+      "operations": 119
+    },
+    {
+      "code": "EasyGene",
+      "canonical_code": "easygene",
+      "version": "2021-03-15",
+      "operations": 51
+    },
+    {
+      "code": "ebs",
+      "canonical_code": "ebs",
+      "version": "2021-07-30",
+      "operations": 63
+    },
+    {
+      "code": "ecd",
+      "canonical_code": "ecd",
+      "version": "2023-06-27",
+      "operations": 3
+    },
+    {
+      "code": "Eci",
+      "canonical_code": "eci",
+      "version": "2018-08-08",
+      "operations": 36
+    },
+    {
+      "code": "Ecs",
+      "canonical_code": "ecs",
+      "version": "2014-05-26",
+      "operations": 371
+    },
+    {
+      "code": "ecs-workbench",
+      "canonical_code": "ecs-workbench",
+      "version": "2025-11-11",
+      "operations": 2
+    },
+    {
+      "code": "Edas",
+      "canonical_code": "edas",
+      "version": "2017-08-01",
+      "operations": 160
+    },
+    {
+      "code": "eds-aic",
+      "canonical_code": "eds-aic",
+      "version": "2023-09-30",
+      "operations": 126
+    },
+    {
+      "code": "eds-user",
+      "canonical_code": "eds-user",
+      "version": "2021-06-22",
+      "operations": 1
+    },
+    {
+      "code": "EduInterpreting",
+      "canonical_code": "eduinterpreting",
+      "version": "2024-08-28",
+      "operations": 2
+    },
+    {
+      "code": "EduTutor",
+      "canonical_code": "edututor",
+      "version": "2025-07-07",
+      "operations": 2
+    },
+    {
+      "code": "eflo",
+      "canonical_code": "eflo",
+      "version": "2022-05-30",
+      "operations": 77
+    },
+    {
+      "code": "eflo-cnp",
+      "canonical_code": "eflo-cnp",
+      "version": "2023-08-28",
+      "operations": 26
+    },
+    {
+      "code": "eflo-controller",
+      "canonical_code": "eflo-controller",
+      "version": "2022-12-15",
+      "operations": 66
+    },
+    {
+      "code": "EHPC",
+      "canonical_code": "ehpc",
+      "version": "2018-04-12",
+      "operations": 101
+    },
+    {
+      "code": "EhpcInstant",
+      "canonical_code": "ehpcinstant",
+      "version": "2023-07-01",
+      "operations": 38
+    },
+    {
+      "code": "Eiam",
+      "canonical_code": "eiam",
+      "version": "2021-12-01",
+      "operations": 357
+    },
+    {
+      "code": "Eiam-developerapi",
+      "canonical_code": "eiam-developerapi",
+      "version": "2022-02-25",
+      "operations": 51
+    },
+    {
+      "code": "Eipanycast",
+      "canonical_code": "eipanycast",
+      "version": "2020-03-09",
+      "operations": 15
+    },
+    {
+      "code": "elasticsearch",
+      "canonical_code": "elasticsearch",
+      "version": "2017-06-13",
+      "operations": 206
+    },
+    {
+      "code": "emas-appmonitor",
+      "canonical_code": "emas-appmonitor",
+      "version": "2019-06-11",
+      "operations": 14
+    },
+    {
+      "code": "Emr",
+      "canonical_code": "emr",
+      "version": "2021-03-20",
+      "operations": 76
+    },
+    {
+      "code": "emr-serverless-spark",
+      "canonical_code": "emr-serverless-spark",
+      "version": "2023-08-08",
+      "operations": 86
+    },
+    {
+      "code": "EMRASSISTANT",
+      "canonical_code": "emrassistant",
+      "version": "2025-07-23",
+      "operations": 1
+    },
+    {
+      "code": "EmrStudio",
+      "canonical_code": "emrstudio",
+      "version": "2024-04-30",
+      "operations": 24
+    },
+    {
+      "code": "energyExpertExternal",
+      "canonical_code": "energyexpertexternal",
+      "version": "2022-09-23",
+      "operations": 59
+    },
+    {
+      "code": "Ens",
+      "canonical_code": "ens",
+      "version": "2017-11-10",
+      "operations": 319
+    },
+    {
+      "code": "es-serverless",
+      "canonical_code": "es-serverless",
+      "version": "2023-06-27",
+      "operations": 26
+    },
+    {
+      "code": "ESA",
+      "canonical_code": "esa",
+      "version": "2024-09-10",
+      "operations": 473
+    },
+    {
+      "code": "Ess",
+      "canonical_code": "ess",
+      "version": "2014-08-28",
+      "operations": 89
+    },
+    {
+      "code": "eventbridge",
+      "canonical_code": "eventbridge",
+      "version": "2020-04-01",
+      "operations": 107
+    },
+    {
+      "code": "ExpressConnectRouter",
+      "canonical_code": "expressconnectrouter",
+      "version": "2023-09-01",
+      "operations": 38
+    },
+    {
+      "code": "facebody",
+      "canonical_code": "facebody",
+      "version": "2019-12-30",
+      "operations": 43
+    },
+    {
+      "code": "FaRui",
+      "canonical_code": "farui",
+      "version": "2024-06-28",
+      "operations": 7
+    },
+    {
+      "code": "FC",
+      "canonical_code": "fc",
+      "version": "2023-03-30",
+      "operations": 73
+    },
+    {
+      "code": "FC-Open",
+      "canonical_code": "fc-open",
+      "version": "2021-04-06",
+      "operations": 65
+    },
+    {
+      "code": "FCSandbox",
+      "canonical_code": "fcsandbox",
+      "version": "2026-05-09",
+      "operations": 29
+    },
+    {
+      "code": "fnf",
+      "canonical_code": "fnf",
+      "version": "2019-03-15",
+      "operations": 29
+    },
+    {
+      "code": "foasconsole",
+      "canonical_code": "foasconsole",
+      "version": "2021-10-28",
+      "operations": 31
+    },
+    {
+      "code": "Ga",
+      "canonical_code": "ga",
+      "version": "2019-11-20",
+      "operations": 160
+    },
+    {
+      "code": "GEMP",
+      "canonical_code": "gemp",
+      "version": "2021-04-13",
+      "operations": 147
+    },
+    {
+      "code": "goodstech",
+      "canonical_code": "goodstech",
+      "version": "2019-12-30",
+      "operations": 1
+    },
+    {
+      "code": "governance",
+      "canonical_code": "governance",
+      "version": "2021-01-20",
+      "operations": 16
+    },
+    {
+      "code": "gpdb",
+      "canonical_code": "gpdb",
+      "version": "2016-05-03",
+      "operations": 293
+    },
+    {
+      "code": "grace",
+      "canonical_code": "grace",
+      "version": "2022-06-06",
+      "operations": 4
+    },
+    {
+      "code": "Green",
+      "canonical_code": "green",
+      "version": "2022-03-02",
+      "operations": 30
+    },
+    {
+      "code": "Gwlb",
+      "canonical_code": "gwlb",
+      "version": "2024-04-15",
+      "operations": 25
+    },
+    {
+      "code": "gws",
+      "canonical_code": "gws",
+      "version": "2019-06-18",
+      "operations": 28
+    },
+    {
+      "code": "HBase",
+      "canonical_code": "hbase",
+      "version": "2019-01-01",
+      "operations": 103
+    },
+    {
+      "code": "hbr",
+      "canonical_code": "hbr",
+      "version": "2017-09-08",
+      "operations": 97
+    },
+    {
+      "code": "hcs-mgw",
+      "canonical_code": "hcs-mgw",
+      "version": "2024-06-26",
+      "operations": 25
+    },
+    {
+      "code": "hdr",
+      "canonical_code": "hdr",
+      "version": "2017-09-25",
+      "operations": 32
+    },
+    {
+      "code": "hitsdb",
+      "canonical_code": "hitsdb",
+      "version": "2020-06-15",
+      "operations": 25
+    },
+    {
+      "code": "Hologram",
+      "canonical_code": "hologram",
+      "version": "2022-06-01",
+      "operations": 92
+    },
+    {
+      "code": "hsm",
+      "canonical_code": "hsm",
+      "version": "2023-11-13",
+      "operations": 43
+    },
+    {
+      "code": "Httpdns",
+      "canonical_code": "httpdns",
+      "version": "2016-02-01",
+      "operations": 8
+    },
+    {
+      "code": "IaCService",
+      "canonical_code": "iacservice",
+      "version": "2021-08-06",
+      "operations": 102
+    },
+    {
+      "code": "ICE",
+      "canonical_code": "ice",
+      "version": "2020-11-09",
+      "operations": 400
+    },
+    {
+      "code": "idaas-doraemon",
+      "canonical_code": "idaas-doraemon",
+      "version": "2021-05-20",
+      "operations": 16
+    },
+    {
+      "code": "idrsservice",
+      "canonical_code": "idrsservice",
+      "version": "2020-06-30",
+      "operations": 64
+    },
+    {
+      "code": "imageaudit",
+      "canonical_code": "imageaudit",
+      "version": "2019-12-30",
+      "operations": 2
+    },
+    {
+      "code": "imageenhan",
+      "canonical_code": "imageenhan",
+      "version": "2019-09-30",
+      "operations": 17
+    },
+    {
+      "code": "imageprocess",
+      "canonical_code": "imageprocess",
+      "version": "2020-03-20",
+      "operations": 24
+    },
+    {
+      "code": "imagerecog",
+      "canonical_code": "imagerecog",
+      "version": "2019-09-30",
+      "operations": 9
+    },
+    {
+      "code": "ImageSearch",
+      "canonical_code": "imagesearch",
+      "version": "2021-05-01",
+      "operations": 3
+    },
+    {
+      "code": "imageseg",
+      "canonical_code": "imageseg",
+      "version": "2019-12-30",
+      "operations": 15
+    },
+    {
+      "code": "imgsearch",
+      "canonical_code": "imgsearch",
+      "version": "2020-03-20",
+      "operations": 7
+    },
+    {
+      "code": "imm",
+      "canonical_code": "imm",
+      "version": "2020-09-30",
+      "operations": 104
+    },
+    {
+      "code": "imp",
+      "canonical_code": "imp",
+      "version": "2021-06-30",
+      "operations": 57
+    },
+    {
+      "code": "Ims",
+      "canonical_code": "ims",
+      "version": "2019-08-15",
+      "operations": 105
+    },
+    {
+      "code": "Iot",
+      "canonical_code": "iot",
+      "version": "2018-01-20",
+      "operations": 423
+    },
+    {
+      "code": "IoTCC",
+      "canonical_code": "iotcc",
+      "version": "2021-05-13",
+      "operations": 76
+    },
+    {
+      "code": "iovcc",
+      "canonical_code": "iovcc",
+      "version": "2018-05-01",
+      "operations": 162
+    },
+    {
+      "code": "IQS",
+      "canonical_code": "iqs",
+      "version": "2024-11-11",
+      "operations": 14
+    },
+    {
+      "code": "ivpd",
+      "canonical_code": "ivpd",
+      "version": "2019-06-25",
+      "operations": 9
+    },
+    {
+      "code": "Kms",
+      "canonical_code": "kms",
+      "version": "2016-01-20",
+      "operations": 91
+    },
+    {
+      "code": "Kvcachestore",
+      "canonical_code": "kvcachestore",
+      "version": "2026-06-17",
+      "operations": 12
+    },
+    {
+      "code": "LHM",
+      "canonical_code": "lhm",
+      "version": "2026-04-22",
+      "operations": 1
+    },
+    {
+      "code": "LingMou",
+      "canonical_code": "lingmou",
+      "version": "2025-05-27",
+      "operations": 24
+    },
+    {
+      "code": "Linkcard",
+      "canonical_code": "linkcard",
+      "version": "2021-05-20",
+      "operations": 29
+    },
+    {
+      "code": "linkedmall",
+      "canonical_code": "linkedmall",
+      "version": "2023-09-30",
+      "operations": 25
+    },
+    {
+      "code": "Linkvisual",
+      "canonical_code": "linkvisual",
+      "version": "2018-01-20",
+      "operations": 122
+    },
+    {
+      "code": "LinkWAN",
+      "canonical_code": "linkwan",
+      "version": "2019-03-01",
+      "operations": 79
+    },
+    {
+      "code": "live",
+      "canonical_code": "live",
+      "version": "2016-11-01",
+      "operations": 423
+    },
+    {
+      "code": "ltl",
+      "canonical_code": "ltl",
+      "version": "2019-05-10",
+      "operations": 48
+    },
+    {
+      "code": "MaaS",
+      "canonical_code": "maas",
+      "version": "2026-03-18",
+      "operations": 6
+    },
+    {
+      "code": "MaasAISearchProxy",
+      "canonical_code": "maasaisearchproxy",
+      "version": "2026-04-24",
+      "operations": 3
+    },
+    {
+      "code": "MaasQIService",
+      "canonical_code": "maasqiservice",
+      "version": "2026-08-31",
+      "operations": 3
+    },
+    {
+      "code": "Market",
+      "canonical_code": "market",
+      "version": "2015-11-01",
+      "operations": 32
+    },
+    {
+      "code": "MaxCompute",
+      "canonical_code": "maxcompute",
+      "version": "2022-01-04",
+      "operations": 114
+    },
+    {
+      "code": "metaspace",
+      "canonical_code": "metaspace",
+      "version": "2022-03-07",
+      "operations": 3
+    },
+    {
+      "code": "Mhub",
+      "canonical_code": "mhub",
+      "version": "2017-08-25",
+      "operations": 13
+    },
+    {
+      "code": "milvus",
+      "canonical_code": "milvus",
+      "version": "2023-10-12",
+      "operations": 20
+    },
+    {
+      "code": "MilvusKnowledgeBase",
+      "canonical_code": "milvusknowledgebase",
+      "version": "2026-06-04",
+      "operations": 3
+    },
+    {
+      "code": "Mns-open",
+      "canonical_code": "mns-open",
+      "version": "2022-01-19",
+      "operations": 26
+    },
+    {
+      "code": "ModelStudio",
+      "canonical_code": "modelstudio",
+      "version": "2026-02-10",
+      "operations": 38
+    },
+    {
+      "code": "moguan-sdk",
+      "canonical_code": "moguan-sdk",
+      "version": "2021-04-15",
+      "operations": 1
+    },
+    {
+      "code": "MPServerless",
+      "canonical_code": "mpserverless",
+      "version": "2019-06-15",
+      "operations": 83
+    },
+    {
+      "code": "mse",
+      "canonical_code": "mse",
+      "version": "2019-05-31",
+      "operations": 255
+    },
+    {
+      "code": "mssp",
+      "canonical_code": "mssp",
+      "version": "2016-12-28",
+      "operations": 29
+    },
+    {
+      "code": "Mts",
+      "canonical_code": "mts",
+      "version": "2014-06-18",
+      "operations": 97
+    },
+    {
+      "code": "MultimodalDialog",
+      "canonical_code": "multimodaldialog",
+      "version": "2025-09-03",
+      "operations": 1
+    },
+    {
+      "code": "NAS",
+      "canonical_code": "nas",
+      "version": "2017-06-26",
+      "operations": 140
+    },
+    {
+      "code": "ndr",
+      "canonical_code": "ndr",
+      "version": "2024-01-24",
+      "operations": 55
+    },
+    {
+      "code": "nis",
+      "canonical_code": "nis",
+      "version": "2021-12-16",
+      "operations": 28
+    },
+    {
+      "code": "Nlb",
+      "canonical_code": "nlb",
+      "version": "2022-04-30",
+      "operations": 50
+    },
+    {
+      "code": "nlp-automl",
+      "canonical_code": "nlp-automl",
+      "version": "2019-11-11",
+      "operations": 4
+    },
+    {
+      "code": "nls-cloud-meta",
+      "canonical_code": "nls-cloud-meta",
+      "version": "2019-02-28",
+      "operations": 1
+    },
+    {
+      "code": "nls-filetrans",
+      "canonical_code": "nls-filetrans",
+      "version": "2019-08-23",
+      "operations": 2
+    },
+    {
+      "code": "Notifications",
+      "canonical_code": "notifications",
+      "version": "2024-12-25",
+      "operations": 30
+    },
+    {
+      "code": "objectdet",
+      "canonical_code": "objectdet",
+      "version": "2019-12-30",
+      "operations": 7
+    },
+    {
+      "code": "OceanBasePro",
+      "canonical_code": "oceanbasepro",
+      "version": "2019-09-01",
+      "operations": 141
+    },
+    {
+      "code": "ocr",
+      "canonical_code": "ocr",
+      "version": "2019-12-30",
+      "operations": 17
+    },
+    {
+      "code": "ocr-api",
+      "canonical_code": "ocr-api",
+      "version": "2021-07-07",
+      "operations": 75
+    },
+    {
+      "code": "Ons",
+      "canonical_code": "ons",
+      "version": "2019-02-14",
+      "operations": 40
+    },
+    {
+      "code": "OnsMqtt",
+      "canonical_code": "onsmqtt",
+      "version": "2020-04-20",
+      "operations": 52
+    },
+    {
+      "code": "oos",
+      "canonical_code": "oos",
+      "version": "2019-06-01",
+      "operations": 105
+    },
+    {
+      "code": "openanalytics-open",
+      "canonical_code": "openanalytics-open",
+      "version": "2020-09-28",
+      "operations": 6
+    },
+    {
+      "code": "OpenAPIExplorer",
+      "canonical_code": "openapiexplorer",
+      "version": "2024-11-30",
+      "operations": 24
+    },
+    {
+      "code": "OpenITag",
+      "canonical_code": "openitag",
+      "version": "2022-06-16",
+      "operations": 38
+    },
+    {
+      "code": "OpenSearch",
+      "canonical_code": "opensearch",
+      "version": "2017-12-25",
+      "operations": 136
+    },
+    {
+      "code": "opt",
+      "canonical_code": "opt",
+      "version": "2021-07-30",
+      "operations": 3
+    },
+    {
+      "code": "OssAdmin",
+      "canonical_code": "ossadmin",
+      "version": "2019-04-22",
+      "operations": 1
+    },
+    {
+      "code": "OssAgent",
+      "canonical_code": "ossagent",
+      "version": "2026-06-22",
+      "operations": 4
+    },
+    {
+      "code": "OssSddp",
+      "canonical_code": "osssddp",
+      "version": "2024-02-22",
+      "operations": 2
+    },
+    {
+      "code": "OutboundBot",
+      "canonical_code": "outboundbot",
+      "version": "2019-12-26",
+      "operations": 165
+    },
+    {
+      "code": "pai-dlc",
+      "canonical_code": "pai-dlc",
+      "version": "2020-12-03",
+      "operations": 43
+    },
+    {
+      "code": "pai-dsw",
+      "canonical_code": "pai-dsw",
+      "version": "2022-01-01",
+      "operations": 45
+    },
+    {
+      "code": "paiAutoML",
+      "canonical_code": "paiautoml",
+      "version": "2022-08-28",
+      "operations": 18
+    },
+    {
+      "code": "PAICopilot",
+      "canonical_code": "paicopilot",
+      "version": "2025-07-31",
+      "operations": 9
+    },
+    {
+      "code": "PAIElasticDatasetAccelerator",
+      "canonical_code": "paielasticdatasetaccelerator",
+      "version": "2022-08-01",
+      "operations": 27
+    },
+    {
+      "code": "PaiFeatureStore",
+      "canonical_code": "paifeaturestore",
+      "version": "2023-06-21",
+      "operations": 61
+    },
+    {
+      "code": "PAIFlow",
+      "canonical_code": "paiflow",
+      "version": "2021-02-02",
+      "operations": 18
+    },
+    {
+      "code": "PAILangStudio",
+      "canonical_code": "pailangstudio",
+      "version": "2024-07-10",
+      "operations": 28
+    },
+    {
+      "code": "PaiLLMTrace",
+      "canonical_code": "paillmtrace",
+      "version": "2024-03-11",
+      "operations": 14
+    },
+    {
+      "code": "PAIModelGallery",
+      "canonical_code": "paimodelgallery",
+      "version": "2025-06-30",
+      "operations": 8
+    },
+    {
+      "code": "PaiPlugin",
+      "canonical_code": "paiplugin",
+      "version": "2022-01-12",
+      "operations": 36
+    },
+    {
+      "code": "PaiRecService",
+      "canonical_code": "pairecservice",
+      "version": "2022-12-13",
+      "operations": 167
+    },
+    {
+      "code": "PaiStudio",
+      "canonical_code": "paistudio",
+      "version": "2022-01-12",
+      "operations": 58
+    },
+    {
+      "code": "Pcdn",
+      "canonical_code": "pcdn",
+      "version": "2017-04-11",
+      "operations": 35
+    },
+    {
+      "code": "pds",
+      "canonical_code": "pds",
+      "version": "2022-03-01",
+      "operations": 111
+    },
+    {
+      "code": "polardb",
+      "canonical_code": "polardb",
+      "version": "2017-08-01",
+      "operations": 476
+    },
+    {
+      "code": "polardbx",
+      "canonical_code": "polardbx",
+      "version": "2020-02-02",
+      "operations": 228
+    },
+    {
+      "code": "Privatelink",
+      "canonical_code": "privatelink",
+      "version": "2020-04-15",
+      "operations": 39
+    },
+    {
+      "code": "PTS",
+      "canonical_code": "pts",
+      "version": "2020-10-20",
+      "operations": 44
+    },
+    {
+      "code": "Push",
+      "canonical_code": "push",
+      "version": "2016-08-01",
+      "operations": 33
+    },
+    {
+      "code": "pvtz",
+      "canonical_code": "pvtz",
+      "version": "2018-01-01",
+      "operations": 57
+    },
+    {
+      "code": "Qualitycheck",
+      "canonical_code": "qualitycheck",
+      "version": "2019-01-15",
+      "operations": 107
+    },
+    {
+      "code": "QuanMiaoLightApp",
+      "canonical_code": "quanmiaolightapp",
+      "version": "2024-08-01",
+      "operations": 44
+    },
+    {
+      "code": "quickbi-public",
+      "canonical_code": "quickbi-public",
+      "version": "2022-01-01",
+      "operations": 139
+    },
+    {
+      "code": "quotas",
+      "canonical_code": "quotas",
+      "version": "2020-05-10",
+      "operations": 27
+    },
+    {
+      "code": "R-kvstore",
+      "canonical_code": "r-kvstore",
+      "version": "2015-01-01",
+      "operations": 165
+    },
+    {
+      "code": "RAI",
+      "canonical_code": "rai",
+      "version": "2024-07-01",
+      "operations": 35
+    },
+    {
+      "code": "Ram",
+      "canonical_code": "ram",
+      "version": "2015-05-01",
+      "operations": 69
+    },
+    {
+      "code": "Rds",
+      "canonical_code": "rds",
+      "version": "2014-08-15",
+      "operations": 368
+    },
+    {
+      "code": "rds-data",
+      "canonical_code": "rds-data",
+      "version": "2022-03-30",
+      "operations": 6
+    },
+    {
+      "code": "RdsAi",
+      "canonical_code": "rdsai",
+      "version": "2025-05-07",
+      "operations": 87
+    },
+    {
+      "code": "RealTranslationAgent",
+      "canonical_code": "realtranslationagent",
+      "version": "2026-06-22",
+      "operations": 7
+    },
+    {
+      "code": "ResourceCenter",
+      "canonical_code": "resourcecenter",
+      "version": "2022-12-01",
+      "operations": 48
+    },
+    {
+      "code": "ResourceDirectoryMaster",
+      "canonical_code": "resourcedirectorymaster",
+      "version": "2022-04-19",
+      "operations": 74
+    },
+    {
+      "code": "ResourceManager",
+      "canonical_code": "resourcemanager",
+      "version": "2020-03-31",
+      "operations": 114
+    },
+    {
+      "code": "ResourceSharing",
+      "canonical_code": "resourcesharing",
+      "version": "2020-01-10",
+      "operations": 25
+    },
+    {
+      "code": "retailadvqa",
+      "canonical_code": "retailadvqa",
+      "version": "2023-04-17",
+      "operations": 9
+    },
+    {
+      "code": "RiskManagement",
+      "canonical_code": "riskmanagement",
+      "version": "2026-04-24",
+      "operations": 36
+    },
+    {
+      "code": "RocketMQ",
+      "canonical_code": "rocketmq",
+      "version": "2022-08-01",
+      "operations": 69
+    },
+    {
+      "code": "ROS",
+      "canonical_code": "ros",
+      "version": "2019-09-10",
+      "operations": 94
+    },
+    {
+      "code": "rtc",
+      "canonical_code": "rtc",
+      "version": "2018-01-11",
+      "operations": 131
+    },
+    {
+      "code": "rtc-white-board",
+      "canonical_code": "rtc-white-board",
+      "version": "2020-12-14",
+      "operations": 17
+    },
+    {
+      "code": "sae",
+      "canonical_code": "sae",
+      "version": "2019-05-06",
+      "operations": 150
+    },
+    {
+      "code": "saf",
+      "canonical_code": "saf",
+      "version": "2019-05-21",
+      "operations": 4
+    },
+    {
+      "code": "safconsole",
+      "canonical_code": "safconsole",
+      "version": "2025-05-21",
+      "operations": 41
+    },
+    {
+      "code": "Sandbox",
+      "canonical_code": "sandbox",
+      "version": "2026-08-20",
+      "operations": 29
+    },
+    {
+      "code": "Sas",
+      "canonical_code": "sas",
+      "version": "2018-12-03",
+      "operations": 962
+    },
+    {
+      "code": "SasClaw",
+      "canonical_code": "sasclaw",
+      "version": "2026-06-26",
+      "operations": 1
+    },
+    {
+      "code": "SasRasp",
+      "canonical_code": "sasrasp",
+      "version": "2024-07-27",
+      "operations": 2
+    },
+    {
+      "code": "schedulerx2",
+      "canonical_code": "schedulerx2",
+      "version": "2019-04-30",
+      "operations": 61
+    },
+    {
+      "code": "SchedulerX3",
+      "canonical_code": "schedulerx3",
+      "version": "2024-06-24",
+      "operations": 97
+    },
+    {
+      "code": "Sddp",
+      "canonical_code": "sddp",
+      "version": "2019-01-03",
+      "operations": 53
+    },
+    {
+      "code": "searchengine",
+      "canonical_code": "searchengine",
+      "version": "2021-10-25",
+      "operations": 114
+    },
+    {
+      "code": "Searchplat",
+      "canonical_code": "searchplat",
+      "version": "2024-04-01",
+      "operations": 55
+    },
+    {
+      "code": "selectdb",
+      "canonical_code": "selectdb",
+      "version": "2023-05-22",
+      "operations": 51
+    },
+    {
+      "code": "servicecatalog",
+      "canonical_code": "servicecatalog",
+      "version": "2021-09-01",
+      "operations": 55
+    },
+    {
+      "code": "servicemesh",
+      "canonical_code": "servicemesh",
+      "version": "2020-01-11",
+      "operations": 96
+    },
+    {
+      "code": "sgw",
+      "canonical_code": "sgw",
+      "version": "2018-05-11",
+      "operations": 68
+    },
+    {
+      "code": "Slb",
+      "canonical_code": "slb",
+      "version": "2014-05-15",
+      "operations": 93
+    },
+    {
+      "code": "Sls",
+      "canonical_code": "sls",
+      "version": "2020-12-30",
+      "operations": 244
+    },
+    {
+      "code": "Smartag",
+      "canonical_code": "smartag",
+      "version": "2018-03-13",
+      "operations": 205
+    },
+    {
+      "code": "smc",
+      "canonical_code": "smc",
+      "version": "2019-06-01",
+      "operations": 24
+    },
+    {
+      "code": "SMQProxy",
+      "canonical_code": "smqproxy",
+      "version": "2026-04-09",
+      "operations": 7
+    },
+    {
+      "code": "SOFA",
+      "canonical_code": "sofa",
+      "version": "2019-08-15",
+      "operations": 57
+    },
+    {
+      "code": "sophonsoar",
+      "canonical_code": "sophonsoar",
+      "version": "2022-07-28",
+      "operations": 55
+    },
+    {
+      "code": "STAROps",
+      "canonical_code": "starops",
+      "version": "2026-04-28",
+      "operations": 34
+    },
+    {
+      "code": "starrocks",
+      "canonical_code": "starrocks",
+      "version": "2022-10-19",
+      "operations": 93
+    },
+    {
+      "code": "Status",
+      "canonical_code": "status",
+      "version": "2020-01-17",
+      "operations": 1
+    },
+    {
+      "code": "Sts",
+      "canonical_code": "sts",
+      "version": "2015-04-01",
+      "operations": 4
+    },
+    {
+      "code": "SuperappNlp",
+      "canonical_code": "superappnlp",
+      "version": "2024-09-30",
+      "operations": 1
+    },
+    {
+      "code": "support-plan",
+      "canonical_code": "support-plan",
+      "version": "2021-07-06",
+      "operations": 6
+    },
+    {
+      "code": "SWAS-OPEN",
+      "canonical_code": "swas-open",
+      "version": "2020-06-01",
+      "operations": 100
+    },
+    {
+      "code": "SysOM",
+      "canonical_code": "sysom",
+      "version": "2023-12-30",
+      "operations": 85
+    },
+    {
+      "code": "Tablestore",
+      "canonical_code": "tablestore",
+      "version": "2020-12-09",
+      "operations": 32
+    },
+    {
+      "code": "Tag",
+      "canonical_code": "tag",
+      "version": "2018-08-28",
+      "operations": 33
+    },
+    {
+      "code": "tdsr",
+      "canonical_code": "tdsr",
+      "version": "2020-01-01",
+      "operations": 68
+    },
+    {
+      "code": "tingwu",
+      "canonical_code": "tingwu",
+      "version": "2023-09-30",
+      "operations": 7
+    },
+    {
+      "code": "TrafficFxOpen",
+      "canonical_code": "trafficfxopen",
+      "version": "2024-08-15",
+      "operations": 3
+    },
+    {
+      "code": "ververica",
+      "canonical_code": "ververica",
+      "version": "2022-07-18",
+      "operations": 104
+    },
+    {
+      "code": "viapi",
+      "canonical_code": "viapi",
+      "version": "2023-01-17",
+      "operations": 3
+    },
+    {
+      "code": "videoenhan",
+      "canonical_code": "videoenhan",
+      "version": "2020-03-20",
+      "operations": 16
+    },
+    {
+      "code": "videorecog",
+      "canonical_code": "videorecog",
+      "version": "2020-03-20",
+      "operations": 6
+    },
+    {
+      "code": "videoseg",
+      "canonical_code": "videoseg",
+      "version": "2020-03-20",
+      "operations": 2
+    },
+    {
+      "code": "vod",
+      "canonical_code": "vod",
+      "version": "2017-03-21",
+      "operations": 188
+    },
+    {
+      "code": "VoiceNavigator",
+      "canonical_code": "voicenavigator",
+      "version": "2018-06-12",
+      "operations": 40
+    },
+    {
+      "code": "Vpc",
+      "canonical_code": "vpc",
+      "version": "2016-04-28",
+      "operations": 403
+    },
+    {
+      "code": "VpcIpam",
+      "canonical_code": "vpcipam",
+      "version": "2023-02-28",
+      "operations": 40
+    },
+    {
+      "code": "VpcPeer",
+      "canonical_code": "vpcpeer",
+      "version": "2022-01-01",
+      "operations": 11
+    },
+    {
+      "code": "vs",
+      "canonical_code": "vs",
+      "version": "2018-12-12",
+      "operations": 213
+    },
+    {
+      "code": "waf-openapi",
+      "canonical_code": "waf-openapi",
+      "version": "2021-10-01",
+      "operations": 241
+    },
+    {
+      "code": "WebsiteBuild",
+      "canonical_code": "websitebuild",
+      "version": "2025-04-29",
+      "operations": 186
+    },
+    {
+      "code": "WinNexo",
+      "canonical_code": "winnexo",
+      "version": "2026-05-12",
+      "operations": 157
+    },
+    {
+      "code": "Workorder",
+      "canonical_code": "workorder",
+      "version": "2021-06-10",
+      "operations": 12
+    },
+    {
+      "code": "wss",
+      "canonical_code": "wss",
+      "version": "2021-12-21",
+      "operations": 11
+    },
+    {
+      "code": "WuyingAI",
+      "canonical_code": "wuyingai",
+      "version": "2026-03-11",
+      "operations": 2
+    },
+    {
+      "code": "wyota",
+      "canonical_code": "wyota",
+      "version": "2021-04-20",
+      "operations": 6
+    },
+    {
+      "code": "xtee",
+      "canonical_code": "xtee",
+      "version": "2022-05-13",
+      "operations": 7
+    },
+    {
+      "code": "xtrace",
+      "canonical_code": "xtrace",
+      "version": "2019-08-08",
+      "operations": 10
+    },
+    {
+      "code": "Yike",
+      "canonical_code": "yike",
+      "version": "2026-03-19",
+      "operations": 50
+    },
+    {
+      "code": "Yundun-bastionhost",
+      "canonical_code": "yundun-bastionhost",
+      "version": "2019-12-09",
+      "operations": 193
+    }
+  ]
+}

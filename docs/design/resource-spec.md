@@ -754,10 +754,38 @@ loader 必须校验：
 
 ## 18. OpenAPI drift 处理流程
 
-`.github/workflows/api-sync.yml` 只负责在隔离 runner 中刷新
-`aliyun-openapi-meta`、检测 drift，并维护一个有界的 GitHub issue。它不会修改
-仓库、刷新 baseline、创建分支或 PR，也不会获得云凭证。完整 `drift.json`、
-dry-run patch 和同步计划作为 workflow artifact 保存；issue 只展示前 50 项。
+OpenAPI 元数据来自固定完整 40 位 commit SHA 的内置压缩快照，保留全产品的默认
+API 版本，而不是仅收录当前 resource specs 使用的产品。
+`internal/openapimeta/manifest.json` 的 `repository` 固定为
+`aliyun/aliyun-openapi-meta`，`revision` 是该快照的完整 SHA；版本不再来自 Go module。
+运行时、drift 检测和 `make lint` 都离线读取内置快照，不会每次探测或下载最新元数据。
+
+`.github/workflows/api-sync.yml` 是 report-only：在隔离 runner 中对固定快照检测
+drift，并维护一个有界的 GitHub issue。它不会修改仓库、刷新快照或 baseline、创建
+分支或 PR，也不会获得云凭证。完整 `drift.json`、dry-run patch 和同步计划作为
+workflow artifact 保存；issue 只展示前 50 项。工作流通过
+`gh api repos/aliyun/aliyun-openapi-meta/commits/master --jq .sha` 获取上游完整 SHA，
+与 manifest revision 比较；不一致仅产生非 fatal staleness notice，上游不可达或返回
+无效 SHA 时仅告警，不阻止固定快照的 drift 检测。SHA 相同也不代表直接检测了上游内容。
+
+更新快照必须由维护者显式执行：先选定并记录完整 SHA，再通过 `gh api` 下载该 SHA
+对应的 tarball，不能下载浮动 `master` tarball。以下命令先解析一次 master，再固定
+下载；复现已接受的快照时，将 `revision` 设为 manifest 中记录的 SHA：
+
+```bash
+set -euo pipefail
+revision=$(gh api repos/aliyun/aliyun-openapi-meta/commits/master --jq .sha)
+[[ "$revision" =~ ^[0-9a-f]{40}$ ]] || exit 1
+archive="${TMPDIR:-/tmp}/aliyun-openapi-meta-${revision}.tar.gz"
+gh api "repos/aliyun/aliyun-openapi-meta/tarball/${revision}" > "$archive"
+make metadata-sync METADATA_ARCHIVE="$archive" METADATA_REVISION="$revision"
+```
+
+`metadata-sync` 要求同时提供 `METADATA_ARCHIVE` 和 `METADATA_REVISION`，只执行
+`go run ./cmd/openapimeta-sync -archive <downloaded.tar.gz> -revision <40hex> -out internal/openapimeta`，
+不自动下载或刷新 baseline，也不是 `make lint` 的依赖。审阅生成的 manifest 和压缩
+快照，保留旧 baseline，先 triage 并解决 drift，再接受新 baseline；不能用刷新 baseline
+掩盖快照更新造成的差异。
 
 维护者在独立 worktree 中处理 drift：
 

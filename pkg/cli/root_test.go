@@ -1520,25 +1520,57 @@ func TestCallListProductsIncludesMetadata(t *testing.T) {
 	}
 }
 
-func TestCallListProductsOmitsProductsWithoutCallableAPIs(t *testing.T) {
+func TestAPIProductHasCallableOperations(t *testing.T) {
+	for name, wantDeprecated := range map[string]bool{"AddTags": true, "DescribeInstances": false} {
+		summary, ok := aliyun.OpenAPIOperationSummaryFor("en", "ecs", name)
+		if !ok || summary.Deprecated != wantDeprecated {
+			t.Fatalf("invalid operation fixture %s: %#v, found=%v", name, summary, ok)
+		}
+	}
+	for _, tt := range []struct {
+		name string
+		apis []string
+		want bool
+	}{
+		{name: "nil operations"},
+		{name: "empty operations", apis: []string{}},
+		{name: "only deprecated", apis: []string{"AddTags"}},
+		{name: "callable", apis: []string{"DescribeInstances"}, want: true},
+		{name: "deprecated then callable", apis: []string{"AddTags", "DescribeInstances"}, want: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			product := aliyun.OpenAPIProduct{Code: "ecs", APINames: tt.apis}
+			if got := apiProductHasCallableOperations(product, "en"); got != tt.want {
+				t.Fatalf("apiProductHasCallableOperations(%v) = %v, want %v", tt.apis, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCallListProductsIncludesCanonicalXtraceAPIs(t *testing.T) {
+	// Xtrace now has callable APIs in the canonical snapshot and must no
+	// longer serve as the fixture for products with no operations.
 	stdout, stderr, code := runCLI("--lang", "en", "call", "--list", "--filter", "xtrace")
-	if code != 0 {
+	if code != 0 || stderr != "" {
 		t.Fatalf("call --list --filter xtrace exit %d stderr=%s stdout=%s", code, stderr, stdout)
 	}
 	out := decodeObject(t, stdout)
-	if out["count"] != float64(0) || out["total"] != float64(0) {
-		t.Fatalf("xtrace should be omitted from product list: %s", stdout)
-	}
-	if products, _ := out["products"].([]any); len(products) != 0 {
-		t.Fatalf("xtrace product leaked: %#v; stdout=%s", products, stdout)
+	if out["count"] != float64(1) || out["total"] != float64(1) || findCallProduct(out["products"], "xtrace") == nil {
+		t.Fatalf("canonical xtrace missing from product list: %s", stdout)
 	}
 
-	stdout, stderr, code = runCLI("--lang", "en", "call", "xtrace", "--list")
-	if code == 0 {
-		t.Fatalf("call xtrace --list should fail for products without callable APIs; stderr=%s stdout=%s", stderr, stdout)
+	stdout, stderr, code = runCLI("--lang", "en", "call", "xtrace", "--list", "--filter", "GetTrace")
+	if code != 0 || stderr != "" {
+		t.Fatalf("call xtrace --list exit %d stderr=%s stdout=%s", code, stderr, stdout)
 	}
-	if got := errorCode(t, stdout); got != "UnknownProduct" {
-		t.Fatalf("call xtrace --list error = %s, want UnknownProduct; stdout=%s", got, stdout)
+	out = decodeObject(t, stdout)
+	apis, _ := out["apis"].([]any)
+	if out["product"] != "xtrace" || out["count"] != float64(1) || out["total"] != float64(1) || len(apis) != 1 {
+		t.Fatalf("canonical xtrace operation missing: %s", stdout)
+	}
+	api, _ := apis[0].(map[string]any)
+	if api["name"] != "GetTrace" {
+		t.Fatalf("canonical xtrace operation = %#v, want GetTrace", api)
 	}
 }
 
@@ -1760,8 +1792,12 @@ func TestCallSchemaDescribesOpenAPIOperation(t *testing.T) {
 	if out["title"] != "DescribeInstances" {
 		t.Fatalf("schema title = %#v; stdout=%s", out["title"], stdout)
 	}
-	if summary, _ := out["summary"].(string); !strings.Contains(summary, "ECS instances") {
-		t.Fatalf("schema summary = %q; stdout=%s", summary, stdout)
+	metadata, ok := aliyun.OpenAPIOperationSummaryFor("en", "ecs", "DescribeInstances")
+	if !ok || strings.TrimSpace(metadata.Summary) == "" {
+		t.Fatalf("canonical DescribeInstances summary missing: %#v, found=%v", metadata, ok)
+	}
+	if summary, _ := out["summary"].(string); summary != metadata.Summary {
+		t.Fatalf("schema summary = %q, want canonical summary %q", summary, metadata.Summary)
 	}
 	parameters, _ := out["parameters"].([]any)
 	if len(parameters) == 0 {
