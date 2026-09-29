@@ -29,9 +29,6 @@ For repository-wide `/check` or equivalent reviews:
   broad rereviews.
 - Give delegated reviewers a bounded scope plus compact diff context, not the
   full task history.
-- Run at most one initial review and one final rereview for each review scope.
-  If the final rereview finds a new blocker, stop and report it instead of
-  recursively starting another broad review cycle.
 - While repairing findings, run only the smallest relevant tests. Run
   `make review-final` exactly once for each final candidate SHA, from an
   isolated worktree based on the latest `origin/main`.
