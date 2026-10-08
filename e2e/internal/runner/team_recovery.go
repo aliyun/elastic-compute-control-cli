@@ -37,6 +37,20 @@ type teamCreateIntent struct {
 
 var writeTeamCreateIntent = journalfile.WriteExclusiveDurable
 
+func teamCommandArgument(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func (intent *teamCreateIntent) command() string {
+	// Pin the verified region before user values: both exec's flag detection
+	// and the CLI's early raw-token checks must see the actual selected flag.
+	args := append([]string{intent.Input[0], "--region", intent.Region}, intent.Input[1:]...)
+	for i, value := range args {
+		args[i] = teamCommandArgument(value)
+	}
+	return strings.Join(args, " ")
+}
+
 func teamOwnership(data map[string]any) error {
 	var nonce [12]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
@@ -236,7 +250,7 @@ func renderTeamRecoveryDelete(st scenario.Step, data map[string]any) (string, er
 func reconcileTeamCreate(cfg execpkg.Config, cl *cleanup, scope *[]*cleanupItem, data map[string]any, st scenario.Step, locks []string, timeout time.Duration, intent *teamCreateIntent) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	result := execpkg.Run(ctx, cfg, "ecctl sandbox team list --filter name="+intent.Name+" --all")
+	result := execpkg.Run(ctx, cfg, "ecctl --region "+teamCommandArgument(intent.Region)+" sandbox team list --filter name="+intent.Name+" --all")
 	if result.Err != nil || result.Exit != 0 {
 		return fmt.Errorf("Team reconciliation failed; retained recovery intent %s", intent.path)
 	}

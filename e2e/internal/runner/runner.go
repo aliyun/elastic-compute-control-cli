@@ -1415,6 +1415,7 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 				sr.Status, sr.Error = report.StatusError, err.Error()
 				return sr, false
 			}
+			cmd = teamIntent.command()
 		}
 		for attempt := 0; ; attempt++ {
 			sctx, cancel := context.WithTimeout(ctx, timeout)

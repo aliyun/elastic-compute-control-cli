@@ -71,6 +71,43 @@ func TestFCSandboxTeamCreateDoesNotReadBackOrLoseIdentity(t *testing.T) {
 	}
 }
 
+func TestFCSandboxTeamExplicitRegionOverridesConsumedFlagValues(t *testing.T) {
+	t.Setenv("ECCTL_REGION", "cn-beijing")
+	for _, value := range []string{"--region=cn-beijing", "--region", "--region=", "quote' --region=cn-beijing"} {
+		for _, pin := range []bool{false, true} {
+			name := value + "/fallback"
+			if pin {
+				name = value + "/pinned"
+			}
+			t.Run(name, func(t *testing.T) {
+				fake := &fakeSpecCaller{responses: []map[string]any{teamResponse("team-A", "active")}}
+				selected := ""
+				run := withCaller(func(_, _ string, _ spec.ResourceSpec, region string, _ func(string) string) (engine.Caller, error) {
+					selected = region
+					return fake, nil
+				})
+				args := []string{"sandbox", "team", "create", "--name", "dev", "--lang", value}
+				want := "cn-beijing"
+				if pin {
+					args = append([]string{"--region", "cn-hangzhou"}, args...)
+					want = "cn-hangzhou"
+				}
+				stdout, stderr, code := run(args...)
+				if !pin && (value == "--region" || value == "--region=") {
+					// The CLI's early raw-token check rejects these unpinned forms.
+					if code != 1 || errorCode(t, stdout) != "MissingRegion" || len(fake.calls) != 0 {
+						t.Fatalf("unpinned empty-region guard changed: exit=%d out=%s err=%s calls=%+v", code, stdout, stderr, fake.calls)
+					}
+					return
+				}
+				if code != 0 || selected != want || len(fake.calls) != 1 || fake.calls[0].operation != "CreateTeam" {
+					t.Fatalf("actual public parser region=%q want=%q exit=%d out=%s err=%s calls=%+v", selected, want, code, stdout, stderr, fake.calls)
+				}
+			})
+		}
+	}
+}
+
 func TestFCSandboxTeamListAllPreservesFailingPagePublicActions(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ name, rawCode, message string }{

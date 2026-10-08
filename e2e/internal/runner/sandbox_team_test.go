@@ -608,3 +608,130 @@ echo '{"error":{"message":"unexpected command"}}'; exit 1
 		})
 	}
 }
+
+func TestRunTeamProtectedCommandsUseReservedRegion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a bash script")
+	}
+	t.Setenv("ECCTL_REGION", "cn-beijing")
+	for _, layout := range []struct{ command, language string }{
+		{`ecctl sandbox team create --lang "--region=cn-beijing"`, "--region=cn-beijing"},
+		{`ecctl --lang "--region" sbx team create`, "--region"},
+		{`ecctl sandbox team --lang="--region=cn-beijing" create`, "--region=cn-beijing"},
+		{`ecctl --lang "quote' --region=cn-beijing" sandbox team create`, "quote' --region=cn-beijing"},
+		{`ecctl --lang "--region=" sandbox team create`, "--region="},
+		{`ecctl --lang "--region=cn-beijing" sandbox team create --region cn-hangzhou`, "--region=cn-beijing"},
+	} {
+		for _, mode := range []string{"success", "lost-response-keep", "lost-response-cleanup"} {
+			t.Run(layout.command+"/"+mode, func(t *testing.T) {
+				dir := t.TempDir()
+				fake := filepath.Join(dir, "ecctl")
+				body := `#!/usr/bin/env bash
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    create|list|delete) op="$1";;
+    --lang) language="$2"; shift;;
+    --lang=*) language="${1#*=}";;
+    --name) name="$2"; shift;;
+    --description) description="$2"; shift;;
+    --region) region="$2"; shift;;
+    --region=*) region="${1#*=}";;
+  esac
+  shift
+done
+region="${region:-$ECCTL_REGION}"
+printf '%s %s\n' "$op" "$region" >> "$FAKE_LOG"
+if [[ "$op" == "create" ]]; then
+  if ! compgen -G "$FAKE_JOURNAL.team-create-*.json" >/dev/null; then echo 'no durable intent'; exit 1; fi
+  if [[ "$language" != "$FAKE_LANGUAGE" ]]; then echo 'string value changed'; exit 1; fi
+  if [[ -f "$FAKE_REMOTE" ]]; then echo 'create replayed'; exit 1; fi
+  printf '%s\n' "$region" > "$FAKE_REMOTE"
+  printf '{"teams":[{"id":"team-A","name":"%s","description":"%s","status":"active"}],"pagination":{"has_more":false}}\n' "$name" "$description" > "$FAKE_LIST"
+  if [[ "$FAKE_MODE" != "success" ]]; then echo '{"error":{"message":"connection reset by peer"}}'; exit 1; fi
+  printf '{"team":{"id":"team-A","name":"%s","status":"active","read_only":false}}\n' "$name"; exit 0
+fi
+if [[ "$op" == "list" ]]; then
+  if [[ -f "$FAKE_REMOTE" && "$(cat "$FAKE_REMOTE")" == "$region" ]]; then cat "$FAKE_LIST"; else echo '{"teams":[],"pagination":{"has_more":false}}'; fi
+  exit 0
+fi
+if [[ "$op" == "delete" ]]; then
+  if [[ ! -s "$FAKE_JOURNAL" ]]; then echo 'delete before journal'; exit 1; fi
+  if [[ -f "$FAKE_REMOTE" && "$(cat "$FAKE_REMOTE")" == "$region" ]]; then rm "$FAKE_REMOTE"; echo '{"deleted":true}'; exit 0; fi
+  echo '{"error":{"kind":"not_found","code":"NotFound","message":"Team not found in this region"}}'; exit 4
+fi
+echo 'unexpected command'; exit 1
+`
+				if err := os.WriteFile(fake, []byte(body), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				caseBody, err := os.ReadFile("../../cases/sandbox/team-lifecycle.yaml")
+				if err != nil {
+					t.Fatal(err)
+				}
+				create := strings.Split(string(caseBody), "  - name: get")[0]
+				create = strings.Replace(create, "ecctl sandbox team create", layout.command, 1)
+				cases := filepath.Join(dir, "cases", "sandbox")
+				if err := os.MkdirAll(cases, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(cases, "custom.yaml"), []byte(create), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				log, remote, journal := filepath.Join(dir, "calls"), filepath.Join(dir, "remote"), filepath.Join(dir, "journal.json")
+				t.Setenv("FAKE_LOG", log)
+				t.Setenv("FAKE_REMOTE", remote)
+				t.Setenv("FAKE_LIST", filepath.Join(dir, "list.json"))
+				t.Setenv("FAKE_JOURNAL", journal)
+				t.Setenv("FAKE_LANGUAGE", layout.language)
+				t.Setenv("FAKE_MODE", mode)
+				keep := mode == "lost-response-keep"
+				result, err := Run(context.Background(), Options{CasesDir: filepath.Join(dir, "cases"), InputsDir: filepath.Join(dir, "inputs"), RunID: "owned-run", ExecutionID: "owned-execution", Region: "cn-hangzhou", Surface: "public", EcctlBin: fake, CleanupJournal: journal, Keep: keep, StepTimeout: time.Second})
+				if err != nil {
+					t.Fatal(err)
+				}
+				calls, err := os.ReadFile(log)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantCalls := "create cn-hangzhou\n"
+				if mode != "success" {
+					wantCalls += "list cn-hangzhou\n"
+				}
+				if !keep {
+					wantCalls += "delete cn-hangzhou\n"
+				}
+				if string(calls) != wantCalls {
+					t.Errorf("protected subprocess targets/replay differ: calls=%q want=%q", calls, wantCalls)
+				}
+				if mode == "success" && result.Summary.Passed != 1 || mode != "success" && result.Summary.Failed != 1 {
+					t.Errorf("create outcome changed: %+v", result.Summary)
+				}
+				intents, err := filepath.Glob(journal + ".team-create-*.json")
+				if err != nil || len(intents) != 1 {
+					t.Fatalf("durable owned intent missing: %v %v", intents, err)
+				}
+				encoded, err := os.ReadFile(intents[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				var intent teamCreateIntent
+				if err := json.Unmarshal(encoded, &intent); err != nil || intent.Region != "cn-hangzhou" || intent.EcctlBin != fake || intent.ExecutionID != "owned-execution" {
+					t.Fatalf("intent target mismatch: %s %v", encoded, err)
+				}
+				if _, err := os.Stat(journal); err != nil {
+					t.Errorf("owned resource was never journaled: %v", err)
+					return
+				}
+				entries := readJournalEntries(t, journal)
+				if keep {
+					actual, err := os.ReadFile(remote)
+					if err != nil || string(actual) != "cn-hangzhou\n" || len(entries) != 1 || entries[0].Region != intent.Region || entries[0].Teardown != "ecctl sandbox team delete team-A --timeout 5m" {
+						t.Errorf("owned recovery/journal target mismatch: remote=%q err=%v entries=%+v", actual, err, entries)
+					}
+				} else if _, err := os.Stat(remote); !os.IsNotExist(err) || len(entries) != 0 {
+					t.Errorf("false successful cleanup/empty journal with surviving resource: err=%v entries=%+v result=%+v", err, entries, result.Summary)
+				}
+			})
+		}
+	}
+}
