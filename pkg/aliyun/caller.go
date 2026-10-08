@@ -355,11 +355,13 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		if callerBoolMapValue(request, "DryRun") && isDryRunPassed(err) {
 			return map[string]any{"DryRun": true}, nil
 		}
-		code, _, _ := ecerrors.ParseCloudError(err.Error())
-		if isCloudNotFound(err) || c.isFCSandboxTeam() && operation == "GetTeam" && teamAbsenceCode(code) {
-			if !c.isFCSandboxTeam() || operation != "GetTeam" || teamAbsenceCode(code) {
-				return nil, ecerrors.NotFound("NotFound", cloudNotFoundMessage(request, code), cloudErrorOptions(err)...)
-			}
+		code, _, _ := callerCloudErrorFields(err)
+		notFound := isCloudNotFound(err)
+		if c.isFCSandboxTeam() {
+			notFound = operation == "GetTeam" && teamAbsenceCode(code)
+		}
+		if notFound {
+			return nil, ecerrors.NotFound("NotFound", cloudNotFoundMessage(request, code), cloudErrorOptions(err)...)
 		}
 		if isDependencyViolation(err) {
 			return nil, ecerrors.Service("DependencyViolation", callerCloudErrorMessage(err), false, cloudErrorOptions(err)...)
@@ -1171,22 +1173,64 @@ func callerSanitizeCloudError(err error) string {
 }
 
 func callerCloudErrorMessage(err error) string {
+	_, message, _ := callerCloudErrorFields(err)
+	return message
+}
+
+// SDK messages include a formatted HTTP status and request ID. Read the
+// structured fields and original body instead of parsing that display string.
+// Only selected public fields leave this boundary; Data can contain credentials.
+func callerCloudErrorFields(err error) (code, message, requestID string) {
 	if err == nil {
+		return "", "", ""
+	}
+	var responseErr dara.ResponseError
+	var teaErr *tea.SDKError
+	var daraErr *dara.SDKError
+	var data map[string]any
+	var encodedData string
+	switch {
+	case errors.As(err, &responseErr):
+		code, message = tea.StringValue(responseErr.GetCode()), responseErr.Error()
+		data = responseErr.GetData()
+		if withRequestID, ok := responseErr.(interface{ GetRequestId() *string }); ok {
+			requestID = tea.StringValue(withRequestID.GetRequestId())
+		}
+	case errors.As(err, &teaErr):
+		code, message = tea.StringValue(teaErr.Code), tea.StringValue(teaErr.Message)
+		encodedData = tea.StringValue(teaErr.Data)
+	case errors.As(err, &daraErr):
+		code, message = tea.StringValue(daraErr.Code), tea.StringValue(daraErr.Message)
+		encodedData = tea.StringValue(daraErr.Data)
+	default:
+		return ecerrors.ParseCloudError(callerSanitizeCloudError(err))
+	}
+	if encodedData != "" {
+		// TeaSDKError can JSON-encode an already encoded Dara Data string.
+		var wrapped string
+		if json.Unmarshal([]byte(encodedData), &wrapped) == nil {
+			encodedData = wrapped
+		}
+		_ = json.Unmarshal([]byte(encodedData), &data)
+	}
+	bodyField := func(keys ...string) string {
+		for _, key := range keys {
+			if value, ok := data[key].(string); ok && value != "" {
+				return value
+			}
+		}
 		return ""
 	}
-	sanitized := callerSanitizeCloudError(err)
-	if sanitized != err.Error() {
-		return sanitized
-	}
-	_, message, _ := ecerrors.ParseCloudError(err.Error())
-	if message != "" {
-		return message
-	}
-	return sanitized
+	code = firstNonEmptyString(code, bodyField("Code", "code"))
+	message = firstNonEmptyString(bodyField("Message", "message"), message)
+	requestID = firstNonEmptyString(requestID, bodyField("RequestId", "requestId", "requestid"))
+	return callerSanitizeCloudError(errors.New(code)),
+		callerSanitizeCloudError(errors.New(message)),
+		callerSanitizeCloudError(errors.New(requestID))
 }
 
 func cloudErrorOptions(err error) []ecerrors.Option {
-	code, message, requestID := ecerrors.ParseCloudError(callerSanitizeCloudError(err))
+	code, message, requestID := callerCloudErrorFields(err)
 	options := make([]ecerrors.Option, 0, 2)
 	if requestID != "" {
 		options = append(options, ecerrors.WithRequestID(requestID))
