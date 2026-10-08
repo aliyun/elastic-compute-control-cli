@@ -1,11 +1,11 @@
-resource: fcsandbox/team
+resource: sandbox/team
 serial: true
 timeout: 10m
 
 steps:
   - name: create
     run: >
-      ecctl fcsandbox team create
+      ecctl sandbox team create
       --name {{.resource_prefix}}-team
       --description "ecctl E2E Team {{.run_id}}"
     at: $.team
@@ -16,30 +16,30 @@ steps:
       read_only: { eq: false }
     capture:
       team_id: id
-    teardown: ecctl fcsandbox team delete {{.team_id}} --timeout 5m
+    teardown: ecctl sandbox team delete {{.team_id}} --timeout 5m
 
   - name: get
-    run: ecctl fcsandbox team get {{.team_id}}
+    run: ecctl sandbox team get {{.team_id}}
     at: $.team
     expect:
       id: { eq: "{{.team_id}}" }
       status: { eq: active }
 
   - name: list
-    run: ecctl fcsandbox team list --filter name={{.resource_prefix}}-team --limit 1 --all
+    run: ecctl sandbox team list --filter name={{.resource_prefix}}-team --limit 1 --all
     assert:
       - len($.teams) == 1
       - $.teams[0].id == "{{.team_id}}"
       - $.pagination.has_more == false
 
   - name: update
-    run: ecctl fcsandbox team update {{.team_id}} --description "ecctl E2E Team updated {{.run_id}}"
+    run: ecctl sandbox team update {{.team_id}} --description "ecctl E2E Team updated {{.run_id}}"
     at: $.team
     expect:
       id: { eq: "{{.team_id}}" }
       description: { eq: "ecctl E2E Team updated {{.run_id}}" }
 
   - name: delete
-    run: ecctl fcsandbox team delete {{.team_id}} --timeout 5m
+    run: ecctl sandbox team delete {{.team_id}} --timeout 5m
     expect:
       $.deleted: { eq: true }

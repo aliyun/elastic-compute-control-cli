@@ -9,10 +9,59 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
 
+func TestFCSandboxTeamCreateDoesNotReadBackOrLoseIdentity(t *testing.T) {
+	t.Parallel()
+	for _, product := range []string{"sandbox", "sbx"} {
+		t.Run(product, func(t *testing.T) {
+			fake := &fakeSpecCaller{
+				responses: []map[string]any{teamResponse("created-team-1", "active")},
+				errors:    []error{nil, ecerrors.Service("CloudAPIError", "dial tcp: readback unavailable", true)},
+			}
+			stdout, stderr, code := teamCaller(t, fake)(product, "team", "create", "--name", "dev", "--region", "cn-hangzhou")
+			if code != 0 || len(fake.calls) != 1 || fake.calls[0].operation != "CreateTeam" {
+				t.Fatalf("create introduced a failure-prone readback: %d %s %s %#v", code, stdout, stderr, fake.calls)
+			}
+			obj := decodeObject(t, stdout)
+			team := obj["team"].(map[string]any)
+			if team["id"] != "created-team-1" || team["status"] != "active" || team["read_only"] != false || team["allow_update_team_name"] != true {
+				t.Fatalf("validated create resource was lost: %s", stdout)
+			}
+		})
+	}
+}
+
+func TestFCSandboxTeamListAllPreservesFailingPagePublicActions(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, rawCode, message string }{
+		{"business", "409", "provider rejected page 2"},
+		{"transport", "CloudAPIError", "dial tcp: page 2 unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			failure := ecerrors.Service("CloudAPIError", tc.message, false, ecerrors.WithRawCause(tc.rawCode, tc.message), ecerrors.WithRequestID("req-page-2-failure"))
+			fake := &fakeSpecCaller{
+				responses: []map[string]any{{"code": "200", "requestId": "req-page-1", "teams": []any{teamResponse("team-1", "active")["team"]}, "total": 2}},
+				errors:    []error{nil, failure},
+			}
+			stdout, stderr, code := teamCaller(t, fake)("sandbox", "team", "list", "--region", "cn-hangzhou", "--limit", "1", "--all")
+			if code == 0 {
+				t.Fatalf("page failure succeeded: %s %s", stdout, stderr)
+			}
+			actions, ok := decodeObject(t, stdout)["actions"].([]any)
+			if !ok || len(actions) != 2 {
+				t.Fatalf("failing page action missing: %s", stdout)
+			}
+			first, failed := actions[0].(map[string]any), actions[1].(map[string]any)
+			if first["request_id"] != "req-page-1" || failed["request_id"] != "req-page-2-failure" || failed["code"] != tc.rawCode || failed["message"] != tc.message || failed["action_name"] != "ListTeams" {
+				t.Fatalf("public provider evidence lost: %s", stdout)
+			}
+		})
+	}
+}
+
 func teamCaller(t *testing.T, fake *fakeSpecCaller) func(...string) (string, string, int) {
 	t.Helper()
 	return withCaller(func(_, _ string, resource spec.ResourceSpec, region string, _ func(string) string) (engine.Caller, error) {
-		if resource.Product != "fcsandbox" || resource.APIProduct != "FCSandbox" || resource.Resource != "team" || region != "cn-hangzhou" {
+		if resource.Product != "sandbox" || resource.APIProduct != "FCSandbox" || resource.Resource != "team" || region != "cn-hangzhou" {
 			t.Fatalf("unexpected resource/region: %#v %s", resource, region)
 		}
 		return fake, nil
@@ -30,18 +79,18 @@ func TestFCSandboxTeamCreateAndGet(t *testing.T) {
 	t.Parallel()
 	fake := &fakeSpecCaller{responses: []map[string]any{teamResponse("team-1", "active"), teamResponse("team-1", "active"), teamResponse("team-1", "active")}}
 	run := teamCaller(t, fake)
-	stdout, stderr, code := run("fcsandbox", "team", "create", "--region", "cn-hangzhou", "--name", "dev", "--description", "development", "--resource-group", "rg-test", "--plan", "eco")
+	stdout, stderr, code := run("sandbox", "team", "create", "--region", "cn-hangzhou", "--name", "dev", "--description", "development", "--resource-group", "rg-test", "--plan", "eco")
 	if code != 0 {
 		t.Fatalf("create exit %d: %s %s", code, stdout, stderr)
 	}
-	if got := strings.Join(callNames(fake.calls), ","); got != "CreateTeam,GetTeam" {
+	if got := strings.Join(callNames(fake.calls), ","); got != "CreateTeam" {
 		t.Fatalf("create calls = %s", got)
 	}
 	request := fake.calls[0].request
-	if request["body.teamName"] != "dev" || request["body.description"] != "development" || request["body.resourceGroupID"] != "rg-test" || request["body.plan"] != "eco" || fake.calls[1].request["teamID"] != "team-1" {
+	if request["body.teamName"] != "dev" || request["body.description"] != "development" || request["body.resourceGroupID"] != "rg-test" || request["body.plan"] != "eco" {
 		t.Fatalf("create mapping = %#v", fake.calls)
 	}
-	stdout, stderr, code = run("fcsandbox", "team", "get", "team-1", "--region", "cn-hangzhou")
+	stdout, stderr, code = run("sandbox", "team", "get", "team-1", "--region", "cn-hangzhou")
 	if code != 0 {
 		t.Fatalf("get exit %d: %s %s", code, stdout, stderr)
 	}
@@ -59,7 +108,7 @@ func TestFCSandboxTeamListPagesAndAll(t *testing.T) {
 		return map[string]any{"code": "200", "requestId": "req-list", "teams": []any{teamResponse(id, "active")["team"]}, "pageNumber": n, "pageSize": 1, "total": 2}
 	}
 	fake := &fakeSpecCaller{responses: []map[string]any{page("team-1", 1), page("team-2", 2)}}
-	stdout, stderr, code := teamCaller(t, fake)("fcsandbox", "team", "list", "--region", "cn-hangzhou", "--filter", "name=dev", "--filter", "resource-group=rg-test", "--filter", "plan=eco", "--limit", "1", "--all")
+	stdout, stderr, code := teamCaller(t, fake)("sandbox", "team", "list", "--region", "cn-hangzhou", "--filter", "name=dev", "--filter", "resource-group=rg-test", "--filter", "plan=eco", "--limit", "1", "--all")
 	if code != 0 {
 		t.Fatalf("list all exit %d: %s %s", code, stdout, stderr)
 	}
@@ -76,7 +125,7 @@ func TestFCSandboxTeamListPagesAndAll(t *testing.T) {
 		t.Fatalf("full list still advertises more: %s", stdout)
 	}
 	fake = &fakeSpecCaller{responses: []map[string]any{page("team-2", 2)}}
-	stdout, stderr, code = teamCaller(t, fake)("fcsandbox", "team", "list", "--region", "cn-hangzhou", "--page", "2", "--limit", "1")
+	stdout, stderr, code = teamCaller(t, fake)("sandbox", "team", "list", "--region", "cn-hangzhou", "--page", "2", "--limit", "1")
 	if code != 0 || fake.calls[0].request["pageNumber"] != 2 || decodeObject(t, stdout)["total"] != float64(2) {
 		t.Fatalf("single page failed: %d %s %s %#v", code, stdout, stderr, fake.calls)
 	}
@@ -98,7 +147,7 @@ func TestFCSandboxTeamUpdateRestrictions(t *testing.T) {
 			response := teamResponse("team-1", "active")
 			response["team"].(map[string]any)[tc.field] = tc.value
 			fake := &fakeSpecCaller{responses: []map[string]any{response}}
-			args := append([]string{"fcsandbox", "team", "update", "team-1", "--region", "cn-hangzhou"}, tc.args...)
+			args := append([]string{"sandbox", "team", "update", "team-1", "--region", "cn-hangzhou"}, tc.args...)
 			stdout, _, code := teamCaller(t, fake)(args...)
 			if code == 0 || errorCode(t, stdout) != tc.want || len(fake.calls) != 1 || fake.calls[0].operation != "GetTeam" {
 				t.Fatalf("restriction not enforced: %d %s %#v", code, stdout, fake.calls)
@@ -106,7 +155,7 @@ func TestFCSandboxTeamUpdateRestrictions(t *testing.T) {
 		})
 	}
 	fake := &fakeSpecCaller{responses: []map[string]any{teamResponse("team-1", "active"), teamResponse("team-1", "active"), teamResponse("team-1", "active")}}
-	stdout, stderr, code := teamCaller(t, fake)("fcsandbox", "team", "update", "team-1", "--region", "cn-hangzhou", "--description", "updated", "--resource-group", "rg-other", "--plan", "std")
+	stdout, stderr, code := teamCaller(t, fake)("sandbox", "team", "update", "team-1", "--region", "cn-hangzhou", "--description", "updated", "--resource-group", "rg-other", "--plan", "std")
 	if code != 0 || strings.Join(callNames(fake.calls), ",") != "GetTeam,UpdateTeam,GetTeam" || fake.calls[1].request["body.description"] != "updated" || fake.calls[1].request["body.resourceGroupID"] != "rg-other" || fake.calls[1].request["body.plan"] != "std" || fake.calls[1].request["teamID"] != "team-1" {
 		t.Fatalf("update failed: %d %s %s %#v", code, stdout, stderr, fake.calls)
 	}
@@ -129,7 +178,7 @@ func TestFCSandboxTeamDeleteTruthfulCompletion(t *testing.T) {
 			if tc.absent {
 				fake.errors = []error{nil, nil, nil, ecerrors.NotFound("NotFound", "team not found")}
 			}
-			args := []string{"fcsandbox", "team", "delete", "team-1", "--region", "cn-hangzhou", "--timeout", "20ms"}
+			args := []string{"sandbox", "team", "delete", "team-1", "--region", "cn-hangzhou", "--timeout", "20ms"}
 			if tc.noWait {
 				args = append(args, "--no-wait")
 			}
@@ -151,7 +200,7 @@ func TestFCSandboxTeamDeleteTruthfulCompletion(t *testing.T) {
 	response := teamResponse("team-1", "active")
 	response["team"].(map[string]any)["readOnly"] = true
 	fake := &fakeSpecCaller{responses: []map[string]any{response}}
-	stdout, _, code := teamCaller(t, fake)("fcsandbox", "team", "delete", "team-1", "--region", "cn-hangzhou")
+	stdout, _, code := teamCaller(t, fake)("sandbox", "team", "delete", "team-1", "--region", "cn-hangzhou")
 	if code == 0 || errorCode(t, stdout) != "TeamReadOnly" || len(fake.calls) != 1 {
 		t.Fatalf("read-only delete: %d %s %#v", code, stdout, fake.calls)
 	}
@@ -163,7 +212,7 @@ func TestFCSandboxTeamInvalidInputDoesNotCallCloud(t *testing.T) {
 		{"create"}, {"update", "team-1"}, {"list", "--limit", "51"}, {"list", "--limit", "0"}, {"list", "--page", "0"}, {"list", "--filter", "unknown=value"},
 	} {
 		fake := &fakeSpecCaller{}
-		full := append([]string{"fcsandbox", "team", "--region", "cn-hangzhou"}, args...)
+		full := append([]string{"sandbox", "team", "--region", "cn-hangzhou"}, args...)
 		stdout, _, code := teamCaller(t, fake)(full...)
 		if code == 0 || len(fake.calls) != 0 {
 			t.Fatalf("invalid input reached cloud: %v %d %s %#v", args, code, stdout, fake.calls)

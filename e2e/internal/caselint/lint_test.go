@@ -129,16 +129,16 @@ func TestCheckAllowsReviewedCreateSafetyAlternatives(t *testing.T) {
 		{
 			name: "FCSandbox Team has no tag input and uses an explicit finalizer",
 			caseBody: `
-resource: fcsandbox/team
+resource: sandbox/team
 steps:
   - name: create
-    run: ecctl fcsandbox team create --name {{.resource_prefix}}-team
+    run: ecctl sandbox team create --name {{.resource_prefix}}-team
     at: $.team
     capture:
       team_id: id
-    teardown: ecctl fcsandbox team delete {{.team_id}}
+    teardown: ecctl sandbox team delete {{.team_id}}
 `,
-			resource: "fcsandbox/team",
+			resource: "sandbox/team",
 		},
 		{
 			name: "ack kubeconfig has an immediate revoke finalizer",

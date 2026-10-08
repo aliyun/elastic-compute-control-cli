@@ -8,6 +8,10 @@
 `tpl`。该资源与 `sandbox/sandbox` 使用相同的全局端点、
 `E2B_API_KEY` 和安全策略。
 
+同一产品下的 `ecctl sandbox team`（`sbx team`）使用独立的 FCSandbox
+OpenAPI AK/STS 凭证及目标地域；本资源继续使用上述 E2B 路由和凭证。
+详见 [Team 路由说明](team.md)。
+
 ## 创建契约
 
 E2B 当前模板创建是两阶段协议：

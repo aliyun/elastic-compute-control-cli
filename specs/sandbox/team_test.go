@@ -1,4 +1,4 @@
-package fcsandbox
+package sandbox
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 )
 
 func TestFCSandboxTeamSpecIsValid(t *testing.T) {
-	if _, err := spec.LoadResource("..", "fcsandbox", "team"); err != nil {
+	if _, err := spec.LoadResource("..", "sandbox", "team"); err != nil {
 		t.Fatalf("Team spec must be valid for catalog inclusion: %v", err)
 	}
 }
@@ -43,7 +43,7 @@ func TestTeamMutationPreflight(t *testing.T) {
 		{"wrong identity", "validate_delete", "other", false, true, "", "InvalidTeamResponse"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hook, ok := spechooks.BeforeOperationHook("fcsandbox", "team", tc.hook)
+			hook, ok := spechooks.BeforeOperationHook("sandbox", "team", tc.hook)
 			if !ok {
 				t.Fatalf("Team hook %s is missing", tc.hook)
 			}

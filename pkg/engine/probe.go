@@ -82,10 +82,10 @@ func (e *Executor) runAllProbePages(ctx context.Context, name string, execCtx Ex
 	for page := 1; ; page++ {
 		input["page"] = page
 		result, err := e.runProbe(ctx, name, execCtx, nil)
-		combined.Actions = append(combined.Actions, result.Actions...)
 		if err != nil {
-			return ProbeResult{}, ecerrors.WithActions(err, combined.Actions)
+			return ProbeResult{}, ecerrors.WithActions(err, append(combined.Actions, actionsFromError(err, probe.API)...))
 		}
+		combined.Actions = append(combined.Actions, result.Actions...)
 		invalid := func() (ProbeResult, error) {
 			return ProbeResult{}, ecerrors.WithActions(ecerrors.Service("IncompletePagination", i18n.NewLocalizer("en").Message("IncompletePagination"), false), combined.Actions)
 		}

@@ -92,7 +92,7 @@ func TestFCSandboxTeamBusinessFailureTelemetry(t *testing.T) {
 	if _, err := caller.Call(ctx, "DeleteTeam", map[string]any{"teamID": "team-1"}); err == nil {
 		t.Fatal("business failure succeeded")
 	}
-	session.Finish("ecctl fcsandbox team delete", 1)
+	session.Finish("ecctl sandbox team delete", 1)
 	for _, span := range exporter.GetSpans() {
 		if span.Name == "ecctl.cloud.api.request" {
 			if outcome := testSpanAttributes(span.Attributes)["ecctl.cloud.outcome"]; outcome != "error" {

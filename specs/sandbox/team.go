@@ -1,4 +1,4 @@
-package fcsandbox
+package sandbox
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 )
 
 func init() {
-	spechooks.RegisterBeforeOperation("fcsandbox", "team", "validate_update", validateTeamUpdate)
-	spechooks.RegisterBeforeOperation("fcsandbox", "team", "validate_delete", validateTeamDelete)
+	spechooks.RegisterBeforeOperation("sandbox", "team", "validate_update", validateTeamUpdate)
+	spechooks.RegisterBeforeOperation("sandbox", "team", "validate_delete", validateTeamDelete)
 }
 
 func validateTeamUpdate(ctx context.Context, caller spechooks.OperationCaller, request map[string]any) (map[string]any, error) {

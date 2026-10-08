@@ -1,14 +1,15 @@
 schema_version: 2
-product: fcsandbox
+product: sandbox
+provider: aliyun
 api_product: FCSandbox
 resource: team
 kind: regional
 display_name: {en: team, zh-CN: 团队}
 description: {en: Manage FC Agent Sandbox teams., zh-CN: 管理 FC 云沙箱团队。}
 examples:
-  - ecctl fcsandbox team list --region cn-hangzhou
-  - ecctl fcsandbox team get <team-id> --region cn-hangzhou
-  - ecctl fcsandbox team create --name dev --region cn-hangzhou
+  - ecctl sandbox team list --region cn-hangzhou
+  - ecctl sandbox team get <team-id> --region cn-hangzhou
+  - ecctl sandbox team create --name dev --region cn-hangzhou
 
 identity:
   field: id
@@ -128,6 +129,7 @@ bindings:
         plan: $.plan
     require_all: [{request: body.teamName}]
     id_from: $.team.teamID
+    context_from: {created_team: $.team}
     request_id_from: $.requestId
   update_team:
     api: UpdateTeam
@@ -177,10 +179,19 @@ operations:
         - plan
     workflow:
       - binding: create_team
-      - probe: detail
-        ids: [$context.id]
-        not_found: error
-    examples: [ecctl fcsandbox team create --name dev --region cn-hangzhou]
+      - emit:
+          fields:
+            id: $context.created_team.teamID
+            name: $context.created_team.teamName
+            description: $context.created_team.description
+            resource_group: $context.created_team.resourceGroupID
+            plan: $context.created_team.plan
+            status: $context.created_team.status
+            created_time: $context.created_team.createdTime
+            user_id: $context.created_team.userID
+            allow_update_team_name: $context.created_team.allowUpdateTeamName
+            read_only: $context.created_team.readOnly
+    examples: [ecctl sandbox team create --name dev --region cn-hangzhou]
   update:
     description: {en: Update an FC Agent Sandbox team, zh-CN: 更新 FC 云沙箱团队}
     input:
@@ -195,7 +206,7 @@ operations:
       - probe: detail
         ids: [$input.id]
         not_found: error
-    examples: [ecctl fcsandbox team update <team-id> --description updated]
+    examples: [ecctl sandbox team update <team-id> --description updated]
   delete:
     description: {en: Delete an FC Agent Sandbox team, zh-CN: 删除 FC 云沙箱团队}
     input:
@@ -215,7 +226,7 @@ operations:
         team: {id: $input.id}
         deleted: {value: $result.deleted, unless: $input.no_wait}
         deletion_requested: {value: true, when: $input.no_wait}
-    examples: [ecctl fcsandbox team delete <team-id> --timeout 300s]
+    examples: [ecctl sandbox team delete <team-id> --timeout 300s]
   get:
     aliases: [show, describe]
     description: {en: Get an FC Agent Sandbox team, zh-CN: 获取 FC 云沙箱团队}
@@ -226,7 +237,7 @@ operations:
       - probe: detail
         ids: [$input.id]
         not_found: error
-    examples: [ecctl fcsandbox team get <team-id> --region cn-hangzhou]
+    examples: [ecctl sandbox team get <team-id> --region cn-hangzhou]
   list:
     description: {en: List FC Agent Sandbox teams, zh-CN: 列出 FC 云沙箱团队}
     input:
@@ -239,5 +250,5 @@ operations:
       - probe: list
         many: true
     examples:
-      - ecctl fcsandbox team list --filter name=dev --limit 50 --page 1
-      - ecctl fcsandbox team list --all
+      - ecctl sandbox team list --filter name=dev --limit 50 --page 1
+      - ecctl sandbox team list --all
