@@ -66,9 +66,18 @@ func isTeamCreate(command string) bool {
 	// A separator cannot make an unsupported Team layout bypass reservation.
 	// Classify conservatively here; reservation rejects the original separator.
 	commandArgs := make([]string, 0, len(args)-1)
-	for _, arg := range args[1:] {
-		if arg != "--" {
-			commandArgs = append(commandArgs, arg)
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			continue
+		}
+		commandArgs = append(commandArgs, arg)
+		name, _, inline := strings.Cut(arg, "=")
+		flag := root.PersistentFlags().Lookup(strings.TrimPrefix(name, "--"))
+		if strings.HasPrefix(arg, "--") && !inline && flag != nil && flag.NoOptDefVal == "" && i+1 < len(args) {
+			// A string flag consumes its next token even when that value is --.
+			i++
+			commandArgs = append(commandArgs, args[i])
 		}
 	}
 	found, _, err := root.Find(commandArgs)
@@ -142,7 +151,8 @@ func reserveTeamCreate(cmd string, data map[string]any, cfg execpkg.Config, cl *
 	if flags["--output"] != "" && flags["--output"] != "json" {
 		return nil, fmt.Errorf("Team recovery requires JSON output")
 	}
-	if flags["--name"] != name || flags["--description"] != description || flags["--region"] != "" && flags["--region"] != cfg.Region || st.TeardownRegion != "" && st.TeardownRegion != "primary" {
+	region, regionSupplied := flags["--region"]
+	if flags["--name"] != name || flags["--description"] != description || regionSupplied && region != cfg.Region || st.TeardownRegion != "" && st.TeardownRegion != "primary" {
 		return nil, fmt.Errorf("Team create command does not match recovery ownership/region")
 	}
 	meta := cl.journalMeta

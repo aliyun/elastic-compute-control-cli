@@ -398,6 +398,9 @@ func TestRunTeamCreateFlagLayoutsCannotBypassRecovery(t *testing.T) {
 		`ecctl --json --no-color=true sbx team --output=json create --lang=en`,
 		`ecctl --name={{.team_name}} sandbox team create --lang=en`,
 		`ecctl --region=cn-hangzhou sbx --lang=en team create`,
+		`ecctl --lang -- sandbox team create`,
+		`ecctl sandbox team --lang "--" create`,
+		`ecctl --lang=-- sbx team create`,
 	} {
 		for _, reserved := range []bool{false, true} {
 			t.Run(command+"/journal="+strconv.FormatBool(reserved), func(t *testing.T) {
@@ -508,6 +511,8 @@ func TestRunTeamCreateRejectsUnboundFlagLayoutsBeforeLaunch(t *testing.T) {
 		"ecctl sandbox team create --name foreign",
 		"ecctl --region=cn-beijing sandbox team create",
 		"ecctl -- sandbox team create",
+		"ecctl --lang -- -- sandbox team create",
+		"ecctl --name -- sandbox team create",
 	} {
 		t.Run(command, func(t *testing.T) {
 			dir := t.TempDir()
@@ -526,6 +531,79 @@ func TestRunTeamCreateRejectsUnboundFlagLayoutsBeforeLaunch(t *testing.T) {
 			intents, err := filepath.Glob(cl.journal + ".team-create-*.json")
 			if err != nil || len(intents) != 0 {
 				t.Fatalf("invalid input acquired recovery intent: %v %v", intents, err)
+			}
+		})
+	}
+}
+
+func TestRunTeamCreateRejectsEmptyExplicitRegionBeforeLaunch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a bash script")
+	}
+	t.Setenv("ECCTL_REGION", "cn-beijing")
+	for _, regionFlag := range []string{`--region=`, `--region ""`} {
+		t.Run(regionFlag, func(t *testing.T) {
+			dir := t.TempDir()
+			fake := filepath.Join(dir, "ecctl")
+			body := `#!/usr/bin/env bash
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    create|delete) op="$1";;
+    --name) name="$2"; shift;;
+    --region) region="$2"; shift;;
+    --region=*) region="${1#*=}";;
+  esac
+  shift
+done
+region="${region:-$ECCTL_REGION}"
+printf '%s %s\n' "$op" "$region" >> "$FAKE_LOG"
+if [[ "$op" == "create" ]]; then
+  printf '%s\n' "$region" > "$FAKE_REMOTE"
+  printf '{"team":{"id":"team-A","name":"%s","status":"active","read_only":false}}\n' "$name"; exit 0
+fi
+if [[ "$op" == "delete" ]]; then
+  echo '{"error":{"kind":"not_found","code":"NotFound","message":"Team not found"}}'; exit 4
+fi
+echo '{"error":{"message":"unexpected command"}}'; exit 1
+`
+			if err := os.WriteFile(fake, []byte(body), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			caseBody, err := os.ReadFile("../../cases/sandbox/team-lifecycle.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			create := strings.Split(string(caseBody), "  - name: get")[0]
+			create = strings.Replace(create, `--description "{{.team_owner}}"`, `--description "{{.team_owner}}" `+regionFlag, 1)
+			cases := filepath.Join(dir, "cases", "sandbox")
+			if err := os.MkdirAll(cases, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(cases, "custom.yaml"), []byte(create), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			log, remote, journal := filepath.Join(dir, "calls"), filepath.Join(dir, "remote"), filepath.Join(dir, "journal.json")
+			t.Setenv("FAKE_LOG", log)
+			t.Setenv("FAKE_REMOTE", remote)
+			result, err := Run(context.Background(), Options{CasesDir: filepath.Join(dir, "cases"), InputsDir: filepath.Join(dir, "inputs"), RunID: "owned-run", ExecutionID: "owned-execution", Region: "cn-hangzhou", Surface: "public", EcctlBin: fake, CleanupJournal: journal, StepTimeout: time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			step := result.Cases[0].Steps[0]
+			if result.Summary.Failed != 1 || step.Status != report.StatusError || step.Command != "" || !strings.Contains(step.Error, "ownership/region") || len(result.Manifest) != 0 {
+				t.Errorf("empty explicit region bypassed target reservation: %+v", result)
+			}
+			if calls, err := os.ReadFile(log); !os.IsNotExist(err) {
+				t.Errorf("unsafe create/cleanup launched: %s (read error %v)", calls, err)
+			}
+			for _, file := range []string{remote, journal} {
+				if _, err := os.Stat(file); !os.IsNotExist(err) {
+					t.Errorf("unsafe create left a remote Team or misbound journal: %s %v", file, err)
+				}
+			}
+			intents, err := filepath.Glob(journal + ".team-create-*.json")
+			if err != nil || len(intents) != 0 {
+				t.Errorf("empty region acquired a recovery intent: %v %v", intents, err)
 			}
 		})
 	}

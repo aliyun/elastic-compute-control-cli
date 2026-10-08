@@ -34,6 +34,9 @@ func TestSandboxTeamCreateAcceptsGlobalFlagLayouts(t *testing.T) {
 		{"--name=dev", "sandbox", "team", "create", "--lang=en"},
 		{"--region=cn-hangzhou", "sbx", "--lang=en", "team", "create"},
 		{"--profile=test", "sandbox", "team", "create", "--lang=en"},
+		{"--lang", "--", "sandbox", "team", "create"},
+		{"sandbox", "team", "--lang", "--", "create"},
+		{"--lang=--", "sbx", "team", "create"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			stdout, stderr, code := runCLI(append(args, "--help")...)
