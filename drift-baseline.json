@@ -5417,6 +5417,56 @@
       ]
     },
     {
+      "product": "fcsandbox",
+      "resource": "team",
+      "binding": "create_team",
+      "api": "CreateTeam",
+      "parameters": [
+        "body.description",
+        "body.plan",
+        "body.resourceGroupID",
+        "body.teamName"
+      ],
+      "covered": [
+        "body.description",
+        "body.plan",
+        "body.resourceGroupID",
+        "body.teamName"
+      ]
+    },
+    {
+      "product": "fcsandbox",
+      "resource": "team",
+      "binding": "delete_team",
+      "api": "DeleteTeam",
+      "parameters": [
+        "teamID"
+      ],
+      "covered": [
+        "teamID"
+      ]
+    },
+    {
+      "product": "fcsandbox",
+      "resource": "team",
+      "binding": "update_team",
+      "api": "UpdateTeam",
+      "parameters": [
+        "body.description",
+        "body.plan",
+        "body.resourceGroupID",
+        "body.teamName",
+        "teamID"
+      ],
+      "covered": [
+        "body.description",
+        "body.plan",
+        "body.resourceGroupID",
+        "body.teamName",
+        "teamID"
+      ]
+    },
+    {
       "product": "lingjun",
       "resource": "cluster",
       "binding": "create_cluster",

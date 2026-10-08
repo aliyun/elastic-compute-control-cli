@@ -355,9 +355,11 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		if callerBoolMapValue(request, "DryRun") && isDryRunPassed(err) {
 			return map[string]any{"DryRun": true}, nil
 		}
-		if isCloudNotFound(err) {
-			code, _, _ := ecerrors.ParseCloudError(err.Error())
-			return nil, ecerrors.NotFound("NotFound", cloudNotFoundMessage(request, code), cloudErrorOptions(err)...)
+		code, _, _ := ecerrors.ParseCloudError(err.Error())
+		if isCloudNotFound(err) || c.isFCSandboxTeam() && operation == "GetTeam" && teamAbsenceCode(code) {
+			if !c.isFCSandboxTeam() || operation != "GetTeam" || teamAbsenceCode(code) {
+				return nil, ecerrors.NotFound("NotFound", cloudNotFoundMessage(request, code), cloudErrorOptions(err)...)
+			}
 		}
 		if isDependencyViolation(err) {
 			return nil, ecerrors.Service("DependencyViolation", callerCloudErrorMessage(err), false, cloudErrorOptions(err)...)
@@ -366,7 +368,7 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		return nil, ecerrors.Service("CloudAPIError", callerCloudErrorMessage(err), retryable, cloudErrorOptions(err)...)
 	}
 	if c.Resource != "" {
-		if err := openAPIBusinessError(resp); err != nil {
+		if err := c.resourceResponseError(req, resp); err != nil {
 			return nil, err
 		}
 	}
@@ -453,7 +455,7 @@ func (c *OpenAPICaller) executeOpenAPIRequest(ctx context.Context, operation str
 		resp, err := executor.ExecuteOpenAPI(ctx, req)
 		spanErr := err
 		if spanErr == nil && c.Resource != "" {
-			spanErr = openAPIBusinessError(resp)
+			spanErr = c.resourceResponseError(req, resp)
 		}
 		endSpan(spanErr)
 		if err == nil {

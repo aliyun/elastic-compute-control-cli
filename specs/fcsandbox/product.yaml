@@ -1,0 +1,10 @@
+schema_version: 1
+product: fcsandbox
+priority: 8
+resources: [team]
+description:
+  en: Manage FC Agent Sandbox teams.
+  zh-CN: 管理 FC 云沙箱团队。
+examples:
+  - ecctl fcsandbox team list --region cn-hangzhou
+  - ecctl fcsandbox team create --name dev --region cn-hangzhou

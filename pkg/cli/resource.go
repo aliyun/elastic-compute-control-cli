@@ -387,7 +387,7 @@ func publicCLICommandAllowed(args []string) bool {
 		return true
 	case "vpc":
 		return true
-	case "ack", "agentrun", "lingjun", "rg", "sandbox", "tag":
+	case "ack", "agentrun", "fcsandbox", "lingjun", "rg", "sandbox", "tag":
 		if len(positionals) == 1 {
 			return true
 		}
@@ -473,7 +473,7 @@ func publicCLIExample(example string) bool {
 	switch product {
 	case "ecs", "vpc":
 		return true
-	case "ack", "agentrun", "lingjun", "rg", "sandbox", "tag":
+	case "ack", "agentrun", "fcsandbox", "lingjun", "rg", "sandbox", "tag":
 		resource, action, ok := publicCLIExampleResourceAction(positionals)
 		if !ok {
 			return false
@@ -2311,6 +2311,9 @@ func outputItems(items []map[string]any) []map[string]any {
 
 func operationPaginationPayload(operation spec.Operation, input map[string]any, result engine.Result) map[string]any {
 	limit := intInput(input, "limit", defaultListLimit)
+	if operationInputHasName(operation.Input.Controls, "all") && boolInput(input, "all") {
+		return map[string]any{"page": 1, "limit": limit, "returned": len(result.Items), "has_more": false}
+	}
 	if operationUsesTokenPagination(operation) {
 		return tokenPaginationPayload(limit, len(result.Items), result.NextToken)
 	}

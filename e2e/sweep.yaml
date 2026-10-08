@@ -294,3 +294,9 @@ non_sweepable:
   - resource: tag/policy
     reason: provider-limitation
     review_after: "2026-10-27"
+
+  # Teams have no tag-based sweep contract; use lifecycle teardown and the
+  # run-specific cleanup journal. Do not scan or delete unrelated Teams.
+  - resource: fcsandbox/team
+    reason: provider-limitation
+    review_after: "2026-12-08"

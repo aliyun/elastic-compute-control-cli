@@ -621,6 +621,11 @@ func waiterState(waitSpec spec.Waiter, probe spec.Probe, result ProbeResult, ids
 			if !probeResultHasAnyID(result, ids) {
 				return "absent"
 			}
+			for _, item := range result.Items {
+				if containsString(ids, stringFromMap(item, "id")) && containsStringFold(waitSpec.Failure.States, stringFromMap(item, "status")) {
+					return stringFromMap(item, "status")
+				}
+			}
 			return ""
 		}
 		for _, item := range result.Items {

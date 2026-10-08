@@ -4,11 +4,11 @@ generated:
   cases_dir: cases
 summary:
   surface: public
-  resources: 61
-  operations: 289
+  resources: 62
+  operations: 294
   missing_cases: 0
   passed: 265
-  not_passed: 24
+  not_passed: 29
 resources:
   ack:
     ack:
@@ -1153,6 +1153,39 @@ resources:
           fingerprint: sha256:9fc34fb66f89cc5d283ee7590872f14cbecd64609d108e5437646b558ac91b3d
           time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
+  fcsandbox:
+    team:
+      operations:
+        create:
+          status: offline
+          case: cases/fcsandbox/team-lifecycle.yaml
+          fingerprint: sha256:6607aac8b059431264457911f0c86da5b2c327f07cd27f7257975270610c218e
+          time: "2026-10-08T03:12:20.290Z"
+          reason: not-run
+        delete:
+          status: offline
+          case: cases/fcsandbox/team-lifecycle.yaml
+          fingerprint: sha256:6607aac8b059431264457911f0c86da5b2c327f07cd27f7257975270610c218e
+          time: "2026-10-08T03:12:20.290Z"
+          reason: not-run
+        get:
+          status: offline
+          case: cases/fcsandbox/team-lifecycle.yaml
+          fingerprint: sha256:6607aac8b059431264457911f0c86da5b2c327f07cd27f7257975270610c218e
+          time: "2026-10-08T03:12:20.290Z"
+          reason: not-run
+        list:
+          status: offline
+          case: cases/fcsandbox/team-lifecycle.yaml
+          fingerprint: sha256:6607aac8b059431264457911f0c86da5b2c327f07cd27f7257975270610c218e
+          time: "2026-10-08T03:12:20.290Z"
+          reason: not-run
+        update:
+          status: offline
+          case: cases/fcsandbox/team-lifecycle.yaml
+          fingerprint: sha256:6607aac8b059431264457911f0c86da5b2c327f07cd27f7257975270610c218e
+          time: "2026-10-08T03:12:20.290Z"
+          reason: not-run
   lingjun:
     cluster:
       operations:

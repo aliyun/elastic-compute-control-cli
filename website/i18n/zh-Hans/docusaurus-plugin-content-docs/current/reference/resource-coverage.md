@@ -88,6 +88,16 @@ ecctl schema --list ecs
 | `snapshot-group` | `list`, `get`, `create`, `update`, `delete` |
 | `zone` | `list` |
 
+## FCSandbox
+
+```bash
+ecctl schema --list fcsandbox
+```
+
+| 资源 | 操作 |
+|---|---|
+| `team` | `list`, `get`, `create`, `update`, `delete` |
+
 ## 灵骏
 
 ```bash
