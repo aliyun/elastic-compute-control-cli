@@ -6,12 +6,12 @@ steps:
   - name: create
     run: >
       ecctl sandbox team create
-      --name {{.resource_prefix}}-team
-      --description "ecctl E2E Team {{.run_id}}"
+      --name {{.team_name}}
+      --description "{{.team_owner}}"
     at: $.team
     expect:
       id: { type: string, min_len: 1 }
-      name: { eq: "{{.resource_prefix}}-team" }
+      name: { eq: "{{.team_name}}" }
       status: { eq: active }
       read_only: { eq: false }
     capture:
@@ -26,7 +26,7 @@ steps:
       status: { eq: active }
 
   - name: list
-    run: ecctl sandbox team list --filter name={{.resource_prefix}}-team --limit 1 --all
+    run: ecctl sandbox team list --filter name={{.team_name}} --limit 1 --all
     assert:
       - len($.teams) == 1
       - $.teams[0].id == "{{.team_id}}"

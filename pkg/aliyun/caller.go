@@ -374,6 +374,18 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 			return nil, err
 		}
 	}
+	if c.isFCSandboxTeam() {
+		// Hooks and probes retain successful request IDs in later errors.
+		// Normalize at the provider boundary before any consumer can retain it.
+		if requestID, ok := resp["requestId"].(string); ok {
+			normalized := make(map[string]any, len(resp))
+			for key, value := range resp {
+				normalized[key] = value
+			}
+			normalized["requestId"] = callerSanitizeCloudError(errors.New(requestID))
+			resp = normalized
+		}
+	}
 	return resp, nil
 }
 

@@ -1085,6 +1085,12 @@ func runCase(
 	data := vars.Clone(base)
 	data["run_name"] = opt.RunName + "-" + caseSlug(s.Resource)
 	data["inputs"] = inputs
+	if s.Resource == "sandbox/team" {
+		if err := teamOwnership(data); err != nil {
+			cr.Status, cr.Error = report.StatusError, err.Error()
+			return cr
+		}
+	}
 
 	stepTimeout := opt.StepTimeout
 	if s.Timeout != "" {
@@ -1391,6 +1397,7 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 
 	var res execpkg.Result
 	var renderedCommand string
+	var teamIntent *teamCreateIntent
 	if st.Local != nil {
 		sctx, cancel := context.WithTimeout(ctx, timeout)
 		res = runLocalAction(sctx, data, *st.Local)
@@ -1402,11 +1409,18 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 			return sr, false
 		}
 		renderedCommand = cmd
+		if isTeamCreate(cmd) {
+			teamIntent, err = reserveTeamCreate(cmd, data, execCfg, cl, st)
+			if err != nil {
+				sr.Status, sr.Error = report.StatusError, err.Error()
+				return sr, false
+			}
+		}
 		for attempt := 0; ; attempt++ {
 			sctx, cancel := context.WithTimeout(ctx, timeout)
 			res = execpkg.Run(sctx, execCfg, cmd)
 			cancel()
-			if res.Exit == 0 || !isTransientNetworkError(res) || attempt >= len(stepRetryDelays) {
+			if teamIntent != nil || res.Exit == 0 || !isTransientNetworkError(res) || attempt >= len(stepRetryDelays) {
 				break
 			}
 			opt.Logf("step retry %d/%d after transient network error: %s", attempt+1, len(stepRetryDelays), report.Scrub(renderedCommand))
@@ -1424,6 +1438,19 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 	sr.DurationMs = res.Duration.Milliseconds()
 	sr.Stdout = strings.TrimSpace(res.Stdout)
 	sr.Stderr = strings.TrimSpace(res.Stderr)
+	if teamIntent != nil && !teamCreateHasIdentity(res) {
+		recoveryErr := reconcileTeamCreate(execCfg, cl, scope, data, st, lockKeys, timeout, teamIntent)
+		sr.Status = report.StatusFail
+		sr.Error = failureDetail(res)
+		if res.Err != nil {
+			sr.Error = res.Err.Error()
+		}
+		if sr.Error != "" {
+			sr.Error += "; "
+		}
+		sr.Error += recoveryErr.Error()
+		return sr, false
+	}
 
 	// Register teardown as soon as the create-ish step ran (even if asserts
 	// later fail) so the resource it produced is cleaned up.

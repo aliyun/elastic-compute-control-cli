@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
 func TestRunTeamCreateJournalsIdentityBeforeLaterReadbackFailure(t *testing.T) {
@@ -82,5 +84,190 @@ exit 1
 	}
 	if metadata.RunID != "test" || metadata.ExecutionID != "team-execution" || metadata.Surface != "public" || metadata.Region != "cn-hangzhou" || metadata.EcctlBin != fake {
 		t.Fatalf("cleanup journal lost run/binary/surface/region binding: %+v", metadata)
+	}
+}
+
+func TestRunTeamAmbiguousCreateNeverReplaysAndRecoversOwnedIdentity(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a bash script")
+	}
+	oldDelays := stepRetryDelays
+	stepRetryDelays = []time.Duration{time.Millisecond}
+	defer func() { stepRetryDelays = oldDelays }()
+	names := map[string]bool{}
+	for _, mode := range []string{"retry-success", "duplicate-rejection", "success-no-id", "cleanup", "wrong-owner", "empty", "list-failure", "unsafe-id", "flag-id", "incomplete"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			fake := filepath.Join(dir, "ecctl")
+			body := `#!/usr/bin/env bash
+echo "$*" >> "$FAKE_LOG"
+if [[ "$*" == *" team create "* ]]; then
+  if ! compgen -G "$FAKE_JOURNAL.team-create-*.json" >/dev/null; then
+    echo '{"error":{"message":"create ran before recovery intent"}}'; exit 1
+  fi
+  if [[ -f "$FAKE_REMOTE" ]]; then
+    if [[ "$FAKE_MODE" == "retry-success" ]]; then
+      echo '{"team":{"id":"team-B","status":"active","read_only":false}}'; exit 0
+    fi
+    echo '{"error":{"message":"duplicate team name"}}'; exit 1
+  fi
+  while [[ $# -gt 0 ]]; do
+    case "$1" in --name) name="$2"; shift;; --description) description="$2"; shift;; esac
+    shift
+  done
+  printf '{"teams":[{"id":"team-A","name":"%s","description":"%s","status":"active","read_only":false}],"pagination":{"has_more":false}}\n' "$name" "$description" > "$FAKE_REMOTE"
+  if [[ "$FAKE_MODE" == "success-no-id" ]]; then echo '{}'; exit 0; fi
+  echo '{"error":{"message":"connection reset by peer"}}'; exit 1
+fi
+if [[ "$*" == *" team list "* ]]; then
+  case "$FAKE_MODE" in
+    empty) echo '{"teams":[],"pagination":{"has_more":false}}';;
+    list-failure) echo '{"error":{"message":"permission denied"}}'; exit 1;;
+    wrong-owner) sed 's/ecctl E2E Team/ecctl foreign Team/' "$FAKE_REMOTE";;
+    unsafe-id) sed 's/team-A/..\/foreign/' "$FAKE_REMOTE";;
+    flag-id) sed 's/team-A/--foreign/' "$FAKE_REMOTE";;
+    incomplete) sed 's/"has_more":false/"has_more":true/' "$FAKE_REMOTE";;
+    *) cat "$FAKE_REMOTE";;
+  esac
+  exit 0
+fi
+if [[ "$*" == *" team delete team-A "* && "$FAKE_MODE" == "cleanup" ]]; then
+  if [[ ! -s "$FAKE_JOURNAL" ]]; then echo 'delete ran before durable journal'; exit 1; fi
+  echo '{"deleted":true}'; exit 0
+fi
+echo '{"error":{"message":"unexpected command"}}'; exit 1
+`
+			if err := os.WriteFile(fake, []byte(body), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cases := filepath.Join(dir, "cases", "sandbox")
+			if err := os.MkdirAll(cases, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			caseBody, err := os.ReadFile("../../cases/sandbox/team-lifecycle.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(cases, "team.yaml"), caseBody, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			log, remote, journal := filepath.Join(dir, "calls"), filepath.Join(dir, "remote"), filepath.Join(dir, "journal.json")
+			t.Setenv("FAKE_LOG", log)
+			t.Setenv("FAKE_REMOTE", remote)
+			t.Setenv("FAKE_MODE", mode)
+			t.Setenv("FAKE_JOURNAL", journal)
+			run, err := Run(context.Background(), Options{CasesDir: filepath.Join(dir, "cases"), InputsDir: filepath.Join(dir, "inputs"), RunName: "same-reused-label", RunID: "owned-run", ExecutionID: "owned-execution", Region: "cn-hangzhou", Surface: "public", EcctlBin: fake, Keep: mode != "cleanup", CleanupJournal: journal, StepTimeout: time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Count(string(calls), "team create ") != 1 {
+				t.Errorf("ambiguous CreateTeam was replayed: %s", calls)
+			}
+			if strings.Count(string(calls), "team list ") != 1 {
+				t.Errorf("missing bounded read-only reconciliation: %s", calls)
+			}
+			if run.Summary.Failed != 1 || run.Cases[0].Steps[0].Status == report.StatusPass {
+				t.Errorf("uncertain CreateTeam fabricated pass: %+v", run)
+			}
+			intents, err := filepath.Glob(journal + ".team-create-*.json")
+			if err != nil || len(intents) != 1 {
+				t.Fatalf("durable recovery intent missing: %v %v", intents, err)
+			}
+			intentBody, err := os.ReadFile(intents[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var intent map[string]any
+			if err := json.Unmarshal(intentBody, &intent); err != nil {
+				t.Fatal(err)
+			}
+			if intent["run_id"] != "owned-run" || intent["execution_id"] != "owned-execution" || intent["region"] != "cn-hangzhou" || intent["surface"] != "public" || intent["ecctl_bin"] != fake || intent["created_at"] == nil {
+				t.Fatalf("intent binding missing: %s", intentBody)
+			}
+			name, _ := intent["name"].(string)
+			if len(name) != 32 || !strings.HasPrefix(name, "ecctl-t-") {
+				t.Errorf("name not bounded and execution owned: %q", name)
+			}
+			if names[name] {
+				t.Fatalf("reused label reused Team ownership: %q", name)
+			}
+			names[name] = true
+			if mode == "retry-success" || mode == "duplicate-rejection" || mode == "success-no-id" || mode == "cleanup" {
+				entries := readJournalEntries(t, journal)
+				if mode == "cleanup" {
+					if len(entries) != 0 || strings.Count(string(calls), "team delete team-A ") != 1 {
+						t.Fatalf("owned recovery cleanup failed: %+v %s", entries, calls)
+					}
+				} else if len(entries) != 1 || entries[0].Teardown != "ecctl sandbox team delete team-A --timeout 5m" {
+					t.Fatalf("original owned Team missing from journal: %+v", entries)
+				}
+				body, err := os.ReadFile(journal)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var metadata report.CleanupJournal
+				if err := json.Unmarshal(body, &metadata); err != nil {
+					t.Fatal(err)
+				}
+				if metadata.RunID != "owned-run" || metadata.ExecutionID != "owned-execution" || metadata.Region != "cn-hangzhou" || metadata.Surface != "public" || metadata.EcctlBin != fake {
+					t.Fatalf("recovered journal target changed: %s", body)
+				}
+			} else if _, err := os.Stat(journal); !os.IsNotExist(err) {
+				t.Fatalf("unsafe/unmatched Team got a delete journal: %v", err)
+			}
+		})
+	}
+}
+
+func TestRunTeamCreateFailsBeforeLaunchWithoutSafeRecoveryReservation(t *testing.T) {
+	for _, mode := range []string{"no-journal", "mismatched-journal", "unbound-journal", "bad-teardown", "reused-intent", "unwritable-intent"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := execpkg.Config{Bin: filepath.Join(dir, "must-not-launch"), Region: "cn-hangzhou"}
+			data := map[string]any{"run_name": "owned-run"}
+			if err := teamOwnership(data); err != nil {
+				t.Fatal(err)
+			}
+			st := scenario.Step{Name: "create", Run: `ecctl sandbox team create --name {{.team_name}} --description "{{.team_owner}}"`, Teardown: "ecctl sandbox team delete {{.team_id}} --timeout 5m"}
+			journal := filepath.Join(dir, "journal.json")
+			if mode == "no-journal" {
+				journal = ""
+			}
+			cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, nil, true, journal, report.CleanupJournal{RunID: "owned-run", ExecutionID: "owned-execution", Surface: "public"}, func(string, ...any) {})
+			if mode == "mismatched-journal" {
+				if err := writeRunnerJournal(journal, report.CleanupJournal{Version: 2, RunID: "foreign-run", Region: "cn-hangzhou"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "unbound-journal" {
+				if err := writeRunnerJournal(journal, report.CleanupJournal{Version: 2}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "bad-teardown" {
+				st.Teardown = "ecctl sandbox team delete {{.team_id}} --region foreign"
+			}
+			if mode == "unwritable-intent" {
+				if err := os.WriteFile(journal, []byte("{}"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				cl.journal = filepath.Join(journal, "child")
+			}
+			if mode == "reused-intent" {
+				cmd := `ecctl sandbox team create --name ` + data["team_name"].(string) + ` --description "` + data["team_owner"].(string) + `"`
+				if _, err := reserveTeamCreate(cmd, data, cfg, cl, st); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var scope []*cleanupItem
+			sr, ok := runStep(context.Background(), Options{}, cfg, cl, &scope, data, st, time.Second)
+			if ok || sr.Status != report.StatusError || sr.Command != "" || strings.Contains(sr.Error, "executable") {
+				t.Fatalf("create reached CLI before safe reservation: %+v", sr)
+			}
+		})
 	}
 }

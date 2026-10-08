@@ -1649,31 +1649,31 @@ resources:
         create:
           status: offline
           case: cases/sandbox/team-lifecycle.yaml
-          fingerprint: sha256:06e5de6db243bc916e5799dc77e84e22d9a043b88df1822ac4c2dc4d484ed20d
+          fingerprint: sha256:27b700c2250d9bc4a57d3c2cbc7d08b6569c59b103d80e6537ef9ab09068fa43
           time: "2026-10-08T04:19:46.846Z"
           reason: not-run
         delete:
           status: offline
           case: cases/sandbox/team-lifecycle.yaml
-          fingerprint: sha256:06e5de6db243bc916e5799dc77e84e22d9a043b88df1822ac4c2dc4d484ed20d
+          fingerprint: sha256:27b700c2250d9bc4a57d3c2cbc7d08b6569c59b103d80e6537ef9ab09068fa43
           time: "2026-10-08T04:19:46.846Z"
           reason: not-run
         get:
           status: offline
           case: cases/sandbox/team-lifecycle.yaml
-          fingerprint: sha256:06e5de6db243bc916e5799dc77e84e22d9a043b88df1822ac4c2dc4d484ed20d
+          fingerprint: sha256:27b700c2250d9bc4a57d3c2cbc7d08b6569c59b103d80e6537ef9ab09068fa43
           time: "2026-10-08T04:19:46.846Z"
           reason: not-run
         list:
           status: offline
           case: cases/sandbox/team-lifecycle.yaml
-          fingerprint: sha256:06e5de6db243bc916e5799dc77e84e22d9a043b88df1822ac4c2dc4d484ed20d
+          fingerprint: sha256:27b700c2250d9bc4a57d3c2cbc7d08b6569c59b103d80e6537ef9ab09068fa43
           time: "2026-10-08T04:19:46.846Z"
           reason: not-run
         update:
           status: offline
           case: cases/sandbox/team-lifecycle.yaml
-          fingerprint: sha256:06e5de6db243bc916e5799dc77e84e22d9a043b88df1822ac4c2dc4d484ed20d
+          fingerprint: sha256:27b700c2250d9bc4a57d3c2cbc7d08b6569c59b103d80e6537ef9ab09068fa43
           time: "2026-10-08T04:19:46.846Z"
           reason: not-run
     template:

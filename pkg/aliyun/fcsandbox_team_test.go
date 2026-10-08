@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,7 +19,85 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/pkg/output"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
+	_ "github.com/aliyun/elastic-compute-control-cli/specs/sandbox"
 )
+
+type teamSuccessHTTPSequence struct {
+	bodies []string
+	calls  int
+}
+
+func (s *teamSuccessHTTPSequence) Call(_ *http.Request, _ *http.Transport) (*http.Response, error) {
+	body := s.bodies[s.calls]
+	s.calls++
+	return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+}
+
+func TestFCSandboxTeamSuccessRequestIDPublicErrors(t *testing.T) {
+	resource, err := spec.LoadResource("../../specs", "sandbox", "team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []struct{ raw, want string }{
+		{"req-ordinary", "req-ordinary"},
+		{"securityToken=private-token", "Alibaba Cloud API request failed"},
+		{"https://example.com/?Signature=private-signature", "https://example.com/?[REDACTED]"},
+		{"Deny: private-principal|source ip: 127.0.0.1", "Deny: [REDACTED]|source ip: 127.0.0.1"},
+	} {
+		for _, tc := range []struct {
+			name, action, code string
+			input              map[string]any
+			readonly           bool
+			pages              bool
+		}{
+			{"readonly", "delete", "TeamReadOnly", map[string]any{"id": "team-1", "no_wait": true}, true, false},
+			{"rename", "update", "TeamRenameNotAllowed", map[string]any{"id": "team-1", "name": "new-name"}, false, false},
+			{"later page", "list", "CloudAPIError", map[string]any{"limit": 1, "page": 1, "all": true}, false, true},
+		} {
+			t.Run(tc.name+"/"+id.want, func(t *testing.T) {
+				team := map[string]any{"teamID": "team-1", "teamName": "old-name", "status": "active", "readOnly": tc.readonly, "allowUpdateTeamName": false}
+				body := map[string]any{"code": "200", "requestId": id.raw, "team": team}
+				if tc.pages {
+					body = map[string]any{"code": "200", "requestId": id.raw, "teams": []any{team}, "total": 2, "pageNumber": 1, "pageSize": 1}
+				}
+				encoded, err := json.Marshal(body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sequence := &teamSuccessHTTPSequence{bodies: []string{string(encoded), `{"code":"Forbidden","message":"page rejected","requestId":"req-page-2"}`}}
+				profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
+				executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+				if err != nil {
+					t.Fatal(err)
+				}
+				executor.client.HttpClient = sequence
+				caller := &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", Profile: resolvedOpenAPIProfile{Language: "en"}, executor: executor}
+				_, err = engine.NewExecutor(resource, caller).Execute(context.Background(), engine.Request{Action: tc.action, Input: tc.input})
+				var appErr *ecerrors.AppError
+				if !errors.As(err, &appErr) || appErr.Payload().Code != tc.code {
+					t.Fatalf("actual hook/page error = %v", err)
+				}
+				actions := appErr.Actions()
+				if len(actions) == 0 || actions[0].RequestID != id.want {
+					t.Fatalf("success action request ID = %+v, want %q", actions, id.want)
+				}
+				if tc.pages && (len(actions) != 2 || actions[1].RequestID != "req-page-2" || sequence.calls != 2) {
+					t.Fatalf("page actions lost: %+v", actions)
+				}
+				for _, mode := range []string{output.ModeJSON, output.ModeText} {
+					var rendered bytes.Buffer
+					public := map[string]any{"error": i18n.NewLocalizer("en").ErrorPayload(appErr.Payload(), true), "actions": actions}
+					if err := output.Write(&rendered, mode, public, output.TextOptions{}); err != nil {
+						t.Fatal(err)
+					}
+					if strings.Contains(rendered.String(), "private-") {
+						t.Fatalf("%s public output leaked request ID: %s", mode, rendered.String())
+					}
+				}
+			})
+		}
+	}
+}
 
 func TestFCSandboxTeamBusinessErrorFieldsAreSanitized(t *testing.T) {
 	resource, err := spec.LoadResource("../../specs", "sandbox", "team")
