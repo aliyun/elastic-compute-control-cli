@@ -35,7 +35,10 @@ type teamCreateIntent struct {
 	path        string
 }
 
-var writeTeamCreateIntent = journalfile.WriteExclusiveDurable
+var (
+	writeTeamCreateIntent  = journalfile.WriteExclusiveDurable
+	writeTeamCreateJournal = writeRunnerJournal
+)
 
 func teamCommandArgument(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
@@ -44,7 +47,7 @@ func teamCommandArgument(value string) string {
 func (intent *teamCreateIntent) command() string {
 	// Pin the verified region and machine output before user values: early
 	// raw-token checks must see the actual flags, independent of profile defaults.
-	args := append([]string{intent.Input[0], "--output=json", "--region", intent.Region}, intent.Input[1:]...)
+	args := append([]string{intent.Input[0], "--output=json", "--agent-envelope=false", "--region", intent.Region}, intent.Input[1:]...)
 	for i, value := range args {
 		args[i] = teamCommandArgument(value)
 	}
@@ -187,17 +190,23 @@ func reserveTeamCreate(cmd string, data map[string]any, cfg execpkg.Config, cl *
 	if err != nil {
 		return nil, err
 	}
-	if err := journalfile.WithLock(context.Background(), cl.journal, func() error {
-		journal, legacy, err := readRunnerJournal(cl.journal)
+	desired, _, journalPath := cl.journalValues(&cleanupItem{role: "primary"})
+	if err := journalfile.WithLock(context.Background(), journalPath, func() error {
+		journal, legacy, err := readRunnerJournal(journalPath)
 		if err == nil {
 			if legacy || journal.Version != 2 {
 				return fmt.Errorf("Team create requires a version 2 cleanup journal")
 			}
-			desired, _, _ := cl.journalValues(&cleanupItem{role: "primary"})
 			if journal.RunID != desired.RunID || journal.ExecutionID != desired.ExecutionID || journal.RegionRole != desired.RegionRole || journal.Region != desired.Region || journal.Surface != desired.Surface || journal.EcctlBin != desired.EcctlBin {
 				return fmt.Errorf("existing Team cleanup journal does not match run, execution, role, region, surface and binary")
 			}
-		} else if !os.IsNotExist(err) {
+		} else if os.IsNotExist(err) {
+			// Bind the journal before another run can reserve or either create
+			// can launch. A failed claim must not degrade to in-memory cleanup.
+			if err := writeTeamCreateJournal(journalPath, desired); err != nil {
+				return fmt.Errorf("claim Team cleanup journal: %w", err)
+			}
+		} else {
 			return err
 		}
 		return writeTeamCreateIntent(intent.path, append(body, '\n'))
@@ -250,7 +259,7 @@ func renderTeamRecoveryDelete(st scenario.Step, data map[string]any) (string, er
 func reconcileTeamCreate(cfg execpkg.Config, cl *cleanup, scope *[]*cleanupItem, data map[string]any, st scenario.Step, locks []string, timeout time.Duration, intent *teamCreateIntent) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	result := execpkg.Run(ctx, cfg, "ecctl --output=json --region "+teamCommandArgument(intent.Region)+" sandbox team list --filter name="+intent.Name+" --all")
+	result := execpkg.Run(ctx, cfg, "ecctl --output=json --agent-envelope=false --region "+teamCommandArgument(intent.Region)+" sandbox team list --filter name="+intent.Name+" --all")
 	if result.Err != nil || result.Exit != 0 {
 		return fmt.Errorf("Team reconciliation failed; retained recovery intent %s", intent.path)
 	}

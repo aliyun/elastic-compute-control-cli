@@ -65,6 +65,9 @@ func (f *fakeTeamCaller) Call(_ context.Context, operation string, params map[st
 		f.created = true
 		response["team"] = team
 	case "ListTeams":
+		if os.Getenv("FAKE_TEAM_DENY_LIST") == "1" {
+			return nil, ecerrors.Service("CloudAPIError", "ListTeams denied", false)
+		}
 		teams := []any{}
 		if team != nil {
 			teams = append(teams, team)

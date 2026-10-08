@@ -52,6 +52,7 @@ func TestRunTeamTextProfileRegistersCleanup(t *testing.T) {
 		t.Setenv("FAKE_TEAM_DIR", dir)
 		t.Setenv("FAKE_TEAM_JOURNAL", "")
 		t.Setenv("FAKE_TEAM_LOST_RESPONSE", "")
+		t.Setenv("FAKE_TEAM_DENY_LIST", "")
 		return config
 	}
 	if !t.Run("profile-control", func(t *testing.T) {
@@ -79,6 +80,8 @@ func TestRunTeamTextProfileRegistersCleanup(t *testing.T) {
 		`ecctl --lang "--output=text" sbx team create`,
 		`ecctl sandbox team create --lang "quote' --output=text" --output=json`,
 		`ecctl --lang "--region=cn-beijing" sandbox team create --output json --json=false`,
+		`ecctl --lang "--agent-envelope" sandbox team create`,
+		`ecctl sandbox team create --lang "--agent-envelope=true"`,
 	} {
 		for _, mode := range []string{"success-keep", "success-cleanup", "lost-response-keep", "lost-response-cleanup"} {
 			t.Run(command+"/"+mode, func(t *testing.T) {
@@ -87,6 +90,9 @@ func TestRunTeamTextProfileRegistersCleanup(t *testing.T) {
 				lost, keep := strings.HasPrefix(mode, "lost-response"), strings.HasSuffix(mode, "keep")
 				if lost {
 					t.Setenv("FAKE_TEAM_LOST_RESPONSE", "1")
+				} else {
+					// A known create ID must register directly even without list permission.
+					t.Setenv("FAKE_TEAM_DENY_LIST", "1")
 				}
 				journal := filepath.Join(dir, "journal.json")
 				t.Setenv("FAKE_TEAM_JOURNAL", journal)
@@ -150,6 +156,143 @@ func TestRunTeamTextProfileRegistersCleanup(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestRunTeamReservationClaimsJournalBeforeCreate(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		for _, changed := range []string{"same", "run", "execution", "region", "binary", "surface"} {
+			t.Run("existing="+strconv.FormatBool(existing)+"/"+changed, func(t *testing.T) {
+				dir := t.TempDir()
+				journal := filepath.Join(dir, "journal.json")
+				cfg := execpkg.Config{Bin: filepath.Join(dir, "must-not-launch"), Region: "cn-hangzhou"}
+				meta := report.CleanupJournal{RunID: "first-run", ExecutionID: "first-execution", Surface: "public"}
+				first := newCleanup(map[string]execpkg.Config{"primary": cfg}, nil, true, journal, meta, func(string, ...any) {})
+				desired, _, _ := first.journalValues(&cleanupItem{role: "primary"})
+				var existingBytes []byte
+				if existing {
+					desired.Entries = []report.Resource{{Scope: "existing", Teardown: "ecctl sandbox team delete existing-team --timeout 5m", RegionRole: "primary", Region: cfg.Region, ExecutionID: meta.ExecutionID}}
+					if err := writeRunnerJournal(journal, desired); err != nil {
+						t.Fatal(err)
+					}
+					var err error
+					existingBytes, err = os.ReadFile(journal)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				makeInput := func() (map[string]any, string) {
+					data := map[string]any{}
+					if err := teamOwnership(data); err != nil {
+						t.Fatal(err)
+					}
+					return data, `ecctl sandbox team create --name ` + data["team_name"].(string) + ` --description "` + data["team_owner"].(string) + `"`
+				}
+				data, command := makeInput()
+				st := scenario.Step{Name: "create", Run: command, Teardown: "ecctl sandbox team delete {{.team_id}} --timeout 5m"}
+				intent, err := reserveTeamCreate(command, data, cfg, first, st)
+				if err != nil {
+					t.Fatal(err)
+				}
+				before, readErr := os.ReadFile(journal)
+				if existing && string(before) != string(existingBytes) {
+					t.Errorf("first reservation changed existing metadata/entries: %s", before)
+				}
+				var claimed report.CleanupJournal
+				if readErr != nil || json.Unmarshal(before, &claimed) != nil || claimed.Version != 2 || claimed.RunID != meta.RunID || claimed.ExecutionID != meta.ExecutionID || claimed.RegionRole != "primary" || claimed.Region != cfg.Region || claimed.EcctlBin != cfg.Bin || claimed.Surface != meta.Surface || len(claimed.Entries) != len(desired.Entries) {
+					t.Errorf("reservation returned before durable metadata claim: %s %v", before, readErr)
+				}
+				firstIntent, err := os.ReadFile(intent.path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				switch changed {
+				case "run":
+					meta.RunID = "second-run"
+				case "execution":
+					meta.ExecutionID = "second-execution"
+				case "region":
+					cfg.Region = "cn-beijing"
+				case "binary":
+					cfg.Bin = filepath.Join(dir, "other-must-not-launch")
+				case "surface":
+					meta.Surface = "full"
+				}
+				second := newCleanup(map[string]execpkg.Config{"primary": cfg}, nil, true, journal, meta, func(string, ...any) {})
+				data, command = makeInput()
+				st.Run = command
+				if changed == "same" {
+					if _, err := reserveTeamCreate(command, data, cfg, second, st); err != nil {
+						t.Errorf("compatible reservation rejected: %v", err)
+					}
+				} else {
+					var scope []*cleanupItem
+					step, ok := runStep(context.Background(), Options{}, cfg, second, &scope, data, st, time.Second)
+					if ok || step.Command != "" || step.Status != report.StatusError || !strings.Contains(step.Error, "does not match") || len(scope) != 0 {
+						t.Errorf("incompatible interleaved run reached a command: %+v", step)
+					}
+				}
+				after, err := os.ReadFile(journal)
+				if err != nil || string(after) != string(before) {
+					t.Errorf("reservation rewrote existing metadata/entries: %s %v", after, err)
+				}
+				if actual, err := os.ReadFile(intent.path); err != nil || string(actual) != string(firstIntent) {
+					t.Errorf("interleaving changed the first immutable intent: %s %v", actual, err)
+				}
+				intents, err := filepath.Glob(journal + ".team-create-*.json")
+				want := 1
+				if changed == "same" {
+					want = 2
+				}
+				if err != nil || len(intents) != want {
+					t.Errorf("incompatible owner acquired an intent: %v %v", intents, err)
+				}
+			})
+		}
+	}
+}
+
+func TestRunTeamJournalClaimFailurePreventsLaunch(t *testing.T) {
+	for _, installed := range []bool{false, true} {
+		t.Run("installed="+strconv.FormatBool(installed), func(t *testing.T) {
+			dir := t.TempDir()
+			journal := filepath.Join(dir, "journal.json")
+			cfg := execpkg.Config{Bin: filepath.Join(dir, "must-not-launch"), Region: "cn-hangzhou"}
+			cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, nil, true, journal, report.CleanupJournal{RunID: "claim-run", ExecutionID: "claim-execution", Surface: "public"}, func(string, ...any) {})
+			data := map[string]any{}
+			if err := teamOwnership(data); err != nil {
+				t.Fatal(err)
+			}
+			previous := writeTeamCreateJournal
+			t.Cleanup(func() { writeTeamCreateJournal = previous })
+			failure := errors.New("claim directory sync failed")
+			called := false
+			writeTeamCreateJournal = func(path string, metadata report.CleanupJournal) error {
+				called = true
+				if path != journal || metadata.Version != 2 || metadata.RunID != "claim-run" || metadata.ExecutionID != "claim-execution" || metadata.RegionRole != "primary" || metadata.Region != cfg.Region || metadata.EcctlBin != cfg.Bin || metadata.Surface != "public" || len(metadata.Entries) != 0 {
+					t.Fatalf("claim writer received incorrect metadata: %+v", metadata)
+				}
+				if installed {
+					if err := previous(path, metadata); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return failure
+			}
+			st := scenario.Step{Name: "create", Run: `ecctl sandbox team create --name {{.team_name}} --description "{{.team_owner}}"`, Teardown: "ecctl sandbox team delete {{.team_id}} --timeout 5m"}
+			var scope []*cleanupItem
+			step, ok := runStep(context.Background(), Options{}, cfg, cl, &scope, data, st, time.Second)
+			if !called || ok || step.Command != "" || step.Status != report.StatusError || !strings.Contains(step.Error, failure.Error()) || len(scope) != 0 {
+				t.Fatalf("failed durable claim permitted launch: %+v", step)
+			}
+			intents, err := filepath.Glob(journal + ".team-create-*.json")
+			if err != nil || len(intents) != 0 {
+				t.Fatalf("failed claim acquired an intent: %v %v", intents, err)
+			}
+			if _, err := os.Stat(journal); installed && err != nil || !installed && !os.IsNotExist(err) {
+				t.Fatalf("post-install uncertainty discarded or fabricated the claim: %v", err)
+			}
+		})
 	}
 }
 
@@ -293,8 +436,8 @@ echo '{"error":{"message":"unexpected command"}}'; exit 1
 				if run.Summary.Failed != 1 || strings.Contains(string(calls), "team delete ") {
 					t.Fatalf("unsafe successful identity launched a delete: %+v %s", run.Summary, calls)
 				}
-				if _, err := os.Stat(journal); !os.IsNotExist(err) {
-					t.Fatalf("unsafe identity got a cleanup journal: %v", err)
+				if entries := readJournalEntries(t, journal); len(entries) != 0 {
+					t.Fatalf("unsafe identity got a delete entry: %+v", entries)
 				}
 			}
 		})
@@ -462,8 +605,8 @@ echo '{"error":{"message":"unexpected command"}}'; exit 1
 				if metadata.RunID != "owned-run" || metadata.ExecutionID != "owned-execution" || metadata.Region != "cn-hangzhou" || metadata.Surface != "public" || metadata.EcctlBin != fake {
 					t.Fatalf("recovered journal target changed: %s", body)
 				}
-			} else if _, err := os.Stat(journal); !os.IsNotExist(err) {
-				t.Fatalf("unsafe/unmatched Team got a delete journal: %v", err)
+			} else if entries := readJournalEntries(t, journal); len(entries) != 0 {
+				t.Fatalf("unsafe/unmatched Team got a delete entry: %+v", entries)
 			}
 		})
 	}

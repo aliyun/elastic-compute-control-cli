@@ -97,6 +97,9 @@ HTTP 200 的业务失败保留 `message` 和 `requestId`。详情响应必须包
 删除失败、等待超时和 no-wait。E2E case 为 `e2e/cases/sandbox/team-lifecycle.yaml`；
 保护创建与响应丢失后的恢复查询显式使用 JSON 输出，避免 profile 的文本输出
 使 runner 无法解析团队 ID 和登记删除 finalizer。
+完整 lifecycle case 的普通 get/list/update/delete 步骤仍沿用 profile 的输出格式，
+需要选择 JSON 输出的 profile；保护创建与恢复清理的离线测试不代表文本 profile
+下整套 lifecycle 的断言均可通过。
 
 2026-10-08 在 `cn-hangzhou` 对候选 `5fabce2a` 的 public live 运行验证了创建、
 获取、按名称筛选的 `--all` 列表、描述更新和等待删除，五项操作均通过断言，
