@@ -1,6 +1,7 @@
 package aliyun
 
 import (
+	"errors"
 	"math"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ func (c *OpenAPICaller) resourceResponseError(req *openAPIRequest, response map[
 		return openAPIBusinessError(response)
 	}
 	requestID, _ := response["requestId"].(string)
+	requestID = callerSanitizeCloudError(errors.New(requestID))
 	invalid := func() error {
 		return ecerrors.Service("InvalidTeamResponse", i18n.NewLocalizer("en").Message("InvalidTeamResponse"), false, ecerrors.WithRequestID(requestID))
 	}
@@ -30,10 +32,12 @@ func (c *OpenAPICaller) resourceResponseError(req *openAPIRequest, response map[
 		return invalid()
 	}
 	if code != "200" {
+		code = callerSanitizeCloudError(errors.New(code))
 		message, _ := response["message"].(string)
 		if message == "" {
 			message = i18n.NewLocalizer("en").Message("CloudAPIError")
 		}
+		message = callerSanitizeCloudError(errors.New(message))
 		options := []ecerrors.Option{ecerrors.WithRequestID(requestID), ecerrors.WithRawCause(code, message)}
 		if req.ApiName == "GetTeam" && teamAbsenceCode(code) {
 			return ecerrors.NotFound("NotFound", i18n.NewLocalizer("en").Message("TeamNotFound"), options...)

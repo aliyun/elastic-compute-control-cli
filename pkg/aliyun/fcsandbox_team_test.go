@@ -1,16 +1,106 @@
 package aliyun
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
+	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/output"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
 )
+
+func TestFCSandboxTeamBusinessErrorFieldsAreSanitized(t *testing.T) {
+	resource, err := spec.LoadResource("../../specs", "sandbox", "team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	localizer := i18n.NewLocalizer("en")
+	invalidMessage := localizer.Message("InvalidTeamResponse")
+	for _, tc := range []struct {
+		name, code, message, requestID                    string
+		wantCode, wantMessage, wantRequestID, payloadCode string
+	}{
+		{"ordinary fields", "409", "team has API keys", "req-business", "409", "team has API keys", "req-business", "CloudAPIError"},
+		{"credential assignment message", "409", "securityToken=private-token", "req-business", "409", "Alibaba Cloud API request failed", "req-business", "CloudAPIError"},
+		{"signed URL message", "409", "request https://example.com/?AccessKeyId=private-ak&Signature=private-signature failed", "req-business", "409", "request https://example.com/?[REDACTED] failed", "req-business", "CloudAPIError"},
+		{"Deny principal message", "409", "Deny: private-principal|source ip: 127.0.0.1", "req-business", "409", "Deny: [REDACTED]|source ip: 127.0.0.1", "req-business", "CloudAPIError"},
+		{"credential assignment code", "securityToken=private-code", "provider rejected request", "req-business", "Alibaba Cloud API request failed", "provider rejected request", "req-business", "CloudAPIError"},
+		{"credential assignment request ID", "409", "provider rejected request", "securityToken=private-request", "409", "provider rejected request", "Alibaba Cloud API request failed", "CloudAPIError"},
+		{"invalid missing code request ID", "", "unused provider message", "securityToken=private-request", "InvalidTeamResponse", invalidMessage, "Alibaba Cloud API request failed", "InvalidTeamResponse"},
+		{"invalid success signed URL request ID", "200", "success", "https://example.com/?AccessKeyId=private-ak&Signature=private-signature", "InvalidTeamResponse", invalidMessage, "https://example.com/?[REDACTED]", "InvalidTeamResponse"},
+		{"invalid success Deny request ID", "200", "success", "Deny: private-principal|source ip: 127.0.0.1", "InvalidTeamResponse", invalidMessage, "Deny: [REDACTED]|source ip: 127.0.0.1", "InvalidTeamResponse"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := map[string]any{"message": tc.message, "requestId": tc.requestID}
+			if tc.code != "" {
+				body["code"] = tc.code
+			}
+			encoded, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
+			executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+			if err != nil {
+				t.Fatal(err)
+			}
+			executor.client.HttpClient = sdkErrorHTTPClient{status: 200, body: string(encoded)}
+			caller := &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", Profile: resolvedOpenAPIProfile{Language: "en"}, executor: executor}
+			_, err = engine.NewExecutor(resource, caller).Execute(context.Background(), engine.Request{Action: "list", Input: map[string]any{"limit": 1, "page": 1}})
+			var appErr *ecerrors.AppError
+			if !errors.As(err, &appErr) {
+				t.Fatalf("business failure did not produce AppError: %v", err)
+			}
+			payload := appErr.Payload()
+			actions := appErr.Actions()
+			if payload.Kind != "service" || payload.Code != tc.payloadCode || payload.Message != tc.wantMessage || payload.Retryable {
+				t.Errorf("business payload = %+v", payload)
+			}
+			if len(actions) != 1 || actions[0].ActionName != "ListTeams" || actions[0].Code != tc.wantCode || actions[0].Message != tc.wantMessage || actions[0].RequestID != tc.wantRequestID {
+				t.Errorf("business actions = %+v", actions)
+			}
+			rawPayload, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(rawPayload), "private-") {
+				t.Errorf("business payload leaked fixture secret: %s", rawPayload)
+			}
+			for _, mode := range []string{output.ModeJSON, output.ModeText} {
+				var rendered bytes.Buffer
+				public := map[string]any{"error": localizer.ErrorPayload(payload, len(actions) > 0), "actions": actions}
+				if err := output.Write(&rendered, mode, public, output.TextOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(rendered.String(), "private-") {
+					t.Errorf("%s public output leaked fixture secret: %s", mode, rendered.String())
+				}
+				if mode == output.ModeJSON {
+					var decoded struct {
+						Error   ecerrors.ErrorPayload `json:"error"`
+						Actions []ecerrors.Action     `json:"actions"`
+					}
+					if err := json.Unmarshal(rendered.Bytes(), &decoded); err != nil {
+						t.Fatal(err)
+					}
+					if decoded.Error.Code != tc.payloadCode || len(decoded.Actions) != 1 || decoded.Actions[0].Code != tc.wantCode || decoded.Actions[0].Message != tc.wantMessage || decoded.Actions[0].RequestID != tc.wantRequestID {
+						t.Errorf("public provider metadata changed: %s", rendered.String())
+					}
+				}
+			}
+		})
+	}
+}
 
 func TestFCSandboxTeamBusinessErrorsAndInvalidSuccess(t *testing.T) {
 	t.Parallel()
