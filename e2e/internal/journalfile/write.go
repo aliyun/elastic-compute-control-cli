@@ -14,6 +14,9 @@ func WriteDurable(path string, data []byte) error {
 // WriteExclusiveDurable reserves an immutable recovery intent. An existing
 // intent is never replaced, even after an uncertain durability error.
 func WriteExclusiveDurable(path string, data []byte) error {
+	if err := ensureRecoveryDirectory(filepath.Dir(path)); err != nil {
+		return err
+	}
 	return writeDurable(path, data, false)
 }
 

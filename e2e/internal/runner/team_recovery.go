@@ -33,6 +33,8 @@ type teamCreateIntent struct {
 	path        string
 }
 
+var writeTeamCreateIntent = journalfile.WriteExclusiveDurable
+
 func teamOwnership(data map[string]any) error {
 	var nonce [12]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
@@ -116,21 +118,34 @@ func reserveTeamCreate(cmd string, data map[string]any, cfg execpkg.Config, cl *
 		} else if !os.IsNotExist(err) {
 			return err
 		}
-		return journalfile.WriteExclusiveDurable(intent.path, append(body, '\n'))
+		return writeTeamCreateIntent(intent.path, append(body, '\n'))
 	}); err != nil {
 		return nil, fmt.Errorf("reserve Team create intent: %w", err)
 	}
 	return intent, nil
 }
 
-func teamCreateHasIdentity(result execpkg.Result) bool {
+func teamCreateIdentity(result execpkg.Result) (string, bool) {
 	root, _ := result.JSON.(map[string]any)
 	team, _ := root["team"].(map[string]any)
 	id, _ := team["id"].(string)
-	return strings.TrimSpace(id) != ""
+	return id, safeTeamIdentity(id)
+}
+
+func safeTeamIdentity(id string) bool {
+	if id == "" || id[0] == '-' || id[0] == '_' {
+		return false
+	}
+	return strings.IndexFunc(id, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_')
+	}) < 0
 }
 
 func renderTeamRecoveryDelete(st scenario.Step, data map[string]any) (string, error) {
+	id, ok := data["team_id"].(string)
+	if !ok || !safeTeamIdentity(id) {
+		return "", fmt.Errorf("Team delete requires a safe identity")
+	}
 	command, err := vars.Render(st.Teardown, data)
 	if err != nil {
 		return "", err
@@ -177,9 +192,7 @@ func reconcileTeamCreate(cfg execpkg.Config, cl *cleanup, scope *[]*cleanupItem,
 			continue
 		}
 		id, ok := team["id"].(string)
-		if !ok || id == "" || id[0] == '-' || id[0] == '_' || strings.IndexFunc(id, func(r rune) bool {
-			return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_')
-		}) >= 0 {
+		if !ok || !safeTeamIdentity(id) {
 			return fmt.Errorf("unsafe recovered Team identity; retained recovery intent %s", intent.path)
 		}
 		// Render the declared delete with only the strictly matched identity.

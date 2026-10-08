@@ -1,13 +1,54 @@
 package spec_resource
 
 import (
+	"bytes"
+	"context"
 	"strings"
 	"testing"
 
+	"github.com/aliyun/elastic-compute-control-cli/pkg/cli"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 )
+
+func TestFCSandboxTeamAbsencePublicChineseOutput(t *testing.T) {
+	for _, rawCode := range []string{"TeamNotFound", "404"} {
+		for _, mode := range []string{"json", "text"} {
+			t.Run(rawCode+"/"+mode, func(t *testing.T) {
+				failure := ecerrors.NotFound("NotFound", i18n.NewLocalizer("en").Message("TeamNotFound"), ecerrors.WithRawCause(rawCode, "provider missing team"), ecerrors.WithRequestID("https://example.com/?[REDACTED]"))
+				fake := &fakeSpecCaller{errors: []error{failure}}
+				ctx := cli.WithResourceCallerFactory(context.Background(), func(_, _ string, r spec.ResourceSpec, region string, _ func(string) string) (engine.Caller, error) {
+					if r.Product != "sandbox" || r.Resource != "team" || region != "cn-hangzhou" {
+						t.Fatalf("wrong public target: %+v %s", r, region)
+					}
+					return fake, nil
+				})
+				var stdout, stderr bytes.Buffer
+				code := cli.Run(ctx, []string{"--lang", "zh-CN", "--output", mode, "sandbox", "team", "get", "team-1", "--region", "cn-hangzhou"}, &stdout, &stderr)
+				if code != 4 || !strings.Contains(stdout.String(), "团队不存在") || strings.Contains(stdout.String(), "team 资源不存在") {
+					t.Fatalf("public Chinese absence: exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+				}
+				if len(fake.calls) != 1 || fake.calls[0].operation != "GetTeam" {
+					t.Fatalf("public call path changed: %+v", fake.calls)
+				}
+				if mode == "json" {
+					payload := decodeObject(t, stdout.String())
+					errPayload := payload["error"].(map[string]any)
+					actions := payload["actions"].([]any)
+					if errPayload["kind"] != "not_found" || errPayload["code"] != "NotFound" || len(actions) != 1 {
+						t.Fatalf("public absence category changed: %s", stdout.String())
+					}
+					action := actions[0].(map[string]any)
+					if action["code"] != rawCode || action["message"] != "provider missing team" || action["request_id"] != "https://example.com/?[REDACTED]" {
+						t.Fatalf("public provider actions changed: %s", stdout.String())
+					}
+				}
+			})
+		}
+	}
+}
 
 func TestFCSandboxTeamCreateDoesNotReadBackOrLoseIdentity(t *testing.T) {
 	t.Parallel()

@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -84,6 +85,114 @@ exit 1
 	}
 	if metadata.RunID != "test" || metadata.ExecutionID != "team-execution" || metadata.Surface != "public" || metadata.Region != "cn-hangzhou" || metadata.EcctlBin != fake {
 		t.Fatalf("cleanup journal lost run/binary/surface/region binding: %+v", metadata)
+	}
+}
+
+func TestRunTeamSuccessfulCreateCleanupUsesStrictIdentity(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses bash")
+	}
+	for _, id := range []string{"created-Team_1", "foreign-team --region cn-beijing", "foreign-team --profile victim", "foreign-team extra", "foreign-team\n--region cn-beijing", "--region", "team/a", "capture-divergence"} {
+		t.Run(id, func(t *testing.T) {
+			dir := t.TempDir()
+			fake := filepath.Join(dir, "ecctl")
+			log := filepath.Join(dir, "calls.log")
+			if err := os.WriteFile(fake, []byte(`#!/usr/bin/env bash
+echo "$*" >> "$FAKE_LOG"
+if [[ "$*" == *" team create "* ]]; then
+  while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "--name" ]]; then name="$2"; break; fi
+    shift
+  done
+  printf '{"team":{"id":%s,"name":"%s","status":"active","read_only":false}}\n' "$FAKE_TEAM_ID_JSON" "$name"
+  exit 0
+fi
+if [[ "$*" == *" team list "* ]]; then echo '{"teams":[],"pagination":{"has_more":false}}'; exit 0; fi
+if [[ "$*" == *" team delete "* ]]; then echo '{"deleted":true}'; exit 0; fi
+echo '{"error":{"message":"unexpected command"}}'; exit 1
+`), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			body, err := os.ReadFile("../../cases/sandbox/team-lifecycle.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			body = []byte(strings.Split(string(body), "\n  - name: get")[0] + "\n")
+			createdID := id
+			if id == "capture-divergence" {
+				createdID = "created-Team_1"
+				body = []byte(strings.ReplaceAll(string(body), "team_id: id", "team_id: name"))
+			}
+			cases := filepath.Join(dir, "cases", "sandbox")
+			if err := os.MkdirAll(cases, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(cases, "team.yaml"), body, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(createdID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("FAKE_LOG", log)
+			t.Setenv("FAKE_TEAM_ID_JSON", string(encoded))
+			journal := filepath.Join(dir, "reports", "fresh", "nested", "journal.json")
+			run, err := Run(context.Background(), Options{CasesDir: filepath.Join(dir, "cases"), InputsDir: filepath.Join(dir, "inputs"), RunName: "normal-success", RunID: "normal-run", ExecutionID: "normal-execution", Region: "cn-hangzhou", Surface: "public", EcctlBin: fake, CleanupJournal: journal, StepTimeout: time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls, err := os.ReadFile(log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if id == "created-Team_1" || id == "capture-divergence" {
+				if run.Summary.Passed != 1 || strings.Count(string(calls), "team delete created-Team_1 --timeout 5m --region cn-hangzhou") != 1 {
+					t.Fatalf("normal create cleanup changed target: %+v %s", run.Summary, calls)
+				}
+				if entries := readJournalEntries(t, journal); len(entries) != 0 {
+					t.Fatalf("normal cleanup did not complete: %+v", entries)
+				}
+			} else {
+				if run.Summary.Failed != 1 || strings.Contains(string(calls), "team delete ") {
+					t.Fatalf("unsafe successful identity launched a delete: %+v %s", run.Summary, calls)
+				}
+				if _, err := os.Stat(journal); !os.IsNotExist(err) {
+					t.Fatalf("unsafe identity got a cleanup journal: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestRunTeamAncestorBarrierFailurePreventsCreateLaunch(t *testing.T) {
+	dir := t.TempDir()
+	journal := filepath.Join(dir, "new", "nested", "reports", "journal.json")
+	data := map[string]any{"run_name": "barrier-run"}
+	if err := teamOwnership(data); err != nil {
+		t.Fatal(err)
+	}
+	cfg := execpkg.Config{Bin: filepath.Join(dir, "must-not-launch"), Region: "cn-hangzhou"}
+	cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, nil, true, journal, report.CleanupJournal{RunID: "barrier-run", ExecutionID: "barrier-execution", Surface: "public"}, func(string, ...any) {})
+	st := scenario.Step{Name: "create", Run: `ecctl sandbox team create --name {{.team_name}} --description "{{.team_owner}}"`, Teardown: "ecctl sandbox team delete {{.team_id}} --timeout 5m"}
+	barrierFailure := errors.New("sync recovery intent ancestor failed")
+	previous := writeTeamCreateIntent
+	t.Cleanup(func() { writeTeamCreateIntent = previous })
+	called := false
+	writeTeamCreateIntent = func(path string, _ []byte) error {
+		called = true
+		if parent, err := os.Stat(filepath.Dir(path)); err != nil || !parent.IsDir() {
+			t.Fatalf("not testing freshly created directory chain: %v", err)
+		}
+		return barrierFailure
+	}
+	var scope []*cleanupItem
+	sr, ok := runStep(context.Background(), Options{}, cfg, cl, &scope, data, st, time.Second)
+	if !called || ok || sr.Command != "" || sr.Status != report.StatusError || !strings.Contains(sr.Error, barrierFailure.Error()) || len(scope) != 0 {
+		t.Fatalf("ancestor barrier failed open: %+v", sr)
+	}
+	intents, err := filepath.Glob(journal + ".team-create-*.json")
+	if err != nil || len(intents) != 0 {
+		t.Fatalf("failed barrier created an intent: %v %v", intents, err)
 	}
 }
 

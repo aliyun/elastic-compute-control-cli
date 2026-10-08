@@ -27,6 +27,72 @@ type teamSuccessHTTPSequence struct {
 	calls  int
 }
 
+func TestFCSandboxTeamRejectsUnsafeSuccessfulIdentity(t *testing.T) {
+	for _, id := range []string{"foreign-team --region cn-beijing", "foreign-team --profile victim", "foreign-team extra", "foreign-team\n--region cn-beijing", "--region", "team/a", `team"quote`, "团队"} {
+		t.Run(id, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{"code": "200", "requestId": "securityToken=private-id", "team": map[string]any{"teamID": id, "status": "active"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
+			executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+			if err != nil {
+				t.Fatal(err)
+			}
+			executor.client.HttpClient = sdkErrorHTTPClient{status: 200, body: string(body)}
+			caller := &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", executor: executor}
+			response, err := caller.CallRaw(context.Background(), "CreateTeam", map[string]any{"body.teamName": "dev"})
+			var appErr *ecerrors.AppError
+			if !errors.As(err, &appErr) || appErr.Payload().Code != "InvalidTeamResponse" || response != nil {
+				t.Fatalf("unsafe created identity crossed provider boundary: %q response=%+v err=%v", id, response, err)
+			}
+			if action := ecerrors.ActionFromError("CreateTeam", err); action.RequestID != "Alibaba Cloud API request failed" {
+				t.Fatalf("invalid response metadata was not sanitized: %+v", action)
+			}
+		})
+	}
+}
+
+func TestFCSandboxTeamSuccessfulIdentityAndAbsenceCompatibility(t *testing.T) {
+	for _, id := range []string{"created-Team_1", "1-team", "ed3c4a86-425d-40c4-a9db-d5ef407b2d97"} {
+		t.Run(id, func(t *testing.T) {
+			encoded, err := json.Marshal(map[string]any{"code": "200", "requestId": "req-create", "team": map[string]any{"teamID": id, "status": "active"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			caller := &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", executor: &fakeOpenAPIExecutor{response: string(encoded)}}
+			response, err := caller.CallRaw(context.Background(), "CreateTeam", map[string]any{"body.teamName": "dev"})
+			if err != nil || response["team"].(map[string]any)["teamID"] != id {
+				t.Fatalf("ordinary successful identity rejected: %+v %v", response, err)
+			}
+		})
+	}
+	for _, code := range []string{"TeamNotFound", "404"} {
+		t.Run(code, func(t *testing.T) {
+			encoded, err := json.Marshal(map[string]any{"code": code, "message": "https://example.com/?Signature=private-signature", "requestId": "securityToken=private-token"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
+			executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+			if err != nil {
+				t.Fatal(err)
+			}
+			executor.client.HttpClient = sdkErrorHTTPClient{status: 200, body: string(encoded)}
+			caller := &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", executor: executor}
+			_, err = caller.CallRaw(context.Background(), "GetTeam", map[string]any{"teamID": "team-1"})
+			var appErr *ecerrors.AppError
+			if !errors.As(err, &appErr) || appErr.Payload().Kind != "not_found" || appErr.Payload().Code != "NotFound" || appErr.Payload().Message != i18n.NewLocalizer("en").Message("TeamNotFound") {
+				t.Fatalf("canonical Team absence changed: %v", err)
+			}
+			action := ecerrors.ActionFromError("GetTeam", err)
+			if action.Code != code || action.Message != "https://example.com/?[REDACTED]" || action.RequestID != "Alibaba Cloud API request failed" {
+				t.Fatalf("absence provider evidence changed: %+v", action)
+			}
+		})
+	}
+}
+
 func (s *teamSuccessHTTPSequence) Call(_ *http.Request, _ *http.Transport) (*http.Response, error) {
 	body := s.bodies[s.calls]
 	s.calls++

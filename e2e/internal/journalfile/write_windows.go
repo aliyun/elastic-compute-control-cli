@@ -1,6 +1,11 @@
 package journalfile
 
-import "golang.org/x/sys/windows"
+import (
+	"golang.org/x/sys/windows"
+	"os"
+)
+
+func ensureRecoveryDirectory(dir string) error { return os.MkdirAll(dir, 0o755) }
 
 func installDurable(tmp, path string, replace bool) error {
 	source, err := windows.UTF16PtrFromString(tmp)

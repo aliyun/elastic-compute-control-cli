@@ -814,7 +814,7 @@ func (l *Localizer) ErrorPayload(payload ecerrors.ErrorPayload, hasActions bool)
 		return payload
 	}
 	// Preserve provider-specific messages that share a stable generic error code.
-	for _, id := range []string{"UnsupportedACSOperation", "InvalidSandboxResponse"} {
+	for _, id := range []string{"UnsupportedACSOperation", "InvalidSandboxResponse", "TeamNotFound"} {
 		if payload.Message == NewLocalizer("en").Message(id) {
 			payload.Message = l.Message(id)
 			return payload

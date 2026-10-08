@@ -463,6 +463,8 @@ private `cleanup-journal-*.json.team-create-<owner>.json` intent recording the
 owned name, description, input, creation time, run, execution, region, surface,
 and binary. These immutable intents are separate from delete-only journals and
 remain available for diagnosis, including after normal cleanup.
+On Unix, reservation syncs the real directory and its ancestors before creating
+the intent; a failed directory barrier prevents the create from launching.
 
 An uncertain Team create is never retried. The runner makes one bounded
 `sandbox team list --filter name=<owned-name> --all` query with the same binary

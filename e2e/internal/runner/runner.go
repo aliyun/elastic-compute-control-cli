@@ -1438,7 +1438,8 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 	sr.DurationMs = res.Duration.Milliseconds()
 	sr.Stdout = strings.TrimSpace(res.Stdout)
 	sr.Stderr = strings.TrimSpace(res.Stderr)
-	if teamIntent != nil && !teamCreateHasIdentity(res) {
+	teamID, validTeamID := teamCreateIdentity(res)
+	if teamIntent != nil && !validTeamID {
 		recoveryErr := reconcileTeamCreate(execCfg, cl, scope, data, st, lockKeys, timeout, teamIntent)
 		sr.Status = report.StatusFail
 		sr.Error = failureDetail(res)
@@ -1456,6 +1457,17 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 	// later fail) so the resource it produced is cleaned up.
 	if st.Teardown != "" {
 		td, terr := vars.Render(st.Teardown, mergeCaptures(data, res, st))
+		if teamIntent != nil {
+			// The normal success path must use the same safe, exact target as
+			// reconciliation, independently of case capture expressions.
+			teamData := vars.Clone(data)
+			teamData["team_id"] = teamID
+			td, terr = renderTeamRecoveryDelete(st, teamData)
+			if terr != nil {
+				sr.Status, sr.Error = report.StatusError, "Team teardown: "+terr.Error()
+				return sr, false
+			}
+		}
 		if terr != nil {
 			// Failed creates commonly have no resource ID. Preserve the command
 			// error. A structured recovery delete from ecctl is safe to journal

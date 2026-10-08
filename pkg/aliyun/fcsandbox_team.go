@@ -18,6 +18,15 @@ func teamAbsenceCode(code string) bool {
 	return code == "TeamNotFound" || code == "404"
 }
 
+func validTeamIdentity(id string) bool {
+	if id == "" || id[0] == '-' || id[0] == '_' {
+		return false
+	}
+	return strings.IndexFunc(id, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_')
+	}) < 0
+}
+
 func (c *OpenAPICaller) resourceResponseError(req *openAPIRequest, response map[string]any) error {
 	if !c.isFCSandboxTeam() {
 		return openAPIBusinessError(response)
@@ -51,7 +60,7 @@ func (c *OpenAPICaller) resourceResponseError(req *openAPIRequest, response map[
 		}
 		id, _ := team["teamID"].(string)
 		status, _ := team["status"].(string)
-		if strings.TrimSpace(id) == "" || strings.TrimSpace(status) == "" || expectedID != "" && id != expectedID {
+		if !validTeamIdentity(id) || strings.TrimSpace(status) == "" || expectedID != "" && id != expectedID {
 			return false
 		}
 		for _, field := range []string{"readOnly", "allowUpdateTeamName"} {
