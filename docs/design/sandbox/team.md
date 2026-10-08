@@ -55,8 +55,10 @@ API schema 接受资源组归属，但[官方控制台说明](https://help.aliyu
 `code/message/requestId`；元数据的 synchronous 标记不足以证明资源已清理。
 官方 Team schema 定义 `active`、`deleting`、`delete_failed`，但未明确描述
 GetTeam 的最终不存在响应。实现只接受 GetTeam 的 TeamNotFound / 404
-作为不存在信号，拒绝将缺失 team 的成功响应当作不存在；这个转换需要
-后续授权的 live 验收确认。其他资源的 NotFound 业务错误不能证明团队删除。
+作为不存在信号，拒绝将缺失 team 的成功响应当作不存在。2026-10-08 在
+`cn-hangzhou` 的 public live 验收已观察到删除后的 GetTeam 返回 `TeamNotFound`，
+命令随后输出 `deleted=true`。该次运行未覆盖 404 分支或其他地域；
+其他资源的 NotFound 业务错误不能证明团队删除。
 
 [官方说明](https://help.aliyun.com/en/agent-sandbox/user-guide/team-and-subscription-plans)
 指出团队仍有 API Key 时不能删除。命令不自动清理 Team 内的 API Key、模板、
@@ -93,7 +95,15 @@ HTTP 200 的业务失败保留 `message` 和 `requestId`。详情响应必须包
 
 离线测试覆盖 API 请求构建、字段映射、全量分页、只读/改名限制、业务失败、
 删除失败、等待超时和 no-wait。E2E case 为 `e2e/cases/sandbox/team-lifecycle.yaml`；
-新增五个操作在 registry 标为 offline/not-run，待独立授权的 live 验收。
+保护创建与响应丢失后的恢复查询显式使用 JSON 输出，避免 profile 的文本输出
+使 runner 无法解析团队 ID 和登记删除 finalizer。
+
+2026-10-08 在 `cn-hangzhou` 对候选 `5fabce2a` 的 public live 运行验证了创建、
+获取、按名称筛选的 `--all` 列表、描述更新和等待删除，五项操作均通过断言，
+最终确认 `TeamNotFound`，本轮 cleanup journal 无剩余条目。registry 中五项
+操作均标为 `live-pass/live-verified`，记录的完成时间为
+`2026-10-08T21:13:30.270997+08:00`。该次运行未独立验证 plan、资源组修改、
+允许改名的场景或其他地域；后续候选仍需最终验收。
 
 依据：[FCSandbox 2026-05-09 官方元数据](https://api.aliyun.com/meta/v1/products/FCSandbox/versions/2026-05-09/api-docs.json)，
 [CreateTeam](https://api.aliyun.com/document/FCSandbox/2026-05-09/CreateTeam)、

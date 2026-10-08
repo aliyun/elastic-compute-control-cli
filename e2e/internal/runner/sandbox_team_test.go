@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -16,6 +17,141 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
+
+func TestRunTeamTextProfileRegistersCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake CLI launcher uses a shell script")
+	}
+	root, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "ecctl-fake-caller")
+	goBin, err := osexec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// go run uses the toolchain's executable path; macOS can reject a freshly
+	// installed standalone binary before it reaches the fake caller.
+	launcher := "#!/bin/sh\ncd " + teamCommandArgument(root) + "\nexec " + teamCommandArgument(goBin) + " run ./e2e/internal/runner/testdata/team_text_profile.go \"$@\"\n"
+	if err := os.WriteFile(bin, []byte(launcher), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	profile := []byte(`{"current":"default","profiles":[{"name":"default","language":"en","output_format":"text"}]}`)
+	configure := func(t *testing.T, dir string) string {
+		t.Helper()
+		config := filepath.Join(dir, "text-profile.json")
+		if err := os.WriteFile(config, profile, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("ECCTL_CONFIG_PATH", config)
+		t.Setenv("ECCTL_ALIYUN_CONFIG_PATH", filepath.Join(dir, "missing-aliyun.json"))
+		t.Setenv("ECCTL_PROFILE", "")
+		t.Setenv("ALIBABA_CLOUD_PROFILE", "")
+		t.Setenv("ECCTL_REGION", "cn-beijing")
+		t.Setenv("FAKE_TEAM_DIR", dir)
+		t.Setenv("FAKE_TEAM_JOURNAL", "")
+		t.Setenv("FAKE_TEAM_LOST_RESPONSE", "")
+		return config
+	}
+	if !t.Run("profile-control", func(t *testing.T) {
+		dir := t.TempDir()
+		configure(t, dir)
+		cfg := execpkg.Config{Bin: bin, Region: "cn-hangzhou"}
+		for _, command := range []string{
+			"ecctl --lang en sandbox team create --name control --description control",
+			"ecctl --lang en sandbox team list --filter name=control --all",
+		} {
+			result := execpkg.Run(context.Background(), cfg, command)
+			if result.Exit != 0 || result.JSON != nil || !strings.Contains(result.Stdout, "team-owned") {
+				t.Fatalf("text profile no longer reproduces YAML: %+v", result)
+			}
+		}
+		result := execpkg.Run(context.Background(), cfg, "ecctl --output=json --lang en sandbox team list --filter name=control --all")
+		if result.Exit != 0 || result.JSON == nil {
+			t.Fatalf("explicit JSON control failed: %+v", result)
+		}
+	}) {
+		t.Fatal("real CLI output controls failed; cannot establish the regression")
+	}
+	for _, command := range []string{
+		`ecctl sandbox team create`,
+		`ecctl --lang "--output=text" sbx team create`,
+		`ecctl sandbox team create --lang "quote' --output=text" --output=json`,
+		`ecctl --lang "--region=cn-beijing" sandbox team create --output json --json=false`,
+	} {
+		for _, mode := range []string{"success-keep", "success-cleanup", "lost-response-keep", "lost-response-cleanup"} {
+			t.Run(command+"/"+mode, func(t *testing.T) {
+				dir := t.TempDir()
+				config := configure(t, dir)
+				lost, keep := strings.HasPrefix(mode, "lost-response"), strings.HasSuffix(mode, "keep")
+				if lost {
+					t.Setenv("FAKE_TEAM_LOST_RESPONSE", "1")
+				}
+				journal := filepath.Join(dir, "journal.json")
+				t.Setenv("FAKE_TEAM_JOURNAL", journal)
+				body, err := os.ReadFile("../../cases/sandbox/team-lifecycle.yaml")
+				if err != nil {
+					t.Fatal(err)
+				}
+				create := strings.Split(string(body), "  - name: get")[0]
+				create = strings.Replace(create, "ecctl sandbox team create", command, 1)
+				cases := filepath.Join(dir, "cases", "sandbox")
+				if err := os.MkdirAll(cases, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(cases, "team.yaml"), []byte(create), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				result, err := Run(context.Background(), Options{CasesDir: filepath.Join(dir, "cases"), InputsDir: filepath.Join(dir, "inputs"), RunID: "text-profile", ExecutionID: "text-execution", Region: "cn-hangzhou", Surface: "public", EcctlBin: bin, Keep: keep, CleanupJournal: journal, StepTimeout: 5 * time.Second})
+				if err != nil {
+					t.Fatal(err)
+				}
+				step := result.Cases[0].Steps[0]
+				if !lost && (result.Summary.Passed != 1 || !json.Valid([]byte(step.Stdout))) || lost && (result.Summary.Failed != 1 || !strings.Contains(step.Error, "journaled 1 owned Team")) {
+					t.Errorf("protected JSON create/reconciliation failed: summary=%+v step=%+v", result.Summary, step)
+				}
+				calls, err := os.ReadFile(filepath.Join(dir, "calls"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := "CreateTeam cn-hangzhou\n"
+				if lost {
+					want += "ListTeams cn-hangzhou\n"
+				}
+				if !keep {
+					want += "GetTeam cn-hangzhou\nDeleteTeam cn-hangzhou\nGetTeam cn-hangzhou\n"
+				}
+				if string(calls) != want {
+					t.Errorf("replay or cleanup target mismatch: got %q want %q", calls, want)
+				}
+				if _, err := os.Stat(journal); err != nil {
+					t.Errorf("created Team has no registered finalizer: %v", err)
+					return
+				}
+				entries := readJournalEntries(t, journal)
+				encoded, err := os.ReadFile(journal)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var metadata report.CleanupJournal
+				if err := json.Unmarshal(encoded, &metadata); err != nil || metadata.EcctlBin != bin || metadata.Region != "cn-hangzhou" {
+					t.Fatalf("cleanup journal target differs: %s %v", encoded, err)
+				}
+				if keep {
+					if len(entries) != 1 || entries[0].Teardown != "ecctl sandbox team delete team-owned --timeout 5m" || entries[0].Region != "cn-hangzhou" {
+						t.Errorf("known/recovered identity not registered: %+v", entries)
+					}
+				} else if _, err := os.Stat(filepath.Join(dir, "team.json")); !os.IsNotExist(err) || len(entries) != 0 {
+					t.Errorf("cleanup left an owned Team: err=%v entries=%+v", err, entries)
+				}
+				if actual, err := os.ReadFile(config); err != nil || string(actual) != string(profile) {
+					t.Errorf("protected execution changed profile defaults: %s %v", actual, err)
+				}
+			})
+		}
+	}
+}
 
 func TestRunTeamCreateJournalsIdentityBeforeLaterReadbackFailure(t *testing.T) {
 	if runtime.GOOS == "windows" {
