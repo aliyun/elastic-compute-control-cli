@@ -15,6 +15,8 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/vars"
 	"github.com/google/shlex"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // Team has no create idempotency key and no tag sweep. Keep uncertain create
@@ -48,13 +50,61 @@ func teamOwnership(data map[string]any) error {
 
 func isTeamCreate(command string) bool {
 	args, err := shlex.Split(command)
-	return err == nil && len(args) >= 4 && args[0] == "ecctl" && (args[1] == "sandbox" || args[1] == "sbx") && args[2] == "team" && args[3] == "create"
+	if err != nil || len(args) == 0 || args[0] != "ecctl" {
+		return false
+	}
+	// Find the command before validating flag values, just as the public CLI
+	// does. Even invalid Team inputs must enter reservation, not generic retry.
+	root := &cobra.Command{Use: "ecctl"}
+	root.PersistentFlags().AddFlagSet(teamCreateFlagSet())
+	product := &cobra.Command{Use: "sandbox", Aliases: []string{"sbx"}}
+	resource := &cobra.Command{Use: "team"}
+	create := &cobra.Command{Use: "create"}
+	resource.AddCommand(create)
+	product.AddCommand(resource)
+	root.AddCommand(product)
+	// A separator cannot make an unsupported Team layout bypass reservation.
+	// Classify conservatively here; reservation rejects the original separator.
+	commandArgs := make([]string, 0, len(args)-1)
+	for _, arg := range args[1:] {
+		if arg != "--" {
+			commandArgs = append(commandArgs, arg)
+		}
+	}
+	found, _, err := root.Find(commandArgs)
+	return err == nil && found == create
+}
+
+func teamCreateFlagSet() *pflag.FlagSet {
+	flags := pflag.NewFlagSet("Team create", pflag.ContinueOnError)
+	// Match the public root and Team create flag types. pflag handles prefix,
+	// interspersed and inline values using the same grammar as Cobra.
+	for _, name := range []string{"region", "profile", "lang", "output", "name", "description", "resource-group", "plan"} {
+		flags.String(name, "", "")
+	}
+	for _, name := range []string{"json", "agent-envelope", "no-color"} {
+		flags.Bool(name, false, "")
+	}
+	flags.BoolP("help", "h", false, "")
+	flags.BoolP("version", "v", false, "")
+	return flags
 }
 
 func reserveTeamCreate(cmd string, data map[string]any, cfg execpkg.Config, cl *cleanup, st scenario.Step) (*teamCreateIntent, error) {
 	args, err := shlex.Split(cmd)
 	if err != nil {
 		return nil, err
+	}
+	if len(args) == 0 || args[0] != "ecctl" {
+		return nil, fmt.Errorf("Team recovery command must start with ecctl")
+	}
+	parsed := teamCreateFlagSet()
+	if err := parsed.Parse(args[1:]); err != nil {
+		return nil, fmt.Errorf("invalid Team recovery input: %w", err)
+	}
+	positionals := parsed.Args()
+	if len(positionals) != 3 || (positionals[0] != "sandbox" && positionals[0] != "sbx") || positionals[1] != "team" || positionals[2] != "create" {
+		return nil, fmt.Errorf("Team recovery requires exactly the Team create command path")
 	}
 	name, _ := data["team_name"].(string)
 	description, _ := data["team_owner"].(string)
@@ -65,13 +115,18 @@ func reserveTeamCreate(cmd string, data map[string]any, cfg execpkg.Config, cl *
 		return nil, fmt.Errorf("invalid Team owner: %w", err)
 	}
 	flags := map[string]string{}
-	for i := 4; i < len(args); i++ {
+	for i := 1; i < len(args); i++ {
+		if args[i] == "--" || strings.HasPrefix(args[i], "-") && !strings.HasPrefix(args[i], "--") {
+			return nil, fmt.Errorf("unsupported Team recovery input %s", args[i])
+		}
 		if strings.HasPrefix(args[i], "--") {
 			key, value, inline := strings.Cut(args[i], "=")
-			if key != "--name" && key != "--description" && key != "--region" {
+			switch key {
+			case "--name", "--description", "--region", "--lang", "--output", "--json", "--no-color":
+			default:
 				return nil, fmt.Errorf("unsupported Team recovery input %s", key)
 			}
-			if !inline {
+			if !inline && parsed.Lookup(strings.TrimPrefix(key, "--")).NoOptDefVal == "" {
 				i++
 				if i >= len(args) {
 					return nil, fmt.Errorf("missing %s value", key)
@@ -83,6 +138,9 @@ func reserveTeamCreate(cmd string, data map[string]any, cfg execpkg.Config, cl *
 			}
 			flags[key] = value
 		}
+	}
+	if flags["--output"] != "" && flags["--output"] != "json" {
+		return nil, fmt.Errorf("Team recovery requires JSON output")
 	}
 	if flags["--name"] != name || flags["--description"] != description || flags["--region"] != "" && flags["--region"] != cfg.Region || st.TeardownRegion != "" && st.TeardownRegion != "primary" {
 		return nil, fmt.Errorf("Team create command does not match recovery ownership/region")

@@ -36,6 +36,11 @@ func (c *OpenAPICaller) resourceResponseError(req *openAPIRequest, response map[
 	invalid := func() error {
 		return ecerrors.Service("InvalidTeamResponse", i18n.NewLocalizer("en").Message("InvalidTeamResponse"), false, ecerrors.WithRequestID(requestID))
 	}
+	if value, present := response["requestId"]; present {
+		if _, ok := value.(string); !ok {
+			return invalid()
+		}
+	}
 	code, ok := response["code"].(string)
 	if !ok || code == "" {
 		return invalid()

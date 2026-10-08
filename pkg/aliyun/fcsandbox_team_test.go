@@ -99,6 +99,138 @@ func (s *teamSuccessHTTPSequence) Call(_ *http.Request, _ *http.Transport) (*htt
 	return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
 }
 
+func TestFCSandboxTeamRequestIDTypesCannotReachPublicActions(t *testing.T) {
+	resource, err := spec.LoadResource("../../specs", "sandbox", "team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []struct {
+		name  string
+		value any
+	}{
+		{"array", []any{"securityToken=private-token"}},
+		{"empty array", []any{}},
+		{"object", map[string]any{"token": "private-token"}},
+		{"number", 123},
+		{"boolean", true},
+		{"null", nil},
+	} {
+		for _, path := range []string{"create", "get", "delete preflight", "update preflight", "business error", "later success page", "later business page"} {
+			t.Run(id.name+"/"+path, func(t *testing.T) {
+				team := map[string]any{"teamID": "team-1", "teamName": "dev", "status": "active", "readOnly": true, "allowUpdateTeamName": false}
+				body := map[string]any{"code": "200", "requestId": id.value, "team": team}
+				action, input := "create", map[string]any{"name": "dev"}
+				wantAPI, wantCalls, wantActions := "CreateTeam", 1, 1
+				var prefix []string
+				switch path {
+				case "get":
+					action, input, wantAPI = "get", map[string]any{"id": "team-1"}, "GetTeam"
+				case "delete preflight":
+					action, input, wantAPI = "delete", map[string]any{"id": "team-1", "no_wait": true}, "GetTeam"
+				case "update preflight":
+					action, input, wantAPI = "update", map[string]any{"id": "team-1", "name": "new-name"}, "GetTeam"
+				case "business error":
+					body["code"], body["message"] = "409", "securityToken=private-cause"
+				case "later success page", "later business page":
+					action, input, wantAPI = "list", map[string]any{"limit": 1, "page": 1, "all": true}, "ListTeams"
+					wantCalls, wantActions = 2, 2
+					prefix = []string{`{"code":"200","requestId":"req-page-1","teams":[{"teamID":"team-first","status":"active"}],"total":2,"pageNumber":1,"pageSize":1}`}
+					body = map[string]any{"code": "200", "requestId": id.value, "teams": []any{team}, "total": 2, "pageNumber": 2, "pageSize": 1}
+					if path == "later business page" {
+						body["code"], body["message"] = "409", "securityToken=private-cause"
+					}
+				}
+				encoded, err := json.Marshal(body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sequence := &teamSuccessHTTPSequence{bodies: append(prefix, string(encoded))}
+				profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
+				executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+				if err != nil {
+					t.Fatal(err)
+				}
+				executor.client.HttpClient = sequence
+				caller := &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", Profile: resolvedOpenAPIProfile{Language: "en"}, executor: executor}
+				result, err := engine.NewExecutor(resource, caller).Execute(context.Background(), engine.Request{Action: action, Input: input})
+				var appErr *ecerrors.AppError
+				public := map[string]any{"team": result.Item, "actions": result.Actions}
+				if errors.As(err, &appErr) {
+					public = map[string]any{"error": i18n.NewLocalizer("en").ErrorPayload(appErr.Payload(), true), "actions": appErr.Actions()}
+				}
+				for _, mode := range []string{output.ModeJSON, output.ModeText} {
+					var rendered bytes.Buffer
+					if err := output.Write(&rendered, mode, public, output.TextOptions{}); err != nil {
+						t.Fatal(err)
+					}
+					if strings.Contains(rendered.String(), "private-") {
+						t.Errorf("%s public output leaked malformed request ID: %s", mode, rendered.String())
+					}
+				}
+				if appErr == nil || appErr.Payload().Kind != "service" || appErr.Payload().Code != "InvalidTeamResponse" || sequence.calls != wantCalls {
+					t.Fatalf("non-string request ID escaped provider validation: result=%+v err=%v calls=%d", result, err, sequence.calls)
+				}
+				actions := appErr.Actions()
+				if len(actions) != wantActions || actions[len(actions)-1].ActionName != wantAPI || actions[len(actions)-1].RequestID != "" || actions[len(actions)-1].Code != "InvalidTeamResponse" {
+					t.Fatalf("invalid metadata entered public action: %+v", actions)
+				}
+				if wantActions == 2 && actions[0].RequestID != "req-page-1" {
+					t.Fatalf("ordinary earlier action was lost: %+v", actions)
+				}
+			})
+		}
+	}
+}
+
+func TestFCSandboxTeamCreateStringRequestIDCompatibility(t *testing.T) {
+	resource, err := spec.LoadResource("../../specs", "sandbox", "team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, raw, want string
+		present         bool
+	}{
+		{"ordinary", "req-create", "req-create", true},
+		{"sensitive", "securityToken=private-token", "Alibaba Cloud API request failed", true},
+		{"signed URL", "https://example.com/?Signature=private-signature", "https://example.com/?[REDACTED]", true},
+		{"empty", "", "", true},
+		{"absent", "", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := map[string]any{"code": "200", "team": map[string]any{"teamID": "team-1", "status": "active"}}
+			if tc.present {
+				body["requestId"] = tc.raw
+			}
+			encoded, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
+			executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+			if err != nil {
+				t.Fatal(err)
+			}
+			sequence := &teamSuccessHTTPSequence{bodies: []string{string(encoded)}}
+			executor.client.HttpClient = sequence
+			caller := &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", Profile: resolvedOpenAPIProfile{Language: "en"}, executor: executor}
+			result, err := engine.NewExecutor(resource, caller).Execute(context.Background(), engine.Request{Action: "create", Input: map[string]any{"name": "dev"}})
+			if err != nil || result.ID != "team-1" || len(result.Actions) != 1 || result.Actions[0].RequestID != tc.want || sequence.calls != 1 {
+				t.Fatalf("valid metadata compatibility changed: %+v %v", result, err)
+			}
+			for _, mode := range []string{output.ModeJSON, output.ModeText} {
+				var rendered bytes.Buffer
+				if err := output.Write(&rendered, mode, map[string]any{"team": result.Item, "actions": result.Actions}, output.TextOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(rendered.String(), "private-") {
+					t.Fatalf("%s public success leaked string request ID: %s", mode, rendered.String())
+				}
+			}
+		})
+	}
+}
+
 func TestFCSandboxTeamSuccessRequestIDPublicErrors(t *testing.T) {
 	resource, err := spec.LoadResource("../../specs", "sandbox", "team")
 	if err != nil {

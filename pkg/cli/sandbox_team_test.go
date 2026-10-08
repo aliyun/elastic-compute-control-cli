@@ -23,6 +23,27 @@ func TestFCSandboxTeamIsPublic(t *testing.T) {
 	}
 }
 
+func TestSandboxTeamCreateAcceptsGlobalFlagLayouts(t *testing.T) {
+	for _, args := range [][]string{
+		{"sandbox", "team", "create", "--lang", "en"},
+		{"sbx", "team", "create", "--lang=en"},
+		{"--lang", "en", "sandbox", "team", "create"},
+		{"sandbox", "--lang=en", "team", "create"},
+		{"sandbox", "team", "--lang", "en", "create"},
+		{"--json", "--no-color=true", "sbx", "team", "--output=json", "create", "--lang=en"},
+		{"--name=dev", "sandbox", "team", "create", "--lang=en"},
+		{"--region=cn-hangzhou", "sbx", "--lang=en", "team", "create"},
+		{"--profile=test", "sandbox", "team", "create", "--lang=en"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			stdout, stderr, code := runCLI(append(args, "--help")...)
+			if code != 0 || !strings.Contains(stdout, "Create an FC Agent Sandbox team") {
+				t.Fatalf("public create parser %v: exit %d %s %s", args, code, stdout, stderr)
+			}
+		})
+	}
+}
+
 func TestSandboxTeamProviderDispatch(t *testing.T) {
 	dir := t.TempDir()
 	aliyunPath := filepath.Join(dir, "aliyun.json")
