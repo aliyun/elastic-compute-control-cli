@@ -46,11 +46,21 @@ func TestOpenAPICallerSDKResponseErrors(t *testing.T) {
 			{"observed create rejection", "CreateTeam", "400", "teamName is invalid", "service", 400},
 			{"numeric team absence", "GetTeam", "404", "team missing", "not_found", 404},
 			{"named team absence", "GetTeam", "TeamNotFound", "team missing", "not_found", 404},
+			{"lowercase numeric team absence", "getteam", "404", "team missing", "not_found", 404},
+			{"lowercase named team absence", "getteam", "TeamNotFound", "team missing", "not_found", 404},
+			{"mixed-case numeric team absence", "gEtTeAm", "404", "team missing", "not_found", 404},
+			{"mixed-case named team absence", "gEtTeAm", "TeamNotFound", "team missing", "not_found", 404},
+			{"whitespace numeric team absence", " \tGetTeam\n ", "404", "team missing", "not_found", 404},
+			{"whitespace named team absence", " \tGetTeam\n ", "TeamNotFound", "team missing", "not_found", 404},
 			{"auth mentioning absence", "GetTeam", "Forbidden", "team not found: permission denied", "service", 403},
 			{"auth with HTTP 404", "GetTeam", "Forbidden", "team not found: permission denied", "service", 404},
+			{"lowercase auth with HTTP 404", "getteam", "Forbidden", "team not found: permission denied", "service", 404},
 			{"unrelated absence", "GetTeam", "ResourceGroupNotFound", "resource group not found", "service", 404},
+			{"whitespace unrelated absence", " GetTeam ", "ResourceGroupNotFound", "resource group not found", "service", 404},
 			{"delete is not absence confirmation", "DeleteTeam", "404", "team not found", "service", 404},
+			{"lowercase delete is not absence confirmation", "deleteteam", "404", "team not found", "service", 404},
 			{"list unrelated absence", "ListTeams", "TeamNotFound", "team not found", "service", 404},
+			{"mixed-case list unrelated absence", " lIsTtEaMs ", "TeamNotFound", "team not found", "service", 404},
 		} {
 			t.Run(fmt.Sprintf("%s/disableSDKError=%t", tc.name, disableSDKError), func(t *testing.T) {
 				profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
@@ -66,7 +76,7 @@ func TestOpenAPICallerSDKResponseErrors(t *testing.T) {
 				executor.client.HttpClient = sdkErrorHTTPClient{tc.status, string(body)}
 				capture := &sdkErrorCapturingExecutor{delegate: executor}
 				caller := &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", executor: capture}
-				_, err = caller.Call(context.Background(), tc.api, map[string]any{"teamID": "team-1", "teamName": "test-team"})
+				_, err = caller.CallRaw(context.Background(), tc.api, map[string]any{"teamID": "team-1", "teamName": "test-team"})
 				if disableSDKError {
 					var sdkErr *openapiClient.ClientError
 					if !errors.As(capture.err, &sdkErr) {

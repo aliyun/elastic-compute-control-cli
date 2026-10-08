@@ -358,7 +358,7 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		code, _, _ := callerCloudErrorFields(err)
 		notFound := isCloudNotFound(err)
 		if c.isFCSandboxTeam() {
-			notFound = operation == "GetTeam" && teamAbsenceCode(code)
+			notFound = req.ApiName == "GetTeam" && teamAbsenceCode(code)
 		}
 		if notFound {
 			return nil, ecerrors.NotFound("NotFound", cloudNotFoundMessage(request, code), cloudErrorOptions(err)...)
