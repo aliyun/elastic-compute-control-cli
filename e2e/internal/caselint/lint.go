@@ -486,6 +486,10 @@ func checkSuite(rep *Report, suite *scenario.Suite, inputsDir string, resources 
 			}
 		}
 		effectiveNeeds = append(effectiveNeeds, st.Needs...)
+		if suite.Resource == "sandbox/team" {
+			stepDefined["team_name"] = true
+			stepDefined["team_owner"] = true
+		}
 		stackCaptures := stack.capturesFor(effectiveNeeds)
 		primaryPrerequisites := stack.prerequisitesFor(effectiveNeeds)
 		for _, requirement := range suite.RequiresPrerequisites {
@@ -740,6 +744,7 @@ func checkCreateTags(rep *Report, path, step, run string) {
 		resource == "ack/vuls" ||
 		resource == "agentrun/template" ||
 		resource == "agentrun/sandbox" ||
+		resource == "sandbox/team" ||
 		resource == "sandbox/template" ||
 		resource == "sandbox/sandbox" ||
 		resource == "lingjun/net-test" ||

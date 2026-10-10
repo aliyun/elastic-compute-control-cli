@@ -122,6 +122,20 @@ ecctl schema --list rg
 | `service-linked-role` | `create`, `delete` |
 | `policy version` | `list`, `get`, `create`, `update`, `delete` |
 
+## Sandbox
+
+```bash
+ecctl schema --list sandbox
+```
+
+| Resource | Actions |
+|---|---|
+| `sandbox` | `list`, `get`, `create`, `update`, `delete`, `fork`, `logs`, `metrics`, `pause`, `refresh`, `resume`, `snapshot` |
+| `team` | `list`, `get`, `create`, `update`, `delete` |
+| `template` | `list`, `get`, `create`, `update`, `delete`, `build-logs`, `build-status`, `publish`, `tag-assign`, `tag-delete`, `tag-list`, `unpublish` |
+
+`sandbox team` / `sbx team` uses regional FCSandbox OpenAPI with Aliyun profile AK/STS. Existing sandbox/template operations keep E2B API-key and endpoint semantics.
+
 ## Tag
 
 ```bash
