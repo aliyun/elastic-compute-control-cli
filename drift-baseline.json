@@ -6956,6 +6956,56 @@
       ]
     },
     {
+      "product": "sandbox",
+      "resource": "team",
+      "binding": "create_team",
+      "api": "CreateTeam",
+      "parameters": [
+        "body.description",
+        "body.plan",
+        "body.resourceGroupID",
+        "body.teamName"
+      ],
+      "covered": [
+        "body.description",
+        "body.plan",
+        "body.resourceGroupID",
+        "body.teamName"
+      ]
+    },
+    {
+      "product": "sandbox",
+      "resource": "team",
+      "binding": "delete_team",
+      "api": "DeleteTeam",
+      "parameters": [
+        "teamID"
+      ],
+      "covered": [
+        "teamID"
+      ]
+    },
+    {
+      "product": "sandbox",
+      "resource": "team",
+      "binding": "update_team",
+      "api": "UpdateTeam",
+      "parameters": [
+        "body.description",
+        "body.plan",
+        "body.resourceGroupID",
+        "body.teamName",
+        "teamID"
+      ],
+      "covered": [
+        "body.description",
+        "body.plan",
+        "body.resourceGroupID",
+        "body.teamName",
+        "teamID"
+      ]
+    },
+    {
       "product": "tag",
       "resource": "associated-resource-rule",
       "binding": "create_rule",

@@ -4,10 +4,10 @@ generated:
   cases_dir: cases
 summary:
   surface: public
-  resources: 61
-  operations: 289
+  resources: 62
+  operations: 294
   missing_cases: 0
-  passed: 265
+  passed: 270
   not_passed: 24
 resources:
   ack:
@@ -1644,6 +1644,38 @@ resources:
           fingerprint: sha256:60b03ffe596bbd2b0f4409086243846858766cbaa7303ac92a369bcf19ca5713
           time: "2026-09-07T16:14:39.96875+08:00"
           reason: case-changed
+    team:
+      operations:
+        create:
+          status: live-pass
+          case: cases/sandbox/team-lifecycle.yaml
+          fingerprint: sha256:27b700c2250d9bc4a57d3c2cbc7d08b6569c59b103d80e6537ef9ab09068fa43
+          time: "2026-10-08T21:13:30.270997+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/sandbox/team-lifecycle.yaml
+          fingerprint: sha256:27b700c2250d9bc4a57d3c2cbc7d08b6569c59b103d80e6537ef9ab09068fa43
+          time: "2026-10-08T21:13:30.270997+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/sandbox/team-lifecycle.yaml
+          fingerprint: sha256:27b700c2250d9bc4a57d3c2cbc7d08b6569c59b103d80e6537ef9ab09068fa43
+          time: "2026-10-08T21:13:30.270997+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/sandbox/team-lifecycle.yaml
+          fingerprint: sha256:27b700c2250d9bc4a57d3c2cbc7d08b6569c59b103d80e6537ef9ab09068fa43
+          time: "2026-10-08T21:13:30.270997+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/sandbox/team-lifecycle.yaml
+          fingerprint: sha256:27b700c2250d9bc4a57d3c2cbc7d08b6569c59b103d80e6537ef9ab09068fa43
+          time: "2026-10-08T21:13:30.270997+08:00"
+          reason: live-verified
     template:
       operations:
         build-logs:

@@ -41,6 +41,10 @@
 - [E2B CLI](https://docs.e2b.dev/cli)
 - [E2B OpenAPI](https://github.com/e2b-dev/E2B/blob/main/spec/openapi.yml)
 
+同一产品下的 `ecctl sandbox team`（`sbx team`）使用独立的 FCSandbox
+OpenAPI AK/STS 凭证及目标地域；本资源继续使用上述 E2B 路由和凭证。
+详见 [Team 路由说明](team.md)。
+
 ## 资源操作
 
 | ecctl 操作 | E2B API | 说明 |
