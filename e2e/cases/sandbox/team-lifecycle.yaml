@@ -1,0 +1,45 @@
+resource: sandbox/team
+serial: true
+timeout: 10m
+
+steps:
+  - name: create
+    run: >
+      ecctl sandbox team create
+      --name {{.team_name}}
+      --description "{{.team_owner}}"
+    at: $.team
+    expect:
+      id: { type: string, min_len: 1 }
+      name: { eq: "{{.team_name}}" }
+      status: { eq: active }
+      read_only: { eq: false }
+    capture:
+      team_id: id
+    teardown: ecctl sandbox team delete {{.team_id}} --timeout 5m
+
+  - name: get
+    run: ecctl sandbox team get {{.team_id}}
+    at: $.team
+    expect:
+      id: { eq: "{{.team_id}}" }
+      status: { eq: active }
+
+  - name: list
+    run: ecctl sandbox team list --filter name={{.team_name}} --limit 1 --all
+    assert:
+      - len($.teams) == 1
+      - $.teams[0].id == "{{.team_id}}"
+      - $.pagination.has_more == false
+
+  - name: update
+    run: ecctl sandbox team update {{.team_id}} --description "ecctl E2E Team updated {{.run_id}}"
+    at: $.team
+    expect:
+      id: { eq: "{{.team_id}}" }
+      description: { eq: "ecctl E2E Team updated {{.run_id}}" }
+
+  - name: delete
+    run: ecctl sandbox team delete {{.team_id}} --timeout 5m
+    expect:
+      $.deleted: { eq: true }

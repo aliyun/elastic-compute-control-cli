@@ -355,8 +355,12 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		if callerBoolMapValue(request, "DryRun") && isDryRunPassed(err) {
 			return map[string]any{"DryRun": true}, nil
 		}
-		if isCloudNotFound(err) {
-			code, _, _ := ecerrors.ParseCloudError(err.Error())
+		code, _, _ := callerCloudErrorFields(err)
+		notFound := isCloudNotFound(err)
+		if c.isFCSandboxTeam() {
+			notFound = req.ApiName == "GetTeam" && teamAbsenceCode(code)
+		}
+		if notFound {
 			return nil, ecerrors.NotFound("NotFound", cloudNotFoundMessage(request, code), cloudErrorOptions(err)...)
 		}
 		if isDependencyViolation(err) {
@@ -366,8 +370,20 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		return nil, ecerrors.Service("CloudAPIError", callerCloudErrorMessage(err), retryable, cloudErrorOptions(err)...)
 	}
 	if c.Resource != "" {
-		if err := openAPIBusinessError(resp); err != nil {
+		if err := c.resourceResponseError(req, resp); err != nil {
 			return nil, err
+		}
+	}
+	if c.isFCSandboxTeam() {
+		// Hooks and probes retain successful request IDs in later errors.
+		// Normalize at the provider boundary before any consumer can retain it.
+		if requestID, ok := resp["requestId"].(string); ok {
+			normalized := make(map[string]any, len(resp))
+			for key, value := range resp {
+				normalized[key] = value
+			}
+			normalized["requestId"] = callerSanitizeCloudError(errors.New(requestID))
+			resp = normalized
 		}
 	}
 	return resp, nil
@@ -453,7 +469,7 @@ func (c *OpenAPICaller) executeOpenAPIRequest(ctx context.Context, operation str
 		resp, err := executor.ExecuteOpenAPI(ctx, req)
 		spanErr := err
 		if spanErr == nil && c.Resource != "" {
-			spanErr = openAPIBusinessError(resp)
+			spanErr = c.resourceResponseError(req, resp)
 		}
 		endSpan(spanErr)
 		if err == nil {
@@ -1169,22 +1185,64 @@ func callerSanitizeCloudError(err error) string {
 }
 
 func callerCloudErrorMessage(err error) string {
+	_, message, _ := callerCloudErrorFields(err)
+	return message
+}
+
+// SDK messages include a formatted HTTP status and request ID. Read the
+// structured fields and original body instead of parsing that display string.
+// Only selected public fields leave this boundary; Data can contain credentials.
+func callerCloudErrorFields(err error) (code, message, requestID string) {
 	if err == nil {
+		return "", "", ""
+	}
+	var responseErr dara.ResponseError
+	var teaErr *tea.SDKError
+	var daraErr *dara.SDKError
+	var data map[string]any
+	var encodedData string
+	switch {
+	case errors.As(err, &responseErr):
+		code, message = tea.StringValue(responseErr.GetCode()), responseErr.Error()
+		data = responseErr.GetData()
+		if withRequestID, ok := responseErr.(interface{ GetRequestId() *string }); ok {
+			requestID = tea.StringValue(withRequestID.GetRequestId())
+		}
+	case errors.As(err, &teaErr):
+		code, message = tea.StringValue(teaErr.Code), tea.StringValue(teaErr.Message)
+		encodedData = tea.StringValue(teaErr.Data)
+	case errors.As(err, &daraErr):
+		code, message = tea.StringValue(daraErr.Code), tea.StringValue(daraErr.Message)
+		encodedData = tea.StringValue(daraErr.Data)
+	default:
+		return ecerrors.ParseCloudError(callerSanitizeCloudError(err))
+	}
+	if encodedData != "" {
+		// TeaSDKError can JSON-encode an already encoded Dara Data string.
+		var wrapped string
+		if json.Unmarshal([]byte(encodedData), &wrapped) == nil {
+			encodedData = wrapped
+		}
+		_ = json.Unmarshal([]byte(encodedData), &data)
+	}
+	bodyField := func(keys ...string) string {
+		for _, key := range keys {
+			if value, ok := data[key].(string); ok && value != "" {
+				return value
+			}
+		}
 		return ""
 	}
-	sanitized := callerSanitizeCloudError(err)
-	if sanitized != err.Error() {
-		return sanitized
-	}
-	_, message, _ := ecerrors.ParseCloudError(err.Error())
-	if message != "" {
-		return message
-	}
-	return sanitized
+	code = firstNonEmptyString(code, bodyField("Code", "code"))
+	message = firstNonEmptyString(bodyField("Message", "message"), message)
+	requestID = firstNonEmptyString(requestID, bodyField("RequestId", "requestId", "requestid"))
+	return callerSanitizeCloudError(errors.New(code)),
+		callerSanitizeCloudError(errors.New(message)),
+		callerSanitizeCloudError(errors.New(requestID))
 }
 
 func cloudErrorOptions(err error) []ecerrors.Option {
-	code, message, requestID := ecerrors.ParseCloudError(callerSanitizeCloudError(err))
+	code, message, requestID := callerCloudErrorFields(err)
 	options := make([]ecerrors.Option, 0, 2)
 	if requestID != "" {
 		options = append(options, ecerrors.WithRequestID(requestID))

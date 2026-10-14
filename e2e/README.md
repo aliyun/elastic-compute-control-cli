@@ -457,6 +457,26 @@ raw API calls remain ineligible for unattended replay.
 Cleanup failures include timeout state, cloud/action error codes, and redacted
 stdout/stderr in the report; credential-like values are scrubbed before logging.
 
+The Team lifecycle uses a random 32-character name and an execution ownership
+marker in its description. Before `CreateTeam`, the runner durably reserves a
+private `cleanup-journal-*.json.team-create-<owner>.json` intent recording the
+owned name, description, input, creation time, run, execution, region, surface,
+and binary. These immutable intents are separate from delete-only journals and
+remain available for diagnosis, including after normal cleanup.
+On Unix, reservation syncs the real directory and its ancestors before creating
+the intent; a failed directory barrier prevents the create from launching.
+
+An uncertain Team create is never retried. The runner makes one bounded
+`sandbox team list --filter name=<owned-name> --all` query with the same binary
+and region. It journals deletes only for safe IDs whose name and description
+both exactly match the intent, then reports the original create as failed.
+Empty, incomplete, malformed, or failed queries retain the intent and report
+unproven recovery; an empty list does not prove that creation did not commit.
+Team is excluded from the broad sweep. After a crash or unproven recovery, use
+the recorded binary, region, and ownership fields to reconcile manually before
+registering a validated delete. Never replay an intent as a create or delete,
+adopt a Team by name alone, or mark reconciliation as a live CreateTeam pass.
+
 If a process dies before teardown completes, replay the exact journal (the
 recorded binary, execution, role and region are used unless explicitly
 overridden). Multi-execution and fallback runs add

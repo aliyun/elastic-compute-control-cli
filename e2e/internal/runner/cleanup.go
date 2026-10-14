@@ -250,11 +250,7 @@ func writeRunnerJournal(path string, journal report.CleanupJournal) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return journalfile.WriteDurable(path, append(data, '\n'))
 }
 
 // isReplayableTeardown keeps crash-recovery journals within the repository's

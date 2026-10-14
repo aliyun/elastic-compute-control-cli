@@ -121,6 +121,20 @@ ecctl schema --list rg
 | `service-linked-role` | `create`, `delete` |
 | `policy version` | `list`, `get`, `create`, `update`, `delete` |
 
+## Sandbox
+
+```bash
+ecctl schema --list sandbox
+```
+
+| 资源 | 操作 |
+|---|---|
+| `sandbox` | `list`, `get`, `create`, `update`, `delete`, `fork`, `logs`, `metrics`, `pause`, `refresh`, `resume`, `snapshot` |
+| `team` | `list`, `get`, `create`, `update`, `delete` |
+| `template` | `list`, `get`, `create`, `update`, `delete`, `build-logs`, `build-status`, `publish`, `tag-assign`, `tag-delete`, `tag-list`, `unpublish` |
+
+`sandbox team` / `sbx team` 使用地域 FCSandbox OpenAPI 和 Aliyun profile AK/STS；现有 sandbox/template 保留 E2B API Key 与端点语义。
+
 ## 标签
 
 ```bash
