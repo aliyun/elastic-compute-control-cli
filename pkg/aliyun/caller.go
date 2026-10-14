@@ -39,6 +39,7 @@ type openAPIExecutor interface {
 
 type resolvedOpenAPIProfile struct {
 	Name                  string
+	ProfileBound          bool // Name identifies an actual configured profile.
 	Mode                  string
 	RegionID              string
 	RegionSource          ecconfig.RegionSource
@@ -49,6 +50,7 @@ type resolvedOpenAPIProfile struct {
 	CredentialPrincipal   string
 	ExpectedAccountID     string
 	ExpectedIdentityType  string
+	ExpectedIdentityHash  string
 	IdentityPolicy        credentialIdentityPolicy
 	PinCredentialIdentity bool
 }
@@ -56,12 +58,18 @@ type resolvedOpenAPIProfile struct {
 const topLevelArrayResponseMarker = "__ecctl_top_level_array_response"
 
 type OpenAPICaller struct {
-	Product          string
-	Resource         string
-	Region           string
-	Profile          resolvedOpenAPIProfile
-	executor         openAPIExecutor
-	endpointResolver func(OpenAPIProduct, string, string) (string, error)
+	Product               string
+	Resource              string
+	Region                string
+	Profile               resolvedOpenAPIProfile
+	executor              openAPIExecutor
+	endpointResolver      func(OpenAPIProduct, string, string) (string, error)
+	templateMu            sync.Mutex
+	templateSecrets       []string
+	templateWait          bool
+	templateCreatedID     string
+	templateCreatedTeam   string
+	templateCreatedRegion string
 
 	// Throttle-retry knobs; zero values fall back to the defaults above. Exposed
 	// (unexported, same-package) so tests can shrink intervals and inject sleep.
@@ -96,9 +104,20 @@ func NewOpenAPICallerWithRegionSource(profileName, configPath, product string, r
 	if getenv == nil {
 		getenv = func(string) string { return "" }
 	}
+	pin, identityHash, err := parseExpectedCredentialIdentity(getenv(expectedCredentialIdentityEnv))
+	if err != nil {
+		return nil, credentialResolutionError(err)
+	}
 	openAPIProfile, err := resolveOpenAPIProfile(profileName, configPath, region, getenv)
 	if err != nil {
 		return nil, err
+	}
+	if pin != nil {
+		if openAPIProfile.ExpectedAccountID != "" && openAPIProfile.ExpectedAccountID != pin.AccountID || openAPIProfile.ExpectedIdentityType != "" && openAPIProfile.ExpectedIdentityType != pin.Type {
+			return nil, credentialResolutionError(ErrCredentialIdentityChanged)
+		}
+		openAPIProfile.ExpectedAccountID, openAPIProfile.ExpectedIdentityType, openAPIProfile.ExpectedIdentityHash = pin.AccountID, pin.Type, identityHash
+		openAPIProfile.PinCredentialIdentity = true
 	}
 	return &OpenAPICaller{
 		Product: product,
@@ -144,7 +163,7 @@ func (c *OpenAPICaller) acquireCredentialLease(ctx context.Context) (*credential
 		}
 		credentialKey = credentialIdentityCacheKey(operationProfile, snapshot)
 		var identityGuard *operationIdentityGuard
-		if operationProfile.PinCredentialIdentity && credentialAcquirerIsRenewable(operationAcquirer) {
+		if operationProfile.ExpectedIdentityHash != "" || operationProfile.PinCredentialIdentity && credentialAcquirerIsRenewable(operationAcquirer) {
 			identityGuard, err = newOperationIdentityGuard(ctx, operationProfile, snapshot)
 			if err != nil {
 				return nil, &credentialProviderError{mode: c.Profile.Mode, err: err}
@@ -339,9 +358,23 @@ func (c *OpenAPICaller) Call(ctx context.Context, operation string, request map[
 }
 
 func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request map[string]any) (map[string]any, error) {
+	if c.isFCTemplate() {
+		if operation == "CreateTemplate" {
+			c.templateMu.Lock()
+			c.templateCreatedID, c.templateCreatedTeam, c.templateCreatedRegion = "", "", ""
+			c.templateMu.Unlock()
+		}
+		c.rememberTemplateSecrets(request, false)
+	}
 	req, err := c.commonRequest(operation, request)
 	if err != nil {
 		return nil, err
+	}
+	if c.isFCTemplate() {
+		c.rememberTemplateSecrets(req.BodyValue(), false)
+		if err := c.validateFCTemplateRequest(req); err != nil {
+			return nil, err
+		}
 	}
 	resp, err := c.executeOpenAPIRequest(ctx, operation, req)
 	if err != nil {
@@ -352,27 +385,43 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		if errors.As(err, &providerErr) {
 			return nil, credentialResolutionError(providerErr)
 		}
-		if callerBoolMapValue(request, "DryRun") && isDryRunPassed(err) {
+		originalErr := err
+		if c.isFCTemplate() {
+			err = c.scrubTemplateError(err)
+		}
+		if callerBoolMapValue(request, "DryRun") && isDryRunPassed(originalErr) {
 			return map[string]any{"DryRun": true}, nil
 		}
-		code, _, _ := callerCloudErrorFields(err)
-		notFound := isCloudNotFound(err)
+		code, _, _ := callerCloudErrorFields(originalErr)
+		notFound := isCloudNotFound(originalErr)
 		if c.isFCSandboxTeam() {
 			notFound = req.ApiName == "GetTeam" && teamAbsenceCode(code)
+		}
+		if c.isFCTemplate() {
+			notFound = req.ApiName == "GetTemplate" && templateAbsenceCode(code)
 		}
 		if notFound {
 			return nil, ecerrors.NotFound("NotFound", cloudNotFoundMessage(request, code), cloudErrorOptions(err)...)
 		}
-		if isDependencyViolation(err) {
+		if isDependencyViolation(originalErr) {
 			return nil, ecerrors.Service("DependencyViolation", callerCloudErrorMessage(err), false, cloudErrorOptions(err)...)
 		}
-		retryable := isThrottling(err) || (isReadOperation(operation) && isTransientNetworkError(err))
+		retryable := isThrottling(originalErr) || (isReadOperation(operation) && isTransientNetworkError(originalErr))
 		return nil, ecerrors.Service("CloudAPIError", callerCloudErrorMessage(err), retryable, cloudErrorOptions(err)...)
 	}
 	if c.Resource != "" {
 		if err := c.resourceResponseError(req, resp); err != nil {
 			return nil, err
 		}
+	}
+	if c.isFCTemplate() && req.ApiName == "CreateTemplate" {
+		c.templateMu.Lock()
+		c.templateCreatedID, _ = resp["templateID"].(string)
+		c.templateCreatedRegion = req.RegionId
+		if body, ok := req.BodyValue().(map[string]any); ok {
+			c.templateCreatedTeam, _ = body["teamID"].(string)
+		}
+		c.templateMu.Unlock()
 	}
 	if c.isFCSandboxTeam() {
 		// Hooks and probes retain successful request IDs in later errors.
@@ -385,6 +434,9 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 			normalized["requestId"] = callerSanitizeCloudError(errors.New(requestID))
 			resp = normalized
 		}
+	}
+	if c.isFCTemplate() {
+		resp = c.scrubTemplateResponse(req, resp)
 	}
 	return resp, nil
 }
@@ -468,6 +520,10 @@ func (c *OpenAPICaller) executeOpenAPIRequest(ctx context.Context, operation str
 		})
 		resp, err := executor.ExecuteOpenAPI(ctx, req)
 		spanErr := err
+		if c.isFCTemplate() {
+			c.rememberTemplateSecrets(resp, false)
+			spanErr = c.scrubTemplateError(err)
+		}
 		if spanErr == nil && c.Resource != "" {
 			spanErr = c.resourceResponseError(req, resp)
 		}
@@ -1195,6 +1251,10 @@ func callerCloudErrorMessage(err error) string {
 func callerCloudErrorFields(err error) (code, message, requestID string) {
 	if err == nil {
 		return "", "", ""
+	}
+	var nativeErr *nativeTemplateCloudError
+	if errors.As(err, &nativeErr) {
+		return nativeErr.code, nativeErr.message, nativeErr.requestID
 	}
 	var responseErr dara.ResponseError
 	var teaErr *tea.SDKError

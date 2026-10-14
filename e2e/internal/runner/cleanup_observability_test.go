@@ -140,6 +140,81 @@ func TestCleanupUsesOperationLocksAndParallelLimit(t *testing.T) {
 	}
 }
 
+func TestCleanupJournalPreflightStartsAfterOperationWait(t *testing.T) {
+	oldTimeout := cleanupTimeout
+	cleanupTimeout = 500 * time.Millisecond
+	defer func() { cleanupTimeout = oldTimeout }()
+	operations := newOperationRuntime(2)
+	entered, release, holderDone := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	released := false
+	unlock := func() {
+		if !released {
+			close(release)
+			released = true
+		}
+	}
+	go func() {
+		holderDone <- operations.executeKeys(context.Background(), []string{"shared"}, func() { close(entered); <-release })
+	}()
+	<-entered
+	defer func() {
+		unlock()
+		if err := <-holderDone; err != nil {
+			t.Error(err)
+		}
+	}()
+	journal := filepath.Join(t.TempDir(), "journal.json")
+	cl := newCleanup(map[string]execpkg.Config{"primary": {Bin: "ecctl-test", Region: "cn-hangzhou"}}, operations, false, journal, report.CleanupJournal{RunID: "queued", ExecutionID: "execution", Surface: "public"}, func(string, ...any) {})
+	commandRan := make(chan struct{}, 1)
+	cl.runCommand = func(ctx context.Context, _ execpkg.Config, _ string) execpkg.Result {
+		commandRan <- struct{}{}
+		deadline, ok := ctx.Deadline()
+		if !ok || ctx.Err() != nil || time.Until(deadline) < cleanupTimeout/2 {
+			t.Error("command did not receive a fresh execution timeout after journal preflight")
+			return execpkg.Result{Exit: -1, Err: ctx.Err()}
+		}
+		return execpkg.Result{Exit: 0}
+	}
+	var scope []*cleanupItem
+	if err := cl.push(&scope, "case", "ecctl test delete", "primary", []string{"shared"}); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan []string, 1)
+	go func() { done <- cl.run(scope) }()
+	var failures []string
+	finished := false
+	select {
+	case failures = <-done:
+		finished = true
+		t.Errorf("queue time consumed journal preflight budget: %v", failures)
+	case <-time.After(cleanupTimeout + 150*time.Millisecond):
+	}
+	select {
+	case <-commandRan:
+		t.Error("delete ran before the operation lock was released")
+	default:
+	}
+	unlock()
+	if !finished {
+		select {
+		case failures = <-done:
+		case <-time.After(3 * time.Second):
+			t.Fatal("journal-backed cleanup did not finish after queue release")
+		}
+	}
+	if len(failures) != 0 || !scope[0].done {
+		t.Fatalf("journal preflight failed after a valid queue wait: %v", failures)
+	}
+	select {
+	case <-commandRan:
+	default:
+		t.Error("delete never reached the injected command runner")
+	}
+	if entries := readJournalEntries(t, journal); len(entries) != 0 {
+		t.Errorf("successful queued cleanup did not retire its journal entry: %+v", entries)
+	}
+}
+
 func TestCleanupWaitDoesNotConsumeCommandTimeout(t *testing.T) {
 	oldTimeout := cleanupTimeout
 	cleanupTimeout = time.Second

@@ -8,8 +8,8 @@ resources:
   - team
 expose_default_resource: true
 description:
-  en: Manage E2B sandboxes and templates, and FC OpenAPI teams.
-  zh-CN: 管理 E2B 沙箱及模板，以及 FC OpenAPI 团队。
+  en: Manage E2B sandboxes and templates, and native FC OpenAPI templates and teams.
+  zh-CN: 管理 E2B 沙箱及模板，以及原生 FC OpenAPI 模板和团队。
 examples:
   - ecctl sandbox list --filter state=running
   - ecctl sbx template create --name python --from-image python:3.12

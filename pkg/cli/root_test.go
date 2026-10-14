@@ -427,9 +427,15 @@ type fakeAPICaller struct {
 	response    map[string]any
 }
 
-type callOnlyAPICaller struct{}
+type callOnlyAPICaller struct {
+	calls     int
+	operation string
+	request   map[string]any
+}
 
-func (*callOnlyAPICaller) Call(_ context.Context, _ string, _ map[string]any) (map[string]any, error) {
+func (f *callOnlyAPICaller) Call(_ context.Context, operation string, request map[string]any) (map[string]any, error) {
+	f.calls++
+	f.operation, f.request = operation, request
 	return map[string]any{}, nil
 }
 
@@ -2447,6 +2453,99 @@ func TestCallCommandPassesAliyunCLIFlagsThrough(t *testing.T) {
 	}
 	if !reflect.DeepEqual(fake.passthrough, wantPassthrough) {
 		t.Fatalf("passthrough = %#v, want %#v", fake.passthrough, wantPassthrough)
+	}
+}
+
+func TestCallLocalOutputModesReachBuiltInCaller(t *testing.T) {
+	for _, flag := range [][]string{
+		{"--output=json"}, {"--output", "json"}, {"-o", "json"}, {"-o=json"},
+		{"--output=text"}, {"--output", "text"}, {"-o", "text"}, {"-o=text"}, {"--output="},
+	} {
+		for _, position := range []int{1, 2, 3} {
+			t.Run(fmt.Sprint(flag)+"/"+fmt.Sprint(position), func(t *testing.T) {
+				caller := &callOnlyAPICaller{}
+				factoryCalls := 0
+				factory := func(profile, _ string, product, region string, _ func(string) string) (engine.Caller, error) {
+					factoryCalls++
+					if profile != "daily-oauth" || product != "sts" || region != "cn-hangzhou" {
+						t.Fatalf("wrong native caller selection: %q %q %q", profile, product, region)
+					}
+					return caller, nil
+				}
+				command := []string{"call", "sts", "GetCallerIdentity"}
+				args := append([]string{"--lang", "en"}, command[:position]...)
+				args = append(args, flag...)
+				args = append(args, command[position:]...)
+				args = append(args, "--profile", "daily-oauth", "--region", "cn-hangzhou", "--agent-envelope=false", "--json", "--no-color")
+				stdout, stderr, code := runCLIWithAPI(factory, args...)
+				if code != 0 || stderr != "" || factoryCalls != 1 || caller.calls != 1 || caller.operation != "GetCallerIdentity" || len(caller.request) != 0 {
+					t.Fatalf("local output became native passthrough: exit=%d factory=%d calls=%d op=%s request=%v stderr=%s stdout=%s", code, factoryCalls, caller.calls, caller.operation, caller.request, stderr, stdout)
+				}
+				payload := decodeObject(t, stdout)
+				if payload["product"] != "sts" || payload["operation"] != "GetCallerIdentity" {
+					t.Errorf("wrong call output: %s", stdout)
+				}
+			})
+		}
+	}
+	caller := &callOnlyAPICaller{}
+	stdout, stderr, code := runCLIWithAPI(func(_, _, _, _ string, _ func(string) string) (engine.Caller, error) { return caller, nil },
+		"--lang", "en", "--output=json", "call", "sts", "GetCallerIdentity", "--agent-envelope=false")
+	if code != 0 || stderr != "" || caller.calls != 1 || !json.Valid([]byte(stdout)) {
+		t.Fatalf("existing global-before-call output control failed: exit=%d calls=%d %s %s", code, caller.calls, stderr, stdout)
+	}
+}
+
+func TestCallLocalHelpAndMissingOutputNeverConstructCaller(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		flag []string
+		help bool
+	}{
+		{"long help", []string{"--help"}, true}, {"short help", []string{"-h"}, true},
+		{"inline help", []string{"--help=true"}, true}, {"inline short help", []string{"-h=true"}, true},
+		{"missing long output", []string{"--output"}, false}, {"missing short output", []string{"-o"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			factoryCalls := 0
+			factory := func(_, _, _, _ string, _ func(string) string) (engine.Caller, error) {
+				factoryCalls++
+				return &callOnlyAPICaller{}, nil
+			}
+			args := append([]string{"--lang", "en", "call", "sts", "GetCallerIdentity"}, tc.flag...)
+			stdout, stderr, code := runCLIWithAPI(factory, args...)
+			if factoryCalls != 0 || tc.help && (code != 0 || !strings.Contains(stdout, "OpenAPI")) || !tc.help && code == 0 {
+				t.Errorf("local metadata/parse path constructed a caller: exit=%d factory=%d stderr=%s stdout=%s", code, factoryCalls, stderr, stdout)
+			}
+		})
+	}
+}
+
+func TestCallAliyunOnlyOutputAndVersionStayPassthrough(t *testing.T) {
+	for _, flag := range [][]string{
+		{"--output", "cols=RequestId"}, {"--output=cols=RequestId"}, {"-o", "cols=RequestId"}, {"-o=cols=RequestId"},
+	} {
+		for _, position := range []int{1, 2, 3} {
+			t.Run(fmt.Sprint(flag)+"/"+fmt.Sprint(position), func(t *testing.T) {
+				fake := &fakeAPICaller{response: map[string]any{"RequestId": "req-aliyun-output"}}
+				factory := func(_, _, _, _ string, _ func(string) string) (engine.Caller, error) { return fake, nil }
+				command := []string{"call", "ecs", "DescribeInstances"}
+				args := append([]string{"--lang", "en"}, command[:position]...)
+				args = append(args, flag...)
+				args = append(args, command[position:]...)
+				args = append(args, "--version=2014-05-26", "-p", "prod", "-e", "endpoint.invalid", "--PageSize", "20")
+				stdout, stderr, code := runCLIWithAPI(factory, args...)
+				outputFlag := strings.SplitN(flag[0], "=", 2)[0]
+				want := []string{outputFlag, "cols=RequestId"}
+				if len(fake.passthrough) > 0 && fake.passthrough[0] == outputFlag+"=cols=RequestId" {
+					want = []string{outputFlag + "=cols=RequestId"}
+				}
+				want = append(want, "--version=2014-05-26", "-p", "prod", "-e", "endpoint.invalid")
+				if code != 0 || stderr != "" || fake.operation != "DescribeInstances" || fake.request["PageSize"] != float64(20) || !reflect.DeepEqual(fake.passthrough, want) {
+					t.Errorf("Aliyun-only flags were consumed locally: exit=%d args=%v request=%v stderr=%s stdout=%s", code, fake.passthrough, fake.request, stderr, stdout)
+				}
+			})
+		}
 	}
 }
 

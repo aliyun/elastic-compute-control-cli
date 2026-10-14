@@ -1,6 +1,7 @@
 schema_version: 2
 product: sandbox
 provider: e2b
+api_product: FCSandbox
 resource: template
 kind: global
 aliases: [tpl]
@@ -8,8 +9,8 @@ display_name:
   en: E2B sandbox template
   zh-CN: E2B 沙箱模板
 description:
-  en: Manage E2B sandbox templates, builds, visibility, and tags.
-  zh-CN: 管理 E2B 沙箱模板、构建、可见性和标签。
+  en: Manage sandbox templates; use --openapi for native FC templates with Aliyun credentials.
+  zh-CN: 管理沙箱模板；使用 --openapi 通过阿里云凭证管理原生 FC 模板。
 examples:
   - ecctl sandbox template list
   - ecctl sandbox template get <template-id>
@@ -24,6 +25,29 @@ identity:
 
 schema:
   fields:
+    team_id:
+      type: string
+      description: {en: native FC team ID, zh-CN: 原生 FC 团队 ID}
+    team_name:
+      type: string
+      description: {en: native FC team name, zh-CN: 原生 FC 团队名称}
+    resource_group:
+      type: string
+      description: {en: resource group ID, zh-CN: 资源组 ID}
+    runtime_config:
+      type: object
+      input_style: json|@file
+      description: {en: "native FC runtime configuration as JSON or @file; nested API keys and JSON structure are preserved in output; --openapi update requires this or --build-config", zh-CN: "原生 FC 运行时配置，使用 JSON 或 @file；输出保留嵌套 API 键名和 JSON 结构；--openapi 更新需要此项或 --build-config"}
+    build_config:
+      type: object
+      input_style: json|@file
+      description: {en: "native FC build configuration as JSON or @file; --openapi update requires this or --runtime-config", zh-CN: "原生 FC 构建配置，使用 JSON 或 @file；--openapi 更新需要此项或 --runtime-config"}
+    created_time:
+      type: string
+      description: {en: native FC creation time, zh-CN: 原生 FC 创建时间}
+    finished_at:
+      type: string
+      description: {en: native FC build completion time, zh-CN: 原生 FC 构建完成时间}
     id:
       type: string
       description: {en: template ID, zh-CN: 模板 ID}
@@ -43,7 +67,7 @@ schema:
       description: {en: template tags, zh-CN: 模板标签}
     public:
       type: boolean
-      description: {en: whether the template is public, zh-CN: 模板是否公开}
+      description: {en: "E2B visibility; E2B update requires --public, unavailable with --openapi", zh-CN: "E2B 可见性；E2B 更新需要 --public，--openapi 不支持此项"}
     cpu_count:
       type: integer
       description: {en: template CPU count, zh-CN: 模板 CPU 数量}
@@ -119,6 +143,9 @@ schema:
       description: {en: template creator, zh-CN: 模板创建者}
 
 controls:
+  openapi:
+    type: boolean
+    description: {en: use native FC OpenAPI with Aliyun profile credentials and a region, zh-CN: 使用阿里云 profile 凭证和地域调用原生 FC OpenAPI}
   filter:
     type: key_value
     repeatable: true
@@ -137,9 +164,38 @@ controls:
   timeout:
     type: duration
     default: 15m
-    description: {en: template build wait timeout, zh-CN: 模板构建等待超时}
+    description: {en: "template build wait timeout; native waiting requires a positive value; native --no-wait defaults to a 30s request budget", zh-CN: "模板构建等待超时；原生等待要求正值；原生 --no-wait 默认使用 30 秒请求预算"}
 
 probes:
+  fc_detail:
+    api: GetTemplate
+    request: {templateID: $.id, teamID: $.team_id}
+    response:
+      item: $
+      request_id: $.requestId
+      id: $.templateID
+      state: $.status.state
+      fields: &fc_template_fields
+        id: $.templateID
+        name: $.name
+        team_id: $.teamID
+        team_name: $.teamName
+        resource_group: $.resourceGroupID
+        runtime_config: $.runtimeConfig
+        created_time: $.createdTime
+        build_status: $.status.state
+        reason: $.status.reason
+        finished_at: $.status.finishedAt
+  fc_list:
+    api: ListTemplates
+    request: {teamID: $.team_id, maxResults: $.limit, nextToken: $.next_token}
+    response:
+      items: $.templates
+      next_token: $.nextToken
+      request_id: $.requestId
+      id: $.templateID
+      state: $.status.state
+      fields: *fc_template_fields
   list:
     api: ListTemplates
     request:
@@ -252,6 +308,12 @@ probes:
         created_at: $.createdAt
 
 waiters:
+  fc_ready:
+    probe: fc_detail
+    target: ready
+    interval: 2s
+    timeout: 15m
+    failure: {states: [error, failed]}
   build_ready:
     probe: build_status
     target: ready
@@ -261,6 +323,36 @@ waiters:
       states: [error]
 
 bindings:
+  fc_create:
+    api: CreateTemplate
+    request:
+      body:
+        name: $.name
+        teamID: $.team_id
+        runtimeConfig: {from: $.runtime_config}
+        buildConfig: {from: $.build_config}
+    require_all: [{request: body.name}]
+    id_from: $.templateID
+    request_id_from: $.requestId
+    wait: fc_ready
+  fc_update:
+    api: UpdateTemplate
+    request:
+      templateID: $.id
+      teamID: $.team_id
+      body:
+        runtimeConfig: {from: $.runtime_config}
+        buildConfig: {from: $.build_config}
+    require_all: [{request: templateID}]
+    require_any: [{request: body.runtimeConfig}, {request: body.buildConfig}]
+    id_from: $.templateID
+    request_id_from: $.requestId
+    wait: fc_ready
+  fc_delete:
+    api: DeleteTemplate
+    request: {templateID: $.id, teamID: $.team_id}
+    require_all: [{request: templateID}]
+    request_id_from: $.requestId
   create_template:
     api: CreateTemplate
     request:
@@ -344,11 +436,17 @@ bindings:
 operations:
   create:
     aliases: [new]
-    description: {en: Create and build an E2B sandbox template, zh-CN: 创建并构建 E2B 沙箱模板}
+    description: {en: Create and build a sandbox template (E2B by default; native FC with --openapi), zh-CN: 创建并构建沙箱模板（默认 E2B；--openapi 使用原生 FC）}
     examples: [ecctl sandbox template create --name python --from-image python:3.12]
+    help:
+      en: E2B requires --from-image or --from-template. Native FC uses --openapi, a region, and optional --team-id, --runtime-config and --build-config; configurations accept JSON or @file. Both modes wait by default; --no-wait returns an accepted ID without asserting build readiness.
+      zh-CN: E2B 需要 --from-image 或 --from-template。原生 FC 使用 --openapi 和地域，可指定 --team-id、--runtime-config 和 --build-config；配置支持 JSON 或 @file。两种模式默认等待；--no-wait 仅返回已受理的 ID，不表示构建就绪。
     input:
       fields:
         - name: {required: true}
+        - team_id
+        - runtime_config
+        - build_config
         - tag
         - cpu_count: {default: 2}
         - memory_mb: {default: 1024}
@@ -359,65 +457,104 @@ operations:
         - steps
         - start_cmd
         - ready_cmd
-      controls: [no_wait, timeout]
+      controls: [openapi, no_wait, timeout]
     require_any:
       - {raw: $.from_image}
       - {raw: $.from_template}
     conflicts:
       - {any: [from_image], with_any: [from_template]}
     workflow:
+      - binding: fc_create
+        when: input.openapi
+        wait_unless: input.no_wait
+      - emit:
+          fields: {id: $context.id, team_id: $input.team_id}
+        when: input.openapi && input.no_wait
       - binding: create_template
+        unless: input.openapi
       - binding: start_build
+        unless: input.openapi
         wait_unless: input.no_wait
       - emit:
           fields:
             id: $context.id
             build_id: $context.build_id
             build_status: waiting
-        when: input.no_wait
+        when: input.no_wait && !input.openapi
   update:
-    description: {en: Update E2B template visibility, zh-CN: 更新 E2B 模板可见性}
+    description: {en: Update template visibility or native FC configuration with --openapi, zh-CN: 更新模板可见性，或通过 --openapi 更新原生 FC 配置}
     examples: [ecctl sandbox template update <template-id> --public]
+    help:
+      en: E2B requires --public. Native FC requires --openapi and at least one of --runtime-config or --build-config; --public is unavailable in native mode. Native updates wait for readiness unless --no-wait is supplied; waiting requires a positive --timeout. Native --no-wait uses a 30s request budget unless --timeout is explicit.
+      zh-CN: E2B 需要 --public。原生 FC 需要 --openapi，以及 --runtime-config 或 --build-config 至少一项；原生模式不支持 --public。原生更新默认等待就绪，除非指定 --no-wait；等待要求 --timeout 大于零。原生 --no-wait 使用 30 秒请求预算，显式 --timeout 可覆盖。
     input:
       fields:
         - id: {required: true, positional: true}
-        - public: {required: true}
+        - public
+        - team_id
+        - runtime_config
+        - build_config
+      controls: [openapi, no_wait, timeout]
     workflow:
+      - binding: fc_update
+        when: input.openapi
+        wait_unless: input.no_wait
+      - emit:
+          fields: {id: $context.id, team_id: $input.team_id}
+        when: input.openapi && input.no_wait
       - binding: update
+        unless: input.openapi
       - probe: detail
+        unless: input.openapi
         ids: [$input.id]
   delete:
     aliases: [remove, rm]
-    description: {en: Delete an E2B sandbox template, zh-CN: 删除 E2B 沙箱模板}
+    description: {en: Delete a sandbox template (native FC with --openapi), zh-CN: 删除沙箱模板（--openapi 使用原生 FC）}
     examples: [ecctl sandbox template delete <template-id>]
     input:
       fields:
         - id: {required: true, positional: true}
+        - team_id
+      controls: [openapi]
     workflow:
+      - binding: fc_delete
+        when: input.openapi
       - binding: delete
+        unless: input.openapi
       - emit:
           fields: {id: $input.id}
           deleted: true
   get:
     aliases: [show, describe]
-    description: {en: Get an E2B sandbox template and its builds, zh-CN: 获取 E2B 沙箱模板及其构建}
+    description: {en: Get a sandbox template and its build state, zh-CN: 获取沙箱模板及其构建状态}
     examples: [ecctl sandbox template get <template-id>]
     input:
       fields:
         - id: {required: true, positional: true}
-      controls: [limit, next_token]
+        - team_id
+      controls: [openapi, limit, next_token]
     workflow:
+      - probe: fc_detail
+        when: input.openapi
+        ids: [$input.id]
+        not_found: error
       - probe: detail
+        unless: input.openapi
         ids: [$input.id]
         not_found: error
   list:
     aliases: [ls]
-    description: {en: List E2B sandbox templates, zh-CN: 列出 E2B 沙箱模板}
+    description: {en: List sandbox templates (native FC with --openapi), zh-CN: 列出沙箱模板（--openapi 使用原生 FC）}
     examples: [ecctl sandbox template list --limit 100]
     input:
-      controls: [limit, next_token]
+      fields: [team_id]
+      controls: [openapi, limit, next_token]
     workflow:
+      - probe: fc_list
+        when: input.openapi
+        many: true
       - probe: list
+        unless: input.openapi
         many: true
   publish:
     description: {en: Publish an E2B sandbox template, zh-CN: 公开 E2B 沙箱模板}

@@ -125,6 +125,11 @@ func ReplayJournal(ctx context.Context, path string, cfg execpkg.Config) (*Resul
 // Raw []Resource journals from older runners remain readable, but new journals
 // always carry metadata and are never replayed against conflicting options.
 func ReplayJournalWithOptions(ctx context.Context, path string, opt ReplayOptions) (*Result, error) {
+	resolved, resolveErr := journalfile.ResolveJournalPath(path)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	path = resolved
 	var result *Result
 	err := journalfile.WithReplayLock(ctx, path, func() error {
 		var journal report.CleanupJournal
@@ -134,13 +139,16 @@ func ReplayJournalWithOptions(ctx context.Context, path string, opt ReplayOption
 			if err != nil {
 				return err
 			}
-			return validateJournalIdentity(journal, &opt)
+			if err := validateJournalIdentity(journal, &opt); err != nil {
+				return err
+			}
+			return journalfile.CheckTemplateCreateIntents(path, journal, opt.Config.Env)
 		})
 		if err != nil {
 			return err
 		}
 		replayJournalAfterRead(path)
-		result, err = replayJournalEntries(ctx, path, opt, journal.Entries)
+		result, err = replayJournalEntries(ctx, path, opt, journal)
 		return err
 	})
 	return result, err
@@ -163,7 +171,8 @@ func readReplayJournal(path string) (report.CleanupJournal, bool, error) {
 	return journal, legacy, nil
 }
 
-func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, entries []report.Resource) (*Result, error) {
+func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, journal report.CleanupJournal) (*Result, error) {
+	entries := journal.Entries
 	result := &Result{}
 	for i := len(entries) - 1; i >= 0; i-- {
 		entry := entries[i]
@@ -175,7 +184,11 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, e
 			result.Details = append(result.Details, fmt.Sprintf("journal %s: invalid teardown: %v", entry.Scope, err))
 			continue
 		}
-		res := execpkg.Run(ctx, opt.Config, entry.Teardown)
+		bound, err := journalfile.PrepareTemplateCleanup(ctx, path, journal, opt.Config)
+		if err != nil {
+			return result, err
+		}
+		res := execpkg.Run(ctx, bound, entry.Teardown)
 		if res.Err != nil || (res.Exit != 0 && res.Exit != 4) {
 			result.Errors++
 			result.Details = append(result.Details, fmt.Sprintf("journal %s: delete exit=%d %s", entry.Scope, res.Exit, failureReason(res)))
@@ -184,7 +197,7 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, e
 		result.Deleted++
 		replayJournalAfterSuccess(path)
 		commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), replayJournalCommitTimeout)
-		err := consumeReplayJournalEntry(commitCtx, path, opt, entry)
+		err = consumeReplayJournalEntry(commitCtx, path, opt, entry)
 		cancel()
 		if err != nil {
 			return result, fmt.Errorf("rewrite cleanup journal %s after replay: %w", path, err)

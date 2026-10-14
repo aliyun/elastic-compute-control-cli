@@ -28,6 +28,9 @@ func validTeamIdentity(id string) bool {
 }
 
 func (c *OpenAPICaller) resourceResponseError(req *openAPIRequest, response map[string]any) error {
+	if c.isFCTemplate() {
+		return c.fcTemplateResponseError(req, response)
+	}
 	if !c.isFCSandboxTeam() {
 		return openAPIBusinessError(response)
 	}

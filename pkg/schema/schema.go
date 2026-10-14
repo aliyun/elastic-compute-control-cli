@@ -810,6 +810,13 @@ func pollCommand(resource spec.ResourceSpec, waiters []WaiterContract) string {
 		if !ok || requestNeedsOperationContext(probe.Request) {
 			return ""
 		}
+		for _, step := range getOperation.Workflow {
+			// A conditional get probe needs selectors/context that this generic
+			// command cannot carry (for example the native template transport).
+			if step.Probe == waiter.Probe && (step.When != "" || step.Unless != "" || len(step.WhenAny) != 0) {
+				return ""
+			}
+		}
 	}
 	parts := resourceCLIPath(resource)
 	parts = append(parts, "get", "<id>")

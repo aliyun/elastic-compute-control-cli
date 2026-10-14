@@ -85,6 +85,12 @@ improve counts.
   one execution unit. Use `lifetime: run` only for compatible resources that
   should be leased across units; a run-lifetime node may depend only on other
   run-lifetime nodes.
+- Native `sandbox/template --openapi` shared fixtures support read-only lookup.
+  Their mutations are rejected before child launch because shared fixtures do
+  not own native creation intents. Keep native create/use/delete in one owned
+  lifecycle case, including its cleanup and lost-response recovery.
+  Native Template allocation is also rejected while the Session holds a
+  run-lifetime Team fixture; a shared parent spans distinct execution journals.
 - Reuse one run-lifetime parent for compatible operations, but isolate
   destructive mutations that change shared state. ACK uses two clusters: the
   run-lifetime `ack_shared_cluster` for reversible cases, and the cluster owned

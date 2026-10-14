@@ -68,14 +68,16 @@ type RegionAttempt struct {
 // persisted with the teardown commands so replay cannot silently target a
 // different region, command surface, or binary.
 type CleanupJournal struct {
-	Version     int        `json:"version"`
-	RunID       string     `json:"run_id"`
-	ExecutionID string     `json:"execution_id,omitempty"`
-	RegionRole  string     `json:"region_role,omitempty"`
-	Region      string     `json:"region"`
-	Surface     string     `json:"surface"`
-	EcctlBin    string     `json:"ecctl_bin"`
-	Entries     []Resource `json:"entries"`
+	Version           int        `json:"version"`
+	RunID             string     `json:"run_id"`
+	ExecutionID       string     `json:"execution_id,omitempty"`
+	RegionRole        string     `json:"region_role,omitempty"`
+	Region            string     `json:"region"`
+	Surface           string     `json:"surface"`
+	EcctlBin          string     `json:"ecctl_bin"`
+	Entries           []Resource `json:"entries"`
+	NativeJournalPath string     `json:"native_journal_path,omitempty"`
+	NativeIntentPaths []string   `json:"native_intent_paths,omitempty"`
 }
 
 // Summary is the at-a-glance tally.

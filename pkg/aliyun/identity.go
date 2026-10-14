@@ -52,6 +52,9 @@ func resolveCredentialIdentityWithExecutor(ctx context.Context, profile resolved
 	if profile.ExpectedIdentityType != "" && identity.Type != profile.ExpectedIdentityType {
 		return telemetry.Identity{}, ErrCredentialIdentityChanged
 	}
+	if profile.ExpectedIdentityHash != "" && identity.Hash != profile.ExpectedIdentityHash {
+		return telemetry.Identity{}, ErrCredentialIdentityChanged
+	}
 	return identity, nil
 }
 
@@ -85,6 +88,9 @@ func (g *operationIdentityGuard) Validate(ctx context.Context, snapshot *credent
 
 func (g *operationIdentityGuard) validateLocked(ctx context.Context, snapshot *credentialSnapshot) error {
 	if proof := validCredentialIdentityProof(g.profile, snapshot, g.domain); proof != nil {
+		if g.profile.ExpectedIdentityHash != "" && proof.identity.Hash != g.profile.ExpectedIdentityHash {
+			return ErrCredentialIdentityChanged
+		}
 		if g.identity.Hash != "" && (proof.identity.Hash != g.identity.Hash || proof.identity.Type != g.identity.Type) {
 			return ErrCredentialIdentityChanged
 		}
@@ -99,6 +105,9 @@ func (g *operationIdentityGuard) validateLocked(ctx context.Context, snapshot *c
 	identity, err := resolver(ctx, g.profile, snapshot, g.domain)
 	if err != nil {
 		return err
+	}
+	if g.profile.ExpectedIdentityHash != "" && (identity.Hash != g.profile.ExpectedIdentityHash || identity.Type != g.profile.ExpectedIdentityType) {
+		return ErrCredentialIdentityChanged
 	}
 	if g.identity.Hash != "" && (identity.Hash != g.identity.Hash || identity.Type != g.identity.Type) {
 		return ErrCredentialIdentityChanged

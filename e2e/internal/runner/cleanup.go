@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,11 +33,14 @@ const exitNotFound = 4
 
 // cleanupItem is one teardown command and whether it has already run.
 type cleanupItem struct {
-	scope    string
-	cmd      string
-	role     string
-	lockKeys []string
-	done     bool
+	scope           string
+	cmd             string
+	role            string
+	lockKeys        []string
+	done            bool
+	running         bool
+	deferred        bool
+	templateBinding *journalfile.TemplateCreateIntent
 }
 
 // cleanup is the two-level teardown registry. Case scopes run when
@@ -44,15 +48,19 @@ type cleanupItem struct {
 // executes on a fresh background context so it completes even when the run's
 // context was cancelled (CI cancel / timeout).
 type cleanup struct {
-	mu          sync.Mutex
-	keep        bool
-	journal     string
-	execCfg     map[string]execpkg.Config
-	runCommand  func(context.Context, execpkg.Config, string) execpkg.Result
-	operations  *operationRuntime
-	logf        func(string, ...any)
-	manifest    []report.Resource
-	journalMeta report.CleanupJournal
+	mu             sync.Mutex
+	session        *Session
+	keep           bool
+	journal        string
+	execCfg        map[string]execpkg.Config
+	runCommand     func(context.Context, execpkg.Config, string) execpkg.Result
+	operations     *operationRuntime
+	logf           func(string, ...any)
+	manifest       []report.Resource
+	journalMeta    report.CleanupJournal
+	nativeJournals map[string]report.CleanupJournal
+	ownedTemplates []*cleanupItem
+	deferredScopes [][]*cleanupItem
 }
 
 func newCleanup(cfg map[string]execpkg.Config, operations *operationRuntime, keep bool, journal string, meta report.CleanupJournal, logf func(string, ...any)) *cleanup {
@@ -61,7 +69,7 @@ func newCleanup(cfg map[string]execpkg.Config, operations *operationRuntime, kee
 }
 
 // push registers a teardown command in a scope and records it in the manifest.
-func (c *cleanup) push(scope *[]*cleanupItem, name, cmd, role string, lockKeys []string) error {
+func (c *cleanup) push(scope *[]*cleanupItem, name, cmd, role string, lockKeys []string, binding ...*journalfile.TemplateCreateIntent) error {
 	if role == "" {
 		role = "primary"
 	}
@@ -74,8 +82,16 @@ func (c *cleanup) push(scope *[]*cleanupItem, name, cmd, role string, lockKeys [
 		return fmt.Errorf("cleanup lock keys: %w", err)
 	}
 	it := &cleanupItem{scope: name, cmd: cmd, role: role, lockKeys: keys}
+	if len(binding) > 0 {
+		copy := *binding[0]
+		it.templateBinding = &copy
+	}
 	c.mu.Lock()
 	*scope = append(*scope, it)
+	if it.templateBinding != nil {
+		// Creation ownership outlives a case scope, including --keep runs.
+		c.ownedTemplates = append(c.ownedTemplates, it)
+	}
 	c.manifest = append(c.manifest, report.Resource{
 		Scope: name, Teardown: cmd, RegionRole: role, Region: cfg.Region, ExecutionID: c.journalMeta.ExecutionID,
 	})
@@ -96,9 +112,12 @@ func (c *cleanup) satisfy(scope []*cleanupItem, command, role string) error {
 	defer c.mu.Unlock()
 	for i := len(scope) - 1; i >= 0; i-- {
 		item := scope[i]
-		if !item.done && item.role == role && commandsEquivalent(item.cmd, command) {
+		if !item.done && item.role == role && (commandsEquivalent(item.cmd, command) || nativeTemplateDeletesEquivalent(item.cmd, command, c.execCfg[role])) {
+			if err := c.removeJournalItemLocked(item); err != nil {
+				return err
+			}
 			item.done = true
-			return c.removeJournalItemLocked(item)
+			return nil
 		}
 	}
 	return nil
@@ -272,6 +291,33 @@ func cleanupJournalPath(base, role string) string {
 // returns concrete failures so a successful test step cannot hide a leaked
 // resource from the final report.
 func (c *cleanup) run(scope []*cleanupItem) []string {
+	return c.runCleanup(scope, false)
+}
+
+func (c *cleanup) runCaseCleanup(scope []*cleanupItem) []string {
+	return c.runCleanup(scope, true)
+}
+
+// Retry only unattempted case cleanup after all allocation steps have settled.
+// Each retained scope keeps its original LIFO dependency order and all guards.
+func (c *cleanup) runDeferredCleanup() []string {
+	c.mu.Lock()
+	scopes := c.deferredScopes
+	c.deferredScopes = nil
+	c.mu.Unlock()
+	var failures []string
+	for _, scope := range scopes {
+		c.mu.Lock()
+		for _, item := range scope {
+			item.deferred = false
+		}
+		c.mu.Unlock()
+		failures = append(failures, c.run(scope)...)
+	}
+	return failures
+}
+
+func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 	var failures []string
 	if c.keep {
 		return nil
@@ -279,40 +325,117 @@ func (c *cleanup) run(scope []*cleanupItem) []string {
 	for i := len(scope) - 1; i >= 0; i-- {
 		it := scope[i]
 		c.mu.Lock()
-		if it.done {
+		if it.done || it.running || it.deferred {
 			c.mu.Unlock()
 			continue
 		}
-		it.done = true
+		it.running = true
 		c.mu.Unlock()
 
 		var res execpkg.Result
 		var itemTimeout time.Duration
 		var timedOut bool
+		var guardErr error
+		var journalErr error
 		coordinationErr := c.operations.executeKeys(context.Background(), it.lockKeys, func() {
-			itemTimeout = cleanupCommandTimeout(it.cmd)
-			commandCtx, cancel := context.WithTimeout(context.Background(), itemTimeout)
-			res = c.runCommand(commandCtx, c.execCfg[it.role], it.cmd)
-			for attempt, delay := range cleanupRetryDelays {
-				if res.Exit == 0 || res.Exit == exitNotFound || !cleanupRetryable(res) {
-					break
+			// Resource/parallel queue time consumes neither the journal preflight
+			// budget nor the separate command timeout. A long delete retains the
+			// shared lock until completion, even after preflight's deadline.
+			preflightCtx, cancelPreflight := context.WithTimeout(context.Background(), min(cleanupTimeout, 30*time.Second))
+			defer cancelPreflight()
+			guardErr = c.withTemplateCleanupGuard(preflightCtx, it.role, func(bound execpkg.Config) error {
+				command, journalItem := it.cmd, it
+				target, native, err := parseNativeTemplateDelete(command)
+				if err != nil {
+					return err
 				}
-				c.logf("cleanup retry %d/%d after transient resource status: %s", attempt+1, len(cleanupRetryDelays), it.cmd)
-				timer := time.NewTimer(delay)
-				select {
-				case <-commandCtx.Done():
-					timer.Stop()
-				case <-timer.C:
-					res = c.runCommand(commandCtx, c.execCfg[it.role], it.cmd)
+				if it.templateBinding != nil && !native {
+					return fmt.Errorf("bound native Template finalizer requires a native delete")
 				}
-				if commandCtx.Err() != nil {
-					break
+				if native {
+					if it.templateBinding == nil || c.journal == "" {
+						return fmt.Errorf("native Template finalizer requires exact retained creation ownership")
+					}
+					owned := *it
+					intent := templateCreateIntent{TemplateCreateIntent: *it.templateBinding}
+					owned.cmd = intent.deleteCommand(target.id)
+					meta, _, requested := c.journalValues(it)
+					meta, path, err := c.requiredTemplateJournal(it.role, meta, requested)
+					if err != nil {
+						return err
+					}
+					if err := journalfile.CheckTemplateDeleteOwnership(path, meta, c.execCfg[it.role].Env, *it.templateBinding, owned.cmd); err != nil {
+						return err
+					}
+					command, err = c.bindNativeTemplateDelete([]*cleanupItem{&owned}, command, it.role)
+					if err != nil {
+						return err
+					}
+					// Execute the normalized spelling, but consume the original
+					// canonical ownership entry after successful deletion.
+					journalItem = &owned
 				}
-			}
-			timedOut = commandCtx.Err() == context.DeadlineExceeded
-			cancel()
+				if binding := it.templateBinding; binding != nil {
+					if bound.ExpectedIdentity == nil || *bound.ExpectedIdentity != binding.Identity {
+						return fmt.Errorf("native finalizer credential binding differs from retained ownership")
+					}
+					if err := binding.ValidateConfig(c.execCfg[it.role].Env); err != nil {
+						return err
+					}
+					bound = binding.BoundConfig(c.execCfg[it.role])
+				}
+				itemTimeout = cleanupCommandTimeout(command)
+				commandCtx, cancel := context.WithTimeout(context.Background(), itemTimeout)
+				res = c.runCommand(commandCtx, bound, command)
+				// A refused guard/lock or a failure to start is not an attempt.
+				// Keep those finalizers eligible for the later cleanup pass.
+				c.mu.Lock()
+				it.done = res.Err == nil && res.Exit >= 0
+				c.mu.Unlock()
+				for attempt, delay := range cleanupRetryDelays {
+					if res.Exit == 0 || res.Exit == exitNotFound || !cleanupRetryable(res) {
+						break
+					}
+					c.logf("cleanup retry %d/%d after transient resource status: %s", attempt+1, len(cleanupRetryDelays), it.cmd)
+					timer := time.NewTimer(delay)
+					select {
+					case <-commandCtx.Done():
+						timer.Stop()
+					case <-timer.C:
+						res = c.runCommand(commandCtx, bound, command)
+					}
+					if commandCtx.Err() != nil {
+						break
+					}
+				}
+				timedOut = commandCtx.Err() == context.DeadlineExceeded
+				cancel()
+				if res.Exit == 0 || res.Exit == exitNotFound {
+					journalErr = c.completeJournalItem(journalItem)
+				}
+				return nil
+			})
 		})
+		c.mu.Lock()
+		it.running = false
+		c.mu.Unlock()
+		if guardErr != nil {
+			coordinationErr = guardErr
+		}
 		if coordinationErr != nil {
+			if deferPending && errors.Is(coordinationErr, journalfile.ErrTemplateCreatePending) {
+				// Defer remaining ancestors with this child, even if another
+				// allocation settles before the next item could be checked.
+				remaining := append([]*cleanupItem(nil), scope[:i+1]...)
+				c.mu.Lock()
+				for _, item := range remaining {
+					item.deferred = true
+				}
+				c.deferredScopes = append(c.deferredScopes, remaining)
+				c.mu.Unlock()
+				c.logf("cleanup deferred until allocations settle: %s", report.Scrub(it.cmd))
+				break
+			}
 			failure := fmt.Sprintf("cleanup coordination: %s: %v", report.Scrub(it.cmd), coordinationErr)
 			c.logf("cleanup failed: %s", failure)
 			failures = append(failures, failure)
@@ -321,8 +444,8 @@ func (c *cleanup) run(scope []*cleanupItem) []string {
 		switch {
 		case res.Exit == 0:
 			c.logf("cleanup ok: %s", it.cmd)
-			if err := c.completeJournalItem(it); err != nil {
-				failure := fmt.Sprintf("cleanup journal rewrite: %s: %v", report.Scrub(it.cmd), err)
+			if journalErr != nil {
+				failure := fmt.Sprintf("cleanup journal rewrite: %s: %v", report.Scrub(it.cmd), journalErr)
 				c.logf("cleanup failed: %s", failure)
 				failures = append(failures, failure)
 			}
@@ -331,8 +454,8 @@ func (c *cleanup) run(scope []*cleanupItem) []string {
 			// removed it and this teardown is the safety net. That is the desired
 			// end state, not a failure worth flagging.
 			c.logf("cleanup ok (already gone): %s", it.cmd)
-			if err := c.completeJournalItem(it); err != nil {
-				failure := fmt.Sprintf("cleanup journal rewrite: %s: %v", report.Scrub(it.cmd), err)
+			if journalErr != nil {
+				failure := fmt.Sprintf("cleanup journal rewrite: %s: %v", report.Scrub(it.cmd), journalErr)
 				c.logf("cleanup failed: %s", failure)
 				failures = append(failures, failure)
 			}

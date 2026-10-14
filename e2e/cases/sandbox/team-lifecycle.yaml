@@ -1,6 +1,8 @@
 resource: sandbox/team
+covers: [sandbox/template]
+requires_prerequisites: [sandbox.template]
 serial: true
-timeout: 10m
+timeout: 25m
 
 steps:
   - name: create
@@ -38,6 +40,51 @@ steps:
     expect:
       id: { eq: "{{.team_id}}" }
       description: { eq: "ecctl E2E Team updated {{.run_id}}" }
+
+  - name: create native template
+    run: >
+      ecctl sandbox template create --openapi --team-id {{.team_id}}
+      --name {{.resource_prefix}}-fc-template
+      --runtime-config '@{{.prerequisites.sandbox.template.runtime_config_file}}'
+      --timeout 20m
+    at: $.template
+    expect:
+      id: {type: string, min_len: 1}
+      team_id: {eq: "{{.team_id}}"}
+      build_status: {eq: ready}
+    capture:
+      native_template_id: id
+    teardown: ecctl sandbox template delete {{.native_template_id}} --openapi --team-id {{.team_id}}
+
+  - name: get native template
+    run: ecctl sandbox template get {{.native_template_id}} --openapi --team-id {{.team_id}}
+    at: $.template
+    expect:
+      id: {eq: "{{.native_template_id}}"}
+      team_id: {eq: "{{.team_id}}"}
+      runtime_config: {type: object}
+      build_status: {eq: ready}
+
+  - name: list native templates
+    run: ecctl sandbox template list --openapi --team-id {{.team_id}} --limit 100
+    assert:
+      - 'len($.templates[?(@.id == "{{.native_template_id}}" && @.team_id == "{{.team_id}}")]) == 1'
+
+  - name: update native template
+    run: >
+      ecctl sandbox template update {{.native_template_id}} --openapi --team-id {{.team_id}}
+      --runtime-config '{"internetAccess":false}' --timeout 20m
+    at: $.template
+    expect:
+      id: {eq: "{{.native_template_id}}"}
+      team_id: {eq: "{{.team_id}}"}
+      build_status: {eq: ready}
+      runtime_config.internetAccess: {eq: false}
+
+  - name: delete native template
+    run: ecctl sandbox template delete {{.native_template_id}} --openapi --team-id {{.team_id}}
+    expect:
+      $.deleted: {eq: true}
 
   - name: delete
     run: ecctl sandbox team delete {{.team_id}} --timeout 5m

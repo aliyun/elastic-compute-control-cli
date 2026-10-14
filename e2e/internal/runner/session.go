@@ -42,6 +42,7 @@ func (s *Session) operationRuntime(parallel int) (*operationRuntime, error) {
 }
 
 type sessionFixture struct {
+	teamParent  bool
 	surface     string
 	binary      string
 	region      string
@@ -56,6 +57,19 @@ type sessionFixture struct {
 
 func NewSession() *Session {
 	return &Session{entries: map[string]*sessionFixture{}}
+}
+
+// A shared Team can outlive several execution journals. Until those journals
+// have a common cleanup guard, do not allocate native children in this Session.
+func (s *Session) hasRunTeamParent() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, entry := range s.entries {
+		if entry.teamParent {
+			return true
+		}
+	}
+	return false
 }
 
 func sessionFixtureKey(surface, binary, region, id string) string {
@@ -139,7 +153,8 @@ func (s *Session) acquire(
 			&Fixture{Provision: []ProvisionStep{provision}}, sc, failures,
 		)
 		entry := &sessionFixture{
-			surface: opt.Surface, binary: opt.EcctlBin, region: opt.Region, id: provision.ID,
+			teamParent: provision.Resource == "sandbox/team" || isTeamCreate(command),
+			surface:    opt.Surface, binary: opt.EcctlBin, region: opt.Region, id: provision.ID,
 			commandHash: hash, captures: map[string]any{}, cleanup: cl, scope: localScope,
 		}
 		for name := range provision.Capture {

@@ -133,7 +133,7 @@ ecctl schema --list sandbox
 | `team` | `list`, `get`, `create`, `update`, `delete` |
 | `template` | `list`, `get`, `create`, `update`, `delete`, `build-logs`, `build-status`, `publish`, `tag-assign`, `tag-delete`, `tag-list`, `unpublish` |
 
-`sandbox team` / `sbx team` 使用地域 FCSandbox OpenAPI 和 Aliyun profile AK/STS；现有 sandbox/template 保留 E2B API Key 与端点语义。
+`sandbox team` / `sbx team` 使用地域 FCSandbox OpenAPI 和 Aliyun profile AK/STS。模板的 `create`、`get`、`list`、`update`、`delete` 可通过显式 `--openapi` 和地域调用原生 FCSandbox；默认模板路由与 sandbox 操作保持 E2B API Key 和端点语义。原生创建/更新支持运行时与构建配置，默认等待构建就绪，`--no-wait` 仅返回受理结果。
 
 ## 标签
 

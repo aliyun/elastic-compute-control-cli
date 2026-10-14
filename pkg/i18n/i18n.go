@@ -87,6 +87,13 @@ func buildLocalizer(tag string, specs map[string]map[string]string) *Localizer {
 	bundle.AddMessages(language.English,
 		&i18n.Message{ID: "CloudAPIError", Other: "cloud API request failed"},
 		&i18n.Message{ID: "InvalidTeamResponse", Other: "the Team API returned an invalid response"},
+		&i18n.Message{ID: "InvalidNativeFCTemplateResponse", Other: "the native FC Template API returned an invalid response"},
+		&i18n.Message{ID: "InvalidFCTemplateConfig", Other: "native FC template configuration does not match this API's schema"},
+		&i18n.Message{ID: "InvalidFCTemplateWaitTimeout", Other: "native FC template waiting requires --timeout greater than zero; use --no-wait to return after acceptance"},
+		&i18n.Message{ID: "FCTemplateBuildFailed", Other: "native FC template build failed; see the sanitized reason in details"},
+		&i18n.Message{ID: "FCTemplateNotFound", Other: "native FC template not found"},
+		&i18n.Message{ID: "FCTemplateRequiresOpenAPI", Other: "this flag requires --openapi for a native FC template"},
+		&i18n.Message{ID: "FCTemplateIncompatibleFlag", Other: "this E2B flag cannot be used with --openapi"},
 		&i18n.Message{ID: "TeamNotFound", Other: "team not found"},
 		&i18n.Message{ID: "TeamReadOnly", Other: "the team is read-only and cannot be changed or deleted"},
 		&i18n.Message{ID: "TeamRenameNotAllowed", Other: "the team name cannot be changed"},
@@ -378,6 +385,13 @@ func buildLocalizer(tag string, specs map[string]map[string]string) *Localizer {
 	bundle.AddMessages(language.MustParse("zh-Hans"),
 		&i18n.Message{ID: "CloudAPIError", Other: "云 API 请求失败"},
 		&i18n.Message{ID: "InvalidTeamResponse", Other: "团队 API 返回了无效响应"},
+		&i18n.Message{ID: "InvalidNativeFCTemplateResponse", Other: "原生 FC 模板 API 返回了无效响应"},
+		&i18n.Message{ID: "InvalidFCTemplateConfig", Other: "原生 FC 模板配置不符合此 API 的 schema"},
+		&i18n.Message{ID: "InvalidFCTemplateWaitTimeout", Other: "原生 FC 模板等待要求 --timeout 大于零；只返回受理结果请使用 --no-wait"},
+		&i18n.Message{ID: "FCTemplateBuildFailed", Other: "原生 FC 模板构建失败；请查看 details 中已脱敏的原因"},
+		&i18n.Message{ID: "FCTemplateNotFound", Other: "未找到原生 FC 模板"},
+		&i18n.Message{ID: "FCTemplateRequiresOpenAPI", Other: "此参数需要 --openapi，以管理原生 FC 模板"},
+		&i18n.Message{ID: "FCTemplateIncompatibleFlag", Other: "此 E2B 参数不能与 --openapi 同时使用"},
 		&i18n.Message{ID: "TeamNotFound", Other: "团队不存在"},
 		&i18n.Message{ID: "TeamReadOnly", Other: "该团队为只读，不能修改或删除"},
 		&i18n.Message{ID: "TeamRenameNotAllowed", Other: "该团队不允许修改名称"},
@@ -814,7 +828,7 @@ func (l *Localizer) ErrorPayload(payload ecerrors.ErrorPayload, hasActions bool)
 		return payload
 	}
 	// Preserve provider-specific messages that share a stable generic error code.
-	for _, id := range []string{"UnsupportedACSOperation", "InvalidSandboxResponse", "TeamNotFound"} {
+	for _, id := range []string{"UnsupportedACSOperation", "InvalidSandboxResponse", "TeamNotFound", "FCTemplateNotFound", "InvalidNativeFCTemplateResponse"} {
 		if payload.Message == NewLocalizer("en").Message(id) {
 			payload.Message = l.Message(id)
 			return payload
