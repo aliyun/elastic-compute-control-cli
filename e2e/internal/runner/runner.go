@@ -218,6 +218,7 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 		}
 	}
 	cl := newCleanup(execCfgs, operations, opt.Keep, opt.CleanupJournal, report.CleanupJournal{RunID: opt.RunID, ExecutionID: opt.ExecutionID, Surface: opt.Surface}, opt.Logf)
+	cl.session = opt.Session
 	regionValues := make(map[string]any, len(regions))
 	for role, region := range regions {
 		prerequisites := region.Prerequisites
@@ -330,6 +331,9 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 		}(i, s)
 	}
 	wg.Wait()
+	if failures := cl.runDeferredCleanup(); len(failures) > 0 {
+		caseResults = append(caseResults, report.Case{Name: "(deferred case cleanup)", Resource: "cleanup", Status: report.StatusFail, Error: strings.Join(failures, "; ")})
+	}
 	if failures := cl.run(stackScope); len(failures) > 0 {
 		if stackCase == nil {
 			stackCase = &report.Case{Name: "(shared stack cleanup)", Resource: "stack", Status: report.StatusFail}
@@ -873,6 +877,26 @@ func resourcePrefix(runName string) string {
 	return prefix + suffix
 }
 
+func validateStackTemplateCommand(command string) error {
+	native, err := nativeTemplateCommandStatus(command)
+	if err != nil {
+		return fmt.Errorf("cannot classify shared-stack Template command")
+	}
+	if !native {
+		return nil
+	}
+	path, err := commandAction(command)
+	if err == nil && len(path) == 3 {
+		switch path[2] {
+		case "get", "show", "describe", "list", "ls":
+			return nil
+		}
+	}
+	// Shared fixtures do not participate in the case-owned native intent and
+	// cleanup protocol. Reject before allocation, including session leases.
+	return fmt.Errorf("native Template shared-stack mutations are unsupported; use an owned case lifecycle")
+}
+
 // provisionStack creates the selected shared-stack resources and records a
 // failure per node. Independent branches continue after a failure; nodes whose
 // dependencies failed are skipped.
@@ -917,9 +941,21 @@ func provisionStack(ctx context.Context, opt Options, execCfg execpkg.Config, cl
 			sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusError, Error: message})
 			continue
 		}
+		if err := validateStackTemplateCommand(cmd); err != nil {
+			failures[ps.ID] = err.Error()
+			sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusError, Error: err.Error()})
+			continue
+		}
+		display, err := renderReportCommand(ps.Run, data)
+		if err != nil {
+			message := "render display: " + err.Error()
+			failures[ps.ID] = message
+			sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusError, Error: message})
+			continue
+		}
 		if opt.DryRun {
-			opt.Logf("stack %q (dry): %s", ps.ID, cmd)
-			sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Command: cmd, Status: report.StatusSkipped})
+			opt.Logf("stack %q (dry): %s", ps.ID, report.Scrub(display))
+			sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Command: display, Status: report.StatusSkipped})
 			for v := range ps.Capture {
 				stackVars[v] = "<" + v + ">"
 				data[v] = "<" + v + ">"
@@ -935,7 +971,7 @@ func provisionStack(ctx context.Context, opt Options, execCfg execpkg.Config, cl
 			continue
 		}
 
-		opt.Logf("stack %q: %s", ps.ID, cmd)
+		opt.Logf("stack %q: %s", ps.ID, report.Scrub(display))
 		sctx, cancel := context.WithTimeout(ctx, opt.StepTimeout)
 		res := execpkg.Run(sctx, execCfg, cmd)
 		cancel()
@@ -945,6 +981,9 @@ func provisionStack(ctx context.Context, opt Options, execCfg execpkg.Config, cl
 			DurationMs: res.Duration.Milliseconds(),
 			Stdout:     strings.TrimSpace(res.Stdout), Stderr: strings.TrimSpace(res.Stderr),
 			Status: report.StatusPass,
+		}
+		if display != cmd {
+			step.Command = report.Scrub(display)
 		}
 		// Register teardown as soon as the resource may exist.
 		if ps.Teardown != "" {
@@ -1100,7 +1139,7 @@ func runCase(
 	}
 
 	var scope []*cleanupItem
-	defer func() { cl.run(scope) }()
+	defer func() { cl.runCaseCleanup(scope) }()
 
 	if s.Execution == scenario.ExecutionDAG {
 		runDAGCase(ctx, opt, execCfg, cl, operations, &scope, data, fix, stackFailures, s, stepTimeout, &cr)
@@ -1110,7 +1149,7 @@ func runCase(
 	if opt.DryRun {
 		cr.Status = report.StatusSkipped
 	}
-	if failures := cl.run(scope); len(failures) > 0 {
+	if failures := cl.runCaseCleanup(scope); len(failures) > 0 {
 		cr.Status = report.StatusFail
 		if cr.Error != "" {
 			cr.Error += "; "
@@ -1397,7 +1436,9 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 
 	var res execpkg.Result
 	var renderedCommand string
+	var privateDisplay string
 	var teamIntent *teamCreateIntent
+	var templateIntent *templateCreateIntent
 	if st.Local != nil {
 		sctx, cancel := context.WithTimeout(ctx, timeout)
 		res = runLocalAction(sctx, data, *st.Local)
@@ -1408,7 +1449,20 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 			sr.Status, sr.Error = report.StatusError, "render: "+renderErr.Error()
 			return sr, false
 		}
+		display, displayErr := renderReportCommand(st.Run, data)
+		if displayErr != nil {
+			sr.Status, sr.Error = report.StatusError, "render display: "+displayErr.Error()
+			return sr, false
+		}
+		if display != cmd {
+			privateDisplay = report.Scrub(display)
+		}
 		renderedCommand = cmd
+		nativeCreate, parseErr := nativeTemplateCreateStatus(cmd)
+		if parseErr != nil {
+			sr.Status, sr.Error = report.StatusError, parseErr.Error()
+			return sr, false
+		}
 		if isTeamCreate(cmd) {
 			teamIntent, err = reserveTeamCreate(cmd, data, execCfg, cl, st)
 			if err != nil {
@@ -1416,15 +1470,46 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 				return sr, false
 			}
 			cmd = teamIntent.command()
+		} else if nativeCreate {
+			templateIntent, err = reserveTemplateCreate(ctx, cmd, execCfg, cl, st, timeout)
+			if err != nil {
+				sr.Status, sr.Error = report.StatusError, err.Error()
+				return sr, false
+			}
+			cmd, execCfg = templateIntent.command, templateIntent.cfg
 		}
+		cmd, err = cl.bindNativeTemplateDelete(*scope, cmd, "primary")
+		if err != nil {
+			sr.Status, sr.Error = report.StatusError, err.Error()
+			return sr, false
+		}
+		cmd, execCfg, err = cl.bindOwnedNativeTemplate(ctx, cmd, "primary", execCfg, timeout)
+		if err != nil {
+			sr.Status, sr.Error = report.StatusError, err.Error()
+			return sr, false
+		}
+		renderedCommand = cmd
 		for attempt := 0; ; attempt++ {
 			sctx, cancel := context.WithTimeout(ctx, timeout)
-			res = execpkg.Run(sctx, execCfg, cmd)
+			invoke := func(bound execpkg.Config) error { res = execpkg.Run(sctx, bound, cmd); return nil }
+			if isDestructiveStep(cmd) {
+				if err := cl.withTemplateCleanupGuard(sctx, "primary", invoke); err != nil {
+					cancel()
+					sr.Status, sr.Error = report.StatusError, err.Error()
+					return sr, false
+				}
+			} else {
+				_ = invoke(execCfg)
+			}
 			cancel()
-			if teamIntent != nil || res.Exit == 0 || !isTransientNetworkError(res) || attempt >= len(stepRetryDelays) {
+			if teamIntent != nil || templateIntent != nil || res.Exit == 0 || !isTransientNetworkError(res) || attempt >= len(stepRetryDelays) {
 				break
 			}
-			opt.Logf("step retry %d/%d after transient network error: %s", attempt+1, len(stepRetryDelays), report.Scrub(renderedCommand))
+			shown := report.Scrub(renderedCommand)
+			if privateDisplay != "" {
+				shown = privateDisplay
+			}
+			opt.Logf("step retry %d/%d after transient network error: %s", attempt+1, len(stepRetryDelays), shown)
 			select {
 			case <-ctx.Done():
 			case <-time.After(stepRetryDelays[attempt]):
@@ -1434,11 +1519,28 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 			}
 		}
 	}
-	sr.Command = res.Command
+	sr.Command = report.Scrub(res.Command)
+	if privateDisplay != "" {
+		sr.Command = privateDisplay
+	}
 	sr.Exit = res.Exit
 	sr.DurationMs = res.Duration.Milliseconds()
 	sr.Stdout = strings.TrimSpace(res.Stdout)
 	sr.Stderr = strings.TrimSpace(res.Stderr)
+	if templateIntent != nil {
+		if err := finishTemplateCreate(res, cl, scope, data, lockKeys, timeout, templateIntent); err != nil {
+			sr.Status = report.StatusFail
+			sr.Error = failureDetail(res)
+			if res.Err != nil {
+				sr.Error = res.Err.Error()
+			}
+			if sr.Error != "" {
+				sr.Error += "; "
+			}
+			sr.Error += err.Error()
+			return sr, false
+		}
+	}
 	teamID, validTeamID := teamCreateIdentity(res)
 	if teamIntent != nil && !validTeamID {
 		recoveryErr := reconcileTeamCreate(execCfg, cl, scope, data, st, lockKeys, timeout, teamIntent)
@@ -1456,7 +1558,7 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 
 	// Register teardown as soon as the create-ish step ran (even if asserts
 	// later fail) so the resource it produced is cleaned up.
-	if st.Teardown != "" {
+	if st.Teardown != "" && templateIntent == nil {
 		td, terr := vars.Render(st.Teardown, mergeCaptures(data, res, st))
 		if teamIntent != nil {
 			// The normal success path must use the same safe, exact target as
@@ -1479,6 +1581,12 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 						sr.Status, sr.Error = report.StatusError, "cleanup journal: "+err.Error()
 						return sr, false
 					}
+				} else if hasRecoveryCommand(res.JSON) {
+					// Keep the original allocation evidence in stdout, but never
+					// persist or execute a recovery outside the delete whitelist.
+					sr.Status = report.StatusError
+					sr.Error = failureDetail(res) + "; cleanup recovery rejected; original target retained in stdout"
+					return sr, false
 				}
 			}
 			// Teardown rendering is authoritative only after the command reached
@@ -1542,6 +1650,21 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 	return sr, true
 }
 
+// Structured recovery signals a partial mutation even if its argv cannot be
+// safely replayed. Safety validation must not decide whether to create again.
+func hasRecoveryCommand(doc any) bool {
+	root, ok := doc.(map[string]any)
+	if !ok {
+		return false
+	}
+	payload, ok := root["error"].(map[string]any)
+	if !ok {
+		return false
+	}
+	args, ok := payload["recovery_command"].([]any)
+	return ok && len(args) != 0
+}
+
 func recoveryDeleteCommand(doc any) (string, bool) {
 	root, ok := doc.(map[string]any)
 	if !ok {
@@ -1558,10 +1681,10 @@ func recoveryDeleteCommand(doc any) (string, bool) {
 	args := make([]string, 0, len(rawArgs))
 	for _, rawArg := range rawArgs {
 		arg, ok := rawArg.(string)
-		if !ok || arg == "" || strings.ContainsAny(arg, " \t\r\n'\"\\`$;&|<>") {
+		if !ok || arg == "" || strings.ContainsAny(arg, "\x00\t\r\n") {
 			return "", false
 		}
-		args = append(args, arg)
+		args = append(args, teamCommandArgument(arg))
 	}
 	command := strings.Join(args, " ")
 	if !isReplayableTeardown(command) {
@@ -1578,6 +1701,21 @@ func recoveryDeleteCommand(doc any) (string, bool) {
 func isTransientNetworkError(res execpkg.Result) bool {
 	if res.Exit == 0 {
 		return false
+	}
+	if hasRecoveryCommand(res.JSON) {
+		// Preserve the first allocation even if cleanup validation later fails;
+		// replaying the mutation would replace its only recovery evidence.
+		return false
+	}
+	if root, ok := res.JSON.(map[string]any); ok {
+		if failure, ok := root["error"].(map[string]any); ok {
+			if retryable, explicit := failure["retryable"].(bool); explicit && !retryable {
+				return false
+			}
+			if failure["code"] == "FCTemplateBuildFailed" {
+				return false
+			}
+		}
 	}
 	text := strings.ToLower(strings.Join([]string{res.Stdout, res.Stderr}, " "))
 	for _, marker := range []string{
@@ -1611,6 +1749,12 @@ func mergeCaptures(data map[string]any, res execpkg.Result, st scenario.Step) ma
 	return m
 }
 
+func renderReportCommand(source string, data map[string]any) (string, error) {
+	return report.RenderCommand(source, func(text string) (string, error) {
+		return vars.Render(text, data)
+	})
+}
+
 func renderDryStep(data map[string]any, st scenario.Step) report.Step {
 	sr := report.Step{Name: st.Name, Status: report.StatusSkipped}
 	if st.Local != nil {
@@ -1626,7 +1770,7 @@ func renderDryStep(data map[string]any, st scenario.Step) report.Step {
 		}
 		sr.Command = fmt.Sprintf("local %s %s %s", st.Local.Action, source, destination)
 	} else {
-		cmd, err := vars.Render(st.Run, data)
+		cmd, err := renderReportCommand(st.Run, data)
 		if err != nil {
 			sr.Status, sr.Error = report.StatusError, "render: "+err.Error()
 			return sr

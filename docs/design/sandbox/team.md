@@ -14,6 +14,7 @@ API 产品为 `FCSandbox`，版本 `2026-05-09`，协议 ROA。
 | `sandbox team` / `sbx team` | FCSandbox ROA，Aliyun profile AK/STS | 必须通过 flag、环境或 profile 解析目标地域；使用 `fcsandbox.<region>.aliyuncs.com` |
 | `sandbox` 默认资源 / `sbx` | 现有 E2B API，`E2B_API_KEY` | 仍为 global；`--region` 只提示默认 FC E2B 端点 |
 | `sandbox template` / `sbx template` | 现有 E2B API，`E2B_API_KEY` | 保留 E2B URL/domain 及现有默认地域规则 |
+| `sandbox template` / `sbx template` 的五个共有操作，指定 `--openapi` | FCSandbox ROA，Aliyun profile AK/STS | 必须解析目标地域；团队 query/body 与模板配置见 [Template](template.md) |
 
 `E2B_API_URL`、`E2B_DOMAIN`、`ECCTL_SANDBOX_BACKEND` 和沙箱 CA 设置
 继续控制 E2B sandbox/template；不影响 Team 的 OpenAPI 目标。

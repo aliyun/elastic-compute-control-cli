@@ -45,6 +45,9 @@
 OpenAPI AK/STS 凭证及目标地域；本资源继续使用上述 E2B 路由和凭证。
 详见 [Team 路由说明](team.md)。
 
+模板的五个共有操作另可通过 `--openapi` 选择原生 FC Template API；
+该选项不改变本 sandbox 资源或默认 E2B 模板的路由。见 [Template](template.md)。
+
 ## 资源操作
 
 | ecctl 操作 | E2B API | 说明 |

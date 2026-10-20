@@ -1320,8 +1320,17 @@ func normalizeAPICallParameterFlags(args []string) []string {
 	operation := ""
 	for i := callIndex + 1; i < len(args); i++ {
 		arg := args[i]
+		if normalized, consumed := normalizeAPICallOutputFlag(args, i); normalized != nil {
+			out = append(out, normalized...)
+			i += consumed
+			continue
+		}
+		if apiCallLocalMetadataFlag(arg) {
+			out = append(out, arg)
+			continue
+		}
 		if positionals < 2 {
-			if apiCallAliyunCLIFlag(arg) && !apiCallLocalMetadataFlag(arg) {
+			if apiCallAliyunCLIFlag(arg) {
 				out = appendAliyunCLIFlagArg(out, arg)
 				if apiCallAliyunCLIValueFlag(arg) && !longFlagHasInlineValue(arg) && i+1 < len(args) {
 					i++
@@ -1396,6 +1405,27 @@ func normalizeAPICallParameterFlags(args []string) []string {
 	return out
 }
 
+func normalizeAPICallOutputFlag(args []string, index int) ([]string, int) {
+	name, value, inline := strings.Cut(args[index], "=")
+	if name != "--output" && name != "-o" {
+		return nil, 0
+	}
+	consumed := 0
+	if !inline {
+		if index+1 >= len(args) || strings.HasPrefix(args[index+1], "-") {
+			// Let local flag parsing reject a missing value before dispatch.
+			return []string{"--output"}, 0
+		}
+		value, consumed = args[index+1], 1
+	}
+	if output.IsSupportedMode(value) {
+		return []string{"--output=" + value}, consumed
+	}
+	// Aliyun's output specification (for example cols=...) remains a CLI
+	// argument; ecctl's own json/text modes must never enter that channel.
+	return appendAPICommandArg(appendAPICommandArg(nil, name), value), consumed
+}
+
 func apiCallParameterType(product, operation, name string) (string, bool) {
 	schema, err := apiOperationSchemaFor("en", product, operation)
 	if err != nil {
@@ -1441,7 +1471,8 @@ func appendAliyunCLIExtraValues(out []string, args []string, index *int, flag st
 }
 
 func apiCallLocalMetadataFlag(arg string) bool {
-	return arg == "--help" || arg == "-h"
+	name, _, _ := strings.Cut(arg, "=")
+	return name == "--help" || name == "-h"
 }
 
 func apiCallPassthroughHasFlag(args []string, name string) bool {

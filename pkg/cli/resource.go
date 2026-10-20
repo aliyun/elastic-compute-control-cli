@@ -1227,8 +1227,11 @@ func requiredFlagStatuses(resource spec.ResourceSpec, params map[string]spec.Par
 }
 
 func runResourceAction(cmd *cobra.Command, options *globalOptions, stdout io.Writer, resource spec.ResourceSpec, actionName string, operation spec.Operation, args []string) error {
+	resource, operation, err := sandboxTemplateTransport(cmd, resource, actionName, operation)
+	if err != nil {
+		return err
+	}
 	region := config.ResolvedRegion{}
-	var err error
 	if resource.Kind == "regional" {
 		region, err = resolveRegion(options)
 		if err != nil {
@@ -1280,6 +1283,11 @@ func runResourceAction(cmd *cobra.Command, options *globalOptions, stdout io.Wri
 		Timeout: timeout,
 	})
 	if err != nil {
+		if resource.Product == "sandbox" && resource.Resource == "template" && resource.Provider == "aliyun" && actionName == "create" {
+			if native, ok := caller.(*aliyun.OpenAPICaller); ok {
+				err = native.TemplateCreateRecovery(err)
+			}
+		}
 		return err
 	}
 	result = cropResultFields(result, selectedFields)
@@ -1434,6 +1442,10 @@ func resourceActionInput(cmd *cobra.Command, resource spec.ResourceSpec, actionN
 	if err := missingRequiredFlags(requiredInputFlagStatuses(resource, inputs, input)...); err != nil {
 		return nil, 0, err
 	}
+	timeout, err := sandboxTemplateRequestTimeout(cmd, resource, actionName, input, timeout)
+	if err != nil {
+		return nil, 0, err
+	}
 	return input, timeout, nil
 }
 
@@ -1569,6 +1581,14 @@ func structuredObjectFlagValue(raw string, flag string, field spec.SchemaField, 
 		if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
 			return nil, assigned, ecerrors.Client("InvalidParameter", "--"+flag+" must be a JSON object")
 		}
+		if field.InputStyle == "json|@file" {
+			// API-shaped JSON uses literal member names and value types. Its
+			// referenced API schema validates them without CLI key coercion.
+			if err := validateStructuredObject(decoded, flag, field); err != nil {
+				return nil, assigned, err
+			}
+			return decoded, assigned, nil
+		}
 		normalized, err := normalizeStructuredObject(decoded, field)
 		if err != nil {
 			return nil, assigned, err
@@ -1581,7 +1601,7 @@ func structuredObjectFlagValue(raw string, flag string, field spec.SchemaField, 
 	if strings.HasPrefix(raw, "[") {
 		return nil, assigned, ecerrors.Client("InvalidParameter", "--"+flag+" accepts one JSON object per flag, not a JSON array")
 	}
-	if !isShallowObjectField(field) {
+	if field.InputStyle == "json|@file" || !isShallowObjectField(field) {
 		return nil, assigned, ecerrors.Client("InvalidParameter", "--"+flag+" must be a JSON object or @file")
 	}
 	parsed, err := parseInlineObject(raw, field)

@@ -562,6 +562,7 @@ func resolveOpenAPIProfile(profileName, configPath string, region ecconfig.Resol
 	var credential resolvedCredential
 	ecctlProfile, hasEcctlProfile := configProfile(ecctlConfig, selected)
 	aliyunProfile, hasAliyunProfile := configProfile(aliyunConfig, selected)
+	resolved.ProfileBound = hasEcctlProfile || hasAliyunProfile
 	switch {
 	case hasEcctlProfile && profileIsNativeOAuth(ecctlProfile):
 		provider, providerErr := newNativeOAuthProfileCredentialsProvider(ecctlProfile, selected, configPath, privateCredentialCacheRoot)

@@ -16,9 +16,10 @@ import (
 
 // Config controls how commands are executed.
 type Config struct {
-	Bin    string // substituted for a leading "ecctl" token (default "ecctl")
-	Region string // appended as --region to ecctl commands when set
-	Env    []string
+	Bin              string // substituted for a leading "ecctl" token (default "ecctl")
+	Region           string // appended as --region to ecctl commands when set
+	Env              []string
+	ExpectedIdentity *IdentityPin
 }
 
 // Result captures everything one invocation produced, for assertions/reports.
@@ -30,6 +31,7 @@ type Result struct {
 	JSON     any           `json:"-"` // parsed Stdout, nil if not JSON
 	Duration time.Duration `json:"-"`
 	Err      error         `json:"-"` // process failed to start / context cancelled
+	Started  bool          `json:"started"`
 }
 
 // Run executes one rendered command line under ctx (which carries the timeout).
@@ -52,16 +54,26 @@ func Run(ctx context.Context, cfg Config, rendered string) Result {
 	if cfg.Region != "" && !hasFlag(args, "--region") {
 		args = append(args, "--region", cfg.Region)
 	}
-	res.Command = strings.Join(append([]string{tokens[0]}, args...), " ")
+	res.Command = recordedCommand(tokens[0], args)
 
 	cmd := osexec.CommandContext(ctx, tokens[0], args...)
-	cmd.Env = sanitizedEnv(cfg.Env)
+	identityEnv, identityErr := identityEnvironment(cfg.ExpectedIdentity)
+	if identityErr != nil {
+		res.Err = identityErr
+		res.Exit = -1
+		return res
+	}
+	cmd.Env = append(sanitizedEnv(cfg.Env), identityEnv...)
 	var out, errb strings.Builder
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 
 	start := time.Now()
-	runErr := cmd.Run()
+	runErr := cmd.Start()
+	if runErr == nil {
+		res.Started = true
+		runErr = cmd.Wait()
+	}
 	res.Duration = time.Since(start)
 	res.Stdout = out.String()
 	res.Stderr = errb.String()
@@ -85,6 +97,30 @@ func Run(ctx context.Context, cfg Config, rendered string) Result {
 		}
 	}
 	return res
+}
+
+// Record private configuration at actual argv boundaries. Reconstructing it
+// from joined shell text loses quoting and cannot safely delimit bad input.
+// The subprocess still receives the original args, including @file values.
+func recordedCommand(bin string, args []string) string {
+	shown := append([]string{bin}, args...)
+	for index := 1; index < len(shown); index++ {
+		key, value, inline := strings.Cut(shown[index], "=")
+		if key != "--runtime-config" && key != "--build-config" {
+			continue
+		}
+		if inline {
+			if !strings.HasPrefix(value, "@") {
+				shown[index] = key + "=***"
+			}
+		} else if index+1 < len(shown) {
+			index++
+			if !strings.HasPrefix(shown[index], "@") {
+				shown[index] = "***"
+			}
+		}
+	}
+	return strings.Join(shown, " ")
 }
 
 func hasFlag(args []string, flag string) bool {

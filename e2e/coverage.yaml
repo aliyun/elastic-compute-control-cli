@@ -7,8 +7,8 @@ summary:
   resources: 62
   operations: 294
   missing_cases: 0
-  passed: 270
-  not_passed: 24
+  passed: 275
+  not_passed: 19
 resources:
   ack:
     ack:
@@ -1649,32 +1649,32 @@ resources:
         create:
           status: live-pass
           case: cases/sandbox/team-lifecycle.yaml
-          fingerprint: sha256:27b700c2250d9bc4a57d3c2cbc7d08b6569c59b103d80e6537ef9ab09068fa43
-          time: "2026-10-08T21:13:30.270997+08:00"
+          fingerprint: sha256:a0131f0c6af510f5182185500058d0f3bbf9188695f3a83ba4c48a0017aa4c2c
+          time: "2026-10-16T11:32:04.942184068+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/sandbox/team-lifecycle.yaml
-          fingerprint: sha256:27b700c2250d9bc4a57d3c2cbc7d08b6569c59b103d80e6537ef9ab09068fa43
-          time: "2026-10-08T21:13:30.270997+08:00"
+          fingerprint: sha256:a0131f0c6af510f5182185500058d0f3bbf9188695f3a83ba4c48a0017aa4c2c
+          time: "2026-10-16T11:32:04.942184068+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/sandbox/team-lifecycle.yaml
-          fingerprint: sha256:27b700c2250d9bc4a57d3c2cbc7d08b6569c59b103d80e6537ef9ab09068fa43
-          time: "2026-10-08T21:13:30.270997+08:00"
+          fingerprint: sha256:a0131f0c6af510f5182185500058d0f3bbf9188695f3a83ba4c48a0017aa4c2c
+          time: "2026-10-16T11:32:04.942184068+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/sandbox/team-lifecycle.yaml
-          fingerprint: sha256:27b700c2250d9bc4a57d3c2cbc7d08b6569c59b103d80e6537ef9ab09068fa43
-          time: "2026-10-08T21:13:30.270997+08:00"
+          fingerprint: sha256:a0131f0c6af510f5182185500058d0f3bbf9188695f3a83ba4c48a0017aa4c2c
+          time: "2026-10-16T11:32:04.942184068+08:00"
           reason: live-verified
         update:
           status: live-pass
           case: cases/sandbox/team-lifecycle.yaml
-          fingerprint: sha256:27b700c2250d9bc4a57d3c2cbc7d08b6569c59b103d80e6537ef9ab09068fa43
-          time: "2026-10-08T21:13:30.270997+08:00"
+          fingerprint: sha256:a0131f0c6af510f5182185500058d0f3bbf9188695f3a83ba4c48a0017aa4c2c
+          time: "2026-10-16T11:32:04.942184068+08:00"
           reason: live-verified
     template:
       operations:
@@ -1691,29 +1691,29 @@ resources:
           time: "2026-09-07T16:14:39.96875+08:00"
           reason: case-changed
         create:
-          status: offline
-          case: cases/sandbox/template-lifecycle.yaml
-          fingerprint: sha256:a57698d4a90ab91f3b0213149f2efc9e29d8a5c8a2ce6a59a91f8559a1c8526f
-          time: "2026-09-07T16:14:39.96875+08:00"
-          reason: case-changed
+          status: live-pass
+          case: cases/sandbox/team-lifecycle.yaml
+          fingerprint: sha256:a0131f0c6af510f5182185500058d0f3bbf9188695f3a83ba4c48a0017aa4c2c
+          time: "2026-10-16T11:32:04.942184068+08:00"
+          reason: live-verified
         delete:
-          status: offline
-          case: cases/sandbox/template-lifecycle.yaml
-          fingerprint: sha256:a57698d4a90ab91f3b0213149f2efc9e29d8a5c8a2ce6a59a91f8559a1c8526f
-          time: "2026-09-07T16:14:39.96875+08:00"
-          reason: case-changed
+          status: live-pass
+          case: cases/sandbox/team-lifecycle.yaml
+          fingerprint: sha256:a0131f0c6af510f5182185500058d0f3bbf9188695f3a83ba4c48a0017aa4c2c
+          time: "2026-10-16T11:32:04.942184068+08:00"
+          reason: live-verified
         get:
-          status: offline
-          case: cases/sandbox/template-lifecycle.yaml
-          fingerprint: sha256:a57698d4a90ab91f3b0213149f2efc9e29d8a5c8a2ce6a59a91f8559a1c8526f
-          time: "2026-09-07T16:14:39.96875+08:00"
-          reason: case-changed
+          status: live-pass
+          case: cases/sandbox/team-lifecycle.yaml
+          fingerprint: sha256:a0131f0c6af510f5182185500058d0f3bbf9188695f3a83ba4c48a0017aa4c2c
+          time: "2026-10-16T11:32:04.942184068+08:00"
+          reason: live-verified
         list:
-          status: offline
-          case: cases/sandbox/template-lifecycle.yaml
-          fingerprint: sha256:a57698d4a90ab91f3b0213149f2efc9e29d8a5c8a2ce6a59a91f8559a1c8526f
-          time: "2026-09-07T16:14:39.96875+08:00"
-          reason: case-changed
+          status: live-pass
+          case: cases/sandbox/team-lifecycle.yaml
+          fingerprint: sha256:a0131f0c6af510f5182185500058d0f3bbf9188695f3a83ba4c48a0017aa4c2c
+          time: "2026-10-16T11:32:04.942184068+08:00"
+          reason: live-verified
         publish:
           status: offline
           case: cases/sandbox/template-lifecycle.yaml
@@ -1745,11 +1745,11 @@ resources:
           time: "2026-09-07T16:14:39.96875+08:00"
           reason: case-changed
         update:
-          status: offline
-          case: cases/sandbox/template-lifecycle.yaml
-          fingerprint: sha256:a57698d4a90ab91f3b0213149f2efc9e29d8a5c8a2ce6a59a91f8559a1c8526f
-          time: "2026-09-07T16:14:39.96875+08:00"
-          reason: case-changed
+          status: live-pass
+          case: cases/sandbox/team-lifecycle.yaml
+          fingerprint: sha256:a0131f0c6af510f5182185500058d0f3bbf9188695f3a83ba4c48a0017aa4c2c
+          time: "2026-10-16T11:32:04.942184068+08:00"
+          reason: live-verified
   tag:
     associated-resource-rule:
       operations:
