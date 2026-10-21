@@ -7006,6 +7006,34 @@
       ]
     },
     {
+      "product": "sandbox",
+      "resource": "template-cache",
+      "binding": "create_cache",
+      "api": "CreateTemplateCache",
+      "parameters": [
+        "body.teamID",
+        "body.templateID"
+      ],
+      "covered": [
+        "body.teamID",
+        "body.templateID"
+      ]
+    },
+    {
+      "product": "sandbox",
+      "resource": "template-cache",
+      "binding": "delete_cache",
+      "api": "DeleteTemplateCache",
+      "parameters": [
+        "teamID",
+        "templateID"
+      ],
+      "covered": [
+        "teamID",
+        "templateID"
+      ]
+    },
+    {
       "product": "tag",
       "resource": "associated-resource-rule",
       "binding": "create_rule",

@@ -281,7 +281,9 @@ func (e *Executor) wait(ctx context.Context, req Request, name string, execCtx E
 					last = ProbeResult{}
 					return waiter.Observation{State: "absent", Value: last}, nil
 				}
-				if waitSpec.Target == "present" && isNotFoundError(err) {
+				// Only explicitly opted-in waiters tolerate post-create
+				// visibility lag; other positive waiters retain NotFound.
+				if (waitSpec.Target == "present" || waitSpec.NotFoundPending) && isNotFoundError(err) {
 					last = ProbeResult{}
 					return waiter.Observation{State: "", Value: last}, nil
 				}
@@ -298,6 +300,16 @@ func (e *Executor) wait(ctx context.Context, req Request, name string, execCtx E
 		},
 	})
 	if err != nil {
+		if waitSpec.Failure.DetailField != "" && len(last.Items) > 0 {
+			var app *ecerrors.AppError
+			if stderrors.As(err, &app) && app.Payload().Code == "WaitFailed" {
+				options := []ecerrors.Option{ecerrors.WithDetail(stringFromMap(last.Items[0], waitSpec.Failure.DetailField))}
+				if last.RequestID != "" {
+					options = append(options, ecerrors.WithRequestID(last.RequestID))
+				}
+				err = ecerrors.WithDetails(err, options...)
+			}
+		}
 		return last, ecerrors.WithActions(err, actions)
 	}
 	if len(ids) > 0 && waitSpec.Target != "absent" {

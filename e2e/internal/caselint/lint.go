@@ -486,7 +486,7 @@ func checkSuite(rep *Report, suite *scenario.Suite, inputsDir string, resources 
 			}
 		}
 		effectiveNeeds = append(effectiveNeeds, st.Needs...)
-		if suite.Resource == "sandbox/team" {
+		if suite.Resource == "sandbox/team" || suite.Resource == "sandbox/template-cache" {
 			stepDefined["team_name"] = true
 			stepDefined["team_owner"] = true
 		}
@@ -746,6 +746,7 @@ func checkCreateTags(rep *Report, path, step, run string) {
 		resource == "agentrun/sandbox" ||
 		resource == "sandbox/team" ||
 		resource == "sandbox/template" ||
+		resource == "sandbox/template-cache" ||
 		resource == "sandbox/sandbox" ||
 		resource == "lingjun/net-test" ||
 		resource == "lingjun/node-group" {
