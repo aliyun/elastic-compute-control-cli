@@ -22,6 +22,20 @@ func TestLocalizeChineseMessage(t *testing.T) {
 	}
 }
 
+func TestTelemetryDescriptionDisclosesAccountIdentifiers(t *testing.T) {
+	for _, tc := range []struct {
+		language string
+		want     string
+	}{
+		{language: "en", want: "Enable best-effort product telemetry, including owning Alibaba Cloud account IDs and RAM user or role IDs."},
+		{language: "zh-CN", want: "启用尽力发送的产品遥测，包括所属阿里云账号 ID，以及 RAM 用户或角色 ID。"},
+	} {
+		if got := NewLocalizer(tc.language).Message("ConfigDescriptionTelemetryEnabled"); got != tc.want {
+			t.Fatalf("%s telemetry description = %q, want %q", tc.language, got, tc.want)
+		}
+	}
+}
+
 func TestLocalizeTemplateMessage(t *testing.T) {
 	if got := NewLocalizer("en").MessageData("NotFoundWithResource", map[string]any{"Resource": "vsw-123"}); got != "vsw-123 not found" {
 		t.Fatalf("English not found template message = %q", got)

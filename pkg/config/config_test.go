@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
 )
 
 func TestResolveRegionForProfileCompatibilitySignatures(t *testing.T) {
@@ -94,13 +95,14 @@ func TestTelemetryEnabledIsGlobalAndDefaultsOn(t *testing.T) {
 	}
 }
 
-func TestTelemetryDescriptionDisclosesPseudonymousCollection(t *testing.T) {
+func TestTelemetryDescriptionDisclosesRawIdentityCollection(t *testing.T) {
 	item, ok := lookupConfigItem("telemetry.enabled")
 	if !ok {
 		t.Fatal("telemetry.enabled config item is missing")
 	}
-	if !strings.Contains(item.Description, "pseudonymous") || strings.Contains(item.Description, "anonymous") {
-		t.Fatalf("telemetry description = %q, want accurate pseudonymous disclosure", item.Description)
+	want := i18n.NewLocalizer("en").Message("ConfigDescriptionTelemetryEnabled")
+	if item.Description != want || !strings.Contains(item.Description, "owning Alibaba Cloud account IDs") || !strings.Contains(item.Description, "RAM user or role IDs") || strings.Contains(item.Description, "anonymous") {
+		t.Fatalf("telemetry description = %q, want accurate raw identity disclosure %q", item.Description, want)
 	}
 }
 

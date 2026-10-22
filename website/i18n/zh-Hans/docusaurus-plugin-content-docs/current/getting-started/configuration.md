@@ -85,8 +85,44 @@ ecctl configure list
 | `security-token` | `sts_token` | 字符串，敏感 |
 | `lang` | `language` | `en`、`zh-CN` |
 | `output` | `output_format` | `json`、`text` |
+| `telemetry.enabled` | `telemetry.enabled` | `true`、`false`；所有 profile 共用，默认为 `true` |
 
 敏感值默认掩码。仅在确实需要查看本地敏感值时使用 `--show-secret`。
+
+## 产品遥测
+
+产品遥测默认开启，并尽力发送到 ecctl 的 ARMS 采集端。STS `GetCallerIdentity` 成功解析支持的身份后，命令根 span 会包含以下原始标识：
+
+| 字段 | 值 |
+|---|---|
+| `ecctl.identity.account_id` | `Account`、`RAMUser` 和 `AssumedRoleUser` 身份所属阿里云账号的 `AccountId` |
+| `ecctl.identity.user_id` | RAM `UserId`，仅用于 `RAMUser` 身份 |
+| `ecctl.identity.role_id` | RAM `RoleId`，仅用于 `AssumedRoleUser` 身份 |
+
+这些字段直接使用 STS 返回的原始值，不做哈希处理，且只出现在命令根 span 上，不会附加到每个 API span。新增字段复用身份响应，不增加凭证采集。现有的 `ecctl.identity.hash` 和 `ecctl.identity.type` 字段继续保留，以兼容已有统计。
+
+账号统计和身份主体统计回答不同的问题。例如，`account_id=A, user_id=U` 的 RAM 用户和 `account_id=A, role_id=R` 的角色，代表一个所属账号、两个身份主体。账号 ID 表示身份所属的账号，不代表每条命令都由该账号的主账号身份执行。历史遥测记录如果只保存了身份哈希，就无法补回这些原始 ID。
+
+云服务返回 RequestId 时，云 API span（`ecctl.cloud.api.request`）会记录 `ecctl.cloud.request_id`。每次 OpenAPI 调用尝试，包括成功、失败和 ecctl 可见的重试，都会在各自的 span 上记录本次返回的 RequestId。同一条 trace 中，`ecctl.cloud.operation_id` 将同一操作的各次尝试归组，`ecctl.cloud.attempt` 标明这是第几次尝试。通过 `traceId` 可以将这些 API span 与命令根 span 上的原始账号、用户或角色 ID 关联。
+
+RequestId 优先取自本次调用尝试的平台响应头（`X-Acs-Request-Id`、`X-Oss-Request-Id` 或 `X-Fc-Request-Id`）。否则，ecctl 仅接受随包 OpenAPI 响应定义声明的顶层字符串 ID 字段，或 API 契约内的结构化错误字段。二进制响应、事件流、不透明响应和定义未知的响应均不扫描正文，也不从非结构化 CLI 输出或错误文本中解析 ID。
+
+网络失败、缺少 ID 或无法确认 ID 来源时不记录该属性。这可能降低 RequestId 覆盖率，以避免采集业务数据。被敏感信息脱敏规则移除的 ID 也会省略，不再尝试其他来源。遥测不采集请求体、响应体或错误文本。
+
+ossutil 仅接受最终可见结果中的结构化顶层 ID，不采集纯文本诊断中的 ID。其 `ecctl.cloud.retry_observable=false`，内部重试对 ecctl 不可见。历史遥测记录未保存的 RequestId 无法补回。
+
+通过任一环境变量关闭单条命令的遥测：
+
+```bash
+ECCTL_DISABLE_TELEMETRY=1 ecctl ecs instance list --region cn-hangzhou
+DO_NOT_TRACK=1 ecctl ecs instance list --region cn-hangzhou
+```
+
+也可以持久关闭所有 profile 的遥测：
+
+```bash
+ecctl configure set telemetry.enabled false
+```
 
 ## Profile
 
@@ -149,3 +185,4 @@ ecctl --region cn-beijing --output json --lang en schema --list ecs
 | `ALIBABA_CLOUD_CREDENTIALS_URI` | CredentialsURI 端点 |
 | `ALIBABA_CLOUD_BEARER_TOKEN`、`ALIBABA_CLOUD_BEARER_TOKEN_HEADER_KEY` | Bearer 令牌和可选的自定义请求头 |
 | `ALIBABA_CLOUD_DISABLE_EXTERNAL_PROCESS` | 禁用 `External` 和 `CredentialsURI` 凭证来源 |
+| `ECCTL_DISABLE_TELEMETRY`、`DO_NOT_TRACK` | 任一变量设为 `1` 时关闭产品遥测 |

@@ -43,6 +43,8 @@ type OpenAPIOperationDetail struct {
 	PathPattern string
 	Style       string
 	Parameters  []OpenAPIParameter
+
+	responseRequestIDFields []string
 }
 
 type OpenAPIParameter struct {
@@ -391,13 +393,14 @@ func openAPIOperationDetailFromNewMeta(product OpenAPIProduct, detail *openAPINe
 		params = append(params, openAPIParameterFromNewMeta(param))
 	}
 	return OpenAPIOperationDetail{
-		Name:        detail.Name,
-		Deprecated:  detail.Deprecated,
-		Protocol:    detail.Protocol,
-		Method:      detail.Method,
-		PathPattern: detail.PathPattern,
-		Style:       product.Style,
-		Parameters:  params,
+		Name:                    detail.Name,
+		Deprecated:              detail.Deprecated,
+		Protocol:                detail.Protocol,
+		Method:                  detail.Method,
+		PathPattern:             detail.PathPattern,
+		Style:                   product.Style,
+		Parameters:              params,
+		responseRequestIDFields: append([]string(nil), detail.ResponseRequestIDFields...),
 	}
 }
 

@@ -267,6 +267,106 @@ func canonicalTestDetail(t *testing.T, code, operation string) OpenAPIOperationD
 	return detail
 }
 
+func TestCanonicalResponseRequestIDFields(t *testing.T) {
+	for _, tc := range []struct {
+		code, operation string
+		want            []string
+	}{
+		{"ecs", "DescribeInstances", []string{"RequestId"}},
+		{"ecs", "DescribeRegions", []string{"RequestId"}},
+		{"fcsandbox", "GetTemplate", []string{"requestId"}},
+		{"tablestore", "GetInstance", []string{"RequestId"}},
+		{"fc", "InvokeFunction", nil},
+		{"fc-open", "InvokeFunction", nil},
+		{"fc", "GetFunction", nil},
+		{"pds", "DownloadFile", nil},
+		{"ros", "StartChat", nil},
+		{"sls", "CallAiTools", nil},
+		{"contactcenterai", "RunCompletion", nil},
+		{"edututor", "AnswerSSE", nil},
+	} {
+		t.Run(tc.code+"/"+tc.operation, func(t *testing.T) {
+			detail := canonicalTestDetail(t, tc.code, tc.operation)
+			got := detail.responseRequestIDFields
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("response request ID fields = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCanonicalResponseRequestIDContractBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name, metadata string
+		want           []string
+	}{
+		{"declared string", `"responses":{"200":{"schema":{"type":"object","properties":{"RequestId":{"type":"string"}}}}}`, []string{"RequestId"}},
+		{"only declared spelling", `"responses":{"200":{"schema":{"type":"object","properties":{"request_id":{"type":"string"},"RequestID":{"type":"integer"}}}}}`, []string{"request_id"}},
+		{"local object and scalar refs", `"responses":{"200":{"schema":{"$ref":"#/components/schemas/Envelope"}}},"components":{"schemas":{"Envelope":{"$ref":"#/components/schemas/Response"},"Response":{"type":"object","properties":{"requestId":{"$ref":"#/components/schemas/ID"}}},"ID":{"type":"string"}}}`, []string{"requestId"}},
+		{"escaped local ref", `"responses":{"200":{"schema":{"$ref":"#/components/schemas/Response~1ID~0"}}},"components":{"schemas":{"Response/ID~":{"type":"object","properties":{"RequestId":{"type":"string"}}}}}`, []string{"RequestId"}},
+		{"binary body", `"operation":{"response_format":"binary"},"responses":{"200":{"schema":{"type":"object","properties":{"RequestId":{"type":"string"}}}}}`, nil},
+		{"unknown response format", `"operation":{"response_format":"custom"},"responses":{"200":{"schema":{"type":"object","properties":{"RequestId":{"type":"string"}}}}}`, nil},
+		{"SSE body", `"operation":{"is_sse":true},"responses":{"200":{"schema":{"type":"object","properties":{"RequestId":{"type":"string"}}}}}`, nil},
+		{"string body", `"responses":{"200":{"schema":{"type":"string","properties":{"RequestId":{"type":"string"}}}}}`, nil},
+		{"array body", `"responses":{"200":{"schema":{"type":"array","items":{"type":"object","properties":{"RequestId":{"type":"string"}}}}}}`, nil},
+		{"unknown body", `"responses":{"200":{"schema":{"properties":{"RequestId":{"type":"string"}}}}}`, nil},
+		{"nonstring ID", `"responses":{"200":{"schema":{"type":"object","properties":{"RequestId":{"type":"object"}}}}}`, nil},
+		{"binary string ID", `"responses":{"200":{"schema":{"type":"object","properties":{"RequestId":{"type":"string","format":"binary"}}}}}`, nil},
+		{"byte string ID", `"responses":{"200":{"schema":{"type":"object","properties":{"RequestId":{"type":"string","format":"byte"}}}}}`, nil},
+		{"unknown string ID format", `"responses":{"200":{"schema":{"type":"object","properties":{"RequestId":{"type":"string","format":"custom"}}}}}`, nil},
+		{"nested ID", `"responses":{"200":{"schema":{"type":"object","properties":{"payload":{"type":"object","properties":{"RequestId":{"type":"string"}}}}}}}`, nil},
+		{"open object", `"responses":{"200":{"schema":{"type":"object","additionalProperties":{"type":"object","properties":{"RequestId":{"type":"string"}}}}}}`, nil},
+		{"declared field with arbitrary additional properties", `"responses":{"200":{"schema":{"type":"object","properties":{"requestId":{"type":"string"}},"additionalProperties":{"type":"object","properties":{"RequestId":{"type":"string"}}}}}}`, []string{"requestId"}},
+		{"error only", `"responses":{"500":{"schema":{"type":"object","properties":{"RequestId":{"type":"string"}}}}}`, nil},
+		{"missing response", `"responses":{}`, nil},
+		{"external ref", `"responses":{"200":{"schema":{"$ref":"https://example.invalid/Envelope"}}}`, nil},
+		{"missing ref", `"responses":{"200":{"schema":{"$ref":"#/components/schemas/Envelope"}}}`, nil},
+		{"invalid ref escape", `"responses":{"200":{"schema":{"$ref":"#/components/schemas/A~2"}}},"components":{"schemas":{"A~2":{"type":"object","properties":{"RequestId":{"type":"string"}}}}}`, nil},
+		{"cyclic ref", `"responses":{"200":{"schema":{"$ref":"#/components/schemas/A"}}},"components":{"schemas":{"A":{"$ref":"#/components/schemas/B"},"B":{"$ref":"#/components/schemas/A"}}}`, nil},
+		{"conflicting ref siblings", `"responses":{"200":{"schema":{"$ref":"#/components/schemas/Envelope","type":"string"}}},"components":{"schemas":{"Envelope":{"type":"object","properties":{"RequestId":{"type":"string"}}}}}`, nil},
+		{"unhandled schema composition", `"responses":{"200":{"schema":{"type":"object","properties":{"RequestId":{"type":"string"}},"oneOf":[{"type":"object"},{"type":"string"}]}}}`, nil},
+		{"all successful variants agree", `"responses":{"200":{"schema":{"type":"object","properties":{"RequestId":{"type":"string"},"requestId":{"type":"string"}}}},"201":{"schema":{"type":"object","properties":{"RequestId":{"type":"string"}}}}}`, []string{"RequestId"}},
+		{"successful variants disagree", `"responses":{"200":{"schema":{"type":"object","properties":{"RequestId":{"type":"string"}}}},"201":{"schema":{"type":"object","properties":{"requestId":{"type":"string"}}}}}`, nil},
+		{"opaque success variant", `"responses":{"200":{"schema":{"type":"object","properties":{"RequestId":{"type":"string"}}}},"202":{"schema":{"type":"string"}}}`, nil},
+		{"unsupported schema shape preserves request metadata", `"responses":{"200":{"schema":true}}`, nil},
+		{"unsupported schema type preserves request metadata", `"responses":{"200":{"schema":{"type":["object","string"],"properties":{"RequestId":{"type":"string"}}}}}`, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			products := []canonicalOpenAPIProduct{{Code: "Test", DefaultVersion: "2026-01-01", Style: "rpc"}}
+			read := func(language, path string) ([]byte, error) {
+				return readCanonicalOpenAPIMetadata(language, path, products, func(string) ([]byte, error) {
+					return []byte(`{"name":"Respond","parameters":[],` + tc.metadata + `}`), nil
+				})
+			}
+			detail, err := openAPIOperationDetailForStrictWithReader("en", OpenAPIProduct{
+				Code: "Test", Style: "rpc", currentMetadata: true, currentAPINames: map[string]bool{"Respond": true},
+			}, "Respond", read)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(detail.responseRequestIDFields, tc.want) {
+				t.Fatalf("response request ID fields = %#v, want %#v", detail.responseRequestIDFields, tc.want)
+			}
+		})
+	}
+}
+
+func TestCanonicalResponseRequestIDFieldsRemainPrivateAndIndependent(t *testing.T) {
+	metadata := &openAPINewDetail{ResponseRequestIDFields: []string{"RequestId"}}
+	detail := openAPIOperationDetailFromNewMeta(OpenAPIProduct{}, metadata)
+	detail.responseRequestIDFields[0] = "changed"
+	if metadata.ResponseRequestIDFields[0] != "RequestId" {
+		t.Fatal("public operation detail shared its private selector with adapter metadata")
+	}
+	raw, err := json.Marshal(detail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "RequestId") || strings.Contains(string(raw), "responseRequestID") {
+		t.Fatalf("private telemetry selector escaped in public metadata: %s", raw)
+	}
+}
+
 func TestCanonicalSnapshotAllProductsLoad(t *testing.T) {
 	catalog, err := canonicalOpenAPIProducts()
 	if err != nil {

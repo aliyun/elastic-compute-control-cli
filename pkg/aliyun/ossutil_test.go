@@ -77,8 +77,11 @@ type brokerAwareOSSUtilRunner struct {
 }
 
 type brokerLeakingPreflightRunner struct {
-	calls     int
-	brokerURL string
+	calls         int
+	brokerURL     string
+	failOperation bool
+	requestID     string
+	brokerID      bool
 }
 
 func (r *brokerLeakingPreflightRunner) Run(_ context.Context, _ string, args []string, _ []string) ([]byte, []byte, error) {
@@ -102,7 +105,25 @@ func (r *brokerLeakingPreflightRunner) Run(_ context.Context, _ string, args []s
 	}
 	profile, _ := configProfile(config, credentialBrokerProfileName)
 	r.brokerURL = stringMapField(profile, "credentials_uri")
-	return nil, []byte("launcher rejected " + r.brokerURL), errors.New("launcher failed")
+	if r.calls == 3 && r.failOperation {
+		return []byte("2.3.0\n"), nil, nil
+	}
+	message := "launcher rejected " + r.brokerURL
+	requestID := r.requestID
+	if r.brokerID {
+		requestID = r.brokerURL
+	}
+	if r.failOperation {
+		output, err := json.Marshal(map[string]string{"Message": message, "RequestId": requestID})
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, output, errors.New("launcher failed")
+	}
+	if requestID != "" {
+		message += "\nRequest ID: " + requestID
+	}
+	return nil, []byte(message), errors.New("launcher failed")
 }
 
 func (r *brokerAwareOSSUtilRunner) Run(_ context.Context, _ string, args []string, env []string) ([]byte, []byte, error) {
@@ -355,12 +376,167 @@ func TestOSSUtilCallerMapsRequestAndUsesCredentialEnvironment(t *testing.T) {
 		}
 		apiSpans++
 		attrs := testSpanAttributes(span.Attributes)
-		if attrs["ecctl.cloud.transport"] != "ossutil" || attrs["ecctl.cloud.retry_observable"] != false {
+		if attrs["ecctl.cloud.transport"] != "ossutil" || attrs["ecctl.cloud.retry_observable"] != false || attrs["ecctl.cloud.request_id"] != "req-1" {
 			t.Fatalf("OSS API attributes = %#v", attrs)
 		}
 	}
 	if apiSpans != 1 {
 		t.Fatalf("OSS API spans = %d, want only final api subprocess", apiSpans)
+	}
+}
+
+func TestOSSUtilTelemetryRecordsOnlyStructuredRequestID(t *testing.T) {
+	tests := []struct {
+		name          string
+		operation     string
+		file          string
+		stdout        string
+		stderr        string
+		runErr        error
+		wantError     bool
+		wantRequestID string
+	}{
+		{
+			name: "labeled stderr is not metadata", operation: "GetBucketAcl",
+			stdout: "sensitive-output test-secret test-token",
+			stderr: "Error Code: AccessDenied\nError Message: sensitive-error-message\nRequest ID: req-stderr",
+			runErr: errors.New("sensitive-run-error"), wantError: true,
+		},
+		{
+			name: "labeled stdout is not metadata", operation: "GetBucketAcl",
+			stdout: "Error Code: AccessDenied\nError Message: sensitive-error-message\nRequest ID: req-stdout",
+			runErr: errors.New("sensitive-run-error"), wantError: true,
+		},
+		{
+			// Real ossutil v2 output for an upload whose missing local filename
+			// contains newlines. The apparent label belongs to the filename.
+			name: "local filename is not metadata", operation: "PutObject",
+			file:   "/private/tmp/ecctl-security-missing\nRequest ID: injected-path-value\nsuffix",
+			stdout: "\n0.000555(s) elapsed\n",
+			stderr: "Error: /private/tmp/ecctl-security-missing\nRequest ID: injected-path-value\nsuffix is not a file\n",
+			runErr: errors.New("exit status 1"), wantError: true,
+		},
+		{
+			name: "JSON stderr", operation: "GetBucketAcl",
+			stderr: `{"Code":"AccessDenied","Message":"sensitive-error-message","RequestId":"req-json-stderr"}`,
+			runErr: errors.New("sensitive-run-error"), wantError: true, wantRequestID: "req-json-stderr",
+		},
+		{
+			name: "JSON stdout", operation: "GetBucketAcl",
+			stdout: `{"Code":"AccessDenied","Message":"sensitive-error-message","request_id":"req-json-stdout"}`,
+			runErr: errors.New("sensitive-run-error"), wantError: true, wantRequestID: "req-json-stdout",
+		},
+		{
+			name: "missing error ID", operation: "GetBucketAcl",
+			stderr: `{"Code":"AccessDenied","Message":"sensitive-error-message\nRequest ID: sensitive-object-body","Body":{"RequestId":"sensitive-object-body"}}`,
+			runErr: errors.New("sensitive-run-error"), wantError: true,
+		},
+		{
+			name: "JSON in Message is not metadata", operation: "GetBucketAcl",
+			stderr: `{"Code":"AccessDenied","Message":"{\"RequestId\":\"sensitive-object-body\"}"}`,
+			runErr: errors.New("sensitive-run-error"), wantError: true,
+		},
+		{
+			name: "URL is not a RequestId", operation: "GetBucketAcl",
+			stderr: "Error Code: AccessDenied\nRequest ID: http://127.0.0.1:12345/v1/credentials/sensitive-capability",
+			runErr: errors.New("sensitive-run-error"), wantError: true,
+		},
+		{
+			name: "missing success ID", operation: "GetBucketAcl",
+			stdout: `{"ACL":"private","Body":"sensitive-object-body","AccessKeySecret":"test-secret"}`,
+		},
+		{
+			name: "invalid success JSON", operation: "GetBucketAcl", stdout: "sensitive-output", wantError: true,
+		},
+		{
+			name: "transfer error labeled stderr is not metadata", operation: "GetObject",
+			stdout: "Request ID: sensitive-object-body", stderr: "Error Code: AccessDenied\nRequest ID: req-transfer",
+			runErr: errors.New("sensitive-run-error"), wantError: true,
+		},
+		{
+			name: "transfer error JSON stderr ID", operation: "GetObject",
+			stdout: `{"RequestId":"sensitive-object-body"}`,
+			stderr: `{"Code":"AccessDenied","Message":"sensitive-error-message","RequestId":"req-transfer"}`,
+			runErr: errors.New("sensitive-run-error"), wantError: true, wantRequestID: "req-transfer",
+		},
+		{
+			name: "transfer stdout is not inspected", operation: "GetObject",
+			stdout: `{"RequestId":"sensitive-object-body"}`, stderr: "Error Code: AccessDenied\nError Message: sensitive-error-message",
+			runErr: errors.New("sensitive-run-error"), wantError: true,
+		},
+		{
+			name: "transfer success has no fabricated ID", operation: "GetObject", stdout: `{"RequestId":"sensitive-object-body"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := &fakeOSSUtilRunner{results: []ossUtilRunnerResult{
+				{stdout: []byte("2.3.0")},
+				{stdout: []byte("operation help")},
+				{stdout: []byte(tt.stdout), stderr: []byte(tt.stderr), err: tt.runErr},
+			}}
+			caller := newTestOSSUtilCaller(t, runner, "cn-hangzhou")
+			exporter := tracetest.NewInMemoryExporter()
+			ctx, session := telemetry.Start(telemetry.WithExporterForTest(context.Background(), exporter), telemetry.Options{
+				Enabled: true, Surface: "public", ConfigPath: filepath.Join(t.TempDir(), "config.json"),
+			})
+			session.RegisterIdentity("test-ak", func(context.Context) (telemetry.Identity, error) {
+				return telemetry.Identity{Hash: "test-hash", Type: "RAMUser"}, nil
+			})
+			request := map[string]any{"Bucket": "private-bucket"}
+			if tt.operation == "GetObject" || tt.operation == "PutObject" {
+				request["Key"] = "private-object"
+				request["File"] = filepath.Join(t.TempDir(), "object")
+				if tt.file != "" {
+					request["File"] = tt.file
+				}
+			}
+			_, err := caller.Call(ctx, tt.operation, request)
+			if (err != nil) != tt.wantError {
+				t.Fatalf("Call error = %v, wantError=%v", err, tt.wantError)
+			}
+			exitCode := 0
+			if tt.wantError {
+				exitCode = 1
+			}
+			session.Finish("ecctl call oss "+tt.operation, exitCode)
+			spans := exporter.GetSpans()
+			apiSpans := 0
+			for _, span := range spans {
+				if span.Name != "ecctl.cloud.api.request" {
+					continue
+				}
+				apiSpans++
+				attrs := testSpanAttributes(span.Attributes)
+				requestID, present := attrs["ecctl.cloud.request_id"]
+				if tt.wantRequestID == "" {
+					if present {
+						t.Fatalf("unexpected RequestId attribute = %#v", requestID)
+					}
+				} else if requestID != tt.wantRequestID {
+					t.Fatalf("RequestId attribute = %#v, want %q", requestID, tt.wantRequestID)
+				}
+				wantOutcome := "success"
+				if tt.wantError {
+					wantOutcome = "error"
+				}
+				if attrs["ecctl.cloud.outcome"] != wantOutcome || attrs["ecctl.cloud.retry_observable"] != false {
+					t.Fatalf("OSS API attributes = %#v", attrs)
+				}
+				if len(span.Events) != 0 {
+					t.Fatalf("OSS API span recorded raw error events: %#v", span.Events)
+				}
+			}
+			if apiSpans != 1 {
+				t.Fatalf("OSS API span count = %d, want 1", apiSpans)
+			}
+			encoded := fmt.Sprintf("%#v", spans)
+			for _, sensitive := range []string{"test-ak", "test-secret", "test-token", "private-bucket", "private-object", "sensitive-output", "sensitive-error-message", "sensitive-run-error", "sensitive-object-body", "sensitive-capability", "ecctl-security-missing", "injected-path-value"} {
+				if strings.Contains(encoded, sensitive) {
+					t.Fatalf("telemetry contains %q", sensitive)
+				}
+			}
+		})
 	}
 }
 
@@ -479,6 +655,55 @@ func TestOSSUtilLauncherPreflightRedactsBrokerCapabilityURL(t *testing.T) {
 	payload := appErr.Payload()
 	if strings.Contains(payload.Detail, runner.brokerURL) || !strings.Contains(payload.Detail, "<credential-source>") {
 		t.Fatalf("preflight payload did not redact broker capability: %#v", payload)
+	}
+}
+
+func TestOSSUtilOperationTelemetryRedactsBrokerCapabilityURL(t *testing.T) {
+	for _, brokerID := range []bool{false, true} {
+		t.Run(fmt.Sprintf("broker URL as ID=%t", brokerID), func(t *testing.T) {
+			acquirer := &renewableCountingCredentialAcquirer{&countingCredentialAcquirer{snapshot: credentialSnapshot{
+				AccessKeyID: "id", AccessKeySecret: "secret", SecurityToken: "sts", Type: "sts",
+			}}}
+			runner := &brokerLeakingPreflightRunner{failOperation: true, requestID: "req-broker", brokerID: brokerID}
+			caller := newTestOSSUtilCaller(t, runner, "cn-hangzhou")
+			caller.Profile.Acquirer = acquirer
+			caller.Profile.Mode = credentialModeExternal
+			exporter := tracetest.NewInMemoryExporter()
+			ctx, session := telemetry.Start(telemetry.WithExporterForTest(context.Background(), exporter), telemetry.Options{
+				Enabled: true, Surface: "public", ConfigPath: filepath.Join(t.TempDir(), "config.json"),
+			})
+			session.RegisterIdentity("test-broker", func(context.Context) (telemetry.Identity, error) {
+				return telemetry.Identity{Hash: "test-hash", Type: "AssumedRoleUser"}, nil
+			})
+			_, err := caller.Call(ctx, "PutObject", map[string]any{
+				"Bucket": "bucket", "Key": "object", "File": "/tmp/object",
+			})
+			if appErrorCode(err) != "CloudAPIError" || runner.brokerURL == "" || runner.calls != 4 {
+				t.Fatalf("operation error=%v broker=%q calls=%d", err, runner.brokerURL, runner.calls)
+			}
+			session.Finish("ecctl call oss PutObject", 1)
+			spans := exporter.GetSpans()
+			apiSpans := 0
+			for _, span := range spans {
+				if span.Name != "ecctl.cloud.api.request" {
+					continue
+				}
+				apiSpans++
+				attrs := testSpanAttributes(span.Attributes)
+				if attrs["ecctl.cloud.outcome"] != "error" {
+					t.Fatalf("OSS API attributes = %#v", attrs)
+				}
+				if requestID, present := attrs["ecctl.cloud.request_id"]; (!brokerID && requestID != "req-broker") || (brokerID && present) {
+					t.Fatalf("OSS RequestId = %#v, brokerID=%v", requestID, brokerID)
+				}
+			}
+			if apiSpans != 1 {
+				t.Fatalf("OSS API span count = %d, want 1", apiSpans)
+			}
+			if strings.Contains(fmt.Sprintf("%#v", spans), runner.brokerURL) {
+				t.Fatal("telemetry contains broker capability URL")
+			}
+		})
 	}
 }
 

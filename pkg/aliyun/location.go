@@ -97,6 +97,9 @@ func (v *RegionVerifier) VerifyContext(ctx context.Context, region, serviceCode 
 	req.Product = locationProduct
 	req.Version = locationVersion
 	req.ApiName = locationAPIName
+	// This fixed SDK contract is absent from the embedded product catalog:
+	// alibaba-cloud-sdk-go/services/location/describe_endpoints.go.
+	req.responseRequestIDFields = []string{"RequestId"}
 	req.Method = "GET"
 	req.Scheme = "https"
 	req.RegionId = locationDefaultSignRegion
@@ -156,6 +159,11 @@ func (v *RegionVerifier) knownRegionIDs(ctx context.Context, executor openAPIExe
 	req.Method = "GET"
 	req.Scheme = "https"
 	req.Domain = "ecs." + locationDefaultSignRegion + ".aliyuncs.com"
+	if product, ok := OpenAPIProductByCode(req.Product, v.profile.Language); ok {
+		if detail, ok := OpenAPIOperationDetailFor(v.profile.Language, product, req.ApiName); ok {
+			req.responseRequestIDFields = detail.responseRequestIDFields
+		}
+	}
 	decoded, err := v.executeWith(ctx, executor, identity, credentialKey, req)
 	if err != nil {
 		return nil, err
@@ -222,8 +230,16 @@ func (v *RegionVerifier) executeWith(ctx context.Context, executor openAPIExecut
 		Attempt:         1,
 		RetryObservable: true,
 	})
-	response, err := executor.ExecuteOpenAPI(ctx, req)
-	endSpan(err)
+	capture := &telemetryRequestIDCapture{request: req}
+	attemptCtx := ctx
+	if session != nil {
+		attemptCtx = context.WithValue(ctx, telemetryRequestIDContextKey{}, capture)
+	}
+	response, err := executor.ExecuteOpenAPI(attemptCtx, req)
+	endSpan(telemetry.APIResult{
+		Err:       err,
+		RequestID: telemetryRequestIDForRequest(req, response, err, capture),
+	})
 	return response, err
 }
 

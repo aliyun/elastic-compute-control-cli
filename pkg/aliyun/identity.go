@@ -226,6 +226,7 @@ func canonicalIdentity(response map[string]any) (telemetry.Identity, error) {
 	if accountID == "" {
 		return telemetry.Identity{}, errors.New("caller account identity is incomplete")
 	}
+	identity := telemetry.Identity{Type: identityType, AccountID: accountID}
 	var canonical string
 	switch identityType {
 	case "Account":
@@ -236,15 +237,18 @@ func canonicalIdentity(response map[string]any) (telemetry.Identity, error) {
 			return telemetry.Identity{}, errors.New("caller RAM user identity is incomplete")
 		}
 		canonical = "v2\x00ram-user\x00" + accountID + "\x00" + userID
+		identity.UserID = userID
 	case "AssumedRoleUser":
 		roleID, _ := response["RoleId"].(string)
 		if roleID == "" {
 			return telemetry.Identity{}, errors.New("caller RAM role identity is incomplete")
 		}
 		canonical = "v2\x00ram-role\x00" + accountID + "\x00" + roleID
+		identity.RoleID = roleID
 	default:
 		return telemetry.Identity{}, errors.New("caller identity type is unsupported")
 	}
 	digest := sha256.Sum256([]byte(canonical))
-	return telemetry.Identity{Hash: hex.EncodeToString(digest[:]), Type: identityType}, nil
+	identity.Hash = hex.EncodeToString(digest[:])
+	return identity, nil
 }

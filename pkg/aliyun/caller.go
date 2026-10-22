@@ -258,22 +258,41 @@ type credentialFinalHTTPClient struct {
 	bearerHeader string
 	bearerToken  string
 	delegate     dara.HttpClient
+	capture      *telemetryRequestIDCapture
 }
 
 func (c *credentialFinalHTTPClient) Call(request *http.Request, transport *http.Transport) (*http.Response, error) {
+	if c.capture != nil {
+		c.capture.responseObserved = false
+		c.capture.headerRequestID = ""
+	}
 	if c.bearerHeader != "" {
 		request.Header.Set(c.bearerHeader, c.bearerToken)
 	}
+	var response *http.Response
+	var err error
 	if c.delegate != nil {
-		return c.delegate.Call(request, transport)
+		response, err = c.delegate.Call(request, transport)
+	} else {
+		client := &http.Client{
+			Transport: transport,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+		response, err = client.Do(request)
 	}
-	client := &http.Client{
-		Transport: transport,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
+	if c.capture != nil {
+		c.capture.responseObserved = response != nil
+		if response != nil {
+			c.capture.headerRequestID = firstNonEmptyString(
+				validTelemetryRequestID(response.Header.Get("x-acs-request-id")),
+				validTelemetryRequestID(response.Header.Get("x-oss-request-id")),
+				validTelemetryRequestID(response.Header.Get("x-fc-request-id")),
+			)
+		}
 	}
-	return client.Do(request)
+	return response, err
 }
 
 func (e *darabonbaExecutor) ExecuteOpenAPI(ctx context.Context, req *openAPIRequest) (map[string]any, error) {
@@ -286,10 +305,15 @@ func (e *darabonbaExecutor) ExecuteOpenAPI(ctx context.Context, req *openAPIRequ
 		e.credential.SetContext(ctx)
 	}
 	originalHTTPClient := e.client.HttpClient
+	capture, _ := ctx.Value(telemetryRequestIDContextKey{}).(*telemetryRequestIDCapture)
+	if capture != nil && capture.request != req {
+		capture = nil
+	}
 	e.client.HttpClient = &credentialFinalHTTPClient{
 		bearerHeader: e.bearerTokenHeaderKey,
 		bearerToken:  e.bearerToken,
 		delegate:     originalHTTPClient,
+		capture:      capture,
 	}
 	originalEndpoint := e.client.Endpoint
 	originalRegionID := e.client.RegionId
@@ -518,7 +542,12 @@ func (c *OpenAPICaller) executeOpenAPIRequest(ctx context.Context, operation str
 			Attempt:         attempt + 1,
 			RetryObservable: true,
 		})
-		resp, err := executor.ExecuteOpenAPI(ctx, req)
+		capture := &telemetryRequestIDCapture{request: req}
+		attemptCtx := ctx
+		if session != nil {
+			attemptCtx = context.WithValue(ctx, telemetryRequestIDContextKey{}, capture)
+		}
+		resp, err := executor.ExecuteOpenAPI(attemptCtx, req)
 		spanErr := err
 		if c.isFCTemplate() {
 			c.rememberTemplateSecrets(resp, false)
@@ -527,7 +556,14 @@ func (c *OpenAPICaller) executeOpenAPIRequest(ctx context.Context, operation str
 		if spanErr == nil && c.Resource != "" {
 			spanErr = c.resourceResponseError(req, resp)
 		}
-		endSpan(spanErr)
+		requestID := telemetryRequestIDForRequest(req, resp, spanErr, capture)
+		if c.isFCTemplate() {
+			requestID = validTelemetryRequestID(c.scrubTemplateRequestID(requestID))
+		}
+		endSpan(telemetry.APIResult{
+			Err:       spanErr,
+			RequestID: requestID,
+		})
 		if err == nil {
 			return resp, nil
 		}
@@ -611,6 +647,7 @@ func (c *OpenAPICaller) commonRequest(operation string, values map[string]any) (
 	req.Method = openAPIMethod(api.Method)
 	req.PathPattern = api.PathPattern
 	req.Style = api.Style
+	req.responseRequestIDFields = api.responseRequestIDFields
 	body, bodyKeys, err := openAPIRequestBody(&api, values)
 	if err != nil {
 		return nil, err
