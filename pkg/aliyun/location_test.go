@@ -15,7 +15,7 @@ import (
 )
 
 func TestRegionVerifierRecordsLocationRequest(t *testing.T) {
-	executor := &fakeOpenAPIExecutor{response: `{"Endpoints":{"Endpoint":[{"RegionId":"cn-hangzhou"}]}}`}
+	executor := &fakeOpenAPIExecutor{response: `{"Endpoints":{"Endpoint":[{"RegionId":"cn-hangzhou"}]},"RequestId":"req-location"}`}
 	verifier := newRegionVerifierWithExecutor(executor)
 	exporter := tracetest.NewInMemoryExporter()
 	ctx, session := telemetry.Start(telemetry.WithExporterForTest(context.Background(), exporter), telemetry.Options{
@@ -30,13 +30,35 @@ func TestRegionVerifierRecordsLocationRequest(t *testing.T) {
 		if span.Name == "ecctl.cloud.api.request" {
 			apiSpans++
 			attrs := testSpanAttributes(span.Attributes)
-			if attrs["ecctl.cloud.transport"] != "location" || attrs["ecctl.cloud.api"] != "DescribeEndpoints" {
+			if attrs["ecctl.cloud.transport"] != "location" || attrs["ecctl.cloud.api"] != "DescribeEndpoints" || attrs["ecctl.cloud.request_id"] != "req-location" {
 				t.Fatalf("location attributes = %#v", attrs)
 			}
 		}
 	}
 	if apiSpans != 1 {
 		t.Fatalf("location API spans = %d, want 1", apiSpans)
+	}
+}
+
+func TestRegionVerifierRecordsRequestIDsForRegionSuggestions(t *testing.T) {
+	executor := &fakeOpenAPIExecutor{responses: []string{
+		`{"Endpoints":{"Endpoint":[]},"RequestId":"req-location"}`,
+		`{"Regions":{"Region":[{"RegionId":"cn-hangzhou"}]},"RequestId":"req-regions"}`,
+	}}
+	verifier := newRegionVerifierWithExecutor(executor)
+	ctx, session, exporter := requestIDRegressionSession(t)
+	err := verifier.VerifyContext(ctx, "cn-hangzho", "ecs")
+	requireAppErrorCode(t, err, ErrCodeInvalidRegion)
+	session.Finish("ecctl configure set region", 1)
+	spans := requestIDRegressionAPISpans(t, exporter, 2)
+	for index, want := range []struct{ api, requestID string }{
+		{api: "DescribeEndpoints", requestID: "req-location"},
+		{api: "DescribeRegions", requestID: "req-regions"},
+	} {
+		if spans[index]["ecctl.cloud.api"] != want.api {
+			t.Fatalf("API %d = %#v, want %q", index+1, spans[index]["ecctl.cloud.api"], want.api)
+		}
+		requestIDRegressionAssertID(t, spans[index], want.requestID)
 	}
 }
 

@@ -1,7 +1,9 @@
 package telemetry
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +13,7 @@ import (
 	"testing"
 
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/aliyun/elastic-compute-control-cli/internal/telemetryconfig"
@@ -59,15 +62,77 @@ func TestHTTPExporterFlushesOTLPProtobufToConfiguredHTTPSURL(t *testing.T) {
 	if FromContext(ctx) != session {
 		t.Fatal("session missing from context")
 	}
-	session.Finish("ecctl --version", 0)
+	session.RegisterIdentity("test-credential", func(context.Context) (Identity, error) {
+		return Identity{Hash: "principal-hash", Type: "RAMUser", AccountID: "123456789", UserID: "user-123"}, nil
+	})
+	for attempt := 1; attempt <= 3; attempt++ {
+		finish := session.StartAPI(APIRequest{
+			Service: "ecs", API: "DescribeInstances", OperationID: "operation-1",
+			Attempt: attempt, RetryObservable: true,
+		})
+		var requestErr error
+		if attempt < 3 {
+			requestErr = errors.New("private-response-error")
+		}
+		finish(APIResult{Err: requestErr, RequestID: "request-" + strconv.Itoa(attempt)})
+	}
+	session.Finish("ecctl ecs instance list", 0)
 
 	select {
 	case payload := <-received:
-		if len(payload.ResourceSpans) != 1 || len(payload.ResourceSpans[0].ScopeSpans) != 1 || len(payload.ResourceSpans[0].ScopeSpans[0].Spans) != 1 {
+		if len(payload.ResourceSpans) != 1 || len(payload.ResourceSpans[0].ScopeSpans) != 1 || len(payload.ResourceSpans[0].ScopeSpans[0].Spans) != 4 {
 			t.Fatalf("OTLP payload span shape = %#v", payload)
 		}
-		if got := payload.ResourceSpans[0].ScopeSpans[0].Spans[0].Name; got != "ecctl.command" {
-			t.Fatalf("span name = %q", got)
+		var root *tracepb.Span
+		var requests []*tracepb.Span
+		for _, span := range payload.ResourceSpans[0].ScopeSpans[0].Spans {
+			switch span.Name {
+			case "ecctl.command":
+				root = span
+			case "ecctl.cloud.api.request":
+				requests = append(requests, span)
+			}
+		}
+		if root == nil || len(requests) != 3 {
+			t.Fatalf("OTLP command = %v, requests = %d", root != nil, len(requests))
+		}
+		attributes := map[string]string{}
+		for _, item := range root.Attributes {
+			attributes[item.Key] = item.Value.GetStringValue()
+		}
+		for key, want := range map[string]string{
+			"ecctl.identity.hash": "principal-hash", "ecctl.identity.type": "RAMUser",
+			"ecctl.identity.account_id": "123456789", "ecctl.identity.user_id": "user-123",
+		} {
+			if got := attributes[key]; got != want {
+				t.Fatalf("OTLP %s = %q, want %q", key, got, want)
+			}
+		}
+		for _, request := range requests {
+			if !bytes.Equal(request.TraceId, root.TraceId) || !bytes.Equal(request.ParentSpanId, root.SpanId) {
+				t.Fatal("OTLP request ID and account identity are not correlated")
+			}
+			requestAttributes := map[string]string{}
+			var attempt int64
+			for _, item := range request.Attributes {
+				requestAttributes[item.Key] = item.Value.GetStringValue()
+				if item.Key == "ecctl.cloud.attempt" {
+					attempt = item.Value.GetIntValue()
+				}
+			}
+			if attempt < 1 || attempt > 3 || requestAttributes["ecctl.cloud.request_id"] != "request-"+strconv.FormatInt(attempt, 10) || requestAttributes["ecctl.cloud.operation_id"] != "operation-1" {
+				t.Fatalf("OTLP attempt %d attributes = %#v", attempt, requestAttributes)
+			}
+			wantOutcome := "error"
+			if attempt == 3 {
+				wantOutcome = "success"
+			}
+			if requestAttributes["ecctl.cloud.outcome"] != wantOutcome {
+				t.Fatalf("OTLP attempt %d outcome = %q", attempt, requestAttributes["ecctl.cloud.outcome"])
+			}
+			if len(request.Events) != 0 || request.GetStatus().GetMessage() != "" {
+				t.Fatal("OTLP request included private error details")
+			}
 		}
 	default:
 		t.Fatal("HTTPS receiver did not receive an OTLP request before Finish returned")

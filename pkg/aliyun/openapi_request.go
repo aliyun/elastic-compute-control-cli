@@ -19,6 +19,8 @@ type openAPIRequest struct {
 	Style        string
 	EndpointType string
 
+	responseRequestIDFields []string
+
 	QueryParams map[string]string
 	FormParams  map[string]string
 	PathParams  map[string]string

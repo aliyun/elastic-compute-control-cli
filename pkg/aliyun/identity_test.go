@@ -48,6 +48,33 @@ func TestCanonicalIdentityRejectsFallbackFields(t *testing.T) {
 	}
 }
 
+func TestCanonicalIdentityRetainsOnlyStableAccountIdentifiers(t *testing.T) {
+	tests := []struct {
+		identityType string
+		wantUserID   string
+		wantRoleID   string
+	}{
+		{identityType: "Account"},
+		{identityType: "RAMUser", wantUserID: "user-123"},
+		{identityType: "AssumedRoleUser", wantRoleID: "role-123"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.identityType, func(t *testing.T) {
+			identity, err := canonicalIdentity(map[string]any{
+				"IdentityType": tc.identityType, "AccountId": "123456789",
+				"UserId": "user-123", "RoleId": "role-123",
+				"PrincipalId": "role-123:session-a", "Arn": "session-specific-arn",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if identity.AccountID != "123456789" || identity.UserID != tc.wantUserID || identity.RoleID != tc.wantRoleID {
+				t.Fatalf("identity = %#v, want account=123456789 user=%q role=%q", identity, tc.wantUserID, tc.wantRoleID)
+			}
+		})
+	}
+}
+
 func TestCanonicalIdentityIgnoresCredentialAndRoleSessionVariation(t *testing.T) {
 	first, err := canonicalIdentity(map[string]any{
 		"IdentityType": "AssumedRoleUser", "AccountId": "123456789", "RoleId": "role-123", "PrincipalId": "role-123:session-a", "Arn": "acs:ram::1234567890123456:role/session-a",

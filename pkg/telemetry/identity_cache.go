@@ -19,6 +19,9 @@ const (
 type identityCacheEntry struct {
 	PrincipalHash string    `json:"principal_hash"`
 	IdentityType  string    `json:"identity_type"`
+	AccountID     string    `json:"account_id"`
+	UserID        string    `json:"user_id,omitempty"`
+	RoleID        string    `json:"role_id,omitempty"`
 	ResolvedAt    time.Time `json:"resolved_at"`
 }
 
@@ -51,12 +54,20 @@ func resolveCachedIdentity(ctx context.Context, configPath, credentialKey string
 		if dirty {
 			_ = handle.write(cache)
 		}
-		return Identity{Hash: entry.PrincipalHash, Type: entry.IdentityType}, nil
+		return Identity{Hash: entry.PrincipalHash, Type: entry.IdentityType, AccountID: entry.AccountID, UserID: entry.UserID, RoleID: entry.RoleID}, nil
 	}
 
 	identity, resolveErr := resolver(ctx)
-	if resolveErr == nil && identity.Hash != "" && identity.Type != "" {
-		cache.Entries[key] = identityCacheEntry{PrincipalHash: identity.Hash, IdentityType: identity.Type, ResolvedAt: now}
+	entry := identityCacheEntry{
+		PrincipalHash: identity.Hash,
+		IdentityType:  identity.Type,
+		AccountID:     identity.AccountID,
+		UserID:        identity.UserID,
+		RoleID:        identity.RoleID,
+		ResolvedAt:    now,
+	}
+	if resolveErr == nil && validIdentityCacheEntry(entry) {
+		cache.Entries[key] = entry
 		dirty = true
 		trimIdentityCache(&cache)
 	}
@@ -94,12 +105,28 @@ func pruneIdentityCache(cache *identityCacheFile, now time.Time) bool {
 	oldest := now.Add(-identityCacheTTL)
 	latest := now.Add(time.Minute)
 	for key, entry := range cache.Entries {
-		if entry.ResolvedAt.IsZero() || entry.ResolvedAt.Before(oldest) || entry.ResolvedAt.After(latest) || entry.PrincipalHash == "" || entry.IdentityType == "" {
+		if entry.ResolvedAt.IsZero() || entry.ResolvedAt.Before(oldest) || entry.ResolvedAt.After(latest) || !validIdentityCacheEntry(entry) {
 			delete(cache.Entries, key)
 			dirty = true
 		}
 	}
 	return dirty
+}
+
+func validIdentityCacheEntry(entry identityCacheEntry) bool {
+	if entry.PrincipalHash == "" || entry.AccountID == "" {
+		return false
+	}
+	switch entry.IdentityType {
+	case "Account":
+		return true
+	case "RAMUser":
+		return entry.UserID != ""
+	case "AssumedRoleUser":
+		return entry.RoleID != ""
+	default:
+		return false
+	}
 }
 
 func trimIdentityCache(cache *identityCacheFile) {

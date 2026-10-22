@@ -91,7 +91,7 @@ func TestIdentityCacheRejectsSymlinkComponentsWithoutTouchingSentinel(t *testing
 			for i := 0; i < 2; i++ {
 				if _, err := resolveCachedIdentity(context.Background(), configPath, "ak", func(context.Context) (Identity, error) {
 					calls++
-					return Identity{Hash: "hash", Type: "RAMUser"}, nil
+					return Identity{Hash: "hash", Type: "RAMUser", AccountID: "1234567890123456", UserID: "2345678901234567"}, nil
 				}); err != nil {
 					t.Fatal(err)
 				}
@@ -121,7 +121,7 @@ func TestIdentityCacheRejectsWritableSharedDirectory(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		if _, err := resolveCachedIdentity(context.Background(), configPath, "ak", func(context.Context) (Identity, error) {
 			calls++
-			return Identity{Hash: "hash", Type: "RAMUser"}, nil
+			return Identity{Hash: "hash", Type: "RAMUser", AccountID: "1234567890123456", UserID: "2345678901234567"}, nil
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -141,7 +141,7 @@ func TestIdentityCacheCreatesOneMissingConfigParentAndCaches(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		identity, err := resolveCachedIdentity(context.Background(), configPath, "ak", func(context.Context) (Identity, error) {
 			calls++
-			return Identity{Hash: "hash", Type: "RAMUser"}, nil
+			return Identity{Hash: "hash", Type: "RAMUser", AccountID: "1234567890123456", UserID: "2345678901234567"}, nil
 		})
 		if err != nil || identity.Hash != "hash" {
 			t.Fatalf("resolveCachedIdentity = %#v, %v", identity, err)
@@ -212,7 +212,7 @@ func TestIdentityCacheRejectsUnsafeOrMissingConfigAncestorWithoutWriting(t *test
 			for i := 0; i < 2; i++ {
 				identity, err := resolveCachedIdentity(context.Background(), configPath, "ak", func(context.Context) (Identity, error) {
 					calls++
-					return Identity{Hash: "hash", Type: "RAMUser"}, nil
+					return Identity{Hash: "hash", Type: "RAMUser", AccountID: "1234567890123456", UserID: "2345678901234567"}, nil
 				})
 				if err != nil || identity.Hash != "hash" {
 					t.Fatalf("resolveCachedIdentity = %#v, %v", identity, err)

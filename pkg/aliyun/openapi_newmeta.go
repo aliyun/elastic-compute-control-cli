@@ -50,6 +50,32 @@ type openAPINewDetail struct {
 	Method      string                       `json:"method"`
 	PathPattern string                       `json:"pathPattern"`
 	Parameters  []openAPINewRequestParameter `json:"parameters"`
+	// Internal adapter metadata; the public operation detail keeps it private.
+	ResponseRequestIDFields []string `json:"responseRequestIDFields,omitempty"`
+}
+
+type canonicalOpenAPIResponseSchema struct {
+	Ref        string                                    `json:"$ref"`
+	Type       string                                    `json:"type"`
+	Format     string                                    `json:"format"`
+	Properties map[string]canonicalOpenAPIResponseSchema `json:"properties"`
+	AllOf      json.RawMessage                           `json:"allOf"`
+	AnyOf      json.RawMessage                           `json:"anyOf"`
+	OneOf      json.RawMessage                           `json:"oneOf"`
+	Not        json.RawMessage                           `json:"not"`
+}
+
+type canonicalOpenAPIResponses struct {
+	Operation struct {
+		ResponseFormat string `json:"response_format"`
+		IsSSE          bool   `json:"is_sse"`
+	} `json:"operation"`
+	Responses map[string]struct {
+		Schema canonicalOpenAPIResponseSchema `json:"schema"`
+	} `json:"responses"`
+	Components struct {
+		Schemas map[string]canonicalOpenAPIResponseSchema `json:"schemas"`
+	} `json:"components"`
 }
 
 type openAPINewRequestParameter struct {
@@ -219,6 +245,10 @@ func readCanonicalOpenAPIMetadata(language, path string, products []canonicalOpe
 			return nil, err
 		}
 		out := openAPINewDetail{Name: detail.Name, Deprecated: detail.Deprecated, Protocol: detail.Protocol, Method: detail.Method, PathPattern: detail.PathPattern}
+		var response canonicalOpenAPIResponses
+		if err := json.Unmarshal(content, &response); err == nil {
+			out.ResponseRequestIDFields = canonicalResponseRequestIDFields(response)
+		}
 		if detail.Parameters != nil {
 			out.Parameters = make([]openAPINewRequestParameter, 0, len(detail.Parameters))
 		}
@@ -259,6 +289,90 @@ func readCanonicalOpenAPIMetadata(language, path string, products []canonicalOpe
 		return json.Marshal(out)
 	}
 	return nil, fmt.Errorf("OpenAPI product %q not found", parts[0])
+}
+
+// Body request IDs are telemetry metadata only when the pinned response
+// contract declares that exact top-level string field. A JSON-looking opaque
+// response is still business data, including RPC operations that return SSE.
+func canonicalResponseRequestIDFields(response canonicalOpenAPIResponses) []string {
+	if response.Operation.ResponseFormat != "" || response.Operation.IsSSE {
+		return nil
+	}
+	keys := []string{"RequestId", "requestId", "RequestID", "requestID", "request_id", "requestid"}
+	var allowed map[string]bool
+	for status, result := range response.Responses {
+		if len(status) != 3 || status[0] != '2' || status[1] < '0' || status[1] > '9' || status[2] < '0' || status[2] > '9' {
+			continue
+		}
+		schema, ok := resolveCanonicalResponseSchema(result.Schema, response.Components.Schemas)
+		if !ok || schema.Type != "object" || schema.Format != "" {
+			return nil
+		}
+		fields := make(map[string]bool)
+		for _, key := range keys {
+			property, exists := schema.Properties[key]
+			if !exists {
+				continue
+			}
+			property, ok = resolveCanonicalResponseSchema(property, response.Components.Schemas)
+			if ok && property.Type == "string" && property.Format == "" {
+				fields[key] = true
+			}
+		}
+		if allowed == nil {
+			allowed = fields
+			continue
+		}
+		// The response normalizer does not retain HTTP status. Permit only
+		// fields declared by every successful response variant.
+		for key := range allowed {
+			if !fields[key] {
+				delete(allowed, key)
+			}
+		}
+	}
+	var fields []string
+	for _, key := range keys {
+		if allowed[key] {
+			fields = append(fields, key)
+		}
+	}
+	return fields
+}
+
+func resolveCanonicalResponseSchema(schema canonicalOpenAPIResponseSchema, components map[string]canonicalOpenAPIResponseSchema) (canonicalOpenAPIResponseSchema, bool) {
+	seen := make(map[string]bool)
+	for {
+		if len(schema.AllOf) != 0 || len(schema.AnyOf) != 0 || len(schema.OneOf) != 0 || len(schema.Not) != 0 {
+			return canonicalOpenAPIResponseSchema{}, false
+		}
+		if schema.Ref == "" {
+			return schema, true
+		}
+		const prefix = "#/components/schemas/"
+		if !strings.HasPrefix(schema.Ref, prefix) || seen[schema.Ref] || schema.Type != "" || schema.Format != "" || schema.Properties != nil {
+			return canonicalOpenAPIResponseSchema{}, false
+		}
+		seen[schema.Ref] = true
+		name := strings.TrimPrefix(schema.Ref, prefix)
+		if name == "" || strings.Contains(name, "/") {
+			return canonicalOpenAPIResponseSchema{}, false
+		}
+		for index := 0; index < len(name); index++ {
+			if name[index] == '~' {
+				if index+1 == len(name) || name[index+1] != '0' && name[index+1] != '1' {
+					return canonicalOpenAPIResponseSchema{}, false
+				}
+				index++
+			}
+		}
+		name = strings.NewReplacer("~1", "/", "~0", "~").Replace(name)
+		var ok bool
+		schema, ok = components[name]
+		if !ok {
+			return canonicalOpenAPIResponseSchema{}, false
+		}
+	}
 }
 
 var canonicalPathPlaceholder = regexp.MustCompile(`\{([^{}]+)\}|\[([^\[\]]+)\]`)

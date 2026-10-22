@@ -176,11 +176,11 @@ func (c *OSSUtilCaller) CallWithArgs(ctx context.Context, operation string, requ
 	})
 	stdout, stderr, runErr := c.runner.Run(ctx, "aliyun", args, env)
 	if runErr != nil {
-		endSpan(runErr)
 		if brokerURL != "" {
 			stdout = redactCredentialSourceOutput(stdout, brokerURL)
 			stderr = redactCredentialSourceOutput(stderr, brokerURL)
 		}
+		endSpan(telemetry.APIResult{Err: runErr, RequestID: ossUtilTelemetryRequestID(stdout, stderr, metadata.transfer != "")})
 		if broker != nil {
 			if refreshErr := broker.RefreshError(); refreshErr != nil {
 				return nil, credentialResolutionError(&credentialProviderError{mode: c.Profile.Mode, err: refreshErr})
@@ -194,12 +194,34 @@ func (c *OSSUtilCaller) CallWithArgs(ctx context.Context, operation string, requ
 			"Key":    callerStringMapValue(request, "Key"),
 			"File":   callerStringMapValue(request, "File"),
 		}
-		endSpan(nil)
+		endSpan(telemetry.APIResult{})
 		return response, nil
 	}
 	response, decodeErr := decodeOSSUtilResponse(stdout, metadata.mutation)
-	endSpan(decodeErr)
+	endSpan(telemetry.APIResult{Err: decodeErr, RequestID: telemetryResponseRequestID(response)})
 	return response, decodeErr
+}
+
+func ossUtilTelemetryRequestID(stdout, stderr []byte, transfer bool) string {
+	outputs := [][]byte{stderr}
+	if !transfer {
+		outputs = append(outputs, stdout)
+	}
+	for _, output := range outputs {
+		if len(output) == 0 {
+			continue
+		}
+		response, err := decodeOSSUtilResponse(output, false)
+		if err != nil {
+			// CLI diagnostics can contain local filenames and object content.
+			// Only a structured response's top-level ID is request metadata.
+			continue
+		}
+		if requestID := telemetryResponseRequestID(response); requestID != "" {
+			return requestID
+		}
+	}
+	return ""
 }
 
 func (c *OSSUtilCaller) requireVersion2(ctx context.Context, runtimePath string, env []string) error {

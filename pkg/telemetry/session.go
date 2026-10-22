@@ -33,8 +33,11 @@ type Options struct {
 }
 
 type Identity struct {
-	Hash string
-	Type string
+	Hash      string
+	Type      string
+	AccountID string
+	UserID    string
+	RoleID    string
 }
 
 type IdentityResolver func(context.Context) (Identity, error)
@@ -158,11 +161,17 @@ type APIRequest struct {
 	RetryObservable bool
 }
 
+type APIResult struct {
+	Err       error
+	RequestID string
+}
+
 // StartAPI starts a direct child of the command root span. The returned
-// function records only a coarse outcome; it never records the error itself.
-func (s *Session) StartAPI(request APIRequest) func(error) {
+// function records a coarse outcome and the returned request ID, never the
+// error text or response body.
+func (s *Session) StartAPI(request APIRequest) func(APIResult) {
 	if s == nil || s.root == nil {
-		return func(error) {}
+		return func(APIResult) {}
 	}
 	parent := trace.ContextWithSpan(context.Background(), s.root)
 	_, span := s.provider.Tracer("github.com/aliyun/elastic-compute-control-cli/pkg/telemetry").Start(parent, "ecctl.cloud.api.request",
@@ -177,11 +186,14 @@ func (s *Session) StartAPI(request APIRequest) func(error) {
 			attribute.Bool("ecctl.cloud.retry_observable", request.RetryObservable),
 		),
 	)
-	return func(err error) {
+	return func(result APIResult) {
 		outcome := "success"
-		if err != nil {
+		if result.Err != nil {
 			outcome = "error"
 			span.SetStatus(codes.Error, "")
+		}
+		if result.RequestID != "" {
+			span.SetAttributes(attribute.String("ecctl.cloud.request_id", result.RequestID))
 		}
 		span.SetAttributes(attribute.String("ecctl.cloud.outcome", outcome))
 		span.End()
@@ -206,6 +218,19 @@ func (s *Session) finishOnce(command string, exitCode int) {
 				attribute.String("ecctl.identity.hash", identity.Hash),
 				attribute.String("ecctl.identity.type", identity.Type),
 			)
+			if identity.AccountID != "" {
+				s.root.SetAttributes(attribute.String("ecctl.identity.account_id", identity.AccountID))
+			}
+			switch identity.Type {
+			case "RAMUser":
+				if identity.UserID != "" {
+					s.root.SetAttributes(attribute.String("ecctl.identity.user_id", identity.UserID))
+				}
+			case "AssumedRoleUser":
+				if identity.RoleID != "" {
+					s.root.SetAttributes(attribute.String("ecctl.identity.role_id", identity.RoleID))
+				}
+			}
 		}
 		cancel()
 	}

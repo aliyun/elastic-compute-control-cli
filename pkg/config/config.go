@@ -15,6 +15,7 @@ import (
 
 	"github.com/aliyun/elastic-compute-control-cli/internal/configfile"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
 )
 
 const DefaultProfileName = "default"
@@ -136,7 +137,7 @@ var configItems = []ConfigItem{
 	{Key: "security-token", StoredAs: "sts_token", Description: "Optional STS security token.", Type: "string", Sensitive: true, SetExample: "ecctl configure set security-token <value>"},
 	{Key: "lang", StoredAs: "language", Description: "Default display language.", Type: "string", Allowed: []string{"en", "zh-CN"}, SetExample: "ecctl configure set lang zh-CN"},
 	{Key: "output", StoredAs: "output_format", Description: "Default output format.", Type: "string", Allowed: []string{"json", "text"}, SetExample: "ecctl configure set output text"},
-	{Key: "telemetry.enabled", StoredAs: "telemetry.enabled", Description: "Enable best-effort pseudonymous product telemetry.", Type: "boolean", Allowed: []string{"true", "false"}, SetExample: "ecctl configure set telemetry.enabled false"},
+	{Key: "telemetry.enabled", StoredAs: "telemetry.enabled", Description: i18n.NewLocalizer("en").Message("ConfigDescriptionTelemetryEnabled"), Type: "boolean", Allowed: []string{"true", "false"}, SetExample: "ecctl configure set telemetry.enabled false"},
 }
 
 var credentialProfileAuthKeys = []string{

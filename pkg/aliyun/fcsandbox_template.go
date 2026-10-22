@@ -401,8 +401,11 @@ func (c *OpenAPICaller) scrubTemplateRequestID(value string) string {
 	// A short registry username must not corrupt an unrelated ID substring.
 	c.templateMu.Lock()
 	defer c.templateMu.Unlock()
+	normalizedID := strings.TrimSpace(value)
 	for _, secret := range c.templateSecrets {
-		if value == secret {
+		// Header parsing and telemetry normalize surrounding whitespace. Match
+		// that same form so normalization cannot resurrect a known secret.
+		if value == secret || (normalizedID != "" && normalizedID == strings.TrimSpace(secret)) {
 			return "[REDACTED]"
 		}
 	}

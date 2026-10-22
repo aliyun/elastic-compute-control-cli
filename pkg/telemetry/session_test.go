@@ -32,9 +32,9 @@ func TestSessionExportsRootAttemptsAndIdentityWithoutErrorText(t *testing.T) {
 			Transport: "darabonba", OperationID: operationID, Attempt: attempt, RetryObservable: true,
 		})
 		if attempt < 3 {
-			end(errors.New("secret request-id req-123"))
+			end(APIResult{Err: errors.New("secret request-id req-123"), RequestID: fmt.Sprintf("req-attempt-%d", attempt)})
 		} else {
-			end(nil)
+			end(APIResult{RequestID: "req-attempt-3"})
 		}
 	}
 	session.RegisterIdentity("test-ak", func(context.Context) (Identity, error) {
@@ -61,6 +61,9 @@ func TestSessionExportsRootAttemptsAndIdentityWithoutErrorText(t *testing.T) {
 			}
 		case "ecctl.cloud.api.request":
 			apiCount++
+			if attrs["ecctl.cloud.request_id"] != fmt.Sprintf("req-attempt-%d", apiCount) {
+				t.Fatalf("request ID did not match API attempt: %#v", attrs)
+			}
 			if attrs["ecctl.cloud.operation_id"] != operationID {
 				t.Fatalf("operation id = %#v, want %q", attrs["ecctl.cloud.operation_id"], operationID)
 			}
@@ -107,6 +110,59 @@ func TestSessionDisabledModesClearAmbientSessionWithoutEndingIt(t *testing.T) {
 			parent.Finish("ecctl parent", 0)
 			if spans := parentExporter.GetSpans(); len(spans) != 1 || spans[0].Name != "ecctl.command" {
 				t.Fatalf("parent session stopped working: %#v", spans)
+			}
+		})
+	}
+}
+
+func TestSessionExportsAccountIdentifiersByIdentityType(t *testing.T) {
+	tests := []struct {
+		identity Identity
+		want     map[string]any
+	}{
+		{
+			identity: Identity{Hash: "account-hash", Type: "Account", AccountID: "123456789", UserID: "irrelevant-user", RoleID: "irrelevant-role"},
+			want:     map[string]any{"ecctl.identity.account_id": "123456789"},
+		},
+		{
+			identity: Identity{Hash: "user-hash", Type: "RAMUser", AccountID: "123456789", UserID: "user-123", RoleID: "irrelevant-role"},
+			want:     map[string]any{"ecctl.identity.account_id": "123456789", "ecctl.identity.user_id": "user-123"},
+		},
+		{
+			identity: Identity{Hash: "role-hash", Type: "AssumedRoleUser", AccountID: "123456789", UserID: "session-specific-user", RoleID: "role-123"},
+			want:     map[string]any{"ecctl.identity.account_id": "123456789", "ecctl.identity.role_id": "role-123"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.identity.Type, func(t *testing.T) {
+			exporter := tracetest.NewInMemoryExporter()
+			_, session := Start(WithExporterForTest(context.Background(), exporter), Options{
+				Enabled: true, Surface: "public", ConfigPath: filepath.Join(t.TempDir(), "config.json"),
+			})
+			session.StartAPI(APIRequest{Service: "Ecs", API: "DescribeInstances"})(APIResult{})
+			session.RegisterIdentity("test-credential", func(context.Context) (Identity, error) { return tc.identity, nil })
+			session.Finish("ecctl ecs instance list", 0)
+			spans := exporter.GetSpans()
+			if len(spans) != 2 {
+				t.Fatalf("spans = %d, want command and API spans", len(spans))
+			}
+			for _, span := range spans {
+				attrs := attributeMap(span.Attributes)
+				if span.Name == "ecctl.command" {
+					if attrs["ecctl.identity.hash"] != tc.identity.Hash || attrs["ecctl.identity.type"] != tc.identity.Type {
+						t.Fatalf("compatibility identity attributes = %#v", attrs)
+					}
+				}
+				for _, key := range []string{"ecctl.identity.account_id", "ecctl.identity.user_id", "ecctl.identity.role_id"} {
+					got, exists := attrs[key]
+					want, wantExists := tc.want[key]
+					if span.Name != "ecctl.command" {
+						wantExists = false
+					}
+					if exists != wantExists || (wantExists && got != want) {
+						t.Fatalf("%s %s = %#v (present=%t), want %#v (present=%t)", span.Name, key, got, exists, want, wantExists)
+					}
+				}
 			}
 		})
 	}

@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	openapiClient "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	credentialproviders "github.com/aliyun/credentials-go/credentials/providers"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -1727,13 +1728,137 @@ func TestOpenAPICallerRejectsUnsuccessfulBusinessResponse(t *testing.T) {
 	session.Finish("ecctl eflo vcc create", 1)
 	for _, span := range exporter.GetSpans() {
 		if span.Name == "ecctl.cloud.api.request" {
-			if outcome := testSpanAttributes(span.Attributes)["ecctl.cloud.outcome"]; outcome != "error" {
+			attrs := testAPISpanMetadata(t, span)
+			if outcome := attrs["ecctl.cloud.outcome"]; outcome != "error" {
 				t.Fatalf("business error API span outcome = %#v, want error", outcome)
+			}
+			if got := attrs["ecctl.cloud.request_id"]; got != "req-business" {
+				t.Fatalf("business error API span request ID = %#v, want req-business", got)
 			}
 			return
 		}
 	}
 	t.Fatal("business error did not emit an API span")
+}
+
+func TestOpenAPICallerTelemetryRequestID(t *testing.T) {
+	sdkServerRequestID, sdkClientRequestID := "req-sdk-server", "req-sdk-client"
+	sdkMessage := "sdk-message-secret-should-stay-local"
+	tests := []struct {
+		name      string
+		response  map[string]any
+		callError error
+		requestID string
+	}{
+		{name: "success RequestId", response: map[string]any{"RequestId": "req-pascal"}, requestID: "req-pascal"},
+		{name: "undeclared requestId", response: map[string]any{"requestId": "req-camel"}},
+		{name: "undeclared requestID", response: map[string]any{"requestID": "req-upper-id"}},
+		{name: "undeclared request_id", response: map[string]any{"request_id": "req-snake"}},
+		{
+			name: "wrapped SDK server error",
+			callError: fmt.Errorf("wrapped SDK error: %w", &openapiClient.ServerError{
+				RequestId: &sdkServerRequestID, Message: &sdkMessage,
+				Data: map[string]any{"AccessKeySecret": "sdk-response-secret-should-stay-local"},
+			}),
+			requestID: sdkServerRequestID,
+		},
+		{
+			name: "wrapped SDK client error",
+			callError: fmt.Errorf("wrapped SDK error: %w", &openapiClient.ClientError{
+				RequestId: &sdkClientRequestID, Message: &sdkMessage,
+			}),
+			requestID: sdkClientRequestID,
+		},
+		{
+			name:      "untrusted SDK error label",
+			callError: errors.New("SDK.ServerError\nErrorCode: InvalidParameter\nRequestId: req-sdk-label\nMessage: error-message-secret-should-stay-local"),
+		},
+		{
+			name: "wrapped AppError field",
+			callError: fmt.Errorf("wrapped app error: %w", ecerrors.Service("CloudAPIError", "app-error-secret-should-stay-local", false,
+				ecerrors.WithRequestID("req-app-error"))),
+			requestID: "req-app-error",
+		},
+		{name: "success without request ID", response: map[string]any{"TotalCount": 0}},
+		{
+			name: "malformed and nested request IDs",
+			response: map[string]any{
+				"RequestId": nil, "requestId": 123, "requestID": []string{"req-array"},
+				"request_id": map[string]any{"id": "req-object"},
+				"Content":    map[string]any{"RequestId": "req-nested"},
+			},
+		},
+		{name: "blank request ID", response: map[string]any{"RequestId": " \t\n"}},
+		{name: "SDK error without request ID", callError: &openapiClient.ServerError{Message: &sdkMessage}},
+		{
+			name:      "network error without request ID",
+			callError: errors.New(`Post "https://ecs.cn-beijing.aliyuncs.com/?AccessKeySecret=network-secret-should-stay-local": dial tcp: no such host`),
+		},
+		{name: "unlabeled error identifier", callError: errors.New("request failed with unrelated identifier=req-unlabeled")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wantSpanID := tt.requestID
+			if tt.callError != nil {
+				if got := telemetryErrorRequestID(tt.callError); got != tt.requestID {
+					t.Fatalf("structured error request ID = %q, want %q", got, tt.requestID)
+				}
+				// This executor has no observed business HTTP response. An
+				// error chain alone cannot establish the ID's request origin.
+				wantSpanID = ""
+			}
+			response := tt.response
+			if response == nil {
+				response = map[string]any{}
+			}
+			response["AccessKeySecret"] = "response-secret-should-stay-local"
+			body, err := json.Marshal(response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := &fakeOpenAPIExecutor{response: string(body), callError: tt.callError}
+			caller := &OpenAPICaller{
+				Product: "ecs", Resource: "instance", Region: "cn-beijing", executor: fake,
+				retryMaxAttempts: 1,
+			}
+			exporter := tracetest.NewInMemoryExporter()
+			ctx, session := telemetry.Start(telemetry.WithExporterForTest(context.Background(), exporter), telemetry.Options{
+				Enabled: true, Surface: "public", Version: "test", ConfigPath: filepath.Join(t.TempDir(), "config.json"),
+			})
+			_, err = caller.Call(ctx, "DescribeInstances", map[string]any{"RegionId": "cn-beijing"})
+			if (err != nil) != (tt.callError != nil) {
+				t.Fatalf("Call error = %v, want error %t", err, tt.callError != nil)
+			}
+			exitCode := 0
+			outcome := "success"
+			if tt.callError != nil {
+				exitCode, outcome = 1, "error"
+			}
+			session.Finish("ecctl ecs instance list", exitCode)
+			apiSpans := 0
+			for _, span := range exporter.GetSpans() {
+				if span.Name != "ecctl.cloud.api.request" {
+					continue
+				}
+				apiSpans++
+				attrs := testAPISpanMetadata(t, span)
+				got, present := attrs["ecctl.cloud.request_id"]
+				if wantSpanID == "" {
+					if present {
+						t.Fatalf("request ID = %#v, want omitted", got)
+					}
+				} else if got != wantSpanID {
+					t.Fatalf("request ID = %#v, want %q", got, wantSpanID)
+				}
+				if attrs["ecctl.cloud.outcome"] != outcome {
+					t.Fatalf("outcome = %#v, want %q", attrs["ecctl.cloud.outcome"], outcome)
+				}
+			}
+			if apiSpans != 1 {
+				t.Fatalf("API spans = %d, want 1", apiSpans)
+			}
+		})
+	}
 }
 
 func TestOpenAPICallerLeavesBusinessResponseVisibleForGenericCall(t *testing.T) {
@@ -2009,26 +2134,32 @@ func TestIsThrottling(t *testing.T) {
 }
 
 func TestCallRawRetriesThenSucceedsOnThrottling(t *testing.T) {
-	throttle := errors.New("SDK.ServerError\nErrorCode: Throttling.User\nMessage: Request was denied due to user flow control.")
-	fake := &fakeOpenAPIExecutor{
-		callErrors: []error{throttle, throttle},
-		response:   `{"RequestId":"req-ok","TotalCount":0,"Instances":{"Instance":[]}}`,
+	acquirer := &countingCredentialAcquirer{snapshot: credentialSnapshot{
+		AccessKeyID: "id", AccessKeySecret: "secret", Type: "access_key",
+	}}
+	profile := resolvedOpenAPIProfile{Mode: credentialModeAK, RegionID: "cn-beijing", Acquirer: acquirer}
+	executor, err := newStaticDarabonbaExecutor(profile, &acquirer.snapshot)
+	if err != nil {
+		t.Fatal(err)
 	}
+	httpClient := &telemetryResponseHTTPClient{responses: []telemetryHTTPResponse{
+		{status: 429, body: `{"Code":"Throttling.User","Message":"too many requests","RequestId":"req-throttled-1"}`},
+		{status: 429, body: `{"Code":"Throttling.User","Message":"too many requests","RequestId":"req-throttled-2"}`},
+		{status: 200, body: `{"RequestId":"req-ok","TotalCount":0,"Instances":{"Instance":[]}}`},
+	}}
+	executor.client.HttpClient = httpClient
 	caller := &OpenAPICaller{
-		Product: "ecs", Resource: "instance", Region: "cn-beijing", executor: fake,
-		Profile: resolvedOpenAPIProfile{
-			Mode: credentialModeAK,
-			Acquirer: &countingCredentialAcquirer{snapshot: credentialSnapshot{
-				AccessKeyID: "id", AccessKeySecret: "secret", Type: "access_key",
-			}},
-		},
+		Product: "ecs", Resource: "instance", Region: "cn-beijing", executor: executor,
+		Profile: profile,
 		sleepFn: func(context.Context, time.Duration) error { return nil },
 	}
-	acquirer := caller.Profile.Acquirer.(*countingCredentialAcquirer)
 
 	exporter := tracetest.NewInMemoryExporter()
 	ctx, session := telemetry.Start(telemetry.WithExporterForTest(context.Background(), exporter), telemetry.Options{
 		Enabled: true, Surface: "public", Version: "test", ConfigPath: filepath.Join(t.TempDir(), "config.json"),
+	})
+	session.RegisterIdentity("retry-test", func(context.Context) (telemetry.Identity, error) {
+		return telemetry.Identity{Hash: "account-hash", Type: "Account", AccountID: "123456789"}, nil
 	})
 	resp, err := caller.Call(ctx, "DescribeInstances", map[string]any{"RegionId": "cn-beijing"})
 	if err != nil {
@@ -2037,21 +2168,39 @@ func TestCallRawRetriesThenSucceedsOnThrottling(t *testing.T) {
 	if resp["RequestId"] != "req-ok" {
 		t.Fatalf("RequestId = %v, want req-ok", resp["RequestId"])
 	}
-	if len(fake.requests) != 3 {
-		t.Fatalf("attempts = %d, want 3 (2 throttled + 1 success)", len(fake.requests))
+	if httpClient.calls != 3 {
+		t.Fatalf("attempts = %d, want 3 (2 throttled + 1 success)", httpClient.calls)
 	}
 	session.Finish("ecctl call ecs DescribeInstances", 0)
 	if acquirer.calls != 1 {
 		t.Fatalf("credential acquisitions = %d, want exactly one for all retries and telemetry", acquirer.calls)
 	}
 	var operationID string
+	var rootTraceID, rootSpanID string
+	spans := exporter.GetSpans()
+	for _, span := range spans {
+		if span.Name == "ecctl.command" {
+			rootTraceID = span.SpanContext.TraceID().String()
+			rootSpanID = span.SpanContext.SpanID().String()
+		}
+	}
+	if rootTraceID == "" || rootSpanID == "" {
+		t.Fatal("command root span was not exported")
+	}
+	wantRequestIDs := []string{"req-throttled-1", "req-throttled-2", "req-ok"}
 	apiSpans := 0
-	for _, span := range exporter.GetSpans() {
+	for _, span := range spans {
 		if span.Name != "ecctl.cloud.api.request" {
 			continue
 		}
+		if apiSpans >= len(wantRequestIDs) {
+			t.Fatalf("unexpected extra API span: %#v", span)
+		}
+		attrs := testAPISpanMetadata(t, span)
+		if got := attrs["ecctl.cloud.request_id"]; got != wantRequestIDs[apiSpans] {
+			t.Fatalf("attempt %d request ID = %#v, want %q", apiSpans+1, got, wantRequestIDs[apiSpans])
+		}
 		apiSpans++
-		attrs := testSpanAttributes(span.Attributes)
 		if attrs["ecctl.cloud.attempt"] != int64(apiSpans) {
 			t.Fatalf("attempt attribute = %#v, want %d", attrs["ecctl.cloud.attempt"], apiSpans)
 		}
@@ -2059,6 +2208,19 @@ func TestCallRawRetriesThenSucceedsOnThrottling(t *testing.T) {
 			operationID, _ = attrs["ecctl.cloud.operation_id"].(string)
 		} else if attrs["ecctl.cloud.operation_id"] != operationID {
 			t.Fatalf("operation ID changed: %#v", attrs)
+		}
+		if operationID == "" {
+			t.Fatal("API span operation ID is empty")
+		}
+		wantOutcome := "error"
+		if apiSpans == len(wantRequestIDs) {
+			wantOutcome = "success"
+		}
+		if attrs["ecctl.cloud.outcome"] != wantOutcome {
+			t.Fatalf("attempt %d outcome = %#v, want %q", apiSpans, attrs["ecctl.cloud.outcome"], wantOutcome)
+		}
+		if span.SpanContext.TraceID().String() != rootTraceID || span.Parent.SpanID().String() != rootSpanID {
+			t.Fatalf("attempt %d is not a direct child of the command root", apiSpans)
 		}
 	}
 	if apiSpans != 3 {
@@ -2337,6 +2499,29 @@ func testSpanAttributes(attributes []attribute.KeyValue) map[string]any {
 		out[string(value.Key)] = value.Value.AsInterface()
 	}
 	return out
+}
+
+func testAPISpanMetadata(t *testing.T, span tracetest.SpanStub) map[string]any {
+	t.Helper()
+	allowed := map[string]bool{
+		"ecctl.cloud.service": true, "ecctl.cloud.api": true, "ecctl.cloud.api_version": true,
+		"ecctl.cloud.transport": true, "ecctl.cloud.operation_id": true, "ecctl.cloud.attempt": true,
+		"ecctl.cloud.retry": true, "ecctl.cloud.retry_observable": true, "ecctl.cloud.outcome": true,
+		"ecctl.cloud.request_id": true,
+	}
+	attrs := testSpanAttributes(span.Attributes)
+	for key := range attrs {
+		if !allowed[key] {
+			t.Fatalf("API span exported unexpected attribute %q: %#v", key, attrs[key])
+		}
+	}
+	if len(span.Events) != 0 {
+		t.Fatalf("API span exported response or error events: %#v", span.Events)
+	}
+	if span.Status.Description != "" {
+		t.Fatalf("API span exported error description %q", span.Status.Description)
+	}
+	return attrs
 }
 
 func TestCallRawExhaustsThrottlingRetries(t *testing.T) {
