@@ -206,6 +206,17 @@ steps:
 			resource: "sandbox/template",
 		},
 		{
+			name: "FC template cache has no tag input and has an explicit finalizer",
+			caseBody: `
+resource: sandbox/template-cache
+steps:
+  - name: create
+    run: ecctl sandbox template-cache create --template-id tpl-1 --team-id team-1
+    teardown: ecctl sandbox template-cache delete tpl-1 --team-id team-1
+`,
+			resource: "sandbox/template-cache",
+		},
+		{
 			name: "ack diagnosis is owned by the disposable cluster fixture",
 			caseBody: `
 resource: ack/diagnosis

@@ -31,6 +31,9 @@ func (c *OpenAPICaller) resourceResponseError(req *openAPIRequest, response map[
 	if c.isFCTemplate() {
 		return c.fcTemplateResponseError(req, response)
 	}
+	if c.isFCSandboxTemplateCache() {
+		return c.fcTemplateCacheResponseError(req, response)
+	}
 	if !c.isFCSandboxTeam() {
 		return openAPIBusinessError(response)
 	}

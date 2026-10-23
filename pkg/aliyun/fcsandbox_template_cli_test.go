@@ -190,6 +190,15 @@ func TestNativeTemplateCLIUnknownAmbiguousAssignmentsFailClosed(t *testing.T) {
 	}
 }
 
+func TestNativeTemplateCLISDKAmbiguousRequestIDFailsClosed(t *testing.T) {
+	response := `{"code":"InvalidParameter","message":"rejected","requestId":"password=blue river"}`
+	caller := aliyun.NativeTemplateOutputCallerForTest(t, []string{response}, 400)
+	output, exit := runNativeTemplateTestCLI(t, context.Background(), caller, "create", "--name", "native")
+	if exit != 2 || strings.Contains(output, "river") || !strings.Contains(output, `"request_id":"[REDACTED]"`) {
+		t.Fatalf("SDK request ID retained an ambiguous credential suffix: exit=%d %s", exit, output)
+	}
+}
+
 func TestNativeTemplateCLIPaginationPreservesOpaqueToken(t *testing.T) {
 	for _, tc := range []struct{ token, username string }{{"password=cursor-2", ""}, {"password=blue river", ""}, {"page-2", "a"}, {"cursor-2", "cursor-2"}} {
 		t.Run(tc.token+"/"+tc.username, func(t *testing.T) {

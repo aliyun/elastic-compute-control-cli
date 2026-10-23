@@ -796,7 +796,40 @@ func sweepCmd() *cobra.Command {
 	f.DurationVar(&ttl, "ttl", 0, "delete resources older than this (ttl mode); 0 deletes all matched")
 	f.BoolVar(&dryRun, "dry-run", false, "list what would be deleted without deleting")
 	f.IntVar(&concurrency, "concurrency", 20, "parallel deletes within a resource kind")
-	cmd.AddCommand(sweepCheckCmd(), sweepReplayCmd())
+	cmd.AddCommand(sweepCheckCmd(), sweepReplayCmd(), sweepReconcileTemplateCacheCmd())
+	return cmd
+}
+
+func sweepReconcileTemplateCacheCmd() *cobra.Command {
+	var region, journalBin, surface, runID, profile, journalSHA, journalBinSHA, probeBin, probeBinSHA string
+	cmd := &cobra.Command{
+		Use:   "reconcile-template-cache JOURNAL",
+		Short: "Verify one pending Template Cache create before journal replay",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := signalContext()
+			defer cancel()
+			result, err := sweeper.ReconcilePendingTemplateCache(ctx, args[0], sweeper.TemplateCacheReconcileOptions{
+				ReplayOptions: sweeper.ReplayOptions{Config: execpkg.Config{Bin: journalBin, Region: region}, RunID: runID, Surface: surface},
+				Profile:       profile, JournalSHA256: journalSHA, JournalBinSHA256: journalBinSHA,
+				ProbeBin: probeBin, ProbeBinSHA256: probeBinSHA,
+			})
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&region, "region", "", "expected Alibaba Cloud region")
+	f.StringVar(&journalBin, "ecctl-bin", "", "original journal ecctl binary")
+	f.StringVar(&surface, "surface", "", "expected command surface: public|full")
+	f.StringVar(&runID, "run-id", "", "expected run id")
+	f.StringVar(&profile, "profile", "", "expected native Template profile")
+	f.StringVar(&journalSHA, "journal-sha256", "", "original pending journal SHA-256")
+	f.StringVar(&journalBinSHA, "ecctl-sha256", "", "original journal binary SHA-256")
+	f.StringVar(&probeBin, "probe-ecctl-bin", "", "ecctl binary for read-only cache get")
+	f.StringVar(&probeBinSHA, "probe-ecctl-sha256", "", "probe binary SHA-256")
 	return cmd
 }
 

@@ -204,17 +204,19 @@ func (f *ProbeField) UnmarshalYAML(unmarshal func(any) error) error {
 }
 
 type Waiter struct {
-	Probe    string          `yaml:"probe"`
-	Target   string          `yaml:"target"`
-	Interval string          `yaml:"interval"`
-	Timeout  string          `yaml:"timeout"`
-	Failure  WaiterFailure   `yaml:"failure"`
-	Pending  []WaiterPending `yaml:"pending"`
-	Match    WaiterMatch     `yaml:"match"`
+	Probe           string          `yaml:"probe"`
+	Target          string          `yaml:"target"`
+	Interval        string          `yaml:"interval"`
+	Timeout         string          `yaml:"timeout"`
+	NotFoundPending bool            `yaml:"not_found_pending"`
+	Failure         WaiterFailure   `yaml:"failure"`
+	Pending         []WaiterPending `yaml:"pending"`
+	Match           WaiterMatch     `yaml:"match"`
 }
 
 type WaiterFailure struct {
-	States []string `yaml:"states"`
+	States      []string `yaml:"states"`
+	DetailField string   `yaml:"detail_field"`
 }
 
 type WaiterMatch struct {

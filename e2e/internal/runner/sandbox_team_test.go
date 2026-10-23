@@ -159,6 +159,80 @@ func TestRunTeamTextProfileRegistersCleanup(t *testing.T) {
 	}
 }
 
+func TestTemplateCacheCaseReservesOwnedTeam(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake CLI case is currently Unix-only")
+	}
+	root, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	goBin, err := osexec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "ecctl-fake-caller")
+	if runtime.GOOS == "darwin" {
+		// A freshly built standalone binary can be rejected on macOS.
+		launcher := "#!/bin/sh\ncd " + teamCommandArgument(root) + "\nexec " + teamCommandArgument(goBin) + " run ./e2e/internal/runner/testdata/team_text_profile.go \"$@\"\n"
+		if err := os.WriteFile(bin, []byte(launcher), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		build := osexec.Command(goBin, "build", "-o", bin, "./e2e/internal/runner/testdata/team_text_profile.go")
+		build.Dir = root
+		if output, err := build.CombinedOutput(); err != nil {
+			t.Fatalf("build fake CLI before timed step: %v: %s", err, output)
+		}
+	}
+	for key, value := range map[string]string{
+		"ECCTL_CONFIG_PATH":        filepath.Join(dir, "missing-ecctl.json"),
+		"ECCTL_ALIYUN_CONFIG_PATH": filepath.Join(dir, "missing-aliyun.json"),
+		"ECCTL_REGION":             "cn-hangzhou",
+		"FAKE_TEAM_DIR":            dir,
+		"FAKE_TEAM_JOURNAL":        "",
+		"FAKE_TEAM_LOST_RESPONSE":  "",
+		"FAKE_TEAM_DENY_LIST":      "1",
+	} {
+		t.Setenv(key, value)
+	}
+	if runtime.GOOS == "darwin" {
+		// Warm the exact go run invocation before the runner starts its step clock.
+		warm := osexec.Command(goBin, "run", "./e2e/internal/runner/testdata/team_text_profile.go", "--help")
+		warm.Dir = root
+		if output, err := warm.CombinedOutput(); err != nil {
+			t.Fatalf("warm fake CLI before timed step: %v: %s", err, output)
+		}
+	}
+	cases := filepath.Join(dir, "cases", "sandbox")
+	if err := os.MkdirAll(cases, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	caseBody := `resource: sandbox/template-cache
+steps:
+  - name: create owned Team
+    run: ecctl sandbox team create --name {{.team_name}} --description "{{.team_owner}}" --output=json
+    at: $.team
+    capture: {team_id: id}
+    teardown: ecctl sandbox team delete {{.team_id}} --timeout 5m
+`
+	if err := os.WriteFile(filepath.Join(cases, "cache.yaml"), []byte(caseBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	journal := filepath.Join(dir, "journal.json")
+	result, err := Run(context.Background(), Options{CasesDir: filepath.Join(dir, "cases"), InputsDir: filepath.Join(dir, "inputs"), RunID: "cache-owned-team", ExecutionID: "cache-owned-execution", Region: "cn-hangzhou", Surface: "public", EcctlBin: bin, Keep: true, CleanupJournal: journal, StepTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Summary.Passed != 1 || result.Summary.Failed != 0 {
+		t.Fatalf("owned cache Team create failed: %+v", result)
+	}
+	if entries := readJournalEntries(t, journal); len(entries) != 1 || entries[0].Teardown != "ecctl sandbox team delete team-owned --timeout 5m" {
+		t.Fatalf("owned Team finalizer = %+v", entries)
+	}
+}
+
 func TestRunTeamReservationClaimsJournalBeforeCreate(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		for _, changed := range []string{"same", "run", "execution", "region", "binary", "surface"} {

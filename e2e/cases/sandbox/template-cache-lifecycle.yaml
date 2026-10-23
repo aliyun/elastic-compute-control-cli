@@ -1,0 +1,81 @@
+resource: sandbox/template-cache
+requires_prerequisites: [sandbox.template]
+serial: true
+timeout: 50m
+
+steps:
+  - name: create Team for cache
+    run: >
+      ecctl sandbox team create --name {{.team_name}}
+      --description "{{.team_owner}}" --output=json
+    at: $.team
+    expect:
+      id: {type: string, min_len: 1}
+      status: {eq: active}
+    capture:
+      team_id: id
+    teardown: ecctl sandbox team delete {{.team_id}} --timeout 5m
+
+  - name: create fully built native Template
+    run: >
+      ecctl sandbox template create --openapi --team-id {{.team_id}}
+      --name {{.resource_prefix}}-cache-template
+      --runtime-config '@{{.prerequisites.sandbox.template.runtime_config_file}}'
+      --timeout 20m --output=json
+    at: $.template
+    expect:
+      id: {type: string, min_len: 1}
+      team_id: {eq: "{{.team_id}}"}
+      build_status: {eq: ready}
+    capture:
+      native_template_id: id
+    teardown: ecctl sandbox template delete {{.native_template_id}} --openapi --team-id {{.team_id}}
+
+  - name: create
+    run: >
+      ecctl sandbox template-cache create --template-id {{.native_template_id}}
+      --team-id {{.team_id}} --timeout 20m --output=json
+    at: $.template_cache
+    expect:
+      id: {eq: "{{.native_template_id}}"}
+      team_id: {eq: "{{.team_id}}"}
+      status: {eq: Success}
+    capture:
+      cache_template_id: id
+    teardown: ecctl sandbox template-cache delete {{.native_template_id}} --team-id {{.team_id}} --timeout 5m --output=json
+
+  - name: get
+    run: >
+      ecctl sandbox template-cache get {{.cache_template_id}}
+      --team-id {{.team_id}} --output=json
+    at: $.template_cache
+    expect:
+      id: {eq: "{{.native_template_id}}"}
+      team_id: {eq: "{{.team_id}}"}
+      status: {eq: Success}
+
+  - name: list
+    run: >
+      ecctl sandbox template-cache list --team-id {{.team_id}}
+      --template-id {{.cache_template_id}} --limit 1 --output=json
+    assert:
+      - 'len($.template_caches[?(@.id == "{{.native_template_id}}" && @.team_id == "{{.team_id}}" && @.status == "Success")]) == 1'
+
+  - name: delete
+    run: >
+      ecctl sandbox template-cache delete {{.cache_template_id}}
+      --team-id {{.team_id}} --timeout 5m --output=json
+    expect:
+      $.deleted: {eq: true}
+
+  - name: delete native Template
+    run: >
+      ecctl sandbox template delete {{.native_template_id}} --openapi
+      --team-id {{.team_id}} --output=json
+    expect:
+      $.deleted: {eq: true}
+
+  - name: delete Team
+    run: ecctl sandbox team delete {{.team_id}} --timeout 5m --output=json
+    expect:
+      $.deleted: {eq: true}

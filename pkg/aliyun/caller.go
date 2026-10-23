@@ -400,6 +400,11 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 			return nil, err
 		}
 	}
+	if c.isFCSandboxTemplateCache() {
+		if err := c.validateTemplateCacheRequest(req); err != nil {
+			return nil, err
+		}
+	}
 	resp, err := c.executeOpenAPIRequest(ctx, operation, req)
 	if err != nil {
 		if errors.Is(err, ErrCredentialLeaseExpired) || errors.Is(err, ErrCredentialIdentityChanged) {
@@ -415,6 +420,27 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		}
 		if callerBoolMapValue(request, "DryRun") && isDryRunPassed(originalErr) {
 			return map[string]any{"DryRun": true}, nil
+		}
+		if c.isFCSandboxTemplateCache() {
+			code, message, requestID := callerCloudErrorFields(originalErr)
+			code = sanitizeTemplateCacheDiagnostic(code)
+			message = sanitizeTemplateCacheDiagnostic(message)
+			requestID = sanitizeTemplateCacheRequestID(requestID)
+			var options []ecerrors.Option
+			if requestID != "" {
+				options = append(options, ecerrors.WithRequestID(requestID))
+			}
+			if code != "" || message != "" {
+				options = append(options, ecerrors.WithRawCause(code, message))
+			}
+			if req.ApiName == "DescribeTemplateCache" && templateCacheAbsenceCode(code) {
+				return nil, ecerrors.NotFound("NotFound", cloudNotFoundMessage(request, code), options...)
+			}
+			if isDependencyViolation(originalErr) {
+				return nil, ecerrors.Service("DependencyViolation", message, false, options...)
+			}
+			retryable := isThrottling(originalErr) || (isReadOperation(operation) && isTransientNetworkError(originalErr))
+			return nil, ecerrors.Service("CloudAPIError", message, retryable, options...)
 		}
 		code, _, _ := callerCloudErrorFields(originalErr)
 		notFound := isCloudNotFound(originalErr)
@@ -433,6 +459,9 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		retryable := isThrottling(originalErr) || (isReadOperation(operation) && isTransientNetworkError(originalErr))
 		return nil, ecerrors.Service("CloudAPIError", callerCloudErrorMessage(err), retryable, cloudErrorOptions(err)...)
 	}
+	if c.isFCSandboxTemplateCache() {
+		resp = scrubTemplateCacheResponse(resp, req.ApiName)
+	}
 	if c.Resource != "" {
 		if err := c.resourceResponseError(req, resp); err != nil {
 			return nil, err
@@ -447,7 +476,7 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		}
 		c.templateMu.Unlock()
 	}
-	if c.isFCSandboxTeam() {
+	if c.isFCSandboxTeam() || c.isFCSandboxTemplateCache() {
 		// Hooks and probes retain successful request IDs in later errors.
 		// Normalize at the provider boundary before any consumer can retain it.
 		if requestID, ok := resp["requestId"].(string); ok {
@@ -455,7 +484,11 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 			for key, value := range resp {
 				normalized[key] = value
 			}
-			normalized["requestId"] = callerSanitizeCloudError(errors.New(requestID))
+			if c.isFCSandboxTemplateCache() {
+				normalized["requestId"] = sanitizeTemplateCacheRequestID(requestID)
+			} else {
+				normalized["requestId"] = callerSanitizeCloudError(errors.New(requestID))
+			}
 			resp = normalized
 		}
 	}
@@ -548,6 +581,10 @@ func (c *OpenAPICaller) executeOpenAPIRequest(ctx context.Context, operation str
 			attemptCtx = context.WithValue(ctx, telemetryRequestIDContextKey{}, capture)
 		}
 		resp, err := executor.ExecuteOpenAPI(attemptCtx, req)
+		if err == nil && c.isFCSandboxTemplateCache() {
+			// Validate the same normalized cache state returned to CallRaw.
+			resp = scrubTemplateCacheResponse(resp, req.ApiName)
+		}
 		spanErr := err
 		if c.isFCTemplate() {
 			c.rememberTemplateSecrets(resp, false)
@@ -559,6 +596,10 @@ func (c *OpenAPICaller) executeOpenAPIRequest(ctx context.Context, operation str
 		requestID := telemetryRequestIDForRequest(req, resp, spanErr, capture)
 		if c.isFCTemplate() {
 			requestID = validTelemetryRequestID(c.scrubTemplateRequestID(requestID))
+		}
+		if c.isFCSandboxTemplateCache() {
+			// CallRaw scrubs the provider response after this span ends.
+			requestID = sanitizeTemplateCacheRequestID(requestID)
 		}
 		endSpan(telemetry.APIResult{
 			Err:       spanErr,
@@ -1268,7 +1309,7 @@ func callerSanitizeCloudError(err error) string {
 		return ""
 	}
 	message := err.Error()
-	if sensitiveCredentialFieldPattern.MatchString(message) {
+	if sensitiveCredentialFieldPattern.MatchString(message) || sensitiveCredentialColonPattern.MatchString(message) {
 		return "Alibaba Cloud API request failed"
 	}
 	message = redactCredentialBearingURLs(message)
@@ -1351,17 +1392,40 @@ func cloudErrorOptions(err error) []ecerrors.Option {
 }
 
 var (
-	credentialURLPattern            = regexp.MustCompile(`https?://[^\s"]+`)
+	credentialURLPattern            = regexp.MustCompile(`(?i)https?://[^\s"]+`)
 	sensitiveCredentialFieldPattern = regexp.MustCompile(`(?i)(?:access[_-]?key[_-]?secret|security[_-]?token|sts[_-]?token|bearer[_-]?token|oauth[_-]?(?:access|refresh)[_-]?token|access[_-]?token|refresh[_-]?token)["']?\s*[:=]`)
-	sensitiveAssignmentPattern      = regexp.MustCompile(`(?i)(^|[\s?&])(?:AccessKeyId|SignatureNonce|Signature|SecurityToken|BearerToken|RefreshToken)=[^&\s"]+`)
-	sensitiveCredentialURLKeys      = map[string]bool{"accesskeyid": true, "signature": true, "signaturenonce": true, "securitytoken": true}
+	sensitiveCredentialColonPattern = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])(?:password|passwd|pwd|token|api[_-]?key|client[_-]?secret|authorization)["']?\s*:`)
+	sensitiveAssignmentPattern      = regexp.MustCompile(`(?i)(^|[\s?&])(?:AccessKeyId|SignatureNonce|Signature|SecurityToken|BearerToken|RefreshToken|Password|Passwd|Pwd|Token|Api[_-]?Key|Client[_-]?Secret)=[^&\s"]+`)
+	sensitiveCredentialURLKeys      = map[string]bool{
+		"accesskeyid": true, "signature": true, "signaturenonce": true, "sig": true, "securitytoken": true,
+		"password": true, "passwd": true, "pwd": true, "token": true,
+		"accesstoken": true, "refreshtoken": true, "idtoken": true, "authtoken": true,
+		"bearertoken": true, "sessiontoken": true, "apikey": true, "clientsecret": true,
+	}
 )
 
 func redactCredentialBearingURLs(message string) string {
 	return credentialURLPattern.ReplaceAllStringFunc(message, func(raw string) string {
 		parsed, err := url.Parse(raw)
-		if err != nil || !urlHasSensitiveQuery(parsed) {
+		if err != nil {
+			// A malformed URL can still contain credentials in its authority.
+			return "[REDACTED_URL]"
+		}
+		sensitiveQuery := urlHasSensitiveQuery(parsed.RawQuery)
+		sensitiveFragment := urlHasSensitiveQuery(parsed.Fragment)
+		if _, after, ok := strings.Cut(parsed.Fragment, "?"); ok {
+			sensitiveFragment = sensitiveFragment || urlHasSensitiveQuery(after)
+		}
+		if parsed.User == nil && !sensitiveQuery && !sensitiveFragment {
 			return raw
+		}
+		parsed.User = nil
+		if sensitiveFragment {
+			parsed.Fragment = ""
+			parsed.RawFragment = ""
+		}
+		if !sensitiveQuery {
+			return parsed.String()
 		}
 		parsed.RawQuery = ""
 		parsed.ForceQuery = false
@@ -1369,12 +1433,20 @@ func redactCredentialBearingURLs(message string) string {
 	})
 }
 
-func urlHasSensitiveQuery(parsed *url.URL) bool {
-	if parsed == nil || parsed.RawQuery == "" {
+func urlHasSensitiveQuery(raw string) bool {
+	if raw == "" {
 		return false
 	}
-	for key := range parsed.Query() {
-		if sensitiveCredentialURLKeys[strings.ToLower(key)] {
+	query, err := url.ParseQuery(raw)
+	if err != nil {
+		return true
+	}
+	for key := range query {
+		normalized := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(key))
+		if sensitiveCredentialURLKeys[normalized] ||
+			strings.HasPrefix(normalized, "xoss") ||
+			strings.HasPrefix(normalized, "xamz") ||
+			strings.HasPrefix(normalized, "xgoog") {
 			return true
 		}
 	}

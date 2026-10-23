@@ -172,6 +172,14 @@ func validTemplateResultDigest(value string) bool {
 }
 
 func readTemplateCreateIntents(path string, meta report.CleanupJournal, env []string) ([]TemplateCreateIntent, error) {
+	return readTemplateCreateIntentsMode(path, meta, env, false)
+}
+
+func readTemplateCreateIntentsForRecovery(path string, meta report.CleanupJournal, env []string) ([]TemplateCreateIntent, error) {
+	return readTemplateCreateIntentsMode(path, meta, env, true)
+}
+
+func readTemplateCreateIntentsMode(path string, meta report.CleanupJournal, env []string, allowPendingCache bool) ([]TemplateCreateIntent, error) {
 	var intents []TemplateCreateIntent
 	resolved, resolveErr := ResolveJournalPath(path)
 	if resolveErr != nil {
@@ -188,7 +196,7 @@ func readTemplateCreateIntents(path string, meta report.CleanupJournal, env []st
 	if os.IsNotExist(err) && meta.NativeJournalPath == "" {
 		// A legacy journal may have no directory, but evidence already
 		// loaded from its ledger must still agree with empty discovery.
-		return nil, validateTemplateLedger(path, meta, nil, nil)
+		return nil, validateTemplateLedger(path, meta, nil, nil, allowPendingCache)
 	}
 	if err != nil {
 		return nil, err
@@ -255,7 +263,7 @@ func readTemplateCreateIntents(path string, meta report.CleanupJournal, env []st
 		}
 		intents = append(intents, intent)
 	}
-	if err := validateTemplateLedger(path, meta, intents, seen); err != nil {
+	if err := validateTemplateLedger(path, meta, intents, seen, allowPendingCache); err != nil {
 		return nil, err
 	}
 	return intents, nil

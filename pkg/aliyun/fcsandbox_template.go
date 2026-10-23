@@ -302,9 +302,9 @@ func (c *OpenAPICaller) rememberTemplateSecrets(value any, auth bool) {
 var templateSecretAssignment = regexp.MustCompile(`(?i)(?:password|userName|accessKeySecret|securityToken|access[_-]?token|refresh[_-]?token)["']?\s*[:=]\s*`)
 
 func scrubTemplateAssignments(value string) string {
-	if templateSecretAssignment.MatchString(value) {
-		// Free-form provider text supplies no trustworthy credential boundary,
-		// even when quote characters occur inside an unquoted password.
+	if templateSecretAssignment.MatchString(value) || strings.Contains(value, "[REDACTED_CREDENTIAL]") {
+		// Free-form provider text supplies no trustworthy credential boundary.
+		// A generic scrub can also leave a secret suffix after its marker.
 		return "[REDACTED]"
 	}
 	return value

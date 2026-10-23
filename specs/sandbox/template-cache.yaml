@@ -1,0 +1,202 @@
+schema_version: 2
+product: sandbox
+provider: aliyun
+api_product: FCSandbox
+resource: template-cache
+aliases: [tcache]
+kind: regional
+display_name: {en: template cache, zh-CN: 模板缓存}
+description: {en: Manage native FC sandbox template image caches., zh-CN: 管理原生 FC 沙箱模板镜像缓存。}
+examples:
+  - ecctl sandbox template-cache create --template-id <template-id> --team-id <team-id> --region cn-beijing
+  - ecctl sandbox template-cache list --team-id <team-id> --region cn-beijing
+
+identity:
+  field: id
+  output_root: {one: template_cache, many: template_caches}
+
+schema:
+  fields:
+    id:
+      type: string
+      description: {en: template ID identifying the cache, zh-CN: 标识缓存的模板 ID}
+    template_id:
+      type: string
+      description: {en: cached template ID, zh-CN: 已缓存模板 ID}
+    team_id:
+      type: string
+      description: {en: owning Team ID, zh-CN: 所属团队 ID}
+    status:
+      type: string
+      enum: [InProgress, Success, Failed, Deleting, Evicted]
+      description: {en: "cache state, separate from template build state; provider creating from Create and Describe is shown as InProgress, and ready as Success", zh-CN: 缓存状态，与模板构建状态不同；创建和查询返回的 creating 显示为 InProgress，服务端的 ready 显示为 Success}
+    status_reason:
+      type: string
+      description: {en: cache state reason, zh-CN: 缓存状态原因}
+    progress:
+      type: integer
+      description: {en: cache warming progress percentage, zh-CN: 缓存预热进度百分比}
+    image_digest:
+      type: string
+      description: {en: source image digest, zh-CN: 源镜像摘要}
+    image_size_mb:
+      type: integer
+      description: {en: cached image size in MB, zh-CN: 缓存镜像大小（MB）}
+    created_time:
+      type: string
+      description: {en: cache creation time, zh-CN: 缓存创建时间}
+    ready_time:
+      type: string
+      description: {en: cache ready time, zh-CN: 缓存就绪时间}
+
+controls:
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description: {en: maximum caches per page, zh-CN: 每页最多返回的缓存数量}
+  next_token:
+    type: string
+    description: {en: server pagination token, zh-CN: 服务端分页令牌}
+  no_wait:
+    type: boolean
+    description: {en: return after creation or deletion is accepted, zh-CN: 创建或删除请求被受理后立即返回}
+  timeout:
+    type: duration
+    description: {en: cache readiness or deletion confirmation timeout, zh-CN: 缓存就绪或删除确认超时时间}
+
+probes:
+  detail:
+    api: DescribeTemplateCache
+    request: {templateID: $.id, teamID: $.team_id}
+    response:
+      item: $.templateCache
+      request_id: $.requestId
+      id: $.templateID
+      state: $.status
+      fields: &cache_fields
+        id: $.templateID
+        template_id: $.templateID
+        team_id: $.teamID
+        status: $.status
+        status_reason: $.statusReason
+        progress: $.progress
+        image_digest: $.imageDigest
+        image_size_mb: $.imageSizeMB
+        created_time: $.createdTime
+        ready_time: $.readyTime
+  list:
+    api: ListTemplateCache
+    request: {teamID: $.team_id, templateID: $.template_id, status: $.status, maxResults: $.limit, nextToken: $.next_token}
+    response:
+      items: $.templateCaches
+      next_token: $.nextToken
+      request_id: $.requestId
+      id: $.templateID
+      state: $.status
+      fields: *cache_fields
+
+waiters:
+  ready:
+    probe: detail
+    target: Success
+    interval: 15s
+    timeout: 20m
+    not_found_pending: true
+    failure: {states: [Failed, Evicted], detail_field: status_reason}
+  absent_after_delete:
+    probe: detail
+    target: absent
+    interval: 2s
+    timeout: 300s
+
+bindings:
+  create_cache:
+    api: CreateTemplateCache
+    request:
+      body: {teamID: $.team_id, templateID: $.template_id}
+    require_all: [{request: body.templateID}]
+    id_from: $.templateCache.templateID
+    context_from: {created_cache: $.templateCache}
+    request_id_from: $.requestId
+    wait: ready
+  delete_cache:
+    api: DeleteTemplateCache
+    request: {templateID: $.id, teamID: $.team_id}
+    require_all: [{request: templateID}]
+    request_id_from: $.requestId
+    wait: absent_after_delete
+
+operations:
+  create:
+    description: {en: Start warming a native FC template cache, zh-CN: 提交原生 FC 模板缓存预热任务}
+    help:
+      en: The template must finish building first. Wait for cache status Success by default; --no-wait returns the accepted task without claiming readiness.
+      zh-CN: 模板须先完成构建。默认等待缓存状态变为 Success；--no-wait 仅返回已受理任务，不表示就绪。
+    input:
+      fields:
+        - template_id: {required: true}
+        - team_id
+      controls: [no_wait, timeout]
+    workflow:
+      - binding: create_cache
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.created_cache.templateID
+            template_id: $context.created_cache.templateID
+            team_id: $context.created_cache.teamID
+            status: $context.created_cache.status
+            status_reason: $context.created_cache.statusReason
+            progress: $context.created_cache.progress
+            image_digest: $context.created_cache.imageDigest
+            image_size_mb: $context.created_cache.imageSizeMB
+            created_time: $context.created_cache.createdTime
+            ready_time: $context.created_cache.readyTime
+        when: input.no_wait
+    examples: [ecctl sandbox template-cache create --template-id <template-id> --team-id <team-id> --region cn-beijing]
+  delete:
+    description: {en: Delete a native FC template cache, zh-CN: 删除原生 FC 模板缓存}
+    help:
+      en: Wait for DescribeTemplateCache to report the cache absent before reporting deletion. Use --no-wait to return after acceptance.
+      zh-CN: 默认等待 DescribeTemplateCache 确认缓存不存在后报告删除；--no-wait 在请求受理后返回。
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - team_id
+      controls: [no_wait, timeout]
+    workflow:
+      - binding: delete_cache
+        wait_unless: input.no_wait
+      - emit:
+          fields: {id: $input.id, template_id: $input.id, team_id: $input.team_id}
+          deleted: true
+        unless: input.no_wait
+    output:
+      fields:
+        actions: $result.actions
+        template_cache: {id: $input.id, template_id: $input.id, team_id: $input.team_id}
+        deleted: {value: $result.deleted, unless: $input.no_wait}
+        deletion_requested: {value: true, when: $input.no_wait}
+    examples: [ecctl sandbox template-cache delete <template-id> --team-id <team-id> --region cn-beijing]
+  get:
+    aliases: [show, describe]
+    description: {en: Get native FC template cache status, zh-CN: 获取原生 FC 模板缓存状态}
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - team_id
+    workflow:
+      - probe: detail
+        ids: [$input.id]
+        not_found: error
+    examples: [ecctl sandbox template-cache get <template-id> --team-id <team-id> --region cn-beijing]
+  list:
+    description: {en: List native FC template caches, zh-CN: 列出原生 FC 模板缓存}
+    input:
+      fields: [team_id, template_id, status]
+      controls: [limit, next_token]
+    workflow:
+      - probe: list
+        many: true
+    examples: [ecctl sandbox template-cache list --team-id <team-id> --limit 100 --region cn-beijing]

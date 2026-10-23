@@ -1124,7 +1124,7 @@ func runCase(
 	data := vars.Clone(base)
 	data["run_name"] = opt.RunName + "-" + caseSlug(s.Resource)
 	data["inputs"] = inputs
-	if s.Resource == "sandbox/team" {
+	if s.Resource == "sandbox/team" || s.Resource == "sandbox/template-cache" {
 		if err := teamOwnership(data); err != nil {
 			cr.Status, cr.Error = report.StatusError, err.Error()
 			return cr
@@ -1439,6 +1439,7 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 	var privateDisplay string
 	var teamIntent *teamCreateIntent
 	var templateIntent *templateCreateIntent
+	var cacheReservation *cleanupItem
 	if st.Local != nil {
 		sctx, cancel := context.WithTimeout(ctx, timeout)
 		res = runLocalAction(sctx, data, *st.Local)
@@ -1478,6 +1479,13 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 			}
 			cmd, execCfg = templateIntent.command, templateIntent.cfg
 		}
+		if teamIntent == nil && templateIntent == nil {
+			cmd, execCfg, cacheReservation, err = cl.reserveTemplateCacheCreate(ctx, scope, cmd, execCfg, data, st, lockKeys)
+			if err != nil {
+				sr.Status, sr.Error = report.StatusError, err.Error()
+				return sr, false
+			}
+		}
 		cmd, err = cl.bindNativeTemplateDelete(*scope, cmd, "primary")
 		if err != nil {
 			sr.Status, sr.Error = report.StatusError, err.Error()
@@ -1488,10 +1496,29 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 			sr.Status, sr.Error = report.StatusError, err.Error()
 			return sr, false
 		}
+		cmd, err = cl.bindOwnedTemplateCacheDelete(*scope, cmd, execCfg)
+		if err != nil {
+			sr.Status, sr.Error = report.StatusError, err.Error()
+			return sr, false
+		}
 		renderedCommand = cmd
 		for attempt := 0; ; attempt++ {
 			sctx, cancel := context.WithTimeout(ctx, timeout)
-			invoke := func(bound execpkg.Config) error { res = execpkg.Run(sctx, bound, cmd); return nil }
+			invoke := func(bound execpkg.Config) error {
+				cacheCommand, recognized, parseErr := parseTemplateCacheCommand(cmd)
+				if parseErr != nil {
+					return parseErr
+				}
+				if recognized && cacheCommand.action == "delete" {
+					cl.mu.Lock()
+					defer cl.mu.Unlock()
+					if err := cl.verifyReservedTemplateCacheDelete(*scope, cmd); err != nil {
+						return err
+					}
+				}
+				res = cl.runCommand(sctx, bound, cmd)
+				return nil
+			}
 			if isDestructiveStep(cmd) {
 				if err := cl.withTemplateCleanupGuard(sctx, "primary", invoke); err != nil {
 					cancel()
@@ -1502,7 +1529,7 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 				_ = invoke(execCfg)
 			}
 			cancel()
-			if teamIntent != nil || templateIntent != nil || res.Exit == 0 || !isTransientNetworkError(res) || attempt >= len(stepRetryDelays) {
+			if teamIntent != nil || templateIntent != nil || cacheReservation != nil || res.Exit == 0 || !isTransientNetworkError(res) || attempt >= len(stepRetryDelays) {
 				break
 			}
 			shown := report.Scrub(renderedCommand)
@@ -1527,6 +1554,22 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 	sr.DurationMs = res.Duration.Milliseconds()
 	sr.Stdout = strings.TrimSpace(res.Stdout)
 	sr.Stderr = strings.TrimSpace(res.Stderr)
+	if cacheReservation != nil && !res.Started {
+		if err := cl.retireUnstartedCacheCreate(cacheReservation); err != nil {
+			sr.Status, sr.Error = report.StatusError, "retire unstarted Template Cache create: "+err.Error()
+			return sr, false
+		}
+	}
+	if cacheReservation != nil && res.Err == nil && res.Exit == 0 {
+		if !confirmedTemplateCacheReady(res, cacheReservation) {
+			sr.Status, sr.Error = report.StatusError, "Template Cache create did not confirm a ready owned cache"
+			return sr, false
+		}
+		if err := cl.settleCacheCreate(cacheReservation); err != nil {
+			sr.Status, sr.Error = report.StatusError, "settle Template Cache create: "+err.Error()
+			return sr, false
+		}
+	}
 	if templateIntent != nil {
 		if err := finishTemplateCreate(res, cl, scope, data, lockKeys, timeout, templateIntent); err != nil {
 			sr.Status = report.StatusFail
@@ -1558,7 +1601,7 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 
 	// Register teardown as soon as the create-ish step ran (even if asserts
 	// later fail) so the resource it produced is cleaned up.
-	if st.Teardown != "" && templateIntent == nil {
+	if st.Teardown != "" && templateIntent == nil && cacheReservation == nil {
 		td, terr := vars.Render(st.Teardown, mergeCaptures(data, res, st))
 		if teamIntent != nil {
 			// The normal success path must use the same safe, exact target as

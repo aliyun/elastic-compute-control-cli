@@ -182,7 +182,8 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 		if err := validateJournalTeardown(entry.Teardown); err != nil {
 			result.Errors++
 			result.Details = append(result.Details, fmt.Sprintf("journal %s: invalid teardown: %v", entry.Scope, err))
-			continue
+			// The invalid command may be a child whose parents are earlier.
+			break
 		}
 		bound, err := journalfile.PrepareTemplateCleanup(ctx, path, journal, opt.Config)
 		if err != nil {
@@ -192,6 +193,9 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 		if res.Err != nil || (res.Exit != 0 && res.Exit != 4) {
 			result.Errors++
 			result.Details = append(result.Details, fmt.Sprintf("journal %s: delete exit=%d %s", entry.Scope, res.Exit, failureReason(res)))
+			if journalfile.IsTemplateCacheDelete(entry.Teardown) {
+				break
+			}
 			continue
 		}
 		result.Deleted++

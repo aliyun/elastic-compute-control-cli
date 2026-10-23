@@ -13,7 +13,9 @@ import (
 
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
+	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
 )
 
@@ -75,6 +77,101 @@ func requestIDRegressionAssertID(t *testing.T, span map[string]any, want string)
 	}
 	if !present || actual != want {
 		t.Errorf("cloud request ID = %#v (present=%t), want %q; span = %#v", actual, present, want, span)
+	}
+}
+
+func TestOpenAPITelemetryTemplateCacheProviderReadyOutcome(t *testing.T) {
+	restore := engine.SetTimeScaleForTest(0)
+	defer restore()
+	resource, err := spec.LoadResource("../../specs", "sandbox", "template-cache")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := `{"templateID":"tpl-1","teamID":"team-1","status":"ready"}`
+	for _, tc := range []struct {
+		name, action string
+		input        map[string]any
+		responses    []string
+		wantSpans    int
+	}{
+		{"get", "get", map[string]any{"id": "tpl-1", "team_id": "team-1"}, []string{`{"code":"200","templateCache":` + ready + `}`}, 1},
+		{"list", "list", map[string]any{"team_id": "team-1", "status": "Success"}, []string{`{"code":"200","templateCaches":[` + ready + `]}`}, 1},
+		{"create no wait", "create", map[string]any{"template_id": "tpl-1", "team_id": "team-1", "no_wait": true}, []string{`{"code":"200","templateCache":` + ready + `}`}, 1},
+		{"create readiness poll", "create", map[string]any{"template_id": "tpl-1", "team_id": "team-1"}, []string{
+			`{"code":"200","templateCache":{"templateID":"tpl-1","teamID":"team-1","status":"InProgress"}}`,
+			`{"code":"200","templateCache":` + ready + `}`,
+		}, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caller := &OpenAPICaller{Product: "FCSandbox", Resource: "template-cache", Region: "cn-hangzhou", Profile: resolvedOpenAPIProfile{Language: "en"}, executor: &fakeOpenAPIExecutor{responses: tc.responses}}
+			ctx, session, exporter := requestIDRegressionSession(t)
+			result, err := engine.NewExecutor(resource, caller).Execute(ctx, engine.Request{Action: tc.action, Input: tc.input})
+			if err != nil {
+				t.Fatalf("CLI-facing %s failed: %v", tc.action, err)
+			}
+			item := result.Item
+			if tc.action == "list" {
+				if len(result.Items) != 1 {
+					t.Fatalf("listed items = %d, want 1", len(result.Items))
+				}
+				item = result.Items[0]
+			}
+			if item["status"] != "Success" {
+				t.Fatalf("CLI-facing status = %#v, want Success", item["status"])
+			}
+			session.Finish("ecctl sandbox template-cache "+tc.action, 0)
+			for attempt, span := range requestIDRegressionAPISpans(t, exporter, tc.wantSpans) {
+				if span["ecctl.cloud.outcome"] != "success" {
+					t.Errorf("attempt %d outcome = %#v, want success; span = %#v", attempt+1, span["ecctl.cloud.outcome"], span)
+				}
+			}
+		})
+	}
+}
+
+func TestOpenAPITelemetryTemplateCacheScrubsRequestIDs(t *testing.T) {
+	for _, source := range []string{"header", "response"} {
+		for _, tc := range []struct{ name, requestID, want string }{
+			{"credential_assignment", "token=abc123", ""},
+			{"access_key_shape", "LTAIabcdefghijklmnop", ""},
+			{"compact_token_shape", "AbC_def-123", ""},
+			{"opaque_id", "req-cache-safe", "req-cache-safe"},
+			{"provider_uuid", "4FDE2B91-8A2D-49B0-8A49-1234567890AB", "4FDE2B91-8A2D-49B0-8A49-1234567890AB"},
+		} {
+			t.Run(source+"/"+tc.name, func(t *testing.T) {
+				profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
+				executor, err := newStaticDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+				if err != nil {
+					t.Fatal(err)
+				}
+				executor.client.HttpClient = requestIDRegressionHTTPClient(func(request *http.Request, _ *http.Transport) (*http.Response, error) {
+					body := map[string]any{"code": "200", "requestId": "req-body-safe", "templateCache": map[string]any{"templateID": "tpl-1", "teamID": "team-1", "status": "Success"}}
+					header := ""
+					if source == "header" {
+						header = "X-Acs-Request-Id"
+					} else {
+						body["requestId"] = tc.requestID
+					}
+					encoded, err := json.Marshal(body)
+					if err != nil {
+						return nil, err
+					}
+					return requestIDRegressionResponse(request, header, tc.requestID, string(encoded)), nil
+				})
+				caller := &OpenAPICaller{Product: "FCSandbox", Resource: "template-cache", Region: "cn-hangzhou", Profile: profile, executor: executor, retryMaxAttempts: 1}
+				ctx, session, exporter := requestIDRegressionSession(t)
+				response, err := caller.Call(ctx, "DescribeTemplateCache", map[string]any{"templateID": "tpl-1", "teamID": "team-1"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if source == "response" && response["requestId"] != tc.want {
+					t.Fatal("CLI response request ID did not use the conservative filter")
+				}
+				session.Finish("ecctl sandbox template-cache get", 0)
+				spans := requestIDRegressionAPISpans(t, exporter, 1)
+				requestIDRegressionAssertID(t, spans[0], tc.want)
+			})
+		}
 	}
 }
 

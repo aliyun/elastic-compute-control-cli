@@ -209,6 +209,9 @@ non_sweepable:
   - resource: sandbox/template
     reason: provider-limitation
     review_after: "2026-12-03"
+  - resource: sandbox/template-cache
+    reason: provider-limitation
+    review_after: "2026-12-20"
   - resource: sandbox/sandbox
     reason: provider-limitation
     review_after: "2026-12-03"

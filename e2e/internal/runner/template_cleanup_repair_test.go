@@ -284,6 +284,8 @@ func nativeCleanupFixture(t *testing.T, keep bool) (execpkg.Config, *cleanup, st
 	t.Setenv("FAKE_NATIVE_DIR", dir)
 	t.Setenv("FAKE_CONFIG_RESPONSE", "")
 	t.Setenv("FAKE_CONFIG_EXIT", "")
+	t.Setenv("FAKE_CACHE_CREATE_LOST_RESPONSE", "")
+	t.Setenv("FAKE_CACHE_CREATE_ACCEPTED_ONLY", "")
 	if err := os.WriteFile(filepath.Join(dir, "current"), []byte("account-a"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -304,6 +306,22 @@ if [[ "$*" == *"template create"* ]]; then
  echo "create profile=$profile flag=$given" >> "$FAKE_NATIVE_DIR/calls"
  echo account-b > "$FAKE_NATIVE_DIR/current"
  echo '{"template":{"id":"tpl-1","team_id":"team-1"}}'; exit 0
+fi
+if [[ "$*" == *"template-cache create"* || "$*" == *"tcache create"* ]]; then
+ journal="$(cat "$FAKE_NATIVE_DIR/journal.json")"
+ if [[ "$journal" != *"'template-cache' 'delete'"* && "$journal" != *"'tcache' 'delete'"* ]] || [[ "$profile" != account-a ]]; then
+  echo 'cache-create reached cloud without exact journal or profile' >> "$FAKE_NATIVE_DIR/calls"; exit 2
+ fi
+ echo "cache-create journaled profile=$profile" >> "$FAKE_NATIVE_DIR/calls"
+ if [[ "$FAKE_CACHE_CREATE_LOST_RESPONSE" == 1 ]]; then echo 'connection reset by peer' >&2; exit 1; fi
+ if [[ "$FAKE_CACHE_CREATE_ACCEPTED_ONLY" == 1 ]]; then echo '{"template_cache":{"id":"tpl-1","team_id":"team-1","status":"InProgress"}}'; exit 0; fi
+ echo '{"template_cache":{"id":"tpl-1","team_id":"team-1","status":"Success"}}'; exit 0
+fi
+if [[ "$*" == *"template-cache delete"* || "$*" == *"tcache delete"* ]]; then
+ echo "cache-delete profile=$profile" >> "$FAKE_NATIVE_DIR/calls"
+ if [[ "$FAKE_CACHE_DELETE_FAILURE" == 1 ]]; then echo 'cache delete failed' >&2; exit 2; fi
+ if [[ "$profile" != account-a ]]; then exit 2; fi
+ echo '{"deleted":true}'; exit 0
 fi
 if [[ "$*" == *"template delete"* || "$*" == *"tpl rm"* || "$*" == *"tpl remove"* ]]; then
  echo "template-delete profile=$profile flag=$given" >> "$FAKE_NATIVE_DIR/calls"

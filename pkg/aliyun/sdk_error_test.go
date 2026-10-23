@@ -101,6 +101,52 @@ func TestOpenAPICallerSDKResponseErrors(t *testing.T) {
 	}
 }
 
+func TestTemplateCacheSDKResponseFieldsRedactCredentialAssignments(t *testing.T) {
+	for _, disableSDKError := range []bool{true, false} {
+		for _, tc := range []struct {
+			name, code, message, requestID       string
+			wantCode, wantMessage, wantRequestID string
+			status                               int
+			wantErrorCode                        string
+		}{
+			{"authorization message", "Forbidden", "Authorization=Bearer reviewer-canary-blue reviewer-canary-river", "req-ordinary", "Forbidden", "[REDACTED]", "req-ordinary", http.StatusForbidden, "CloudAPIError"},
+			{"multiword password message", "Forbidden", "Password=reviewer-canary-blue reviewer-canary-river", "req-ordinary", "Forbidden", "[REDACTED]", "req-ordinary", http.StatusForbidden, "CloudAPIError"},
+			{"multiword token code", "Token=reviewer-canary-blue reviewer-canary-river", "provider unavailable", "req-ordinary", "[REDACTED]", "provider unavailable", "req-ordinary", http.StatusForbidden, "CloudAPIError"},
+			{"auth token code", "AuthToken=reviewer-canary", "provider unavailable", "req-ordinary", "[REDACTED]", "provider unavailable", "req-ordinary", http.StatusForbidden, "CloudAPIError"},
+			{"session token request ID", "Forbidden", "provider unavailable", "SessionToken=reviewer-canary", "Forbidden", "provider unavailable", "", http.StatusForbidden, "CloudAPIError"},
+			{"bare access key request ID", "Forbidden", "provider unavailable", "LTAIabcdefghijklmnop", "Forbidden", "provider unavailable", "", http.StatusForbidden, "CloudAPIError"},
+			{"compact token request ID", "Forbidden", "provider unavailable", "AbC_def-123", "Forbidden", "provider unavailable", "", http.StatusForbidden, "CloudAPIError"},
+			{"ordinary diagnostics", "Forbidden", "provider unavailable", "req-ordinary", "Forbidden", "provider unavailable", "req-ordinary", http.StatusForbidden, "CloudAPIError"},
+			{"cache absent", "TemplateCacheNotFound", "cache absent", "req-ordinary", "TemplateCacheNotFound", "cache absent", "req-ordinary", http.StatusNotFound, "NotFound"},
+		} {
+			t.Run(fmt.Sprintf("%s/disableSDKError=%t", tc.name, disableSDKError), func(t *testing.T) {
+				profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
+				executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+				if err != nil {
+					t.Fatal("could not set up local SDK executor")
+				}
+				executor.client.DisableSDKError = tea.Bool(disableSDKError)
+				body, err := json.Marshal(map[string]any{"code": tc.code, "message": tc.message, "requestId": tc.requestID})
+				if err != nil {
+					t.Fatal("could not encode local SDK response")
+				}
+				executor.client.HttpClient = sdkErrorHTTPClient{status: tc.status, body: string(body)}
+				caller := &OpenAPICaller{Product: "FCSandbox", Resource: "template-cache", Region: "cn-hangzhou", Profile: profile, executor: executor}
+				_, err = caller.CallRaw(context.Background(), "DescribeTemplateCache", map[string]any{"templateID": "tpl-1", "teamID": "team-1"})
+				var app *ecerrors.AppError
+				if !errors.As(err, &app) || app.Payload().Code != tc.wantErrorCode {
+					t.Fatal("non-2xx Template Cache response changed error classification")
+				}
+				action := ecerrors.ActionFromError("DescribeTemplateCache", err)
+				public, marshalErr := json.Marshal(map[string]any{"error": app.Payload(), "action": action, "message": err.Error()})
+				if marshalErr != nil || action.Code != tc.wantCode || action.Message != tc.wantMessage || action.RequestID != tc.wantRequestID || strings.Contains(string(public), "reviewer-canary") {
+					t.Fatal("structured SDK diagnostic was not safely retained")
+				}
+			})
+		}
+	}
+}
+
 func TestOpenAPICallerWrappedSDKErrors(t *testing.T) {
 	body := map[string]any{"Code": "InvalidParameter", "Message": "original provider message", "RequestId": "req-body", "securityToken": "unrelated-private-token"}
 	daraErr := dara.NewSDKError(map[string]any{"code": "InvalidParameter", "message": "code: 400, formatted message request id: req-body", "data": body})

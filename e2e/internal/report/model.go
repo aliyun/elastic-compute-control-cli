@@ -128,11 +128,12 @@ type Check struct {
 
 // Resource is a created resource recorded for the manifest.
 type Resource struct {
-	Scope       string `json:"scope"` // "stack" or the case name
-	Teardown    string `json:"teardown"`
-	RegionRole  string `json:"region_role,omitempty"`
-	Region      string `json:"region,omitempty"`
-	ExecutionID string `json:"execution_id,omitempty"`
+	Scope              string `json:"scope"` // "stack" or the case name
+	Teardown           string `json:"teardown"`
+	RegionRole         string `json:"region_role,omitempty"`
+	Region             string `json:"region,omitempty"`
+	ExecutionID        string `json:"execution_id,omitempty"`
+	CacheCreatePending bool   `json:"cache_create_pending,omitempty"`
 }
 
 // Failed reports whether any case failed or errored.

@@ -33,14 +33,15 @@ const exitNotFound = 4
 
 // cleanupItem is one teardown command and whether it has already run.
 type cleanupItem struct {
-	scope           string
-	cmd             string
-	role            string
-	lockKeys        []string
-	done            bool
-	running         bool
-	deferred        bool
-	templateBinding *journalfile.TemplateCreateIntent
+	scope              string
+	cmd                string
+	role               string
+	lockKeys           []string
+	done               bool
+	running            bool
+	deferred           bool
+	cacheCreatePending bool
+	templateBinding    *journalfile.TemplateCreateIntent
 }
 
 // cleanup is the two-level teardown registry. Case scopes run when
@@ -70,23 +71,40 @@ func newCleanup(cfg map[string]execpkg.Config, operations *operationRuntime, kee
 
 // push registers a teardown command in a scope and records it in the manifest.
 func (c *cleanup) push(scope *[]*cleanupItem, name, cmd, role string, lockKeys []string, binding ...*journalfile.TemplateCreateIntent) error {
+	_, err := c.pushItem(scope, name, cmd, role, lockKeys, false, binding...)
+	return err
+}
+
+func (c *cleanup) pushPendingCacheCreate(scope *[]*cleanupItem, name, cmd, role string, lockKeys []string) (*cleanupItem, error) {
+	return c.pushItem(scope, name, cmd, role, lockKeys, true)
+}
+
+func (c *cleanup) pushItem(scope *[]*cleanupItem, name, cmd, role string, lockKeys []string, cacheCreatePending bool, binding ...*journalfile.TemplateCreateIntent) (*cleanupItem, error) {
 	if role == "" {
 		role = "primary"
 	}
 	cfg, ok := c.execCfg[role]
 	if !ok {
-		return fmt.Errorf("cleanup region role %q is not configured", role)
+		return nil, fmt.Errorf("cleanup region role %q is not configured", role)
 	}
 	keys, err := normalizeLockKeys(lockKeys)
 	if err != nil {
-		return fmt.Errorf("cleanup lock keys: %w", err)
+		return nil, fmt.Errorf("cleanup lock keys: %w", err)
 	}
-	it := &cleanupItem{scope: name, cmd: cmd, role: role, lockKeys: keys}
+	it := &cleanupItem{scope: name, cmd: cmd, role: role, lockKeys: keys, cacheCreatePending: cacheCreatePending}
 	if len(binding) > 0 {
 		copy := *binding[0]
 		it.templateBinding = &copy
 	}
 	c.mu.Lock()
+	if cacheCreatePending {
+		// The cache create has not launched. A failed journal reservation must
+		// not leave an in-memory delete eligible for case cleanup.
+		if err := c.appendJournalItemLocked(it); err != nil {
+			c.mu.Unlock()
+			return nil, err
+		}
+	}
 	*scope = append(*scope, it)
 	if it.templateBinding != nil {
 		// Creation ownership outlives a case scope, including --keep runs.
@@ -95,8 +113,66 @@ func (c *cleanup) push(scope *[]*cleanupItem, name, cmd, role string, lockKeys [
 	c.manifest = append(c.manifest, report.Resource{
 		Scope: name, Teardown: cmd, RegionRole: role, Region: cfg.Region, ExecutionID: c.journalMeta.ExecutionID,
 	})
-	err = c.appendJournalItemLocked(it)
+	if !cacheCreatePending {
+		err = c.appendJournalItemLocked(it)
+	}
 	c.mu.Unlock()
+	return it, err
+}
+
+// settleCacheCreate clears the durable replay fence only after the default
+// create command has waited for a visible, ready cache.
+func (c *cleanup) settleCacheCreate(item *cleanupItem) error {
+	return c.finishCacheCreate(item, false)
+}
+
+// A subprocess that did not start cannot have allocated a cache. Retire its
+// exact reservation durably before parent resource cleanup may proceed.
+func (c *cleanup) retireUnstartedCacheCreate(item *cleanupItem) error {
+	return c.finishCacheCreate(item, true)
+}
+
+func (c *cleanup) finishCacheCreate(item *cleanupItem, unstarted bool) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !item.cacheCreatePending || item.done || c.journal == "" {
+		return fmt.Errorf("Template Cache create has no pending journal reservation")
+	}
+	template, entry, path := c.journalValues(item)
+	err := journalfile.WithLock(context.Background(), path, func() error {
+		journal, _, err := readRunnerJournal(path)
+		if err != nil {
+			return err
+		}
+		if err := mergeJournalMetadata(&journal, template); err != nil {
+			return err
+		}
+		index := -1
+		for i := range journal.Entries {
+			if journal.Entries[i] == entry {
+				if index >= 0 {
+					return fmt.Errorf("ambiguous pending Template Cache finalizer")
+				}
+				index = i
+			}
+		}
+		if index < 0 {
+			return fmt.Errorf("pending Template Cache finalizer is missing")
+		}
+		if unstarted {
+			journal.Entries = append(journal.Entries[:index], journal.Entries[index+1:]...)
+		} else {
+			journal.Entries[index].CacheCreatePending = false
+		}
+		return writeRunnerJournal(path, journal)
+	})
+	if err == nil {
+		if unstarted {
+			item.done = true
+		} else {
+			item.cacheCreatePending = false
+		}
+	}
 	return err
 }
 
@@ -200,7 +276,7 @@ func (c *cleanup) journalValues(item *cleanupItem) (report.CleanupJournal, repor
 	journal.Entries = make([]report.Resource, 0)
 	entry := report.Resource{
 		Scope: item.scope, Teardown: item.cmd, RegionRole: item.role,
-		Region: cfg.Region, ExecutionID: c.journalMeta.ExecutionID,
+		Region: cfg.Region, ExecutionID: c.journalMeta.ExecutionID, CacheCreatePending: item.cacheCreatePending,
 	}
 	return journal, entry, cleanupJournalPath(c.journal, item.role)
 }
@@ -249,7 +325,7 @@ func mergeJournalMetadata(journal *report.CleanupJournal, desired report.Cleanup
 }
 
 func journalEntriesMatch(left, right report.Resource) bool {
-	if left.Scope != right.Scope || left.Teardown != right.Teardown {
+	if left.Scope != right.Scope || left.Teardown != right.Teardown || left.CacheCreatePending != right.CacheCreatePending {
 		return false
 	}
 	for _, values := range [][2]string{
@@ -324,9 +400,17 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 	}
 	for i := len(scope) - 1; i >= 0; i-- {
 		it := scope[i]
+		cacheDelete := journalfile.IsTemplateCacheDelete(it.cmd)
 		c.mu.Lock()
-		if it.done || it.running || it.deferred {
+		if it.done {
 			c.mu.Unlock()
+			continue
+		}
+		if it.running || it.deferred {
+			c.mu.Unlock()
+			if cacheDelete {
+				break
+			}
 			continue
 		}
 		it.running = true
@@ -423,7 +507,7 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 			coordinationErr = guardErr
 		}
 		if coordinationErr != nil {
-			if deferPending && errors.Is(coordinationErr, journalfile.ErrTemplateCreatePending) {
+			if deferPending && (errors.Is(coordinationErr, journalfile.ErrTemplateCreatePending) || errors.Is(coordinationErr, journalfile.ErrTemplateCacheCreatePending)) {
 				// Defer remaining ancestors with this child, even if another
 				// allocation settles before the next item could be checked.
 				remaining := append([]*cleanupItem(nil), scope[:i+1]...)
@@ -439,6 +523,10 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 			failure := fmt.Sprintf("cleanup coordination: %s: %v", report.Scrub(it.cmd), coordinationErr)
 			c.logf("cleanup failed: %s", failure)
 			failures = append(failures, failure)
+			if cacheDelete {
+				// The remaining entries may be this cache's Template and Team.
+				break
+			}
 			continue
 		}
 		switch {
@@ -463,6 +551,13 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 			failure := cleanupFailure(res, it.cmd, timedOut, itemTimeout)
 			c.logf("cleanup failed: %s", failure)
 			failures = append(failures, failure)
+		}
+		if cacheDelete && (res.Err != nil || (res.Exit != 0 && res.Exit != exitNotFound) || journalErr != nil) {
+			// A later in-process cleanup pass must retry the child first.
+			c.mu.Lock()
+			it.done = false
+			c.mu.Unlock()
+			break
 		}
 	}
 	return failures
