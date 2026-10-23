@@ -7,8 +7,10 @@ package sweeper
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -42,9 +44,18 @@ var sweepRetrySleep = time.Sleep
 // writer/replayer interleavings. Production keeps the no-op default.
 var replayJournalAfterRead = func(string) {}
 
+// replayJournalAfterResolve is a test synchronization point before lock admission.
+var replayJournalAfterResolve = func(string) {}
+
 // replayJournalAfterSuccess is a test synchronization point for the narrow
 // window between a successful external command and its journal commit.
 var replayJournalAfterSuccess = func(string) {}
+
+// Injectable at the attempt barrier for post-rename failure tests.
+var writeTeamReplayAttemptJournal = journalfile.WriteDurable
+
+// Injectable at the consumption barrier for post-rename failure tests.
+var writeReplayConsumptionJournal = journalfile.WriteDurable
 
 // isTransientSweepFailure reports whether a failed delete is worth retrying:
 // dependency-still-releasing or throttling. Both clear on their own shortly.
@@ -130,10 +141,15 @@ func ReplayJournalWithOptions(ctx context.Context, path string, opt ReplayOption
 		return nil, resolveErr
 	}
 	path = resolved
+	parent, err := replayParentIdentity(path)
+	if err != nil {
+		return nil, err
+	}
+	replayJournalAfterResolve(path)
 	var result *Result
-	err := journalfile.WithReplayLock(ctx, path, func() error {
+	err = withAnchoredReplayLock(ctx, path, parent, func() error {
 		var journal report.CleanupJournal
-		err := journalfile.WithLock(ctx, path, func() error {
+		err := withAnchoredJournalLock(ctx, path, parent, func() error {
 			var err error
 			journal, _, err = readReplayJournal(path)
 			if err != nil {
@@ -148,10 +164,57 @@ func ReplayJournalWithOptions(ctx context.Context, path string, opt ReplayOption
 			return err
 		}
 		replayJournalAfterRead(path)
-		result, err = replayJournalEntries(ctx, path, opt, journal)
+		result, err = replayJournalEntries(ctx, path, opt, journal, parent)
 		return err
 	})
 	return result, err
+}
+
+func replayParentIdentity(path string) (os.FileInfo, error) {
+	parent := filepath.Dir(path)
+	info, err := os.Stat(parent)
+	if err != nil {
+		return nil, fmt.Errorf("existing cleanup journal parent %s is unavailable: %w", parent, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("existing cleanup journal parent %s is not a directory", parent)
+	}
+	return info, nil
+}
+
+func checkReplayParent(path string, original os.FileInfo) error {
+	current, err := replayParentIdentity(path)
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(original, current) {
+		return fmt.Errorf("cleanup journal parent %s changed during replay", filepath.Dir(path))
+	}
+	return nil
+}
+
+func withAnchoredJournalLock(ctx context.Context, path string, parent os.FileInfo, update func() error) error {
+	if err := checkReplayParent(path, parent); err != nil {
+		return err
+	}
+	return journalfile.WithExistingParentLock(ctx, path, func() error {
+		if err := checkReplayParent(path, parent); err != nil {
+			return err
+		}
+		return errors.Join(update(), checkReplayParent(path, parent))
+	})
+}
+
+func withAnchoredReplayLock(ctx context.Context, path string, parent os.FileInfo, update func() error) error {
+	if err := checkReplayParent(path, parent); err != nil {
+		return err
+	}
+	return journalfile.WithExistingReplayLock(ctx, path, func() error {
+		if err := checkReplayParent(path, parent); err != nil {
+			return err
+		}
+		return errors.Join(update(), checkReplayParent(path, parent))
+	})
 }
 
 func readReplayJournal(path string) (report.CleanupJournal, bool, error) {
@@ -168,16 +231,27 @@ func readReplayJournal(path string) (report.CleanupJournal, bool, error) {
 	} else if err := json.Unmarshal(data, &journal); err != nil {
 		return report.CleanupJournal{}, false, fmt.Errorf("cleanup journal %s: %w", path, err)
 	}
+	if err := journalfile.CheckJournalPath(path, journal); err != nil {
+		return report.CleanupJournal{}, false, err
+	}
 	return journal, legacy, nil
 }
 
-func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, journal report.CleanupJournal) (*Result, error) {
+func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, journal report.CleanupJournal, parent os.FileInfo) (*Result, error) {
 	entries := journal.Entries
 	result := &Result{}
 	for i := len(entries) - 1; i >= 0; i-- {
+		if err := checkReplayParent(path, parent); err != nil {
+			return result, err
+		}
 		entry := entries[i]
 		if strings.TrimSpace(entry.Teardown) == "" {
 			continue
+		}
+		if journalfile.IsQuotaCommandCandidate(entry.Teardown) && !journalfile.IsSandboxQuotaDelete(entry.Teardown) {
+			result.Errors++
+			result.Details = append(result.Details, fmt.Sprintf("journal %s: invalid Quota teardown", entry.Scope))
+			break
 		}
 		if err := validateJournalTeardown(entry.Teardown); err != nil {
 			result.Errors++
@@ -185,15 +259,99 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 			// The invalid command may be a child whose parents are earlier.
 			break
 		}
-		bound, err := journalfile.PrepareTemplateCleanup(ctx, path, journal, opt.Config)
+		if journalfile.IsTeamDeleteCandidate(entry.Teardown) && !entry.TeamCreateConfirmed {
+			if err := checkOrdinaryTeamReplay(ctx, path, opt, journal, entry, parent); err != nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: %v", entry.Scope, err))
+				break
+			}
+		}
+		if entry.QuotaBound && (!entry.TeamCreateConfirmed || journal.QuotaBinding == nil) {
+			result.Errors++
+			result.Details = append(result.Details, fmt.Sprintf("journal %s: protected Team credential binding is missing", entry.Scope))
+			break
+		}
+		if journalfile.IsQuotaDeleteCandidate(entry.Teardown) {
+			if journal.QuotaBinding == nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: protected Quota credential binding is missing", entry.Scope))
+				break
+			}
+			if err := withAnchoredJournalLock(ctx, path, parent, func() error {
+				current, legacy, err := readReplayJournal(path)
+				if err != nil {
+					return err
+				}
+				currentOpt := opt
+				if legacy || validateJournalIdentity(current, &currentOpt) != nil || current.Version != journal.Version || current.RunID != journal.RunID || current.ExecutionID != journal.ExecutionID || current.RegionRole != journal.RegionRole || current.Region != journal.Region || current.Surface != journal.Surface || current.EcctlBin != journal.EcctlBin {
+					return fmt.Errorf("Quota delete journal binding changed")
+				}
+				return journalfile.CheckOwnedQuotaDelete(current, entry)
+			}); err != nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: %v", entry.Scope, err))
+				break
+			}
+		}
+		if err := checkReplayParent(path, parent); err != nil {
+			return result, err
+		}
+		templateBound, err := journalfile.PrepareTemplateCleanup(ctx, path, journal, opt.Config)
 		if err != nil {
 			return result, err
 		}
+		if err := checkReplayParent(path, parent); err != nil {
+			return result, err
+		}
+		bound := opt.Config
+		if entry.QuotaReserved || entry.QuotaBound {
+			bound, err = journalfile.PrepareQuotaCleanup(ctx, path, journal, opt.Config)
+			if err != nil {
+				return result, err
+			}
+			if err := checkReplayParent(path, parent); err != nil {
+				return result, err
+			}
+		} else if journalfile.IsTemplateCacheDelete(entry.Teardown) || journalfile.IsNativeTemplateDelete(entry.Teardown) {
+			bound = templateBound
+		} else if journalfile.IsTeamDeleteCandidate(entry.Teardown) {
+			var teamID string
+			if entry.TeamCreateConfirmed {
+				teamID, err = journalfile.TeamDeleteTarget(entry.Teardown)
+			} else {
+				region := journal.Region
+				if region == "" {
+					region = opt.Config.Region
+				}
+				teamID, err = journalfile.TeamDeleteCandidateTargetForRegion(entry.Teardown, region)
+			}
+			if err != nil {
+				return result, fmt.Errorf("Team replay target changed before binding: %w", err)
+			}
+			bound, _, err = journalfile.TemplateTeamCleanupBinding(path, journal, opt.Config, teamID)
+			if err != nil {
+				return result, err
+			}
+		}
+		if entry.TeamCreateConfirmed {
+			entry, err = markTeamReplayAttempt(ctx, path, opt, entry, parent)
+			if err != nil {
+				return result, fmt.Errorf("record Team replay attempt before delete: %w", err)
+			}
+			entries[i] = entry
+			journal.Entries[i] = entry
+		}
+		if err := checkReplayParent(path, parent); err != nil {
+			return result, err
+		}
 		res := execpkg.Run(ctx, bound, entry.Teardown)
+		if err := checkReplayParent(path, parent); err != nil {
+			return result, err
+		}
 		if res.Err != nil || (res.Exit != 0 && res.Exit != 4) {
 			result.Errors++
 			result.Details = append(result.Details, fmt.Sprintf("journal %s: delete exit=%d %s", entry.Scope, res.Exit, failureReason(res)))
-			if journalfile.IsTemplateCacheDelete(entry.Teardown) {
+			if journalfile.IsTemplateCacheDelete(entry.Teardown) || journalfile.IsQuotaDeleteCandidate(entry.Teardown) {
 				break
 			}
 			continue
@@ -201,7 +359,7 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 		result.Deleted++
 		replayJournalAfterSuccess(path)
 		commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), replayJournalCommitTimeout)
-		err = consumeReplayJournalEntry(commitCtx, path, opt, entry)
+		err = consumeReplayJournalEntry(commitCtx, path, opt, entry, parent)
 		cancel()
 		if err != nil {
 			return result, fmt.Errorf("rewrite cleanup journal %s after replay: %w", path, err)
@@ -210,8 +368,80 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 	return result, nil
 }
 
-func consumeReplayJournalEntry(ctx context.Context, path string, opt ReplayOptions, completed report.Resource) error {
-	return journalfile.WithLock(ctx, path, func() error {
+// The replay lock is held. The original snapshot rules out a duplicate of a
+// confirmed Team already consumed in this replay; the current journal checks
+// the remaining children and ordinary finalizers.
+func checkOrdinaryTeamReplay(ctx context.Context, path string, opt ReplayOptions, original report.CleanupJournal, entry report.Resource, parent os.FileInfo) error {
+	region := original.Region
+	if region == "" {
+		region = opt.Config.Region
+	}
+	target, err := journalfile.TeamDeleteCandidateTargetForRegion(entry.Teardown, region)
+	if err != nil {
+		return err
+	}
+	for _, candidate := range original.Entries {
+		if !candidate.TeamCreateConfirmed {
+			continue
+		}
+		id, parseErr := journalfile.TeamDeleteTarget(candidate.Teardown)
+		if parseErr != nil {
+			return fmt.Errorf("invalid confirmed Team ownership in replay snapshot: %w", parseErr)
+		}
+		if id == target {
+			return fmt.Errorf("ordinary Team replay target conflicts with confirmed ownership")
+		}
+	}
+	return withAnchoredJournalLock(ctx, path, parent, func() error {
+		current, _, err := readReplayJournal(path)
+		if err != nil {
+			return err
+		}
+		currentOpt := opt
+		if validateJournalIdentity(current, &currentOpt) != nil {
+			return fmt.Errorf("ordinary Team replay journal binding changed")
+		}
+		count, sameTarget := 0, 0
+		for _, candidate := range current.Entries {
+			if candidate == entry {
+				count++
+			}
+			if journalfile.IsQuotaCommandCandidate(candidate.Teardown) {
+				childID, parseErr := journalfile.SandboxQuotaDeleteTarget(candidate.Teardown)
+				if parseErr != nil || childID == target {
+					return fmt.Errorf("ordinary Team replay must wait for its Quota child")
+				}
+			}
+			if !journalfile.IsTeamDeleteCandidate(candidate.Teardown) {
+				continue
+			}
+			currentRegion := current.Region
+			if currentRegion == "" {
+				currentRegion = currentOpt.Config.Region
+			}
+			id, parseErr := journalfile.TeamDeleteCandidateTargetForRegion(candidate.Teardown, currentRegion)
+			if parseErr != nil {
+				return fmt.Errorf("unclassified Team delete in replay journal: %w", parseErr)
+			}
+			if id == target {
+				sameTarget++
+				if candidate.TeamCreateConfirmed {
+					return fmt.Errorf("ordinary Team replay target conflicts with confirmed ownership")
+				}
+			}
+		}
+		if count != 1 || sameTarget != 1 {
+			return fmt.Errorf("ordinary Team replay target is missing or ambiguous")
+		}
+		return nil
+	})
+}
+
+// The replay lock is held by the caller. A durable pre-delete mark prevents a
+// later Quota reservation from treating a Team whose delete result was unknown
+// or whose successful journal consumption failed as an untouched parent.
+func markTeamReplayAttempt(ctx context.Context, path string, opt ReplayOptions, entry report.Resource, parent os.FileInfo) (report.Resource, error) {
+	err := withAnchoredJournalLock(ctx, path, parent, func() error {
 		journal, legacy, err := readReplayJournal(path)
 		if err != nil {
 			return err
@@ -221,6 +451,84 @@ func consumeReplayJournalEntry(ctx context.Context, path string, opt ReplayOptio
 			return err
 		}
 		index := -1
+		for i, candidate := range journal.Entries {
+			if candidate == entry {
+				if index >= 0 {
+					return fmt.Errorf("ambiguous Team replay parent")
+				}
+				index = i
+			}
+		}
+		if index < 0 {
+			return fmt.Errorf("Team replay parent changed before delete")
+		}
+		target, err := journalfile.TeamDeleteTarget(entry.Teardown)
+		if err != nil {
+			return err
+		}
+		confirmed := 0
+		for _, candidate := range journal.Entries {
+			if journalfile.IsTeamDeleteCandidate(candidate.Teardown) && !candidate.TeamCreateConfirmed {
+				ordinaryTarget, ordinaryErr := journalfile.TeamDeleteCandidateTargetForRegion(candidate.Teardown, journal.Region)
+				if ordinaryErr != nil {
+					return fmt.Errorf("unclassified ordinary Team delete in replay journal: %w", ordinaryErr)
+				}
+				if ordinaryTarget == target {
+					return fmt.Errorf("Team replay target conflicts with ordinary finalizer")
+				}
+			}
+			candidateTarget, candidateErr := journalfile.TeamDeleteTarget(candidate.Teardown)
+			if candidateErr == nil && candidateTarget == target && candidate.TeamCreateConfirmed {
+				confirmed++
+			}
+			if journalfile.IsQuotaCommandCandidate(candidate.Teardown) {
+				childID, parseErr := journalfile.SandboxQuotaDeleteTarget(candidate.Teardown)
+				if parseErr != nil || childID == target {
+					return fmt.Errorf("Team replay must wait for its Quota child")
+				}
+			}
+		}
+		if confirmed > 1 || confirmed == 1 && !entry.TeamCreateConfirmed {
+			return fmt.Errorf("Team replay target conflicts with confirmed ownership")
+		}
+		journal.Entries[index].TeamReplayAttempted = true
+		var value any = journal
+		if legacy {
+			value = journal.Entries
+		}
+		body, err := json.MarshalIndent(value, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := checkReplayParent(path, parent); err != nil {
+			return err
+		}
+		return writeTeamReplayAttemptJournal(path, append(body, '\n'))
+	})
+	if err != nil {
+		return entry, err
+	}
+	entry.TeamReplayAttempted = true
+	return entry, nil
+}
+
+func consumeReplayJournalEntry(ctx context.Context, path string, opt ReplayOptions, completed report.Resource, parent os.FileInfo) error {
+	return withAnchoredJournalLock(ctx, path, parent, func() error {
+		journal, legacy, err := readReplayJournal(path)
+		if err != nil {
+			return err
+		}
+		currentOpt := opt
+		if err := validateJournalIdentity(journal, &currentOpt); err != nil {
+			return err
+		}
+		quotaDelete := journalfile.IsQuotaDeleteCandidate(completed.Teardown)
+		if quotaDelete {
+			if legacy || journalfile.CheckOwnedQuotaDelete(journal, completed) != nil {
+				return fmt.Errorf("settled Quota reservation changed before consumption")
+			}
+		}
+		index := -1
 		for i := len(journal.Entries) - 1; i >= 0; i-- {
 			if journal.Entries[i] == completed {
 				index = i
@@ -228,10 +536,16 @@ func consumeReplayJournalEntry(ctx context.Context, path string, opt ReplayOptio
 			}
 		}
 		if index < 0 {
+			if quotaDelete {
+				return fmt.Errorf("settled Quota reservation disappeared")
+			}
 			return nil
 		}
 		pending := append([]report.Resource(nil), journal.Entries...)
 		pending = append(pending[:index], pending[index+1:]...)
+		if err := checkReplayParent(path, parent); err != nil {
+			return err
+		}
 		return rewriteReplayJournal(path, journal, pending, legacy)
 	})
 }
@@ -248,11 +562,7 @@ func rewriteReplayJournal(path string, journal report.CleanupJournal, pending []
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return writeReplayConsumptionJournal(path, append(data, '\n'))
 }
 
 func validateJournalIdentity(journal report.CleanupJournal, opt *ReplayOptions) error {

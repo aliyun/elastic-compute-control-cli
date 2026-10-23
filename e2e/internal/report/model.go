@@ -2,7 +2,11 @@
 // JSON, HTML, JUnit XML and a GitHub step-summary (GFM markdown).
 package report
 
-import "time"
+import (
+	"time"
+
+	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
+)
 
 const CurrentSchemaVersion = 2
 
@@ -68,16 +72,51 @@ type RegionAttempt struct {
 // persisted with the teardown commands so replay cannot silently target a
 // different region, command surface, or binary.
 type CleanupJournal struct {
-	Version           int        `json:"version"`
-	RunID             string     `json:"run_id"`
-	ExecutionID       string     `json:"execution_id,omitempty"`
-	RegionRole        string     `json:"region_role,omitempty"`
-	Region            string     `json:"region"`
-	Surface           string     `json:"surface"`
-	EcctlBin          string     `json:"ecctl_bin"`
-	Entries           []Resource `json:"entries"`
-	NativeJournalPath string     `json:"native_journal_path,omitempty"`
-	NativeIntentPaths []string   `json:"native_intent_paths,omitempty"`
+	Version           int                     `json:"version"`
+	JournalPath       string                  `json:"journal_path,omitempty"`
+	RunID             string                  `json:"run_id"`
+	ExecutionID       string                  `json:"execution_id,omitempty"`
+	RegionRole        string                  `json:"region_role,omitempty"`
+	Region            string                  `json:"region"`
+	Surface           string                  `json:"surface"`
+	EcctlBin          string                  `json:"ecctl_bin"`
+	QuotaBinding      *QuotaCredentialBinding `json:"quota_binding,omitempty"`
+	Entries           []Resource              `json:"entries"`
+	NativeJournalPath string                  `json:"native_journal_path,omitempty"`
+	NativeIntentPaths []string                `json:"native_intent_paths,omitempty"`
+}
+
+// QuotaCredentialBinding records public selectors and a trusted STS principal
+// for the owned Team and its Quota child. Credential material is never stored.
+type QuotaCredentialBinding struct {
+	Profile     string                           `json:"profile"`
+	Mode        string                           `json:"mode"`
+	Selectors   map[string]string                `json:"selectors"`
+	ConfigPaths map[string]CredentialConfigPath  `json:"config_paths"`
+	ConfigState map[string]CredentialConfigState `json:"config_state"`
+	// SourceProfiles records the Aliyun profiles recursively used by a
+	// ChainableRamRoleArn credential, excluding the selected profile above.
+	SourceProfiles map[string]CredentialConfigState `json:"source_profiles,omitempty"`
+	// EffectiveSTS contains only nonsecret endpoint, region and VPC selectors
+	// that can affect the selected renewable credential or its source chain.
+	EffectiveSTS map[string]string   `json:"effective_sts,omitempty"`
+	ResolvedMode bool                `json:"resolved_mode,omitempty"`
+	Identity     execpkg.IdentityPin `json:"identity"`
+}
+
+type CredentialConfigPath struct {
+	Requested string `json:"requested"`
+	Target    string `json:"target"`
+}
+
+// CredentialConfigState describes the selected profile without storing secret
+// values or a digest of credentials. Changes to another profile or `current`
+// do not alter the selected profile's binding.
+type CredentialConfigState struct {
+	Exists          bool              `json:"exists"`
+	Mode            uint32            `json:"mode,omitempty"`
+	AuthSelectors   map[string]string `json:"auth_selectors,omitempty"`
+	SensitiveFields map[string]bool   `json:"sensitive_fields,omitempty"`
 }
 
 // Summary is the at-a-glance tally.
@@ -128,12 +167,17 @@ type Check struct {
 
 // Resource is a created resource recorded for the manifest.
 type Resource struct {
-	Scope              string `json:"scope"` // "stack" or the case name
-	Teardown           string `json:"teardown"`
-	RegionRole         string `json:"region_role,omitempty"`
-	Region             string `json:"region,omitempty"`
-	ExecutionID        string `json:"execution_id,omitempty"`
-	CacheCreatePending bool   `json:"cache_create_pending,omitempty"`
+	Scope               string `json:"scope"` // "stack" or the case name
+	Teardown            string `json:"teardown"`
+	RegionRole          string `json:"region_role,omitempty"`
+	Region              string `json:"region,omitempty"`
+	ExecutionID         string `json:"execution_id,omitempty"`
+	CacheCreatePending  bool   `json:"cache_create_pending,omitempty"`
+	TeamCreateConfirmed bool   `json:"team_create_confirmed,omitempty"`
+	QuotaBound          bool   `json:"quota_bound,omitempty"`
+	QuotaReserved       bool   `json:"quota_reserved,omitempty"`
+	QuotaUpdatePending  bool   `json:"quota_update_pending,omitempty"`
+	TeamReplayAttempted bool   `json:"team_replay_attempted,omitempty"`
 }
 
 // Failed reports whether any case failed or errored.

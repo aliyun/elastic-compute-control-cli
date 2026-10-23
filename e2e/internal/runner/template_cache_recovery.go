@@ -175,7 +175,7 @@ func (c *cleanup) reserveTemplateCacheCreate(ctx context.Context, scope *[]*clea
 		var pushErr error
 		reservation, pushErr = c.pushPendingCacheCreate(scope, caseScope(data), boundDelete, "primary", lockKeys)
 		return pushErr
-	})
+	}, boundDelete)
 	if err != nil {
 		return "", cfg, nil, fmt.Errorf("reserve Template Cache cleanup: %w", err)
 	}
@@ -243,8 +243,11 @@ func (c *cleanup) verifyReservedTemplateCacheDelete(scope []*cleanupItem, comman
 		if err := journalfile.ValidateOwnedTemplateCacheDelete(command, *binding); err != nil {
 			return err
 		}
+		if _, err := c.checkedJournalPath(item.role); err != nil {
+			return err
+		}
 		template, entry, path := c.journalValues(item)
-		return journalfile.WithLock(context.Background(), path, func() error {
+		return journalfile.WithExistingParentLock(context.Background(), path, func() error {
 			journal, _, err := readRunnerJournal(path)
 			if err != nil {
 				return err

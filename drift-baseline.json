@@ -6957,6 +6957,34 @@
     },
     {
       "product": "sandbox",
+      "resource": "quota",
+      "binding": "delete_quota",
+      "api": "DeleteQuota",
+      "parameters": [
+        "tagValue"
+      ],
+      "covered": [
+        "tagValue"
+      ]
+    },
+    {
+      "product": "sandbox",
+      "resource": "quota",
+      "binding": "update_quota",
+      "api": "UpdateQuota",
+      "parameters": [
+        "body.cpuCores",
+        "body.memoryGB",
+        "body.tagValue"
+      ],
+      "covered": [
+        "body.cpuCores",
+        "body.memoryGB",
+        "body.tagValue"
+      ]
+    },
+    {
+      "product": "sandbox",
       "resource": "team",
       "binding": "create_team",
       "api": "CreateTeam",

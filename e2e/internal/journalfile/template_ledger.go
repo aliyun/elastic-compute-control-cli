@@ -32,41 +32,60 @@ func ResolveJournalPath(path string) (string, error) {
 	return bound.Target, nil
 }
 
-func loadTemplateLedger(path string, expected report.CleanupJournal) (report.CleanupJournal, error) {
+// CheckJournalPath pins protected Team/Quota ownership to the pathname whose
+// replay lock guards it. A verbatim copy must not become a second owner.
+func CheckJournalPath(path string, journal report.CleanupJournal) error {
+	if journal.JournalPath != "" && journal.JournalPath != path {
+		return fmt.Errorf("cleanup journal canonical path changed")
+	}
+	for _, entry := range journal.Entries {
+		if entry.TeamCreateConfirmed || entry.QuotaBound || entry.QuotaReserved || entry.QuotaUpdatePending {
+			if journal.Version != 2 || journal.JournalPath != path {
+				return fmt.Errorf("protected Team/Quota journal anchor missing or changed")
+			}
+		}
+	}
+	return nil
+}
+
+func loadTemplateLedger(path string, expected report.CleanupJournal) (report.CleanupJournal, bool, error) {
 	if expected.NativeJournalPath != "" && path != expected.NativeJournalPath {
-		return report.CleanupJournal{}, fmt.Errorf("retained native ownership journal target changed")
+		return report.CleanupJournal{}, false, fmt.Errorf("retained native ownership journal target changed")
 	}
 	body, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		if expected.NativeJournalPath != "" {
-			return report.CleanupJournal{}, fmt.Errorf("required native ownership journal is missing")
+			return report.CleanupJournal{}, false, fmt.Errorf("required native ownership journal is missing")
 		}
-		return expected, nil
+		return expected, false, nil
 	}
 	if err != nil {
-		return report.CleanupJournal{}, err
+		return report.CleanupJournal{}, false, err
 	}
 	if strings.HasPrefix(strings.TrimSpace(string(body)), "[") {
 		if expected.NativeJournalPath != "" {
-			return report.CleanupJournal{}, fmt.Errorf("required native ownership metadata is missing")
+			return report.CleanupJournal{}, true, fmt.Errorf("required native ownership metadata is missing")
 		}
-		return expected, nil
+		return expected, true, nil
 	}
 	var actual report.CleanupJournal
 	if json.Unmarshal(body, &actual) != nil {
-		return actual, fmt.Errorf("invalid cleanup journal metadata")
+		return actual, true, fmt.Errorf("invalid cleanup journal metadata")
+	}
+	if err := CheckJournalPath(path, actual); err != nil {
+		return actual, true, err
 	}
 	for _, pair := range [][2]string{{actual.RunID, expected.RunID}, {actual.ExecutionID, expected.ExecutionID}, {actual.RegionRole, expected.RegionRole}, {actual.Region, expected.Region}, {actual.Surface, expected.Surface}, {actual.EcctlBin, expected.EcctlBin}} {
 		if pair[1] != "" && pair[0] != pair[1] {
-			return actual, fmt.Errorf("cleanup journal binding changed")
+			return actual, true, fmt.Errorf("cleanup journal binding changed")
 		}
 	}
 	if actual.NativeJournalPath != "" && actual.NativeJournalPath != path {
-		return actual, fmt.Errorf("native ownership journal path changed")
+		return actual, true, fmt.Errorf("native ownership journal path changed")
 	}
 	if expected.NativeJournalPath != "" {
 		if actual.NativeJournalPath != expected.NativeJournalPath {
-			return actual, fmt.Errorf("retained native ownership journal anchor changed")
+			return actual, true, fmt.Errorf("retained native ownership journal anchor changed")
 		}
 		for _, required := range expected.NativeIntentPaths {
 			found := false
@@ -74,11 +93,11 @@ func loadTemplateLedger(path string, expected report.CleanupJournal) (report.Cle
 				found = found || reference == required
 			}
 			if !found {
-				return actual, fmt.Errorf("retained native ownership reference is missing")
+				return actual, true, fmt.Errorf("retained native ownership reference is missing")
 			}
 		}
 	}
-	return actual, nil
+	return actual, true, nil
 }
 
 func nativeTemplateDeleteEntry(command string) bool {
@@ -99,6 +118,10 @@ func nativeTemplateDeleteEntry(command string) bool {
 	native, _ := flags.GetBool("openapi")
 	return native
 }
+
+// IsNativeTemplateDelete classifies the native finalizer for credential
+// selection after the shared Template ledger preflight succeeds.
+func IsNativeTemplateDelete(command string) bool { return nativeTemplateDeleteEntry(command) }
 
 func sameTemplateDelete(left, right string) bool {
 	a, ea := shlex.Split(left)
@@ -180,6 +203,12 @@ func ValidateOwnedTemplateCacheDelete(command string, intent TemplateCreateInten
 }
 
 func validateTemplateLedger(path string, meta report.CleanupJournal, intents []TemplateCreateIntent, seen map[string]bool, allowPendingCache bool) error {
+	if err := CheckJournalPath(path, meta); err != nil {
+		return err
+	}
+	if err := CheckQuotaUpdatePending(meta); err != nil {
+		return err
+	}
 	if len(meta.NativeIntentPaths) > 0 && meta.NativeJournalPath != path {
 		return fmt.Errorf("native ownership journal anchor missing or changed")
 	}

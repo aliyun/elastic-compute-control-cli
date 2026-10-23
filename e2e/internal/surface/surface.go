@@ -13,6 +13,7 @@ import (
 	"github.com/google/shlex"
 
 	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalcmd"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
@@ -163,6 +164,9 @@ func indexCapabilities(caps Capabilities) resourceActions {
 }
 
 func commandCapability(command string, index resourceActions) (resource, action, code string, err error) {
+	if journalcmd.RawQuotaMutationCandidate(command) {
+		return "", "", "unsupported_raw_quota_mutation", fmt.Errorf("raw FCSandbox Quota mutation is unsupported in E2E cases")
+	}
 	tokens, splitErr := shlex.Split(command)
 	if splitErr != nil {
 		return "", "", "invalid_command", splitErr

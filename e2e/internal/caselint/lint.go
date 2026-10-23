@@ -16,6 +16,7 @@ import (
 
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/coverage"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/fixtureconfig"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalcmd"
 	paramspkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/params"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
@@ -464,8 +465,13 @@ func checkSuite(rep *Report, suite *scenario.Suite, inputsDir string, resources 
 	for _, step := range suite.Steps {
 		for name := range step.Capture {
 			if previous := captureProvider[name]; previous != "" {
-				rep.add(suite.Path, step.Name, "duplicate_capture", fmt.Sprintf("capture %q is already defined by %q", name, previous))
-				continue
+				// The serial Quota lifecycle switches the active owned Team ID
+				// between its two children, then restores the first for cleanup.
+				if !(suite.Resource == "sandbox/quota" && suite.Serial && name == "team_id" &&
+					filepath.Base(suite.Path) == "quota-lifecycle.yaml") {
+					rep.add(suite.Path, step.Name, "duplicate_capture", fmt.Sprintf("capture %q is already defined by %q", name, previous))
+					continue
+				}
 			}
 			captureProvider[name] = step.Name
 		}
@@ -486,7 +492,7 @@ func checkSuite(rep *Report, suite *scenario.Suite, inputsDir string, resources 
 			}
 		}
 		effectiveNeeds = append(effectiveNeeds, st.Needs...)
-		if suite.Resource == "sandbox/team" || suite.Resource == "sandbox/template-cache" {
+		if suite.Resource == "sandbox/team" || suite.Resource == "sandbox/template-cache" || suite.Resource == "sandbox/quota" {
 			stepDefined["team_name"] = true
 			stepDefined["team_owner"] = true
 		}
@@ -747,6 +753,7 @@ func checkCreateTags(rep *Report, path, step, run string) {
 		resource == "sandbox/team" ||
 		resource == "sandbox/template" ||
 		resource == "sandbox/template-cache" ||
+		resource == "sandbox/quota" ||
 		resource == "sandbox/sandbox" ||
 		resource == "lingjun/net-test" ||
 		resource == "lingjun/node-group" {
@@ -776,6 +783,10 @@ func allowsFixtureOwnedCreate(suite *scenario.Suite, resource string) bool {
 
 func checkCommandShape(rep *Report, suite *scenario.Suite, st scenario.Step, resources map[string]bool) commandInfo {
 	if st.Local != nil {
+		return commandInfo{}
+	}
+	if journalcmd.RawQuotaMutationCandidate(st.Run) {
+		rep.add(suite.Path, st.Name, "unsupported_raw_quota_mutation", "raw FCSandbox Quota mutation is unsupported in E2E cases")
 		return commandInfo{}
 	}
 	info := parseCommand(st.Run)

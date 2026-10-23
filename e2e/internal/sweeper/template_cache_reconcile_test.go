@@ -59,6 +59,9 @@ case "$*" in
     if [ "$FAKE_CACHE_EXIT" = 4 ]; then exit 4; fi
     printf '{"template_cache":{"id":"%s","template_id":"%s","team_id":"%s","status":"%s"}}\n' "${FAKE_CACHE_ID:-tpl-1}" "${FAKE_CACHE_ID:-tpl-1}" "${FAKE_CACHE_TEAM:-team-1}" "${FAKE_CACHE_STATUS:-Success}"
     ;;
+  *"sandbox team delete team-1"*)
+    if [ "$FAKE_REPLAY_TEAM_UNKNOWN" = 1 ]; then echo 'response lost' >&2; exit 1; fi
+    printf '{"deleted":true}\n' ;;
   *" delete "*) printf '{"deleted":true}\n' ;;
   *) exit 2 ;;
 esac
@@ -162,6 +165,85 @@ func TestReconcilePendingTemplateCacheProvesTerminalStateBeforeReplay(t *testing
 				t.Fatalf("replay did not retain child-before-parent order: %s", calls)
 			}
 		})
+	}
+}
+
+func TestReplayPreMarkerNativeTeamKeepsExactTemplatePrincipal(t *testing.T) {
+	for _, kind := range []string{"template", "template-cache"} {
+		t.Run(kind, func(t *testing.T) {
+			fixture := newCacheReconcileFixture(t)
+			if kind == "template-cache" {
+				if _, err := ReconcilePendingTemplateCache(context.Background(), fixture.journal, fixture.opt); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				journal := readCacheReconcileJournal(t, fixture.journal)
+				journal.Entries = journal.Entries[:2]
+				body, err := json.Marshal(journal)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := journalfile.WriteDurable(fixture.journal, body); err != nil {
+					t.Fatal(err)
+				}
+			}
+			journal := readCacheReconcileJournal(t, fixture.journal)
+			journal.Entries = append(journal.Entries, report.Resource{Scope: "ordinary", Teardown: "ecctl sandbox team delete team-2 --region cn-hangzhou", RegionRole: "primary", Region: "cn-hangzhou", ExecutionID: journal.ExecutionID})
+			body, err := json.Marshal(journal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := journalfile.WriteDurable(fixture.journal, body); err != nil {
+				t.Fatal(err)
+			}
+			before := readCacheReconcileJournal(t, fixture.journal)
+			if before.Entries[0].TeamCreateConfirmed {
+				t.Fatal("fixture unexpectedly has a new Team ownership marker")
+			}
+			t.Setenv("ECCTL_PROFILE", "account-b")
+			result, err := ReplayJournalWithOptions(context.Background(), fixture.journal, fixture.opt.ReplayOptions)
+			want := len(before.Entries)
+			if err != nil || result == nil || result.Errors != 0 || result.Deleted != want || len(readCacheReconcileJournal(t, fixture.journal).Entries) != 0 {
+				t.Fatalf("legacy native replay failed: result=%+v err=%v", result, err)
+			}
+			calls, err := os.ReadFile(fixture.calls)
+			boundTeam, unrelatedTeam := false, false
+			for _, call := range strings.Split(string(calls), "\n") {
+				if strings.Contains(call, "sandbox team delete team-1") && strings.Contains(call, "--profile account-a") {
+					boundTeam = true
+				}
+				if strings.Contains(call, "sandbox team delete team-2") {
+					unrelatedTeam = !strings.Contains(call, "--profile account-a")
+				}
+			}
+			if err != nil || !boundTeam || !unrelatedTeam {
+				t.Fatalf("legacy Team binding crossed target boundary: %s %v", calls, err)
+			}
+		})
+	}
+}
+
+func TestReplayPreMarkerNativeTeamUnknownResultRetainsFinalizer(t *testing.T) {
+	fixture := newCacheReconcileFixture(t)
+	journal := readCacheReconcileJournal(t, fixture.journal)
+	journal.Entries = journal.Entries[:2]
+	body, err := json.Marshal(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := journalfile.WriteDurable(fixture.journal, body); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ECCTL_PROFILE", "account-b")
+	t.Setenv("FAKE_REPLAY_TEAM_UNKNOWN", "1")
+	result, err := ReplayJournalWithOptions(context.Background(), fixture.journal, fixture.opt.ReplayOptions)
+	remaining := readCacheReconcileJournal(t, fixture.journal).Entries
+	if err != nil || result == nil || result.Errors == 0 || len(remaining) != 1 || remaining[0].Teardown != journal.Entries[0].Teardown {
+		t.Fatalf("unknown Team delete consumed legacy finalizer: result=%+v err=%v remaining=%+v", result, err, remaining)
+	}
+	calls, err := os.ReadFile(fixture.calls)
+	if err != nil || !strings.Contains(string(calls), "sandbox team delete team-1") || !strings.Contains(string(calls), "--profile account-a") {
+		t.Fatalf("unknown Team delete lost its native principal: %s %v", calls, err)
 	}
 }
 

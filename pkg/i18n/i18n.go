@@ -98,9 +98,11 @@ func buildLocalizer(tag string, specs map[string]map[string]string) *Localizer {
 		&i18n.Message{ID: "FCTemplateRequiresOpenAPI", Other: "this flag requires --openapi for a native FC template"},
 		&i18n.Message{ID: "FCTemplateIncompatibleFlag", Other: "this E2B flag cannot be used with --openapi"},
 		&i18n.Message{ID: "TeamNotFound", Other: "team not found"},
+		&i18n.Message{ID: "QuotaNotFound", Other: "team quota not found"},
+		&i18n.Message{ID: "InvalidQuotaResponse", Other: "the FC Quota API returned an invalid response"},
 		&i18n.Message{ID: "TeamReadOnly", Other: "the team is read-only and cannot be changed or deleted"},
 		&i18n.Message{ID: "TeamRenameNotAllowed", Other: "the team name cannot be changed"},
-		&i18n.Message{ID: "InvalidAllPages", Other: "fetching all pages requires page 1 and a page-based list with a total"},
+		&i18n.Message{ID: "InvalidAllPages", Other: "fetching all pages requires a supported list from its first page"},
 		&i18n.Message{ID: "IncompletePagination", Other: "the list changed or returned incomplete pages; retry the query"},
 		&i18n.Message{ID: "CloudAPIErrorWithActions", Other: "API call failed; see actions for details"},
 		&i18n.Message{ID: "CleanupPrerequisiteNotFound", Other: "cleanup prerequisite was not found; the requested resource was not deleted"},
@@ -400,9 +402,11 @@ func buildLocalizer(tag string, specs map[string]map[string]string) *Localizer {
 		&i18n.Message{ID: "FCTemplateRequiresOpenAPI", Other: "此参数需要 --openapi，以管理原生 FC 模板"},
 		&i18n.Message{ID: "FCTemplateIncompatibleFlag", Other: "此 E2B 参数不能与 --openapi 同时使用"},
 		&i18n.Message{ID: "TeamNotFound", Other: "团队不存在"},
+		&i18n.Message{ID: "QuotaNotFound", Other: "未找到团队配额"},
+		&i18n.Message{ID: "InvalidQuotaResponse", Other: "FC 配额 API 返回了无效响应"},
 		&i18n.Message{ID: "TeamReadOnly", Other: "该团队为只读，不能修改或删除"},
 		&i18n.Message{ID: "TeamRenameNotAllowed", Other: "该团队不允许修改名称"},
-		&i18n.Message{ID: "InvalidAllPages", Other: "获取所有页需要从第一页开始，并使用返回总数的页码分页列表"},
+		&i18n.Message{ID: "InvalidAllPages", Other: "获取所有页需要从受支持列表的第一页开始"},
 		&i18n.Message{ID: "IncompletePagination", Other: "列表发生变化或返回了不完整的分页，请重新查询"},
 		&i18n.Message{ID: "CloudAPIErrorWithActions", Other: "调用 API 报错，请查看 actions 中的具体报错"},
 		&i18n.Message{ID: "CleanupPrerequisiteNotFound", Other: "清理前置资源不存在，指定资源尚未删除"},
@@ -836,7 +840,7 @@ func (l *Localizer) ErrorPayload(payload ecerrors.ErrorPayload, hasActions bool)
 		return payload
 	}
 	// Preserve provider-specific messages that share a stable generic error code.
-	for _, id := range []string{"UnsupportedACSOperation", "InvalidSandboxResponse", "TeamNotFound", "TemplateCacheNotFound", "FCTemplateNotFound", "InvalidNativeFCTemplateResponse"} {
+	for _, id := range []string{"UnsupportedACSOperation", "InvalidSandboxResponse", "TeamNotFound", "QuotaNotFound", "TemplateCacheNotFound", "FCTemplateNotFound", "InvalidNativeFCTemplateResponse"} {
 		if payload.Message == NewLocalizer("en").Message(id) {
 			payload.Message = l.Message(id)
 			return payload

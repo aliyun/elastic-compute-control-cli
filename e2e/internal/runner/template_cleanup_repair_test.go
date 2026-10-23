@@ -19,6 +19,15 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/sweeper"
 )
 
+func canonicalCleanupTestDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func TestNativeParallelCasesRetryDeferredCleanupAfterAllocation(t *testing.T) {
 	for _, mode := range []string{"success", "unresolved", "principal-change"} {
 		t.Run(mode, func(t *testing.T) {
@@ -133,10 +142,13 @@ echo '{}'
 				if result.run.Summary.Failed != 0 || result.run.Summary.Passed != 2 || len(entries) != 0 {
 					t.Errorf("settled creates abandoned earlier cleanup: summary=%+v journal=%+v calls=%s", result.run.Summary, entries, calls)
 				}
-				for _, id := range []string{"tpl-a", "tpl-b", "parent-a"} {
+				for _, id := range []string{"tpl-a", "tpl-b"} {
 					if strings.Count(string(calls), "delete "+id+" profile=account-a pin={") != 1 {
 						t.Errorf("cleanup lost original binding or ran twice for %s: %s", id, calls)
 					}
+				}
+				if strings.Count(string(calls), "delete parent-a profile=account-a pin=\n") != 1 {
+					t.Errorf("unrelated generic parent inherited native identity or ran twice: %s", calls)
 				}
 				if strings.Index(string(calls), "delete tpl-a ") > strings.Index(string(calls), "delete parent-a ") || !strings.Contains(string(calls), `"UserId":"user-a"`) {
 					t.Errorf("deferred cleanup lost child order or identity: %s", calls)
@@ -152,7 +164,7 @@ echo '{}'
 }
 
 func TestCleanupIndependentLongDeletesShareJournal(t *testing.T) {
-	cl := newCleanup(map[string]execpkg.Config{"primary": {Bin: "ecctl", Region: "cn-test"}}, newOperationRuntime(2), false, filepath.Join(t.TempDir(), "journal.json"), report.CleanupJournal{RunID: "run", ExecutionID: "execution", Surface: "public"}, func(string, ...any) {})
+	cl := newCleanup(map[string]execpkg.Config{"primary": {Bin: "ecctl", Region: "cn-test"}}, newOperationRuntime(2), false, filepath.Join(canonicalCleanupTestDir(t), "journal.json"), report.CleanupJournal{RunID: "run", ExecutionID: "execution", Surface: "public"}, func(string, ...any) {})
 	entered := make(chan string, 2)
 	release := make(chan struct{})
 	cl.runCommand = func(ctx context.Context, _ execpkg.Config, command string) execpkg.Result {
@@ -215,7 +227,7 @@ func TestCleanupIndependentLongDeletesShareJournal(t *testing.T) {
 }
 
 func TestCleanupRejectedGuardKeepsUnlaunchedFinalizer(t *testing.T) {
-	dir := t.TempDir()
+	dir := canonicalCleanupTestDir(t)
 	path := filepath.Join(dir, "journal.json")
 	cl := newCleanup(map[string]execpkg.Config{"primary": {Bin: "ecctl", Region: "cn-test"}}, newOperationRuntime(1), false, path, report.CleanupJournal{RunID: "run", ExecutionID: "execution", Surface: "public"}, func(string, ...any) {})
 	var scope []*cleanupItem
@@ -240,7 +252,7 @@ func TestCleanupRejectedGuardKeepsUnlaunchedFinalizer(t *testing.T) {
 }
 
 func TestCleanupStartFailureAndConcurrentClaim(t *testing.T) {
-	cl := newCleanup(map[string]execpkg.Config{"primary": {Bin: "ecctl", Region: "cn-test"}}, newOperationRuntime(2), false, filepath.Join(t.TempDir(), "journal.json"), report.CleanupJournal{RunID: "run", ExecutionID: "execution", Surface: "public"}, func(string, ...any) {})
+	cl := newCleanup(map[string]execpkg.Config{"primary": {Bin: "ecctl", Region: "cn-test"}}, newOperationRuntime(2), false, filepath.Join(canonicalCleanupTestDir(t), "journal.json"), report.CleanupJournal{RunID: "run", ExecutionID: "execution", Surface: "public"}, func(string, ...any) {})
 	var scope []*cleanupItem
 	if err := cl.push(&scope, "owned", "ecctl test delete owned", "primary", nil); err != nil {
 		t.Fatal(err)
@@ -277,7 +289,7 @@ func nativeCleanupFixture(t *testing.T, keep bool) (execpkg.Config, *cleanup, st
 	if runtime.GOOS == "windows" {
 		t.Skip("fake uses bash")
 	}
-	dir := t.TempDir()
+	dir := canonicalCleanupTestDir(t)
 	for _, key := range []string{"ECCTL_PROFILE", "ALIBABACLOUD_PROFILE", "ALIBABA_CLOUD_PROFILE", "ALICLOUD_PROFILE", "ALIBABA_CLOUD_IGNORE_PROFILE", "ALIBABACLOUD_IGNORE_PROFILE"} {
 		t.Setenv(key, "")
 	}
@@ -433,6 +445,90 @@ func TestNativeSuccessfulCreatePinsConfiguredCurrentForReplay(t *testing.T) {
 	calls, _ := os.ReadFile(filepath.Join(dir, "calls"))
 	if !strings.Contains(string(calls), "create profile=account-a flag=account-a") || !strings.Contains(string(calls), "template-delete profile=account-a flag=account-a") {
 		t.Errorf("create/delete binding changed: %s", calls)
+	}
+}
+
+func TestLegacyNativeTeamCleanupSelectsExactJournaledPrincipal(t *testing.T) {
+	cfg, cl, dir := nativeCleanupFixture(t, false)
+	var scope []*cleanupItem
+	if err := cl.push(&scope, "parent", "ecctl sandbox team delete team-1 --region cn-hangzhou", "primary", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := cl.push(&scope, "ordinary", "ecctl sandbox team delete team-2", "primary", nil); err != nil {
+		t.Fatal(err)
+	}
+	nativeSuccessfulCreate(t, cfg, cl, &scope, map[string]any{})
+	journal := quotaJournal(t, cl.journal)
+	if len(journal.Entries) != 3 || journal.Entries[0].TeamCreateConfirmed || journal.Entries[1].TeamCreateConfirmed {
+		t.Fatalf("fixture lost pre-marker parent entries: %+v", journal.Entries)
+	}
+	t.Setenv("ECCTL_PROFILE", "account-b")
+	seen := map[string]int{}
+	cl.runCommand = func(ctx context.Context, bound execpkg.Config, command string) execpkg.Result {
+		if strings.Contains(command, "sandbox team delete team-1") {
+			seen["native"]++
+			if bound.Profile != "account-a" || bound.ExpectedIdentity == nil || bound.ExpectedIdentity.UserID != "user-a" {
+				t.Errorf("legacy native Team used a different principal: %+v", bound)
+			}
+		} else if strings.Contains(command, "sandbox team delete team-2") {
+			seen["ordinary"]++
+			if bound.Profile != "" || bound.ExpectedIdentity != nil {
+				t.Errorf("unrelated ordinary Team inherited native principal: %+v", bound)
+			}
+		}
+		return execpkg.Run(ctx, bound, command)
+	}
+	if failures := cl.run(scope); len(failures) != 0 || seen["native"] != 1 || seen["ordinary"] != 1 || len(readJournalEntries(t, cl.journal)) != 0 {
+		calls, _ := os.ReadFile(filepath.Join(dir, "calls"))
+		t.Fatalf("legacy native/ordinary cleanup failed: failures=%v seen=%v calls=%s", failures, seen, calls)
+	}
+}
+
+func TestExecutionLifetimeTeamFinalizerKeepsNativeTemplatePrincipal(t *testing.T) {
+	cfg, _, dir := nativeCleanupFixture(t, false)
+	body, err := os.ReadFile(cfg.Bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := strings.Replace(string(body), `if [[ "$*" == *"template create"* ]]; then`, `if [[ "$*" == *"team create"* ]]; then echo '{"team":{"id":"team-1"}}'; exit 0; fi
+if [[ "$*" == *"template create"* ]]; then`, 1)
+	if script == string(body) {
+		t.Fatal("native fixture has no Template create branch to extend")
+	}
+	withTeamDelete := strings.Replace(script, `if [[ "$*" == *"team delete"* ]]; then echo team-delete >> "$FAKE_NATIVE_DIR/calls"; echo '{"deleted":true}'; exit 0; fi`, `if [[ "$*" == *"team delete"* ]]; then echo "team-delete profile=$profile pin=$ECCTL_EXPECTED_CREDENTIAL_IDENTITY" >> "$FAKE_NATIVE_DIR/calls"; echo '{"deleted":true}'; exit 0; fi`, 1)
+	if withTeamDelete == script {
+		t.Fatal("native fixture has no Team delete branch to instrument")
+	}
+	script = withTeamDelete
+	if err := os.WriteFile(cfg.Bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stack := filepath.Join(dir, "stack.yaml")
+	fixture := `provision:
+  - id: team
+    resource: sandbox/team
+    lifetime: execution
+    run: ecctl sandbox team create --name fixture-team
+    at: $.team
+    capture: {team_id: id}
+    teardown: ecctl sandbox team delete {{.team_id}} --region cn-hangzhou
+`
+	if err := os.WriteFile(stack, []byte(fixture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	suite := &scenario.Suite{Resource: "test/native", Serial: true, Needs: []string{"team"}, Steps: []scenario.Step{{
+		Name: "create native Template", Run: "ecctl sandbox template create --openapi --team-id {{.stack.team_id}} --name native",
+		At: "$.template", Capture: map[string]string{"template_id": "id"},
+		Teardown: "ecctl sandbox template delete {{.template_id}} --openapi --team-id {{.stack.team_id}}",
+	}}}
+	journal := filepath.Join(dir, "execution-journal.json")
+	run, err := Run(context.Background(), Options{Suites: []*scenario.Suite{suite}, StackFile: stack, RunName: "native-stack", RunID: "run", ExecutionID: "execution",
+		Surface: "public", Region: cfg.Region, EcctlBin: cfg.Bin, CleanupJournal: journal, StepTimeout: time.Second})
+	calls, readErr := os.ReadFile(filepath.Join(dir, "calls"))
+	if err != nil || run == nil || run.Summary.Failed != 0 || readErr != nil || len(readJournalEntries(t, journal)) != 0 ||
+		!strings.Contains(string(calls), "template-delete profile=account-a flag=account-a") ||
+		strings.Count(string(calls), "team-delete profile=account-a pin={") != 1 {
+		t.Fatalf("execution-lifetime Team lost native principal: run=%+v err=%v calls=%s read=%v", run, err, calls, readErr)
 	}
 }
 

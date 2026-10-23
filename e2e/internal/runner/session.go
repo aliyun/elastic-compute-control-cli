@@ -16,12 +16,31 @@ import (
 // runner invocations. It is intentionally process-local: no fixture survives a
 // top-level ecctl-e2e run.
 type Session struct {
-	mu       sync.Mutex
-	entries  map[string]*sessionFixture
-	order    []string
-	closed   bool
-	ops      *operationRuntime
-	parallel int
+	mu                     sync.Mutex
+	entries                map[string]*sessionFixture
+	order                  []string
+	closed                 bool
+	ops                    *operationRuntime
+	parallel               int
+	retainedQuotaOwnership bool
+}
+
+// A later execution has a different journal and cannot see an unfinished
+// Quota unit's protected Team/Quota finalizers. Keep that boundary in the
+// process-local Session shared by the public CLI's execution units.
+func (s *Session) checkRetainedQuotaOwnership() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.retainedQuotaOwnership {
+		return fmt.Errorf("prior Quota execution retains Team/Quota cleanup ownership")
+	}
+	return nil
+}
+
+func (s *Session) retainQuotaOwnership() {
+	s.mu.Lock()
+	s.retainedQuotaOwnership = true
+	s.mu.Unlock()
 }
 
 func (s *Session) operationRuntime(parallel int) (*operationRuntime, error) {

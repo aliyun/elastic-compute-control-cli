@@ -58,6 +58,20 @@ func TestBuildGroupsSuitesByRegionRequirementSignature(t *testing.T) {
 	}
 }
 
+func TestBuildIsolatesCrossResourceQuotaLifecycle(t *testing.T) {
+	suites := []*scenario.Suite{
+		{Path: "sandbox/team-with-quota.yaml", Resource: "sandbox/team", Covers: []string{"sandbox/quota"}},
+		{Path: "sandbox/team-reader.yaml", Resource: "sandbox/team"},
+	}
+	units, err := Build(Request{Suites: suites, Profiles: []fixtureconfig.RegionProfile{profile("cn-hangzhou")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(units) != 2 || len(units[0].Suites) != 1 || units[0].Suites[0] != suites[0] || !strings.Contains(units[0].Signature, "cleanup=owned-quota") || len(units[1].Suites) != 1 || units[1].Suites[0] != suites[1] {
+		t.Fatalf("cross-resource Quota lifecycle shared a cleanup scope: %+v", units)
+	}
+}
+
 func TestBuildCreatesOrderedDistinctCrossRegionAssignments(t *testing.T) {
 	suite := &scenario.Suite{
 		Path:                  "ecs/image-copy.yaml",

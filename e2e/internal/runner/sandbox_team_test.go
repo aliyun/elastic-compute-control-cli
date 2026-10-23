@@ -4,18 +4,24 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalfile"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/vars"
 )
 
 func TestRunTeamTextProfileRegistersCleanup(t *testing.T) {
@@ -114,7 +120,7 @@ func TestRunTeamTextProfileRegistersCleanup(t *testing.T) {
 					t.Fatal(err)
 				}
 				step := result.Cases[0].Steps[0]
-				if !lost && (result.Summary.Passed != 1 || !json.Valid([]byte(step.Stdout))) || lost && (result.Summary.Failed != 1 || !strings.Contains(step.Error, "journaled 1 owned Team")) {
+				if !lost && (result.Summary.Passed != 1 || !json.Valid([]byte(step.Stdout))) || lost && (result.Summary.Failed != 1 || !strings.Contains(step.Error, "journaled owned Team for cleanup")) {
 					t.Errorf("protected JSON create/reconciliation failed: summary=%+v step=%+v", result.Summary, step)
 				}
 				calls, err := os.ReadFile(filepath.Join(dir, "calls"))
@@ -153,6 +159,94 @@ func TestRunTeamTextProfileRegistersCleanup(t *testing.T) {
 				}
 				if actual, err := os.ReadFile(config); err != nil || string(actual) != string(profile) {
 					t.Errorf("protected execution changed profile defaults: %s %v", actual, err)
+				}
+			})
+		}
+	}
+}
+
+func TestSharedTeamFinalizerAdmittedBeforeAllocation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake CLI uses a POSIX shell")
+	}
+	for _, lifetime := range []string{FixtureLifetimeExecution, FixtureLifetimeRun} {
+		for _, variant := range []string{"valid", "delete-profile", "create-profile", "create-region", "delete-region", "wrong-target"} {
+			t.Run(lifetime+"/"+variant, func(t *testing.T) {
+				dir := canonicalCleanupTestDir(t)
+				calls := filepath.Join(dir, "calls")
+				t.Setenv("FIXTURE_TEAM_CALLS", calls)
+				bin := filepath.Join(dir, "ecctl")
+				script := `#!/bin/sh
+printf '%s\n' "$*" >> "$FIXTURE_TEAM_CALLS"
+case "$*" in
+  *"team create"*) echo '{"team":{"id":"team-owned"}}';;
+  *"team delete"*) echo '{"deleted":true}';;
+  *) exit 91;;
+esac
+`
+				if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				cfg := execpkg.Config{Bin: bin, Region: "cn-hangzhou"}
+				journal := filepath.Join(dir, "journal.json")
+				cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, newOperationRuntime(1), false, journal,
+					report.CleanupJournal{RunID: "fixture-run", ExecutionID: "fixture-execution", Surface: "public"}, func(string, ...any) {})
+				create := "ecctl sandbox team create --name fixture-team --output=json"
+				teardown := "ecctl sandbox team delete {{.team_id}} --output=json"
+				switch variant {
+				case "delete-profile":
+					teardown += " --profile account-a"
+				case "create-profile":
+					create += " --profile account-a"
+				case "create-region":
+					create += " --region cn-beijing"
+				case "delete-region":
+					teardown += " --region cn-beijing"
+				case "wrong-target":
+					teardown = "ecctl sandbox team delete unrelated-team --output=json"
+				}
+				step := ProvisionStep{ID: "team", Resource: "sandbox/team", Lifetime: lifetime, Run: create, At: "$.team", Capture: map[string]string{"team_id": "id"}, Teardown: teardown}
+				opt := Options{StepTimeout: time.Second, Surface: "public", EcctlBin: bin, Region: cfg.Region, Logf: func(string, ...any) {}}
+				stackVars := map[string]any{}
+				var scope []*cleanupItem
+				sc := report.Case{Name: "shared stack"}
+				var failures map[string]string
+				if lifetime == FixtureLifetimeRun {
+					session := NewSession()
+					defer session.Close()
+					var err error
+					failures, err = session.acquire(context.Background(), opt, cfg, cl, map[string]any{}, stackVars, &Fixture{Provision: []ProvisionStep{step}}, &sc)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if variant == "valid" {
+						if got := readJournalEntries(t, journal); len(got) != 1 || got[0].Teardown != "ecctl sandbox team delete team-owned --output=json" {
+							t.Fatalf("run-lifetime finalizer was not journaled: %+v", got)
+						}
+						if cleanupFailures := session.Close(); len(cleanupFailures) != 0 {
+							t.Fatalf("run-lifetime cleanup failed: %v", cleanupFailures)
+						}
+					}
+				} else {
+					failures = provisionStack(context.Background(), opt, cfg, cl, &scope, map[string]any{}, stackVars, &Fixture{Provision: []ProvisionStep{step}}, &sc, nil)
+					if variant == "valid" {
+						if len(scope) != 1 || len(readJournalEntries(t, journal)) != 1 {
+							t.Fatalf("execution finalizer was not journaled: scope=%d", len(scope))
+						}
+						if cleanupFailures := cl.run(scope); len(cleanupFailures) != 0 {
+							t.Fatalf("execution cleanup failed: %v", cleanupFailures)
+						}
+					}
+				}
+				body, err := os.ReadFile(calls)
+				if variant != "valid" {
+					if failures["team"] == "" || !os.IsNotExist(err) || len(scope) != 0 {
+						t.Fatalf("rejected finalizer reached provider or cleanup: failures=%v calls=%q err=%v scope=%d", failures, body, err, len(scope))
+					}
+					return
+				}
+				if err != nil || failures["team"] != "" || !strings.Contains(string(body), "team create") || !strings.Contains(string(body), "team delete") || len(readJournalEntries(t, journal)) != 0 {
+					t.Fatalf("admitted fixture did not complete cleanup: failures=%v calls=%q err=%v", failures, body, err)
 				}
 			})
 		}
@@ -237,7 +331,7 @@ func TestRunTeamReservationClaimsJournalBeforeCreate(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		for _, changed := range []string{"same", "run", "execution", "region", "binary", "surface"} {
 			t.Run("existing="+strconv.FormatBool(existing)+"/"+changed, func(t *testing.T) {
-				dir := t.TempDir()
+				dir := canonicalCleanupTestDir(t)
 				journal := filepath.Join(dir, "journal.json")
 				cfg := execpkg.Config{Bin: filepath.Join(dir, "must-not-launch"), Region: "cn-hangzhou"}
 				meta := report.CleanupJournal{RunID: "first-run", ExecutionID: "first-execution", Surface: "public"}
@@ -269,8 +363,18 @@ func TestRunTeamReservationClaimsJournalBeforeCreate(t *testing.T) {
 					t.Fatal(err)
 				}
 				before, readErr := os.ReadFile(journal)
-				if existing && string(before) != string(existingBytes) {
-					t.Errorf("first reservation changed existing metadata/entries: %s", before)
+				if existing {
+					var original, anchored report.CleanupJournal
+					if err := json.Unmarshal(existingBytes, &original); err != nil {
+						t.Fatal(err)
+					}
+					if err := json.Unmarshal(before, &anchored); err != nil {
+						t.Fatal(err)
+					}
+					original.JournalPath = journal
+					if !reflect.DeepEqual(anchored, original) {
+						t.Errorf("first reservation changed existing metadata/entries beyond the canonical path claim: %s", before)
+					}
 				}
 				var claimed report.CleanupJournal
 				if readErr != nil || json.Unmarshal(before, &claimed) != nil || claimed.Version != 2 || claimed.RunID != meta.RunID || claimed.ExecutionID != meta.ExecutionID || claimed.RegionRole != "primary" || claimed.Region != cfg.Region || claimed.EcctlBin != cfg.Bin || claimed.Surface != meta.Surface || len(claimed.Entries) != len(desired.Entries) {
@@ -329,7 +433,7 @@ func TestRunTeamReservationClaimsJournalBeforeCreate(t *testing.T) {
 func TestRunTeamJournalClaimFailurePreventsLaunch(t *testing.T) {
 	for _, installed := range []bool{false, true} {
 		t.Run("installed="+strconv.FormatBool(installed), func(t *testing.T) {
-			dir := t.TempDir()
+			dir := canonicalCleanupTestDir(t)
 			journal := filepath.Join(dir, "journal.json")
 			cfg := execpkg.Config{Bin: filepath.Join(dir, "must-not-launch"), Region: "cn-hangzhou"}
 			cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, nil, true, journal, report.CleanupJournal{RunID: "claim-run", ExecutionID: "claim-execution", Surface: "public"}, func(string, ...any) {})
@@ -367,6 +471,244 @@ func TestRunTeamJournalClaimFailurePreventsLaunch(t *testing.T) {
 				t.Fatalf("post-install uncertainty discarded or fabricated the claim: %v", err)
 			}
 		})
+	}
+}
+
+func TestRunParallelTeamCleanupWaitsForOtherCreateRegistration(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake CLI uses shell")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "ecctl")
+	for _, name := range []string{"b-start", "release"} {
+		if err := osexec.Command("mkfifo", filepath.Join(dir, name)).Run(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A read/write FIFO descriptor keeps release writes bounded even when B
+	// fails before it opens the reader. The test still fails on that path.
+	releaseFile, err := os.OpenFile(filepath.Join(dir, "release"), os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = releaseFile.Close() })
+	script := `#!/bin/sh
+case "$*" in
+  *"team create"*)
+    case " $* " in
+      *" --lang en "*)
+        echo started > "$SYNC_DIR/b-start"
+        read release < "$SYNC_DIR/release"
+        echo '{"team":{"id":"team-b","status":"active"}}';;
+      *) echo '{"team":{"id":"team-a","status":"active"}}';;
+    esac;;
+  *"team get"*)
+    read started < "$SYNC_DIR/b-start"
+    echo '{"team":{"id":"team-a"}}';;
+  *"team delete"*)
+    echo "$*" >> "$SYNC_DIR/deletes"
+    echo delete >> "$SYNC_DIR/events"
+    echo '{"deleted":true}';;
+  *) exit 2;;
+esac
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SYNC_DIR", dir)
+	create := func(lang string) scenario.Step {
+		return scenario.Step{Name: "create", Run: `ecctl sandbox team create --name {{.team_name}} --description "{{.team_owner}}"` + lang, At: "$.team", Capture: map[string]string{"team_id": "id"}, Teardown: "ecctl sandbox team delete {{.team_id}} --timeout 5m"}
+	}
+	suites := []*scenario.Suite{
+		{Resource: "sandbox/team", Steps: []scenario.Step{create(""), {Name: "wait for other create", Run: "ecctl sandbox team get {{.team_id}}"}}},
+		{Resource: "sandbox/team", Steps: []scenario.Step{create(" --lang en")}},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	journalPath := filepath.Join(dir, "journal.json")
+	firstRegistered := make(chan struct{})
+	var firstOnce sync.Once
+	previousCreateHook := teamCreateBeforeReplayLock
+	t.Cleanup(func() { teamCreateBeforeReplayLock = previousCreateHook })
+	teamCreateBeforeReplayLock = func(command string) {
+		if strings.Contains(command, "--lang en") {
+			select {
+			case <-firstRegistered:
+			case <-ctx.Done():
+			}
+		}
+	}
+	previousRegistration := writeTeamRegistrationJournal
+	t.Cleanup(func() { writeTeamRegistrationJournal = previousRegistration })
+	writeTeamRegistrationJournal = func(path string, journal report.CleanupJournal) error {
+		if err := previousRegistration(path, journal); err != nil {
+			return err
+		}
+		for _, entry := range journal.Entries {
+			if entry.TeamCreateConfirmed && strings.Contains(entry.Teardown, "team-a") {
+				firstOnce.Do(func() { close(firstRegistered) })
+			}
+			if entry.TeamCreateConfirmed && strings.Contains(entry.Teardown, "team-b") {
+				file, err := os.OpenFile(filepath.Join(dir, "events"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+				if err != nil {
+					return err
+				}
+				_, err = file.WriteString("registered-b\n")
+				if closeErr := file.Close(); err == nil {
+					err = closeErr
+				}
+				return err
+			}
+		}
+		return nil
+	}
+	cleanupWaiting := make(chan struct{}, 1)
+	previousHook := teamDeleteBeforeReplayLock
+	t.Cleanup(func() { teamDeleteBeforeReplayLock = previousHook })
+	teamDeleteBeforeReplayLock = func() {
+		select {
+		case cleanupWaiting <- struct{}{}:
+		default:
+		}
+	}
+	admission := make(chan error, 1)
+	go func() {
+		select {
+		case <-cleanupWaiting:
+			if _, err := os.Stat(filepath.Join(dir, "deletes")); !os.IsNotExist(err) {
+				_, releaseErr := releaseFile.Write([]byte("ok\n"))
+				admission <- errors.Join(fmt.Errorf("Team delete started before replay admission: %v", err), releaseErr)
+				return
+			}
+			probeCtx, cancelProbe := context.WithTimeout(ctx, 50*time.Millisecond)
+			probeErr := journalfile.WithCleanupLock(probeCtx, journalPath, func() error { return nil })
+			cancelProbe()
+			if !errors.Is(probeErr, context.DeadlineExceeded) {
+				_, releaseErr := releaseFile.Write([]byte("ok\n"))
+				admission <- errors.Join(fmt.Errorf("Team create did not hold the replay fence: %v", probeErr), releaseErr)
+				return
+			}
+			_, releaseErr := releaseFile.Write([]byte("ok\n"))
+			admission <- releaseErr
+		case <-ctx.Done():
+			admission <- ctx.Err()
+		}
+	}()
+	result, err := Run(ctx, Options{Suites: suites, RunID: "parallel-team", ExecutionID: "parallel-execution", RunName: "parallel-team", Region: "cn-hangzhou", Surface: "public", EcctlBin: bin, CleanupJournal: journalPath, StepTimeout: 8 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var admissionErr error
+	select {
+	case admissionErr = <-admission:
+	case <-ctx.Done():
+		admissionErr = ctx.Err()
+	}
+	if err := admissionErr; err != nil {
+		t.Fatalf("Team cleanup did not wait for registration: %v cases=%+v", err, result.Cases)
+	}
+	if result.Summary.Failed != 0 {
+		t.Fatalf("parallel Team cases failed: %+v", result.Cases)
+	}
+	calls, err := os.ReadFile(filepath.Join(dir, "deletes"))
+	if err != nil || strings.Count(string(calls), "team delete") != 2 {
+		t.Fatalf("both Teams were not deleted after settlement: calls=%q err=%v", calls, err)
+	}
+	events, err := os.ReadFile(filepath.Join(dir, "events"))
+	if err != nil || strings.Index(string(events), "registered-b\n") < 0 || strings.Index(string(events), "delete\n") < strings.Index(string(events), "registered-b\n") {
+		t.Fatalf("Team cleanup preceded durable registration: events=%q err=%v", events, err)
+	}
+}
+
+func TestTeamCreateRejectsChangedRememberedJournalParentBeforeProvider(t *testing.T) {
+	for _, mode := range []string{"missing", "renamed", "replaced", "before-replay-lock"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := canonicalCleanupTestDir(t)
+			parent := filepath.Join(dir, "journals")
+			journal := filepath.Join(parent, "cleanup.json")
+			cfg := execpkg.Config{Bin: filepath.Join(dir, "must-not-launch"), Region: "cn-hangzhou"}
+			cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, newOperationRuntime(1), false, journal, report.CleanupJournal{RunID: "run", ExecutionID: "execution", Surface: "public"}, func(string, ...any) {})
+			var scope []*cleanupItem
+			if err := cl.push(&scope, "stack", "ecctl t thing delete ordinary", "primary", nil); err != nil {
+				t.Fatal(err)
+			}
+			original, err := os.ReadFile(journal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			moved := parent + "-moved"
+			move := func() {
+				if mode == "missing" {
+					if err := os.RemoveAll(parent); err != nil {
+						t.Fatal(err)
+					}
+					return
+				}
+				if err := os.Rename(parent, moved); err != nil {
+					t.Fatal(err)
+				}
+				if mode == "replaced" {
+					if err := os.Mkdir(parent, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if mode == "before-replay-lock" {
+				previous := teamCreateBeforeReplayLock
+				t.Cleanup(func() { teamCreateBeforeReplayLock = previous })
+				teamCreateBeforeReplayLock = func(string) { move() }
+			} else {
+				move()
+			}
+			calls := 0
+			cl.runCommand = func(context.Context, execpkg.Config, string) execpkg.Result {
+				calls++
+				return execpkg.Result{Started: true, Exit: 0, JSON: map[string]any{"team": map[string]any{"id": "team-new"}}}
+			}
+			data := map[string]any{}
+			if err := teamOwnership(data); err != nil {
+				t.Fatal(err)
+			}
+			step := scenario.Step{Name: "create", Run: `ecctl sandbox team create --name {{.team_name}} --description "{{.team_owner}}"`, Teardown: "ecctl sandbox team delete {{.team_id}} --timeout 5m"}
+			result, ok := runStep(context.Background(), Options{}, cfg, cl, &scope, data, step, time.Second)
+			if ok || calls != 0 || result.Error == "" || len(scope) != 1 {
+				t.Fatalf("changed parent reached Team provider: result=%+v calls=%d scope=%d", result, calls, len(scope))
+			}
+			if _, err := os.Stat(journal); !os.IsNotExist(err) {
+				t.Fatalf("changed parent received a new journal: %v", err)
+			}
+			if paths, err := filepath.Glob(journal + ".team-create-*.json"); err != nil || len(paths) != 0 {
+				t.Fatalf("changed parent received a Team intent: %v %v", paths, err)
+			}
+			if mode != "missing" {
+				retained, err := os.ReadFile(filepath.Join(moved, "cleanup.json"))
+				if err != nil || !slices.Equal(retained, original) {
+					t.Fatalf("original journal changed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestFirstTeamCreateAdmitsNewJournalParent(t *testing.T) {
+	dir := canonicalCleanupTestDir(t)
+	journal := filepath.Join(dir, "new", "cleanup.json")
+	cfg := execpkg.Config{Bin: filepath.Join(dir, "must-not-launch"), Region: "cn-hangzhou"}
+	cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, newOperationRuntime(1), true, journal, report.CleanupJournal{RunID: "run", ExecutionID: "execution", Surface: "public"}, func(string, ...any) {})
+	calls := 0
+	cl.runCommand = func(context.Context, execpkg.Config, string) execpkg.Result {
+		calls++
+		return execpkg.Result{Started: true, Exit: 0, JSON: map[string]any{"team": map[string]any{"id": "team-new"}}}
+	}
+	data := map[string]any{}
+	if err := teamOwnership(data); err != nil {
+		t.Fatal(err)
+	}
+	step := scenario.Step{Name: "create", Run: `ecctl sandbox team create --name {{.team_name}} --description "{{.team_owner}}"`, Teardown: "ecctl sandbox team delete {{.team_id}} --timeout 5m"}
+	var scope []*cleanupItem
+	result, ok := runStep(context.Background(), Options{}, cfg, cl, &scope, data, step, time.Second)
+	if !ok || calls != 1 || len(scope) != 1 || !scope[0].teamCreateConfirmed {
+		t.Fatalf("initial Team admission failed: result=%+v calls=%d scope=%+v", result, calls, scope)
 	}
 }
 
@@ -519,7 +861,7 @@ echo '{"error":{"message":"unexpected command"}}'; exit 1
 }
 
 func TestRunTeamAncestorBarrierFailurePreventsCreateLaunch(t *testing.T) {
-	dir := t.TempDir()
+	dir := canonicalCleanupTestDir(t)
 	journal := filepath.Join(dir, "new", "nested", "reports", "journal.json")
 	data := map[string]any{"run_name": "barrier-run"}
 	if err := teamOwnership(data); err != nil {
@@ -550,6 +892,75 @@ func TestRunTeamAncestorBarrierFailurePreventsCreateLaunch(t *testing.T) {
 	}
 }
 
+func TestQuotaTeamReservationFailureReconcilesJournalAndFencesAllocation(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		failIntent            bool
+		failJournalAfterWrite bool
+	}{
+		{name: "intent write failed after binding", failIntent: true},
+		{name: "journal durability uncertain after rename", failJournalAfterWrite: true},
+		{name: "normal reservation"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := canonicalCleanupTestDir(t)
+			journal := filepath.Join(dir, "journal.json")
+			cfg := execpkg.Config{Bin: filepath.Join(dir, "must-not-launch"), Region: "cn-hangzhou"}
+			meta := report.CleanupJournal{RunID: "run", ExecutionID: "execution", Surface: "public"}
+			cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, nil, true, journal, meta, func(string, ...any) {})
+			binding := &report.QuotaCredentialBinding{Profile: "owned"}
+			data := map[string]any{}
+			if err := teamOwnership(data); err != nil {
+				t.Fatal(err)
+			}
+			st := scenario.Step{Name: "create", Run: `ecctl sandbox team create --name {{.team_name}} --description "{{.team_owner}}"`, Teardown: "ecctl sandbox team delete {{.team_id}} --timeout 5m"}
+			cmd, err := vars.Render(st.Run, data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			oldIntent, oldJournal := writeTeamCreateIntent, writeTeamCreateJournal
+			t.Cleanup(func() { writeTeamCreateIntent, writeTeamCreateJournal = oldIntent, oldJournal })
+			if tc.failIntent {
+				writeTeamCreateIntent = func(string, []byte) error { return errors.New("intent sync failed") }
+			}
+			if tc.failJournalAfterWrite {
+				writeTeamCreateJournal = func(path string, value report.CleanupJournal) error {
+					if err := oldJournal(path, value); err != nil {
+						return err
+					}
+					return errors.New("journal sync result uncertain")
+				}
+			}
+			intent, err := reserveTeamCreate(cmd, data, cfg, cl, st, binding)
+			if tc.failIntent || tc.failJournalAfterWrite {
+				if err == nil || intent != nil {
+					t.Fatalf("failed reservation reported success: intent=%+v err=%v", intent, err)
+				}
+				if cl.allocationFence == "" {
+					t.Fatal("uncertain reservation did not fence later allocations")
+				}
+			} else if err != nil || intent == nil || cl.allocationFence != "" {
+				t.Fatalf("normal reservation failed or fenced: intent=%+v err=%v fence=%q", intent, err, cl.allocationFence)
+			}
+			retained, legacy, err := readRunnerJournal(journal)
+			if err != nil || legacy || !reflect.DeepEqual(retained.QuotaBinding, binding) || !reflect.DeepEqual(cl.quotaBinding, binding) {
+				t.Fatalf("durable and in-memory bindings differ: journal=%+v memory=%+v err=%v", retained.QuotaBinding, cl.quotaBinding, err)
+			}
+			if tc.failIntent || tc.failJournalAfterWrite {
+				var scope []*cleanupItem
+				next := map[string]any{}
+				if err := teamOwnership(next); err != nil {
+					t.Fatal(err)
+				}
+				step, ok := runStep(context.Background(), Options{}, cfg, cl, &scope, next, st, time.Second)
+				if ok || step.Command != "" || !strings.Contains(step.Error, "fenced") || len(scope) != 0 {
+					t.Fatalf("later ordinary Team reached allocation: %+v", step)
+				}
+			}
+		})
+	}
+}
+
 func TestRunTeamAmbiguousCreateNeverReplaysAndRecoversOwnedIdentity(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake uses a bash script")
@@ -558,7 +969,7 @@ func TestRunTeamAmbiguousCreateNeverReplaysAndRecoversOwnedIdentity(t *testing.T
 	stepRetryDelays = []time.Duration{time.Millisecond}
 	defer func() { stepRetryDelays = oldDelays }()
 	names := map[string]bool{}
-	for _, mode := range []string{"retry-success", "duplicate-rejection", "success-no-id", "cleanup", "wrong-owner", "empty", "list-failure", "unsafe-id", "flag-id", "incomplete"} {
+	for _, mode := range []string{"retry-success", "duplicate-rejection", "success-no-id", "cleanup", "failure-with-id", "failure-with-id-cleanup", "failure-with-wrong-id", "wrong-owner", "empty", "list-failure", "unsafe-id", "flag-id", "incomplete"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			fake := filepath.Join(dir, "ecctl")
@@ -580,6 +991,11 @@ if [[ "$*" == *" team create "* ]]; then
   done
   printf '{"teams":[{"id":"team-A","name":"%s","description":"%s","status":"active","read_only":false}],"pagination":{"has_more":false}}\n' "$name" "$description" > "$FAKE_REMOTE"
   if [[ "$FAKE_MODE" == "success-no-id" ]]; then echo '{}'; exit 0; fi
+  if [[ "$FAKE_MODE" == "failure-with-id" || "$FAKE_MODE" == "failure-with-id-cleanup" ]]; then
+    printf '{"team":{"id":"team-A","name":"%s","description":"%s","status":"active","read_only":false},"actions":[{"request_id":"req-create"}]}\n' "$name" "$description"
+    exit 1
+  fi
+  if [[ "$FAKE_MODE" == "failure-with-wrong-id" ]]; then echo '{"team":{"id":"team-B","status":"active"}}'; exit 1; fi
   echo '{"error":{"message":"connection reset by peer"}}'; exit 1
 fi
 if [[ "$*" == *" team list "* ]]; then
@@ -594,7 +1010,7 @@ if [[ "$*" == *" team list "* ]]; then
   esac
   exit 0
 fi
-if [[ "$*" == *" team delete team-A "* && "$FAKE_MODE" == "cleanup" ]]; then
+if [[ "$*" == *" team delete team-A "* && ( "$FAKE_MODE" == "cleanup" || "$FAKE_MODE" == "failure-with-id-cleanup" ) ]]; then
   if [[ ! -s "$FAKE_JOURNAL" ]]; then echo 'delete ran before durable journal'; exit 1; fi
   echo '{"deleted":true}'; exit 0
 fi
@@ -619,7 +1035,7 @@ echo '{"error":{"message":"unexpected command"}}'; exit 1
 			t.Setenv("FAKE_REMOTE", remote)
 			t.Setenv("FAKE_MODE", mode)
 			t.Setenv("FAKE_JOURNAL", journal)
-			run, err := Run(context.Background(), Options{CasesDir: filepath.Join(dir, "cases"), InputsDir: filepath.Join(dir, "inputs"), RunName: "same-reused-label", RunID: "owned-run", ExecutionID: "owned-execution", Region: "cn-hangzhou", Surface: "public", EcctlBin: fake, Keep: mode != "cleanup", CleanupJournal: journal, StepTimeout: time.Second})
+			run, err := Run(context.Background(), Options{CasesDir: filepath.Join(dir, "cases"), InputsDir: filepath.Join(dir, "inputs"), RunName: "same-reused-label", RunID: "owned-run", ExecutionID: "owned-execution", Region: "cn-hangzhou", Surface: "public", EcctlBin: fake, Keep: mode != "cleanup" && mode != "failure-with-id-cleanup", CleanupJournal: journal, StepTimeout: time.Second})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -659,13 +1075,18 @@ echo '{"error":{"message":"unexpected command"}}'; exit 1
 				t.Fatalf("reused label reused Team ownership: %q", name)
 			}
 			names[name] = true
-			if mode == "retry-success" || mode == "duplicate-rejection" || mode == "success-no-id" || mode == "cleanup" {
+			if mode == "failure-with-id" || mode == "failure-with-id-cleanup" {
+				if !strings.Contains(run.Cases[0].Steps[0].Stdout, "req-create") || run.Cases[0].Steps[0].Exit != 1 {
+					t.Fatalf("failed CreateTeam lost original process outcome: %+v", run.Cases[0].Steps[0])
+				}
+			}
+			if mode == "retry-success" || mode == "duplicate-rejection" || mode == "success-no-id" || mode == "cleanup" || mode == "failure-with-id" || mode == "failure-with-id-cleanup" {
 				entries := readJournalEntries(t, journal)
-				if mode == "cleanup" {
+				if mode == "cleanup" || mode == "failure-with-id-cleanup" {
 					if len(entries) != 0 || strings.Count(string(calls), "team delete team-A ") != 1 {
 						t.Fatalf("owned recovery cleanup failed: %+v %s", entries, calls)
 					}
-				} else if len(entries) != 1 || entries[0].Teardown != "ecctl sandbox team delete team-A --timeout 5m" {
+				} else if len(entries) != 1 || !entries[0].TeamCreateConfirmed || entries[0].Teardown != "ecctl sandbox team delete team-A --timeout 5m" {
 					t.Fatalf("original owned Team missing from journal: %+v", entries)
 				}
 				body, err := os.ReadFile(journal)
@@ -683,6 +1104,50 @@ echo '{"error":{"message":"unexpected command"}}'; exit 1
 				t.Fatalf("unsafe/unmatched Team got a delete entry: %+v", entries)
 			}
 		})
+	}
+}
+
+func TestTeamFailedCreateReturnedIDKeepsVerifiedCleanupThroughPendingCounter(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake reconciliation uses bash")
+	}
+	dir := canonicalCleanupTestDir(t)
+	bin, journal := filepath.Join(dir, "ecctl"), filepath.Join(dir, "journal.json")
+	script := `#!/usr/bin/env bash
+if [[ "$*" == *" team list "* ]]; then
+  printf '{"teams":[{"id":"team-owned","name":"%s","description":"%s","status":"active"}],"pagination":{"has_more":false}}\n' "$EXPECTED_TEAM_NAME" "$EXPECTED_TEAM_DESCRIPTION"
+  exit 0
+fi
+echo '{"error":{"message":"unexpected reconciliation command"}}'; exit 1
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := execpkg.Config{Bin: bin, Region: "cn-hangzhou"}
+	cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, newOperationRuntime(1), false, journal,
+		report.CleanupJournal{RunID: "run", ExecutionID: "execution", Surface: "public"}, func(string, ...any) {})
+	data := map[string]any{"run_name": "failed-team"}
+	if err := teamOwnership(data); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EXPECTED_TEAM_NAME", data["team_name"].(string))
+	t.Setenv("EXPECTED_TEAM_DESCRIPTION", data["team_owner"].(string))
+	cl.runCommand = func(_ context.Context, _ execpkg.Config, command string) execpkg.Result {
+		return execpkg.Result{Command: command, Started: true, Exit: 1, Stdout: `{"team":{"id":"team-owned","status":"active"},"actions":[{"request_id":"req-create"}]}`,
+			JSON: map[string]any{"team": map[string]any{"id": "team-owned", "status": "active"}}}
+	}
+	st := scenario.Step{Name: "create", Run: `ecctl sandbox team create --name {{.team_name}} --description "{{.team_owner}}" --output=json`, Teardown: "ecctl sandbox team delete {{.team_id}} --timeout 5m"}
+	var scope []*cleanupItem
+	step, ok := runStep(context.Background(), Options{}, cfg, cl, &scope, data, st, time.Second)
+	entries := readJournalEntries(t, journal)
+	if ok || step.Status == report.StatusPass || !strings.Contains(step.Stdout, "req-create") || cl.teamCreatesPending != 0 || len(scope) != 1 || !scope[0].teamCreateConfirmed || len(entries) != 1 || !entries[0].TeamCreateConfirmed {
+		t.Fatalf("failed CreateTeam lost verified cleanup or pending lifecycle: step=%+v pending=%d scope=%+v entries=%+v", step, cl.teamCreatesPending, scope, entries)
+	}
+	cl.runCommand = func(_ context.Context, _ execpkg.Config, command string) execpkg.Result {
+		return execpkg.Result{Command: command, Started: true, Exit: 0, JSON: map[string]any{"deleted": true}}
+	}
+	if failures := cl.runCaseCleanup(scope); len(failures) != 0 || len(readJournalEntries(t, journal)) != 0 {
+		t.Fatalf("verified recovery cleanup did not complete: failures=%v entries=%+v", failures, readJournalEntries(t, journal))
 	}
 }
 
@@ -857,6 +1322,10 @@ func TestRunTeamCreateRejectsUnboundFlagLayoutsBeforeLaunch(t *testing.T) {
 		"ecctl sandbox team --agent-envelope create",
 		"ecctl --resource-group=foreign sandbox team create",
 		"ecctl sandbox --plan=foreign team create",
+		"ecctl sandbox team create --plan=free",
+		"ecctl sandbox team create --plan=eco --plan=pro",
+		"ecctl sandbox team --plan eco --plan=pro create",
+		"ecctl sandbox team --plan eco --profile victim create",
 		"ecctl --unsupported=value sandbox team create",
 		"ecctl --json=invalid sandbox team create",
 		"ecctl sandbox team --no-color=invalid create",
@@ -884,6 +1353,31 @@ func TestRunTeamCreateRejectsUnboundFlagLayoutsBeforeLaunch(t *testing.T) {
 			intents, err := filepath.Glob(cl.journal + ".team-create-*.json")
 			if err != nil || len(intents) != 0 {
 				t.Fatalf("invalid input acquired recovery intent: %v %v", intents, err)
+			}
+		})
+	}
+}
+
+func TestRunTeamCreatePreActionPlanUsesSingleProtectedLaunch(t *testing.T) {
+	for _, plan := range []string{"--plan eco", "--plan=std"} {
+		t.Run(plan, func(t *testing.T) {
+			dir := canonicalCleanupTestDir(t)
+			cfg := execpkg.Config{Bin: filepath.Join(dir, "must-not-launch"), Region: "cn-hangzhou"}
+			data := map[string]any{}
+			if err := teamOwnership(data); err != nil {
+				t.Fatal(err)
+			}
+			cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, nil, true, filepath.Join(dir, "journal.json"), report.CleanupJournal{RunID: "owned-run", ExecutionID: "owned-execution", Surface: "public"}, func(string, ...any) {})
+			st := scenario.Step{Name: "create", Run: `ecctl sandbox team ` + plan + ` create --name {{.team_name}} --description "{{.team_owner}}" --output=json`, Teardown: "ecctl sandbox team delete {{.team_id}} --timeout 5m"}
+			launches := 0
+			cl.runCommand = func(_ context.Context, _ execpkg.Config, command string) execpkg.Result {
+				launches++
+				return execpkg.Result{Command: command, Started: true, Exit: 0, JSON: map[string]any{"team": map[string]any{"id": "team-owned", "status": "active"}}}
+			}
+			var scope []*cleanupItem
+			step, ok := runStep(context.Background(), Options{}, cfg, cl, &scope, data, st, time.Second)
+			if !ok || step.Status != report.StatusPass || launches != 1 || len(scope) != 1 {
+				t.Fatalf("pre-action plan must launch once under recovery fence: step=%+v launches=%d scope=%+v", step, launches, scope)
 			}
 		})
 	}
