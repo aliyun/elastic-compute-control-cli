@@ -1,0 +1,140 @@
+schema_version: 2
+product: sandbox
+provider: aliyun
+api_product: FCSandbox
+resource: quota
+kind: regional
+display_name: {en: team quota, zh-CN: 团队配额}
+description: {en: Manage native FC sandbox team CPU and memory quotas., zh-CN: 管理原生 FC 沙箱团队的 CPU 和内存配额。}
+examples:
+  - ecctl sandbox quota list --region cn-beijing
+  - ecctl sandbox quota get <team-id> --region cn-beijing
+  - ecctl sandbox quota update <team-id> --cpu-cores 32 --memory-gb 64 --region cn-beijing
+
+identity:
+  field: id
+  output_root: {one: quota, many: quotas}
+
+schema:
+  fields:
+    id:
+      type: string
+      description: {en: Team ID (API tagValue), zh-CN: 团队 ID（API tagValue）}
+    team_id:
+      type: string
+      description: {en: Team ID (API tagValue), zh-CN: 团队 ID（API tagValue）}
+    cpu_cores:
+      type: integer
+      description: {en: CPU quota in cores, zh-CN: CPU 配额（核）}
+    memory_gb:
+      type: integer
+      description: {en: memory quota in GB, zh-CN: 内存配额（GB）}
+
+controls:
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description: {en: maximum quotas per page (maxResults; CLI cap 100), zh-CN: 每页最多返回的配额数量（maxResults；CLI 上限 100）}
+  next_token:
+    type: string
+    description: {en: server pagination token, zh-CN: 服务端分页令牌}
+  all:
+    type: boolean
+    description: {en: fetch all token pages from the beginning, zh-CN: 从第一页获取所有令牌分页结果}
+
+probes:
+  detail:
+    api: DescribeQuota
+    request: {tagValue: $.id}
+    response:
+      item: $.quota
+      request_id: $.requestId
+      id: $.tagValue
+      fields: &quota_fields
+        id: $.tagValue
+        team_id: $.tagValue
+        cpu_cores: $.cpuCores
+        memory_gb: $.memoryGB
+  list:
+    api: ListQuota
+    request: {maxResults: $.limit, nextToken: $.next_token}
+    response:
+      items: $.quotas
+      next_token: $.nextToken
+      request_id: $.requestId
+      id: $.tagValue
+      fields: *quota_fields
+
+waiters:
+  absent_after_delete:
+    probe: detail
+    target: absent
+    interval: 2s
+    timeout: 300s
+
+bindings:
+  update_quota:
+    api: UpdateQuota
+    request:
+      body: {tagValue: $.id, cpuCores: $.cpu_cores, memoryGB: $.memory_gb}
+    require_all: [{request: body.tagValue}, {request: body.cpuCores}, {request: body.memoryGB}]
+    context_from: {updated_quota: $.quota}
+    request_id_from: $.requestId
+  delete_quota:
+    api: DeleteQuota
+    request: {tagValue: $.id}
+    require_all: [{request: tagValue}]
+    request_id_from: $.requestId
+    wait: absent_after_delete
+
+operations:
+  update:
+    description: {en: Set a native FC sandbox team quota, zh-CN: 设置原生 FC 沙箱团队配额}
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - cpu_cores: {required: true}
+        - memory_gb: {required: true}
+    workflow:
+      - binding: update_quota
+      - emit:
+          fields:
+            id: $context.updated_quota.tagValue
+            team_id: $context.updated_quota.tagValue
+            cpu_cores: $context.updated_quota.cpuCores
+            memory_gb: $context.updated_quota.memoryGB
+    examples: [ecctl sandbox quota update <team-id> --cpu-cores 32 --memory-gb 64 --region cn-beijing]
+  delete:
+    description: {en: Delete a native FC sandbox team quota configuration, zh-CN: 删除原生 FC 沙箱团队配额配置}
+    help:
+      en: Deletes the quota configuration for the specified Team ID. It does not delete the team.
+      zh-CN: 删除指定团队 ID 的配额配置，不会删除团队。
+    input:
+      fields:
+        - id: {required: true, positional: true}
+    workflow:
+      - binding: delete_quota
+      - emit:
+          fields: {id: $input.id, team_id: $input.id}
+          deleted: true
+    examples: [ecctl sandbox quota delete <team-id> --region cn-beijing]
+  get:
+    aliases: [show, describe]
+    description: {en: Get a native FC sandbox team quota, zh-CN: 获取原生 FC 沙箱团队配额}
+    input:
+      fields:
+        - id: {required: true, positional: true}
+    workflow:
+      - probe: detail
+        ids: [$input.id]
+        not_found: error
+    examples: [ecctl sandbox quota get <team-id> --region cn-beijing]
+  list:
+    description: {en: List native FC sandbox team quotas, zh-CN: 列出原生 FC 沙箱团队配额}
+    input:
+      controls: [limit, next_token, all]
+    workflow:
+      - probe: list
+        many: true
+    examples: [ecctl sandbox quota list --limit 10 --region cn-beijing]

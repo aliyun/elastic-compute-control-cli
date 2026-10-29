@@ -1454,6 +1454,12 @@ func flagInputValue(cmd *cobra.Command, resource spec.ResourceSpec, name string,
 	if flag == nil {
 		return nil, false, nil
 	}
+	if param.Required && param.Default == nil && !flag.Changed {
+		switch param.Type {
+		case "integer", "float", "number":
+			return nil, false, nil
+		}
+	}
 	assigned := flag.Changed || param.Default != nil || param.Required
 	if !assigned {
 		return nil, false, nil
@@ -2332,6 +2338,9 @@ func outputItems(items []map[string]any) []map[string]any {
 func operationPaginationPayload(operation spec.Operation, input map[string]any, result engine.Result) map[string]any {
 	limit := intInput(input, "limit", defaultListLimit)
 	if operationInputHasName(operation.Input.Controls, "all") && boolInput(input, "all") {
+		if operationUsesTokenPagination(operation) {
+			return map[string]any{"limit": limit, "returned": len(result.Items), "has_more": false}
+		}
 		return map[string]any{"page": 1, "limit": limit, "returned": len(result.Items), "has_more": false}
 	}
 	if operationUsesTokenPagination(operation) {

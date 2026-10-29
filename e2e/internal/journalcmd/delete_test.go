@@ -9,6 +9,10 @@ func TestValidateDelete(t *testing.T) {
 		valid   bool
 	}{
 		{name: "first class delete", command: "ecctl ecs instance delete i-1 --force", valid: true},
+		{name: "ordinary Team root flags", command: "ecctl --region cn-hangzhou sandbox team delete team-owned --lang en", valid: true},
+		{name: "ordinary Team interspersed flags", command: "ecctl sandbox --lang=en team --region=cn-hangzhou rm team-owned", valid: true},
+		{name: "ordinary Team unknown root flag", command: "ecctl --future-flag x sandbox team delete team-owned", valid: false},
+		{name: "ordinary Team profile override", command: "ecctl --profile other sandbox team delete team-owned", valid: false},
 		{name: "delete object", command: "ecctl call oss DeleteObject --Bucket e2e-bucket --Key export.raw --region cn-hangzhou", valid: true},
 		{name: "delete bucket equals", command: "ecctl call oss DeleteBucket --Bucket=e2e-bucket --region=cn-hangzhou", valid: true},
 		{name: "restore associated transfer enabled", command: "ecctl rg associated-transfer update --status Enable --enable-existing-resources-transfer true", valid: true},

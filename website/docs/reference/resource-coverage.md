@@ -132,9 +132,10 @@ ecctl schema --list sandbox
 |---|---|
 | `sandbox` | `list`, `get`, `create`, `update`, `delete`, `fork`, `logs`, `metrics`, `pause`, `refresh`, `resume`, `snapshot` |
 | `team` | `list`, `get`, `create`, `update`, `delete` |
+| `quota` | `list`, `get`, `update`, `delete` |
 | `template` | `list`, `get`, `create`, `update`, `delete`, `build-logs`, `build-status`, `publish`, `tag-assign`, `tag-delete`, `tag-list`, `unpublish` |
 
-`sandbox team` / `sbx team` uses regional FCSandbox OpenAPI with Aliyun profile AK/STS. Template `create`, `get`, `list`, `update`, and `delete` also support native FCSandbox with explicit `--openapi` and a region; the default template route and sandbox operations retain E2B API-key and endpoint semantics. Native create/update accept runtime/build configuration and wait for build readiness unless `--no-wait` is supplied.
+`sandbox team`, `sandbox quota`, and their `sbx` aliases use regional FCSandbox OpenAPI with Aliyun profile AK/STS. Quota maps a Team ID to CPU cores and memory GB; it supports get, token-paged list, update, and delete of the quota configuration. Template `create`, `get`, `list`, `update`, and `delete` also support native FCSandbox with explicit `--openapi` and a region; the default template route and sandbox operations retain E2B API-key and endpoint semantics. Native template create/update accept runtime/build configuration and wait for build readiness unless `--no-wait` is supplied.
 
 ## Tag
 

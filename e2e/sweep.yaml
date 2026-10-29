@@ -303,3 +303,6 @@ non_sweepable:
   - resource: sandbox/team
     reason: provider-limitation
     review_after: "2026-12-08"
+  - resource: sandbox/quota
+    reason: provider-limitation
+    review_after: "2026-12-23"

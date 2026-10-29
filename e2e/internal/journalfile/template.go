@@ -186,7 +186,7 @@ func readTemplateCreateIntentsMode(path string, meta report.CleanupJournal, env 
 		return nil, resolveErr
 	}
 	path = resolved
-	actual, ledgerErr := loadTemplateLedger(path, meta)
+	actual, loaded, ledgerErr := loadTemplateLedger(path, meta)
 	if ledgerErr != nil {
 		return nil, ledgerErr
 	}
@@ -194,8 +194,10 @@ func readTemplateCreateIntentsMode(path string, meta report.CleanupJournal, env 
 	seen := map[string]bool{}
 	entries, err := os.ReadDir(filepath.Dir(path))
 	if os.IsNotExist(err) && meta.NativeJournalPath == "" {
-		// A legacy journal may have no directory, but evidence already
-		// loaded from its ledger must still agree with empty discovery.
+		if loaded {
+			return nil, fmt.Errorf("cleanup journal parent disappeared after ledger read")
+		}
+		// A new, unanchored journal may not have a directory yet.
 		return nil, validateTemplateLedger(path, meta, nil, nil, allowPendingCache)
 	}
 	if err != nil {

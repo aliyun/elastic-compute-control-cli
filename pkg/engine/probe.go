@@ -64,13 +64,20 @@ func (e *Executor) runProbe(ctx context.Context, name string, execCtx ExecutionC
 func (e *Executor) runAllProbePages(ctx context.Context, name string, execCtx ExecutionContext, ids []string) (ProbeResult, error) {
 	probe, ok := e.spec.Probes[name]
 	_, optedIn := e.spec.Controls["all"]
-	pageMapped, limitMapped := false, false
+	pageMapped, tokenMapped, limitMapped := false, false, false
 	for _, value := range probe.Request {
 		mapping, _ := value.(string)
 		pageMapped = pageMapped || mapping == "$.page"
+		tokenMapped = tokenMapped || mapping == "$.next_token"
 		limitMapped = limitMapped || mapping == "$.limit"
 	}
 	limit := intValue(execCtx.Input["limit"])
+	if tokenMapped && !pageMapped {
+		if ok && optedIn && limitMapped && probe.Response.NextToken != "" && probe.Response.Items != "" && len(ids) == 0 && limit >= 1 && stringFromMap(execCtx.Input, "next_token") == "" {
+			return e.runAllTokenProbePages(ctx, name, execCtx, limit)
+		}
+		return ProbeResult{}, ecerrors.Client("InvalidAllPages", i18n.NewLocalizer("en").Message("InvalidAllPages"))
+	}
 	if !ok || !optedIn || !pageMapped || !limitMapped || probe.Response.Total == "" || probe.Response.Items == "" || len(ids) != 0 || intValue(execCtx.Input["page"]) != 1 || limit < 1 {
 		return ProbeResult{}, ecerrors.Client("InvalidAllPages", i18n.NewLocalizer("en").Message("InvalidAllPages"))
 	}
@@ -115,6 +122,50 @@ func (e *Executor) runAllProbePages(ctx context.Context, name string, execCtx Ex
 			return invalid()
 		}
 	}
+}
+
+const maxAllTokenPages = 100
+
+func (e *Executor) runAllTokenProbePages(ctx context.Context, name string, execCtx ExecutionContext, limit int) (ProbeResult, error) {
+	input := cloneMap(execCtx.Input)
+	input["all"] = false
+	execCtx.Input = input
+	combined := ProbeResult{}
+	seenTokens := map[string]bool{}
+	seenIDs := map[string]bool{}
+	for page := 0; page < maxAllTokenPages; page++ {
+		result, err := e.runProbe(ctx, name, execCtx, nil)
+		if err != nil {
+			return ProbeResult{}, ecerrors.WithActions(err, append(combined.Actions, actionsFromError(err, e.spec.Probes[name].API)...))
+		}
+		combined.Actions = append(combined.Actions, result.Actions...)
+		invalid := func() (ProbeResult, error) {
+			return ProbeResult{}, ecerrors.WithActions(ecerrors.Service("IncompletePagination", i18n.NewLocalizer("en").Message("IncompletePagination"), false), combined.Actions)
+		}
+		if len(result.Items) > limit {
+			return invalid()
+		}
+		for _, item := range result.Items {
+			id := stringFromMap(item, "id")
+			if id == "" || seenIDs[id] {
+				return invalid()
+			}
+			seenIDs[id] = true
+		}
+		combined.Items = append(combined.Items, result.Items...)
+		combined.Total = len(combined.Items)
+		combined.RequestID = result.RequestID
+		combined.Extra = result.Extra
+		if result.NextToken == "" {
+			return combined, nil
+		}
+		if seenTokens[result.NextToken] || page+1 == maxAllTokenPages {
+			return invalid()
+		}
+		seenTokens[result.NextToken] = true
+		input["next_token"] = result.NextToken
+	}
+	return ProbeResult{}, ecerrors.WithActions(ecerrors.Service("IncompletePagination", i18n.NewLocalizer("en").Message("IncompletePagination"), false), combined.Actions)
 }
 
 func mapProbeResponse(resource spec.ResourceSpec, probe spec.Probe, response map[string]any) ProbeResult {

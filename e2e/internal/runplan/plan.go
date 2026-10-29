@@ -72,12 +72,26 @@ func Build(request Request) ([]ExecutionUnit, error) {
 		if capability := dynamicCapabilitySignature(suite); capability != "" {
 			signature += ";capabilities=[" + capability + "]"
 		}
-		if index, ok := unitIndex[signature]; ok {
-			units[index].Suites = append(units[index].Suites, suite)
-			units[index].Optional[PrimaryRole] = uniqueSorted(append(units[index].Optional[PrimaryRole], optional[PrimaryRole]...))
-			continue
+		// Quota update requires its owned Team to be the only active cleanup
+		// entry. A separate execution gives it a fresh journal and cleanup scope
+		// even when another unit retains a run-lifetime shared-stack fixture.
+		exclusiveQuotaCleanup := suite.Resource == "sandbox/quota"
+		for _, covered := range suite.Covers {
+			if covered == "sandbox/quota" {
+				exclusiveQuotaCleanup = true
+				break
+			}
 		}
-		unitIndex[signature] = len(units)
+		if exclusiveQuotaCleanup {
+			signature += ";cleanup=owned-quota"
+		} else {
+			if index, ok := unitIndex[signature]; ok {
+				units[index].Suites = append(units[index].Suites, suite)
+				units[index].Optional[PrimaryRole] = uniqueSorted(append(units[index].Optional[PrimaryRole], optional[PrimaryRole]...))
+				continue
+			}
+			unitIndex[signature] = len(units)
+		}
 		units = append(units, ExecutionUnit{
 			Signature:    signature,
 			Suites:       []*scenario.Suite{suite},

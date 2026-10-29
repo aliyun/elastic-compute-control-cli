@@ -970,6 +970,12 @@ func TestPaginationAndInputStyleHelpers(t *testing.T) {
 	if payload["has_more"] != true || payload["next_token"] != "token-2" || payload["returned"] != 1 {
 		t.Fatalf("token pagination payload = %#v", payload)
 	}
+	allToken := operationPaginationPayload(spec.Operation{
+		Input: spec.OperationInput{Controls: spec.OperationFields{{Name: "all"}, {Name: "next_token"}}},
+	}, map[string]any{"limit": 1, "all": true}, engine.Result{Items: []map[string]any{{"id": "other"}, {"id": "owned"}}})
+	if allToken["has_more"] != false || allToken["returned"] != 2 || allToken["limit"] != 1 || allToken["page"] != nil || allToken["next_token"] != nil {
+		t.Fatalf("all-token pagination must not claim a numbered page: %#v", allToken)
+	}
 
 	if got := tokenPaginationPayload(10, 0, ""); got["has_more"] != false {
 		t.Fatalf("empty token payload = %#v", got)

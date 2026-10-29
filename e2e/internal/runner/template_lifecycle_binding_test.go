@@ -212,6 +212,60 @@ fi
 	}
 }
 
+func TestNativeTemplateSamePrincipalProfilesAllowTeamParentCleanup(t *testing.T) {
+	for _, cleanupMode := range []string{"runtime", "replay"} {
+		t.Run(cleanupMode, func(t *testing.T) {
+			cfg, cl, dir := nativeCleanupFixture(t, true)
+			var scope []*cleanupItem
+			if err := cl.push(&scope, "team", "ecctl sandbox team delete team-1", "primary", nil); err != nil {
+				t.Fatal(err)
+			}
+			nativeSuccessfulCreate(t, cfg, cl, &scope, map[string]any{})
+			if result, ok := runStep(context.Background(), Options{Logf: func(string, ...any) {}}, cfg, cl, &scope, map[string]any{}, scenario.Step{Name: "delete A", Run: "ecctl sandbox template delete tpl-1 --openapi --team-id team-1 --profile account-a"}, time.Second); !ok {
+				t.Fatalf("A child deletion failed: %+v", result)
+			}
+			body, err := os.ReadFile(cfg.Bin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := strings.ReplaceAll(string(body), `"id":"tpl-1"`, `"id":"tpl-2"`)
+			script = strings.Replace(script, `"$profile" != account-a || -f "$FAKE_NATIVE_DIR/deleted"`, `"$profile" != account-b || -f "$FAKE_NATIVE_DIR/deleted-b"`, 1)
+			script = strings.Replace(script, `touch "$FAKE_NATIVE_DIR/deleted"`, `touch "$FAKE_NATIVE_DIR/deleted-b"`, 1)
+			script = strings.Replace(script, `if [[ "$*" == *"team delete"* ]]; then echo team-delete >> "$FAKE_NATIVE_DIR/calls"; echo '{"deleted":true}'; exit 0; fi`, `if [[ "$*" == *"team delete"* ]]; then
+ if [[ -z "$ECCTL_EXPECTED_CREDENTIAL_IDENTITY" ]]; then exit 2; fi
+ echo "team-delete profile=$profile pin=$ECCTL_EXPECTED_CREDENTIAL_IDENTITY" >> "$FAKE_NATIVE_DIR/calls"
+ echo '{"deleted":true}'; exit 0
+fi`, 1)
+			if err := os.WriteFile(cfg.Bin, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			second := scenario.Step{Name: "create B", Run: "ecctl sandbox template create --openapi --profile account-b --team-id team-1 --name second", Teardown: "ecctl sandbox template delete {{.template_id}} --openapi --team-id team-1"}
+			if result, ok := runStep(context.Background(), Options{Logf: func(string, ...any) {}}, cfg, cl, &scope, map[string]any{}, second, time.Second); !ok {
+				t.Fatalf("same-principal B allocation failed: %+v", result)
+			}
+			if result, ok := runStep(context.Background(), Options{Logf: func(string, ...any) {}}, cfg, cl, &scope, map[string]any{}, scenario.Step{Name: "delete B", Run: "ecctl sandbox template delete tpl-2 --openapi --team-id team-1 --profile account-b"}, time.Second); !ok {
+				t.Fatalf("B child deletion failed: %+v", result)
+			}
+			intents, err := filepath.Glob(cl.journal + ".template-create-*.json")
+			if err != nil || len(intents) != 2 || len(readJournalEntries(t, cl.journal)) != 1 {
+				t.Fatalf("A/B history or Team parent was lost: intents=%v entries=%+v err=%v", intents, readJournalEntries(t, cl.journal), err)
+			}
+			if cleanupMode == "runtime" {
+				cl.keep = false
+				if failures := cl.run(scope); len(failures) != 0 {
+					t.Fatalf("runtime Team parent cleanup failed: %v", failures)
+				}
+			} else if result, err := sweeper.ReplayJournal(context.Background(), cl.journal, cfg); err != nil || result.Deleted != 1 {
+				t.Fatalf("replay Team parent cleanup failed: %+v %v", result, err)
+			}
+			calls, _ := os.ReadFile(filepath.Join(dir, "calls"))
+			if !strings.Contains(string(calls), "team-delete profile=account-") || !strings.Contains(string(calls), `"UserId":"user-a"`) || len(readJournalEntries(t, cl.journal)) != 0 {
+				t.Fatalf("Team parent stayed after A/B cleanup: calls=%s", calls)
+			}
+		})
+	}
+}
+
 func TestNativeTemplateLocalValidationAllowsParentCleanup(t *testing.T) {
 	for _, replay := range []bool{false, true} {
 		t.Run(map[bool]string{false: "runtime", true: "replay"}[replay], func(t *testing.T) {
@@ -444,6 +498,32 @@ func TestPendingNativeTemplateFencesDestructiveLayouts(t *testing.T) {
 	}
 	if journalfile.CheckTemplateCreateIntents(path, meta, cfg.Env) == nil {
 		t.Error("classification discarded unresolved ownership evidence")
+	}
+}
+
+func TestPendingNativeTemplateFencesOrdinaryAutomaticFinalizer(t *testing.T) {
+	cfg, cl, _ := nativeCleanupFixture(t, false)
+	var scope []*cleanupItem
+	if err := cl.push(&scope, "stack", "ecctl t thing delete ordinary", "primary", nil); err != nil {
+		t.Fatal(err)
+	}
+	intent, err := reserveTemplateCreate(context.Background(), "ecctl sandbox template create --openapi --team-id team-1 --name pending", cfg, cl, scenario.Step{Teardown: "ecctl sandbox template delete {{.template_id}} --openapi --team-id team-1"}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerCalls := 0
+	cl.runCommand = func(context.Context, execpkg.Config, string) execpkg.Result {
+		providerCalls++
+		return execpkg.Result{Started: true, Exit: 0}
+	}
+	if failures := cl.run(scope); len(failures) == 0 || providerCalls != 0 || scope[0].done {
+		t.Fatalf("ordinary automatic finalizer crossed pending native intent: failures=%v calls=%d done=%v", failures, providerCalls, scope[0].done)
+	}
+	if _, err := os.Stat(intent.path); err != nil {
+		t.Fatalf("pending native intent disappeared: %v", err)
+	}
+	if got := readJournalEntries(t, cl.journal); len(got) != 1 || got[0].Teardown != scope[0].cmd {
+		t.Fatalf("ordinary finalizer was consumed despite pending native allocation: %+v", got)
 	}
 }
 
@@ -1567,7 +1647,15 @@ func TestNativeRuntimeCleanupReportsHeldReplayLockDeadline(t *testing.T) {
 			t.Fatal("runner did not finish after releasing test lock")
 		}
 	}
-	if result.err != nil || result.run == nil || result.run.Summary.Failed != 1 || !strings.Contains(result.run.Cases[0].Error, "cleanup coordination") || !strings.Contains(result.run.Cases[0].Error, "deadline exceeded") {
+	cleanupFailures := 0
+	if result.run != nil {
+		for _, caseResult := range result.run.Cases {
+			if caseResult.Resource == "cleanup" && caseResult.Status == report.StatusFail && strings.Contains(caseResult.Error, "cleanup coordination") && strings.Contains(caseResult.Error, "deadline exceeded") {
+				cleanupFailures++
+			}
+		}
+	}
+	if result.err != nil || result.run == nil || result.run.Summary.Failed != 1 || cleanupFailures != 1 {
 		t.Errorf("lock refusal did not reach the completed report: %v %+v", result.err, result.run)
 	}
 	calls, _ := os.ReadFile(filepath.Join(dir, "calls"))
@@ -2356,7 +2444,14 @@ func TestNativeFinalizerRequiresOriginalLedgerBundle(t *testing.T) {
 					if err := os.Symlink(originalDir, link); err != nil {
 						t.Fatal(err)
 					}
-					cl.journal = filepath.Join(link, "journal.json")
+					requested := filepath.Join(link, "journal.json")
+					canonical, err := journalfile.ResolveJournalPath(requested)
+					if err != nil {
+						t.Fatal(err)
+					}
+					cl.requestedJournal = requested
+					cl.journalPaths = map[string]string{"primary": canonical}
+					cl.journal = canonical
 				}
 				var scope []*cleanupItem
 				nativeSuccessfulCreate(t, cfg, cl, &scope, map[string]any{})
@@ -2431,12 +2526,113 @@ func TestNativeFinalizerRequiresOriginalLedgerBundle(t *testing.T) {
 	}
 }
 
+func TestTeamFinalizerRejectsMissingJournalParentBeforeLock(t *testing.T) {
+	cfg, _, dir := nativeCleanupFixture(t, false)
+	parent := filepath.Join(dir, "journals")
+	cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, newOperationRuntime(1), false, filepath.Join(parent, "journal.json"),
+		report.CleanupJournal{RunID: "run", ExecutionID: "execution", Surface: "public"}, func(string, ...any) {})
+	var scope []*cleanupItem
+	if err := cl.push(&scope, "sandbox/team", "ecctl sandbox team delete team-1", "primary", nil); err != nil {
+		t.Fatal(err)
+	}
+	moved := parent + "-moved"
+	if err := os.Rename(parent, moved); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	cl.runCommand = func(context.Context, execpkg.Config, string) execpkg.Result {
+		calls++
+		return execpkg.Result{Started: true, Exit: 0}
+	}
+	if failures := cl.run(scope); len(failures) == 0 || calls != 0 || scope[0].done {
+		t.Fatalf("missing journal parent allowed finalizer: failures=%v calls=%d done=%v", failures, calls, scope[0].done)
+	}
+	if _, err := os.Stat(parent); !os.IsNotExist(err) {
+		t.Fatalf("finalizer recreated missing journal parent: %v", err)
+	}
+	if err := os.Rename(moved, parent); err != nil {
+		t.Fatal(err)
+	}
+	if failures := cl.run(scope); len(failures) != 0 || calls != 1 || !scope[0].done || len(readJournalEntries(t, cl.journal)) != 0 {
+		t.Fatalf("restored parent could not retire finalizer: failures=%v calls=%d done=%v", failures, calls, scope[0].done)
+	}
+}
+
+func TestOrdinaryTeamRegistrationPinsJournalParent(t *testing.T) {
+	for _, replaced := range []bool{false, true} {
+		name := "missing"
+		if replaced {
+			name = "replaced"
+		}
+		t.Run(name, func(t *testing.T) {
+			cfg, _, dir := nativeCleanupFixture(t, false)
+			parent := filepath.Join(dir, "journals")
+			cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, newOperationRuntime(1), false, filepath.Join(parent, "journal.json"),
+				report.CleanupJournal{RunID: "run", ExecutionID: "execution", Surface: "public"}, func(string, ...any) {})
+			var scope []*cleanupItem
+			if err := cl.push(&scope, "sandbox/team", "ecctl sandbox team delete team-1", "primary", nil); err != nil {
+				t.Fatalf("first ordinary Team registration: %v", err)
+			}
+			if got := readJournalEntries(t, cl.journal); len(got) != 1 || got[0].Teardown != scope[0].cmd {
+				t.Fatalf("first registration did not read and write the journal: %+v", got)
+			}
+			moved := parent + "-moved"
+			if err := os.Rename(parent, moved); err != nil {
+				t.Fatal(err)
+			}
+			if replaced {
+				if err := os.Mkdir(parent, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := cl.push(&scope, "sandbox/team", "ecctl sandbox team delete team-2", "primary", nil); err == nil || len(scope) != 1 {
+				t.Fatalf("lost journal parent accepted a second finalizer: err=%v scope=%d", err, len(scope))
+			}
+			if _, err := os.Stat(cl.journal); !os.IsNotExist(err) {
+				t.Fatalf("lost journal parent received a new journal: %v", err)
+			}
+			if replaced {
+				if err := os.RemoveAll(parent); err != nil {
+					t.Fatal(err)
+				}
+			} else if _, err := os.Stat(parent); !os.IsNotExist(err) {
+				t.Fatalf("registration recreated the missing parent: %v", err)
+			}
+			if err := os.Rename(moved, parent); err != nil {
+				t.Fatal(err)
+			}
+			if err := cl.push(&scope, "sandbox/team", "ecctl sandbox team delete team-2", "primary", nil); err != nil {
+				t.Fatalf("restored parent could not register finalizer: %v", err)
+			}
+			if got := readJournalEntries(t, cl.journal); len(got) != 2 || got[0].Teardown != scope[0].cmd || got[1].Teardown != scope[1].cmd {
+				t.Fatalf("restored journal lost Team finalizers: %+v", got)
+			}
+		})
+	}
+}
+
+func TestOrdinaryTeamRegistrationRejectsMissingNativeJournalParent(t *testing.T) {
+	cfg, _, dir := nativeCleanupFixture(t, false)
+	parent := filepath.Join(dir, "journals")
+	cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, newOperationRuntime(1), false, filepath.Join(parent, "journal.json"),
+		report.CleanupJournal{RunID: "run", ExecutionID: "execution", Surface: "public"}, func(string, ...any) {})
+	cl.nativeJournals = map[string]report.CleanupJournal{"primary": {NativeJournalPath: cl.journal}}
+	var scope []*cleanupItem
+	if err := cl.push(&scope, "sandbox/team", "ecctl sandbox team delete team-1", "primary", nil); err == nil || len(scope) != 0 {
+		t.Fatalf("retained native journal with missing parent accepted ordinary Team finalizer: err=%v scope=%d", err, len(scope))
+	}
+	if _, err := os.Stat(parent); !os.IsNotExist(err) {
+		t.Fatalf("retained native journal parent was recreated: %v", err)
+	}
+}
+
 func TestNativeParentFinalizerRejectsJournalDirectoryLostAfterRead(t *testing.T) {
 	for _, kind := range []string{"required", "loaded", "references-only", "delete-entry-only", "legacy-v2", "legacy-array"} {
 		t.Run(kind, func(t *testing.T) {
 			cfg, cl, dir := nativeCleanupFixture(t, false)
 			parent := filepath.Join(dir, "journals")
-			cl.journal = filepath.Join(parent, "journal.json")
+			cl = newCleanup(map[string]execpkg.Config{"primary": cfg}, newOperationRuntime(1), false, filepath.Join(parent, "journal.json"),
+				report.CleanupJournal{RunID: "run", ExecutionID: "execution", Surface: "public"}, func(string, ...any) {})
 			var scope []*cleanupItem
 			if err := cl.push(&scope, "sandbox/team", "ecctl sandbox team delete team-1", "primary", nil); err != nil {
 				t.Fatal(err)
@@ -2517,7 +2713,6 @@ func TestNativeParentFinalizerRejectsJournalDirectoryLostAfterRead(t *testing.T)
 					if bound.ExpectedIdentity != nil {
 						t.Error("legacy cleanup acquired an unrelated native identity pin")
 					}
-					restore() // Allow the legitimate finalizer's journal update.
 				}
 				return execpkg.Run(ctx, bound, command)
 			}
@@ -2531,16 +2726,31 @@ func TestNativeParentFinalizerRejectsJournalDirectoryLostAfterRead(t *testing.T)
 				t.Fatal("ledger reader did not complete the deterministic directory move")
 			}
 			argv, _ := os.ReadFile(filepath.Join(dir, "calls"))
+			if len(failures) == 0 || calls != 0 || scope[0].done || scope[0].running || strings.Contains(string(argv), "team-delete") {
+				t.Fatalf("lost journal directory launched parent cleanup: calls=%d failures=%v done=%v argv=%s", calls, failures, scope[0].done, argv)
+			}
+			if _, err := os.Stat(parent); !os.IsNotExist(err) {
+				t.Fatalf("cleanup recreated the lost journal parent: %v", err)
+			}
 			if legacy {
-				if len(failures) != 0 || calls != 1 || !scope[0].done || strings.Count(string(argv), "team-delete\n") != 1 {
-					t.Fatalf("legacy parent cleanup refused: calls=%d failures=%v done=%v argv=%s", calls, failures, scope[0].done, argv)
+				if _, err := cl.prepareOwnedTeamDelete(scope, scope[0].cmd, "primary", scope[0]); err == nil {
+					t.Fatal("Team ownership lookup accepted the lost journal parent")
+				}
+				if _, err := os.Stat(parent); !os.IsNotExist(err) {
+					t.Fatalf("Team ownership lookup recreated the lost journal parent: %v", err)
+				}
+			}
+			restore()
+			if legacy {
+				if failures := cl.run(scope); len(failures) != 0 || calls != 1 || !scope[0].done {
+					t.Fatalf("restored legacy parent cleanup refused: calls=%d failures=%v done=%v", calls, failures, scope[0].done)
+				}
+				argv, _ = os.ReadFile(filepath.Join(dir, "calls"))
+				if strings.Count(string(argv), "team-delete\n") != 1 {
+					t.Fatalf("restored legacy parent cleanup did not run exactly once: %s", argv)
 				}
 				return
 			}
-			if len(failures) == 0 || calls != 0 || scope[0].done || scope[0].running || strings.Contains(string(argv), "team-delete") {
-				t.Fatalf("lost native directory launched parent cleanup: calls=%d failures=%v done=%v argv=%s", calls, failures, scope[0].done, argv)
-			}
-			restore()
 			// Restoring the bundle alone must still preserve its pending fence.
 			if failures := cl.run(scope); len(failures) == 0 || calls != 0 || scope[0].done {
 				t.Fatalf("restored pending allocation allowed cleanup: calls=%d failures=%v", calls, failures)

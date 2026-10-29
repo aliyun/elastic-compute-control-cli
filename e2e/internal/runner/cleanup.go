@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,9 +19,13 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalcmd"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalfile"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
 const cleanupTimeoutPadding = time.Minute
+
+var deleteClaimRejected = func(string) {}
+var writeTeamRegistrationJournal = writeRunnerJournal
 
 var (
 	cleanupTimeout     = 10 * time.Minute
@@ -33,15 +39,23 @@ const exitNotFound = 4
 
 // cleanupItem is one teardown command and whether it has already run.
 type cleanupItem struct {
-	scope              string
-	cmd                string
-	role               string
-	lockKeys           []string
-	done               bool
-	running            bool
-	deferred           bool
-	cacheCreatePending bool
-	templateBinding    *journalfile.TemplateCreateIntent
+	scope                     string
+	cmd                       string
+	role                      string
+	lockKeys                  []string
+	done                      bool
+	running                   bool
+	deferred                  bool
+	cacheCreatePending        bool
+	teamCreateConfirmed       bool
+	quotaBound                bool
+	teamRegistrationFailed    bool
+	quotaReserved             bool
+	quotaUpdatePending        bool
+	quotaReservationUnstarted bool
+	teamReplayAttempted       bool
+	ownedTeamID               string
+	templateBinding           *journalfile.TemplateCreateIntent
 }
 
 // cleanup is the two-level teardown registry. Case scopes run when
@@ -49,37 +63,240 @@ type cleanupItem struct {
 // executes on a fresh background context so it completes even when the run's
 // context was cancelled (CI cancel / timeout).
 type cleanup struct {
-	mu             sync.Mutex
-	session        *Session
-	keep           bool
-	journal        string
-	execCfg        map[string]execpkg.Config
-	runCommand     func(context.Context, execpkg.Config, string) execpkg.Result
-	operations     *operationRuntime
-	logf           func(string, ...any)
-	manifest       []report.Resource
-	journalMeta    report.CleanupJournal
-	nativeJournals map[string]report.CleanupJournal
-	ownedTemplates []*cleanupItem
-	deferredScopes [][]*cleanupItem
+	mu                        sync.Mutex
+	session                   *Session
+	keep                      bool
+	journal                   string
+	requestedJournal          string
+	journalPaths              map[string]string
+	journalParents            map[string]os.FileInfo
+	execCfg                   map[string]execpkg.Config
+	runCommand                func(context.Context, execpkg.Config, string) execpkg.Result
+	operations                *operationRuntime
+	logf                      func(string, ...any)
+	manifest                  []report.Resource
+	journalMeta               report.CleanupJournal
+	nativeJournals            map[string]report.CleanupJournal
+	ownedTemplates            []*cleanupItem
+	ownedTeams                []*cleanupItem
+	registeredItems           []*cleanupItem
+	quotaReservations         []*cleanupItem
+	quotaBinding              *report.QuotaCredentialBinding
+	unresolvedQuotaTeamCreate bool
+	allocationFence           string
+	quotaLifecycleRequired    bool
+	deferredScopes            [][]*cleanupItem
+	deleteClaims              map[string]bool
+	teamCreatesPending        int
+}
+
+// A reservation remains active until its exact journal child is durably
+// settled or retired. A later case must not allocate into that cleanup fence.
+func (c *cleanup) hasPendingQuotaUpdate() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, item := range c.quotaReservations {
+		if item.quotaUpdatePending {
+			return true
+		}
+	}
+	return false
+}
+
+// Check the retained journal as well as the current process's reservations.
+// Callers that may create a Team hold the journal replay lock across this
+// check, provider invocation, and registration.
+func (c *cleanup) checkDurablePendingQuotaUpdate(ctx context.Context) error {
+	c.mu.Lock()
+	fence := c.allocationFence
+	unresolvedTeam := c.unresolvedQuotaTeamCreate
+	binding := c.quotaBinding
+	c.mu.Unlock()
+	if unresolvedTeam {
+		return fmt.Errorf("unresolved Quota-bound Team create blocks new allocation")
+	}
+	if fence != "" {
+		return fmt.Errorf("Team allocation is fenced after uncertain recovery reservation: %s", fence)
+	}
+	if c.journal == "" {
+		return nil
+	}
+	path, err := c.checkedJournalPath("primary")
+	if err != nil {
+		return err
+	}
+	template, _, _ := c.journalValues(&cleanupItem{role: "primary"})
+	known, err := c.rememberedJournalParent(path)
+	if err != nil {
+		return err
+	}
+	lock := journalfile.WithLock
+	if known != nil {
+		lock = journalfile.WithExistingParentLock
+	}
+	return lock(ctx, path, func() error {
+		if err := checkJournalParentIdentity(path, known); err != nil {
+			return err
+		}
+		journal, legacy, err := readRunnerJournal(path)
+		if os.IsNotExist(err) {
+			if binding != nil {
+				return fmt.Errorf("protected cleanup journal is missing for bound Team allocation")
+			}
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if legacy || journal.Version != template.Version || journal.RunID != template.RunID || journal.ExecutionID != template.ExecutionID || journal.RegionRole != template.RegionRole || journal.Region != template.Region || journal.Surface != template.Surface || journal.EcctlBin != template.EcctlBin {
+			return fmt.Errorf("existing cleanup journal does not match run, execution, role, region, surface and binary")
+		}
+		// A fresh ordinary run cannot safely inherit a completed Quota run's
+		// credential binding. Refuse it before any provider allocation.
+		if journal.QuotaBinding != nil && !reflect.DeepEqual(journal.QuotaBinding, binding) {
+			return fmt.Errorf("existing cleanup journal Quota credential binding is not owned by this run")
+		}
+		return journalfile.CheckQuotaUpdatePending(journal)
+	})
+}
+
+func (c *cleanup) isQuotaUpdatePending(item *cleanupItem) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return item.quotaUpdatePending
 }
 
 func newCleanup(cfg map[string]execpkg.Config, operations *operationRuntime, keep bool, journal string, meta report.CleanupJournal, logf func(string, ...any)) *cleanup {
 	meta.Version = 2
-	return &cleanup{keep: keep, journal: journal, execCfg: cfg, runCommand: execpkg.Run, operations: operations, logf: logf, journalMeta: meta}
+	return &cleanup{keep: keep, journal: journal, requestedJournal: journal, execCfg: cfg, runCommand: execpkg.Run, operations: operations, logf: logf, journalMeta: meta}
+}
+
+// withDeleteClaim serializes one owned target across concurrent case steps and
+// case cleanup, without blocking unrelated resource deletes.
+func (c *cleanup) withDeleteClaim(role, command string, run func() error) error {
+	key := role + "\x00" + command
+	c.mu.Lock()
+	if c.deleteClaims == nil {
+		c.deleteClaims = make(map[string]bool)
+	}
+	if c.deleteClaims[key] {
+		c.mu.Unlock()
+		deleteClaimRejected(command)
+		return fmt.Errorf("owned delete is already running: %s", report.Scrub(command))
+	}
+	c.deleteClaims[key] = true
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		delete(c.deleteClaims, key)
+		c.mu.Unlock()
+	}()
+	return run()
+}
+
+func (c *cleanup) checkedJournalPath(role string) (string, error) {
+	if c.journal == "" {
+		return "", nil
+	}
+	want := cleanupJournalPath(c.journal, role)
+	if c.journalPaths != nil {
+		want = c.journalPaths[role]
+	}
+	requested := cleanupJournalPath(c.requestedJournal, role)
+	current, err := journalfile.ResolveJournalPath(requested)
+	if err != nil || current != want {
+		return "", fmt.Errorf("cleanup journal target changed")
+	}
+	return want, nil
+}
+
+// Caller holds c.mu. Once this cleanup has observed a journal directory,
+// later reads and writes must not accept a different directory at that path.
+func (c *cleanup) checkedJournalParentLocked(path string) (os.FileInfo, error) {
+	parent := filepath.Dir(path)
+	current, err := os.Stat(parent)
+	if err != nil {
+		return nil, fmt.Errorf("cleanup journal parent %s: %w", parent, err)
+	}
+	if !current.IsDir() {
+		return nil, fmt.Errorf("cleanup journal parent %s is not a directory", parent)
+	}
+	if known := c.journalParents[path]; known != nil && !os.SameFile(known, current) {
+		return nil, fmt.Errorf("cleanup journal parent %s changed", parent)
+	}
+	return current, nil
+}
+
+// Take the remembered inode before acquiring a journal lock. Callers must
+// compare it again within the lock and before a provider create is launched.
+func (c *cleanup) rememberedJournalParent(path string) (os.FileInfo, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	known := c.journalParents[path]
+	if known != nil {
+		if _, err := c.checkedJournalParentLocked(path); err != nil {
+			return nil, err
+		}
+	}
+	return known, nil
+}
+
+func checkJournalParentIdentity(path string, known os.FileInfo) error {
+	parent := filepath.Dir(path)
+	current, err := os.Stat(parent)
+	if err != nil {
+		return fmt.Errorf("cleanup journal parent %s: %w", parent, err)
+	}
+	if !current.IsDir() || known != nil && !os.SameFile(known, current) {
+		return fmt.Errorf("cleanup journal parent %s changed", parent)
+	}
+	return nil
+}
+
+// Caller holds c.mu and the transaction lock for path.
+func (c *cleanup) rememberJournalParentLocked(path string, parent os.FileInfo) {
+	if c.journalParents == nil {
+		c.journalParents = make(map[string]os.FileInfo)
+	}
+	if c.journalParents[path] == nil {
+		c.journalParents[path] = parent
+	}
+}
+
+// Region identity is the minimum proof of separation available to cleanup.
+// A different binary or environment may still address the same account, so
+// equal or unknown regions conservatively share Team ownership fences.
+func (c *cleanup) teamTargetsMayOverlap(first, second string) bool {
+	a, aOK := c.execCfg[first]
+	b, bOK := c.execCfg[second]
+	return !aOK || !bOK || a.Region == "" || b.Region == "" || a.Region == b.Region
+}
+
+func (c *cleanup) coLocatedTeamRoles(role string) []string {
+	roles := make([]string, 0, len(c.execCfg))
+	for candidate := range c.execCfg {
+		if c.teamTargetsMayOverlap(role, candidate) {
+			roles = append(roles, candidate)
+		}
+	}
+	sort.Strings(roles)
+	return roles
 }
 
 // push registers a teardown command in a scope and records it in the manifest.
 func (c *cleanup) push(scope *[]*cleanupItem, name, cmd, role string, lockKeys []string, binding ...*journalfile.TemplateCreateIntent) error {
-	_, err := c.pushItem(scope, name, cmd, role, lockKeys, false, binding...)
+	_, err := c.pushItem(scope, name, cmd, role, lockKeys, false, false, false, binding...)
 	return err
 }
 
 func (c *cleanup) pushPendingCacheCreate(scope *[]*cleanupItem, name, cmd, role string, lockKeys []string) (*cleanupItem, error) {
-	return c.pushItem(scope, name, cmd, role, lockKeys, true)
+	return c.pushItem(scope, name, cmd, role, lockKeys, true, false, false)
 }
 
-func (c *cleanup) pushItem(scope *[]*cleanupItem, name, cmd, role string, lockKeys []string, cacheCreatePending bool, binding ...*journalfile.TemplateCreateIntent) (*cleanupItem, error) {
+func (c *cleanup) pushItem(scope *[]*cleanupItem, name, cmd, role string, lockKeys []string, cacheCreatePending, teamCreateConfirmed, quotaBound bool, binding ...*journalfile.TemplateCreateIntent) (*cleanupItem, error) {
+	if strings.TrimSpace(cmd) == "" {
+		return nil, fmt.Errorf("cleanup finalizer is empty")
+	}
 	if role == "" {
 		role = "primary"
 	}
@@ -91,12 +308,54 @@ func (c *cleanup) pushItem(scope *[]*cleanupItem, name, cmd, role string, lockKe
 	if err != nil {
 		return nil, fmt.Errorf("cleanup lock keys: %w", err)
 	}
-	it := &cleanupItem{scope: name, cmd: cmd, role: role, lockKeys: keys, cacheCreatePending: cacheCreatePending}
+	if quotaUpdateCandidate(scenario.Step{}, cmd) || quotaDeleteCandidate(cmd) {
+		return nil, fmt.Errorf("Quota mutation cannot be registered as an ordinary finalizer")
+	}
+	teamID, teamErr := journalfile.TeamDeleteTarget(cmd)
+	if teamCreateConfirmed && teamErr != nil {
+		return nil, fmt.Errorf("confirmed Team creation requires a validated Team finalizer: %w", teamErr)
+	}
+	it := &cleanupItem{scope: name, cmd: cmd, role: role, lockKeys: keys, cacheCreatePending: cacheCreatePending, teamCreateConfirmed: teamCreateConfirmed, quotaBound: quotaBound}
+	if teamCreateConfirmed {
+		it.ownedTeamID = teamID
+	}
 	if len(binding) > 0 {
 		copy := *binding[0]
 		it.templateBinding = &copy
 	}
 	c.mu.Lock()
+	if _, err := c.checkedJournalPath(role); err != nil {
+		c.mu.Unlock()
+		return nil, err
+	}
+	if !teamCreateConfirmed && ownedTeamDeleteCandidate(cmd) {
+		if rawTeamDeleteCandidate(cmd) {
+			c.mu.Unlock()
+			return nil, fmt.Errorf("raw Team delete cannot be an unattended finalizer")
+		}
+		candidateID, candidateErr := teamDeleteTargetForOwnership(cmd, cfg.Region)
+		if candidateErr != nil {
+			c.mu.Unlock()
+			return nil, fmt.Errorf("ordinary Team finalizer requires a validated target and region: %w", candidateErr)
+		}
+		if c.teamCreatesPending > 0 {
+			c.mu.Unlock()
+			return nil, fmt.Errorf("ordinary Team finalizer cannot race a protected Team creation")
+		}
+		for _, existing := range c.ownedTeams {
+			if c.teamTargetsMayOverlap(role, existing.role) && existing.ownedTeamID == candidateID {
+				c.mu.Unlock()
+				return nil, fmt.Errorf("ordinary Team finalizer cannot duplicate retained Team ownership")
+			}
+		}
+		if _, found, err := c.retainedTeamParent(role, candidateID, true); err != nil {
+			c.mu.Unlock()
+			return nil, err
+		} else if found {
+			c.mu.Unlock()
+			return nil, fmt.Errorf("ordinary Team finalizer conflicts with durable Team ownership")
+		}
+	}
 	if cacheCreatePending {
 		// The cache create has not launched. A failed journal reservation must
 		// not leave an in-memory delete eligible for case cleanup.
@@ -106,6 +365,10 @@ func (c *cleanup) pushItem(scope *[]*cleanupItem, name, cmd, role string, lockKe
 		}
 	}
 	*scope = append(*scope, it)
+	c.registeredItems = append(c.registeredItems, it)
+	if teamCreateConfirmed {
+		c.ownedTeams = append(c.ownedTeams, it)
+	}
 	if it.templateBinding != nil {
 		// Creation ownership outlives a case scope, including --keep runs.
 		c.ownedTemplates = append(c.ownedTemplates, it)
@@ -115,6 +378,9 @@ func (c *cleanup) pushItem(scope *[]*cleanupItem, name, cmd, role string, lockKe
 	})
 	if !cacheCreatePending {
 		err = c.appendJournalItemLocked(it)
+		if err != nil && teamCreateConfirmed {
+			it.teamRegistrationFailed = true
+		}
 	}
 	c.mu.Unlock()
 	return it, err
@@ -138,8 +404,11 @@ func (c *cleanup) finishCacheCreate(item *cleanupItem, unstarted bool) error {
 	if !item.cacheCreatePending || item.done || c.journal == "" {
 		return fmt.Errorf("Template Cache create has no pending journal reservation")
 	}
+	if _, err := c.checkedJournalPath(item.role); err != nil {
+		return err
+	}
 	template, entry, path := c.journalValues(item)
-	err := journalfile.WithLock(context.Background(), path, func() error {
+	err := journalfile.WithExistingParentLock(context.Background(), path, func() error {
 		journal, _, err := readRunnerJournal(path)
 		if err != nil {
 			return err
@@ -217,8 +486,21 @@ func (c *cleanup) appendJournalItemLocked(item *cleanupItem) error {
 	if c.journal == "" {
 		return nil
 	}
+	if _, err := c.checkedJournalPath(item.role); err != nil {
+		return err
+	}
 	template, entry, path := c.journalValues(item)
-	return journalfile.WithLock(context.Background(), path, func() error {
+	lock := journalfile.WithLock
+	if c.journalParents[path] != nil || item.teamCreateConfirmed {
+		lock = journalfile.WithExistingParentLock
+	}
+	var parent os.FileInfo
+	err := lock(context.Background(), path, func() error {
+		var parentErr error
+		parent, parentErr = c.checkedJournalParentLocked(path)
+		if parentErr != nil {
+			return parentErr
+		}
 		journal, _, err := readRunnerJournal(path)
 		if os.IsNotExist(err) {
 			journal = template
@@ -228,20 +510,33 @@ func (c *cleanup) appendJournalItemLocked(item *cleanupItem) error {
 		if err := mergeJournalMetadata(&journal, template); err != nil {
 			return err
 		}
+		if item.teamCreateConfirmed && journal.JournalPath != path {
+			return fmt.Errorf("confirmed Team requires its anchored cleanup journal")
+		}
 		if !isReplayableTeardown(item.cmd) {
 			return writeRunnerJournal(path, journal)
 		}
 		journal.Entries = append(journal.Entries, entry)
+		if item.teamCreateConfirmed {
+			return writeTeamRegistrationJournal(path, journal)
+		}
 		return writeRunnerJournal(path, journal)
 	})
+	if err == nil {
+		c.rememberJournalParentLocked(path, parent)
+	}
+	return err
 }
 
 func (c *cleanup) removeJournalItemLocked(item *cleanupItem) error {
 	if c.journal == "" || !isReplayableTeardown(item.cmd) {
 		return nil
 	}
+	if _, err := c.checkedJournalPath(item.role); err != nil {
+		return err
+	}
 	template, entry, path := c.journalValues(item)
-	return journalfile.WithLock(context.Background(), path, func() error {
+	return journalfile.WithExistingParentLock(context.Background(), path, func() error {
 		journal, _, err := readRunnerJournal(path)
 		if os.IsNotExist(err) {
 			return nil
@@ -273,12 +568,21 @@ func (c *cleanup) journalValues(item *cleanupItem) (report.CleanupJournal, repor
 	journal.RegionRole = item.role
 	journal.Region = cfg.Region
 	journal.EcctlBin = cfg.Bin
+	if item.role == "primary" {
+		journal.QuotaBinding = c.quotaBinding
+	}
 	journal.Entries = make([]report.Resource, 0)
 	entry := report.Resource{
 		Scope: item.scope, Teardown: item.cmd, RegionRole: item.role,
 		Region: cfg.Region, ExecutionID: c.journalMeta.ExecutionID, CacheCreatePending: item.cacheCreatePending,
+		TeamCreateConfirmed: item.teamCreateConfirmed, QuotaBound: item.quotaBound, QuotaReserved: item.quotaReserved,
+		QuotaUpdatePending: item.quotaUpdatePending, TeamReplayAttempted: item.teamReplayAttempted,
 	}
-	return journal, entry, cleanupJournalPath(c.journal, item.role)
+	path := cleanupJournalPath(c.journal, item.role)
+	if c.journalPaths != nil {
+		path = c.journalPaths[item.role]
+	}
+	return journal, entry, path
 }
 
 func readRunnerJournal(path string) (report.CleanupJournal, bool, error) {
@@ -295,10 +599,19 @@ func readRunnerJournal(path string) (report.CleanupJournal, bool, error) {
 	} else if err := json.Unmarshal(data, &journal); err != nil {
 		return report.CleanupJournal{}, false, fmt.Errorf("cleanup journal %s: %w", path, err)
 	}
+	if err := journalfile.CheckJournalPath(path, journal); err != nil {
+		return report.CleanupJournal{}, false, err
+	}
 	return journal, legacy, nil
 }
 
 func mergeJournalMetadata(journal *report.CleanupJournal, desired report.CleanupJournal) error {
+	if desired.QuotaBinding != nil {
+		if journal.QuotaBinding != nil && !reflect.DeepEqual(journal.QuotaBinding, desired.QuotaBinding) {
+			return fmt.Errorf("cleanup journal Quota credential binding changed")
+		}
+		journal.QuotaBinding = desired.QuotaBinding
+	}
 	for _, field := range []struct {
 		name    string
 		current *string
@@ -325,7 +638,7 @@ func mergeJournalMetadata(journal *report.CleanupJournal, desired report.Cleanup
 }
 
 func journalEntriesMatch(left, right report.Resource) bool {
-	if left.Scope != right.Scope || left.Teardown != right.Teardown || left.CacheCreatePending != right.CacheCreatePending {
+	if left.Scope != right.Scope || left.Teardown != right.Teardown || left.CacheCreatePending != right.CacheCreatePending || left.QuotaUpdatePending != right.QuotaUpdatePending {
 		return false
 	}
 	for _, values := range [][2]string{
@@ -401,6 +714,9 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 	for i := len(scope) - 1; i >= 0; i-- {
 		it := scope[i]
 		cacheDelete := journalfile.IsTemplateCacheDelete(it.cmd)
+		quotaDelete := quotaDeleteCandidate(it.cmd)
+		teamDelete := ownedTeamDeleteCandidate(it.cmd)
+		orderedChildDelete := cacheDelete || quotaDelete
 		c.mu.Lock()
 		if it.done {
 			c.mu.Unlock()
@@ -408,11 +724,13 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 		}
 		if it.running || it.deferred {
 			c.mu.Unlock()
-			if cacheDelete {
+			if orderedChildDelete {
 				break
 			}
 			continue
 		}
+		pendingQuota := it.quotaUpdatePending
+		unstartedQuota := it.quotaReservationUnstarted
 		it.running = true
 		c.mu.Unlock()
 
@@ -427,78 +745,160 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 			// shared lock until completion, even after preflight's deadline.
 			preflightCtx, cancelPreflight := context.WithTimeout(context.Background(), min(cleanupTimeout, 30*time.Second))
 			defer cancelPreflight()
-			guardErr = c.withTemplateCleanupGuard(preflightCtx, it.role, func(bound execpkg.Config) error {
-				command, journalItem := it.cmd, it
-				target, native, err := parseNativeTemplateDelete(command)
-				if err != nil {
-					return err
-				}
-				if it.templateBinding != nil && !native {
-					return fmt.Errorf("bound native Template finalizer requires a native delete")
-				}
-				if native {
-					if it.templateBinding == nil || c.journal == "" {
-						return fmt.Errorf("native Template finalizer requires exact retained creation ownership")
+			runGuard := func() error {
+				before := func() error {
+					if unstartedQuota && pendingQuota {
+						if err := c.retireUnstartedQuotaUpdate(it); err != nil {
+							return errors.Join(journalfile.ErrQuotaUpdatePending, fmt.Errorf("retire unstarted Quota reservation: %w", err))
+						}
+						pendingQuota = false
 					}
-					owned := *it
-					intent := templateCreateIntent{TemplateCreateIntent: *it.templateBinding}
-					owned.cmd = intent.deleteCommand(target.id)
-					meta, _, requested := c.journalValues(it)
-					meta, path, err := c.requiredTemplateJournal(it.role, meta, requested)
+					return nil
+				}
+				if teamDelete {
+					teamDeleteBeforeReplayLock()
+				}
+				return c.withTemplateCleanupGuardBefore(preflightCtx, it.role, true, before, func(bound execpkg.Config) error {
+					if unstartedQuota {
+						return nil
+					}
+					if quotaUpdateCandidate(scenario.Step{}, it.cmd) && !journalfile.IsSandboxQuotaDelete(it.cmd) {
+						return fmt.Errorf("Quota update cannot run as an ordinary finalizer")
+					}
+					if pendingQuota {
+						return journalfile.ErrQuotaUpdatePending
+					}
+					if teamDelete {
+						owned, err := c.prepareOwnedTeamDelete(scope, it.cmd, it.role, it)
+						if err != nil {
+							return err
+						}
+						if owned != nil && owned != it {
+							return fmt.Errorf("owned Team finalizer changed before cleanup")
+						}
+					}
+					if quotaDelete {
+						if err := c.verifyOwnedQuotaDelete(scope, nil, it.cmd, it.role); err != nil {
+							return err
+						}
+					}
+					command, journalItem := it.cmd, it
+					target, native, err := parseNativeTemplateDelete(command)
 					if err != nil {
 						return err
 					}
-					if err := journalfile.CheckTemplateDeleteOwnership(path, meta, c.execCfg[it.role].Env, *it.templateBinding, owned.cmd); err != nil {
-						return err
+					if it.templateBinding != nil && !native {
+						return fmt.Errorf("bound native Template finalizer requires a native delete")
 					}
-					command, err = c.bindNativeTemplateDelete([]*cleanupItem{&owned}, command, it.role)
-					if err != nil {
-						return err
+					if native {
+						if it.templateBinding == nil || c.journal == "" {
+							return fmt.Errorf("native Template finalizer requires exact retained creation ownership")
+						}
+						owned := *it
+						intent := templateCreateIntent{TemplateCreateIntent: *it.templateBinding}
+						owned.cmd = intent.deleteCommand(target.id)
+						meta, _, requested := c.journalValues(it)
+						meta, path, err := c.requiredTemplateJournal(it.role, meta, requested)
+						if err != nil {
+							return err
+						}
+						if err := journalfile.CheckTemplateDeleteOwnership(path, meta, c.execCfg[it.role].Env, *it.templateBinding, owned.cmd); err != nil {
+							return err
+						}
+						command, err = c.bindNativeTemplateDelete([]*cleanupItem{&owned}, command, it.role)
+						if err != nil {
+							return err
+						}
+						// Execute the normalized spelling, but consume the original
+						// canonical ownership entry after successful deletion.
+						journalItem = &owned
 					}
-					// Execute the normalized spelling, but consume the original
-					// canonical ownership entry after successful deletion.
-					journalItem = &owned
+					if binding := it.templateBinding; binding != nil {
+						if bound.ExpectedIdentity == nil || *bound.ExpectedIdentity != binding.Identity {
+							return fmt.Errorf("native finalizer credential binding differs from retained ownership")
+						}
+						if err := binding.ValidateConfig(c.execCfg[it.role].Env); err != nil {
+							return err
+						}
+						bound = binding.BoundConfig(c.execCfg[it.role])
+					}
+					itemTimeout = cleanupCommandTimeout(command)
+					commandCtx, cancel := context.WithTimeout(context.Background(), itemTimeout)
+					res = c.runCommand(commandCtx, bound, command)
+					// A refused guard/lock or a failure to start is not an attempt.
+					// Keep those finalizers eligible for the later cleanup pass.
+					c.mu.Lock()
+					it.done = res.Err == nil && res.Exit >= 0 && !quotaDelete && !it.teamCreateConfirmed
+					c.mu.Unlock()
+					for attempt, delay := range cleanupRetryDelays {
+						if res.Exit == 0 || res.Exit == exitNotFound || !cleanupRetryable(res) {
+							break
+						}
+						c.logf("cleanup retry %d/%d after transient resource status: %s", attempt+1, len(cleanupRetryDelays), it.cmd)
+						timer := time.NewTimer(delay)
+						select {
+						case <-commandCtx.Done():
+							timer.Stop()
+						case <-timer.C:
+							if teamDelete {
+								if _, err := c.prepareOwnedTeamDelete(scope, it.cmd, it.role, it); err != nil {
+									cancel()
+									return err
+								}
+							}
+							if quotaDelete {
+								if err := c.verifyOwnedQuotaDelete(scope, nil, it.cmd, it.role); err != nil {
+									cancel()
+									return err
+								}
+							}
+							if quotaDelete || teamDelete && it.quotaBound {
+								// The outer cleanup fence is still held. A retry launches a
+								// fresh credential provider, so check the original binding
+								// again without recursively acquiring that fence.
+								c.mu.Lock()
+								binding := c.quotaBinding
+								c.mu.Unlock()
+								if binding == nil {
+									cancel()
+									return fmt.Errorf("protected Quota retry lacks its original credential binding")
+								}
+								verified, err := journalfile.ProbeQuotaBinding(commandCtx, binding, c.execCfg[it.role])
+								if err != nil {
+									cancel()
+									return err
+								}
+								bound = verified
+							}
+							res = c.runCommand(commandCtx, bound, command)
+						}
+						if commandCtx.Err() != nil {
+							break
+						}
+					}
+					timedOut = commandCtx.Err() == context.DeadlineExceeded
+					cancel()
+					if res.Exit == 0 || res.Exit == exitNotFound {
+						if quotaDelete {
+							journalErr = c.consumeOwnedQuotaDelete(scope, it.cmd, it.role)
+						} else if it.teamCreateConfirmed {
+							journalErr = c.consumeOwnedTeamDelete(it)
+						} else {
+							journalErr = c.completeJournalItem(journalItem)
+						}
+					}
+					return nil
+				}, it.cmd)
+			}
+			if quotaDelete || teamDelete {
+				claim := it.cmd
+				if teamDelete {
+					claim = ownedTeamClaimKey(it.cmd, c.execCfg[it.role].Region)
 				}
-				if binding := it.templateBinding; binding != nil {
-					if bound.ExpectedIdentity == nil || *bound.ExpectedIdentity != binding.Identity {
-						return fmt.Errorf("native finalizer credential binding differs from retained ownership")
-					}
-					if err := binding.ValidateConfig(c.execCfg[it.role].Env); err != nil {
-						return err
-					}
-					bound = binding.BoundConfig(c.execCfg[it.role])
-				}
-				itemTimeout = cleanupCommandTimeout(command)
-				commandCtx, cancel := context.WithTimeout(context.Background(), itemTimeout)
-				res = c.runCommand(commandCtx, bound, command)
-				// A refused guard/lock or a failure to start is not an attempt.
-				// Keep those finalizers eligible for the later cleanup pass.
-				c.mu.Lock()
-				it.done = res.Err == nil && res.Exit >= 0
-				c.mu.Unlock()
-				for attempt, delay := range cleanupRetryDelays {
-					if res.Exit == 0 || res.Exit == exitNotFound || !cleanupRetryable(res) {
-						break
-					}
-					c.logf("cleanup retry %d/%d after transient resource status: %s", attempt+1, len(cleanupRetryDelays), it.cmd)
-					timer := time.NewTimer(delay)
-					select {
-					case <-commandCtx.Done():
-						timer.Stop()
-					case <-timer.C:
-						res = c.runCommand(commandCtx, bound, command)
-					}
-					if commandCtx.Err() != nil {
-						break
-					}
-				}
-				timedOut = commandCtx.Err() == context.DeadlineExceeded
-				cancel()
-				if res.Exit == 0 || res.Exit == exitNotFound {
-					journalErr = c.completeJournalItem(journalItem)
-				}
-				return nil
-			})
+				guardErr = c.withDeleteClaim(it.role, claim, runGuard)
+			} else {
+				guardErr = runGuard()
+			}
 		})
 		c.mu.Lock()
 		it.running = false
@@ -507,7 +907,7 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 			coordinationErr = guardErr
 		}
 		if coordinationErr != nil {
-			if deferPending && (errors.Is(coordinationErr, journalfile.ErrTemplateCreatePending) || errors.Is(coordinationErr, journalfile.ErrTemplateCacheCreatePending)) {
+			if deferPending && !res.Started && (errors.Is(coordinationErr, journalfile.ErrTemplateCreatePending) || errors.Is(coordinationErr, journalfile.ErrTemplateCacheCreatePending) || errors.Is(coordinationErr, journalfile.ErrQuotaUpdatePending) || errors.Is(coordinationErr, ErrTeamCreatePending) || errors.Is(coordinationErr, ErrTeamRegistrationPending) || errors.Is(coordinationErr, context.DeadlineExceeded)) {
 				// Defer remaining ancestors with this child, even if another
 				// allocation settles before the next item could be checked.
 				remaining := append([]*cleanupItem(nil), scope[:i+1]...)
@@ -521,9 +921,12 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 				break
 			}
 			failure := fmt.Sprintf("cleanup coordination: %s: %v", report.Scrub(it.cmd), coordinationErr)
+			if res.Started {
+				failure += "; prior invocation: " + cleanupFailure(res, it.cmd, timedOut, itemTimeout)
+			}
 			c.logf("cleanup failed: %s", failure)
 			failures = append(failures, failure)
-			if cacheDelete {
+			if orderedChildDelete {
 				// The remaining entries may be this cache's Template and Team.
 				break
 			}
@@ -552,7 +955,7 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 			c.logf("cleanup failed: %s", failure)
 			failures = append(failures, failure)
 		}
-		if cacheDelete && (res.Err != nil || (res.Exit != 0 && res.Exit != exitNotFound) || journalErr != nil) {
+		if orderedChildDelete && (coordinationErr != nil || res.Err != nil || (res.Exit != 0 && res.Exit != exitNotFound) || journalErr != nil) {
 			// A later in-process cleanup pass must retry the child first.
 			c.mu.Lock()
 			it.done = false

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
@@ -47,13 +48,15 @@ func templateCreateFlags() *pflag.FlagSet {
 // Operation-specific parsers still enforce the actual native command grammar.
 func commandPathFlags() *pflag.FlagSet {
 	flags := templateCreateFlags()
-	for _, name := range []string{"step", "build-id", "cursor", "limit", "next-token", "filter", "alias", "disk-size-mb", "fields", "description", "resource-group", "request", "api-param", "aliyun-arg", "status", "policy-name", "policy-type", "fallback-default-version", "cluster", "instance-name"} {
+	for _, name := range []string{"step", "build-id", "cursor", "limit", "next-token", "filter", "alias", "disk-size-mb", "fields", "description", "resource-group", "plan", "request", "api-param", "aliyun-arg", "status", "policy-name", "policy-type", "fallback-default-version", "cluster", "instance-name", "cpu-cores", "memory-gb"} {
 		if flags.Lookup(name) == nil {
 			flags.String(name, "", "")
 		}
 	}
+	flags.Int("page", 0, "")
 	flags.Bool("public", false, "")
 	flags.Bool("dry-run", false, "")
+	flags.Bool("all", false, "")
 	return flags
 }
 
@@ -84,6 +87,9 @@ func templateCommandFamily(command string) (bool, error) {
 		if !afterDash && strings.HasPrefix(arg, "-") {
 			key, _, inline := strings.Cut(arg, "=")
 			flag := flags.Lookup(strings.TrimLeft(key, "-"))
+			if key == "-o" {
+				flag = flags.Lookup("output")
+			}
 			if key == "-h" {
 				flag = flags.Lookup("help")
 			}
@@ -310,6 +316,9 @@ func reserveTemplateCreate(ctx context.Context, command string, cfg execpkg.Conf
 		return nil, fmt.Errorf("Template create requires explicit Team, matching region, JSON output and primary cleanup")
 	}
 	meta, _, journal := cl.journalValues(&cleanupItem{role: "primary"})
+	if _, err := cl.checkedJournalPath("primary"); err != nil {
+		return nil, err
+	}
 	if info, err := os.Lstat(journal); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return nil, fmt.Errorf("native creation requires the real cleanup journal path")
 	}
@@ -497,7 +506,7 @@ func (intent *templateCreateIntent) save() error {
 	if err != nil {
 		return err
 	}
-	return journalfile.WithLock(context.Background(), intent.journal, func() error { return journalfile.WriteDurable(intent.path, append(body, '\n')) })
+	return journalfile.WithExistingParentLock(context.Background(), intent.journal, func() error { return journalfile.WriteDurable(intent.path, append(body, '\n')) })
 }
 
 func finishTemplateCreate(res execpkg.Result, cl *cleanup, scope *[]*cleanupItem, data map[string]any, lockKeys []string, timeout time.Duration, intent *templateCreateIntent) error {
@@ -625,25 +634,164 @@ func templatePreMutationFailure(res execpkg.Result) string {
 
 // All destructive cleanup for the same journal is deferred while an allocation
 // remains unknown. The replay lock serializes this check with new reservations.
-func (c *cleanup) withTemplateCleanupGuard(ctx context.Context, role string, run func(execpkg.Config) error) error {
+func (c *cleanup) withTemplateCleanupGuard(ctx context.Context, role string, run func(execpkg.Config) error, command ...string) error {
+	return c.withTemplateCleanupGuardBefore(ctx, role, false, nil, run, command...)
+}
+
+func quotaOwnedCleanupCommand(journal report.CleanupJournal, command string) bool {
+	if journalfile.IsQuotaDeleteCandidate(command) {
+		return true
+	}
+	target, err := teamDeleteTargetForOwnership(command, journal.Region)
+	if err != nil {
+		return false
+	}
+	for _, entry := range journal.Entries {
+		id, parseErr := journalfile.TeamDeleteTarget(entry.Teardown)
+		if parseErr == nil && id == target && entry.TeamCreateConfirmed && entry.QuotaBound {
+			return true
+		}
+	}
+	return false
+}
+
+func templateOwnedCleanupTeam(journal report.CleanupJournal, command string) (string, bool) {
+	target, err := teamDeleteTargetForOwnership(command, journal.Region)
+	if err != nil {
+		return "", false
+	}
+	for _, entry := range journal.Entries {
+		if entry.QuotaBound {
+			continue
+		}
+		id, parseErr := journalfile.TeamDeleteCandidateTargetForRegion(entry.Teardown, journal.Region)
+		if parseErr == nil && id == target {
+			return target, true
+		}
+	}
+	return "", false
+}
+
+// The in-memory journal template deliberately has no entries. Ownership of a
+// retained Team must be decided from the durable journal under the replay lock.
+func readGuardJournal(path string, expected report.CleanupJournal) (report.CleanupJournal, error) {
+	current, legacy, err := readRunnerJournal(path)
+	if os.IsNotExist(err) {
+		if expected.QuotaBinding != nil || expected.NativeJournalPath != "" {
+			return current, fmt.Errorf("protected cleanup journal is missing")
+		}
+		return expected, nil
+	}
+	if err != nil {
+		return current, err
+	}
+	if legacy {
+		if expected.QuotaBinding != nil || expected.NativeJournalPath != "" {
+			return current, fmt.Errorf("protected cleanup requires a version 2 journal")
+		}
+		expected.Entries = current.Entries
+		return expected, nil
+	}
+	if current.Version != expected.Version || current.RunID != expected.RunID || current.ExecutionID != expected.ExecutionID || current.RegionRole != expected.RegionRole || current.Region != expected.Region || current.Surface != expected.Surface || current.EcctlBin != expected.EcctlBin || !reflect.DeepEqual(current.QuotaBinding, expected.QuotaBinding) || current.QuotaBinding != nil && current.JournalPath != path {
+		return current, fmt.Errorf("protected cleanup journal binding changed")
+	}
+	if expected.JournalPath != "" && current.JournalPath != expected.JournalPath {
+		return current, fmt.Errorf("protected cleanup journal path changed")
+	}
+	return current, nil
+}
+
+func (c *cleanup) withTemplateCleanupGuardBefore(ctx context.Context, role string, existingParent bool, before func() error, run func(execpkg.Config) error, command ...string) error {
 	if role == "" {
 		role = "primary"
 	}
 	if c.journal == "" {
 		return run(c.execCfg[role])
 	}
+	if _, err := c.checkedJournalPath(role); err != nil {
+		return err
+	}
 	meta, _, requested := c.journalValues(&cleanupItem{role: role})
 	meta, path, err := c.requiredTemplateJournal(role, meta, requested)
 	if err != nil {
 		return err
 	}
-	return journalfile.WithCleanupLock(ctx, path, func() error {
-		current, canonical, err := c.requiredTemplateJournal(role, meta, requested)
+	knownParent, err := c.rememberedJournalParent(path)
+	if err != nil {
+		return err
+	}
+	lock := journalfile.WithCleanupLock
+	if existingParent || knownParent != nil {
+		lock = journalfile.WithExistingCleanupLock
+	}
+	return lock(ctx, path, func() error {
+		if err := checkJournalParentIdentity(path, knownParent); err != nil {
+			return err
+		}
+		if _, err := c.checkedJournalPath(role); err != nil {
+			return err
+		}
+		if before != nil {
+			if err := before(); err != nil {
+				return err
+			}
+		}
+		meta, canonical, err := c.requiredTemplateJournal(role, meta, requested)
 		if err != nil {
 			return err
 		}
-		bound, err := journalfile.PrepareTemplateCleanup(ctx, canonical, current, c.execCfg[role])
+		current, err := readGuardJournal(canonical, meta)
 		if err != nil {
+			return err
+		}
+		if err := checkJournalParentIdentity(path, knownParent); err != nil {
+			return err
+		}
+		// Every destructive command shares this pending-intent and historical
+		// identity check. Only owned commands receive the returned binding.
+		templateBound, err := journalfile.PrepareTemplateCleanup(ctx, canonical, meta, c.execCfg[role])
+		if err != nil {
+			return err
+		}
+		if len(command) > 0 {
+			if err := checkJournalParentIdentity(path, knownParent); err != nil {
+				return err
+			}
+			repaired, err := c.repairTeamBeforeCleanupBinding(role, command[0])
+			if err != nil {
+				return err
+			}
+			if repaired {
+				current, err = readGuardJournal(canonical, meta)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		bound := c.execCfg[role]
+		nativeDelete := false
+		if len(command) > 0 {
+			_, nativeDelete, _ = parseNativeTemplateDelete(command[0])
+		}
+		if len(command) > 0 && quotaOwnedCleanupCommand(current, command[0]) {
+			if current.QuotaBinding == nil {
+				return fmt.Errorf("protected Quota credential binding is missing")
+			}
+			if err := checkJournalParentIdentity(path, knownParent); err != nil {
+				return err
+			}
+			bound, err = journalfile.PrepareQuotaCleanup(ctx, canonical, current, c.execCfg[role])
+		} else if len(command) > 0 && (journalfile.IsTemplateCacheDelete(command[0]) || nativeDelete) {
+			bound = templateBound
+		} else if len(command) > 0 {
+			if teamID, owned := templateOwnedCleanupTeam(current, command[0]); owned {
+				bound, _, err = journalfile.TemplateTeamCleanupBinding(canonical, current, c.execCfg[role], teamID)
+			}
+		}
+		if err != nil {
+			return err
+		}
+		if err := checkJournalParentIdentity(path, knownParent); err != nil {
 			return err
 		}
 		return run(bound)
@@ -651,6 +799,9 @@ func (c *cleanup) withTemplateCleanupGuard(ctx context.Context, role string, run
 }
 
 func (c *cleanup) requiredTemplateJournal(role string, meta report.CleanupJournal, requested string) (report.CleanupJournal, string, error) {
+	if _, err := c.checkedJournalPath(role); err != nil {
+		return meta, "", err
+	}
 	c.mu.Lock()
 	retained := c.nativeJournals[role]
 	retained.NativeIntentPaths = append([]string(nil), retained.NativeIntentPaths...)
@@ -685,6 +836,9 @@ func commandAction(command string) ([]string, error) {
 		if !afterDash && strings.HasPrefix(arg, "-") {
 			key, _, inline := strings.Cut(arg, "=")
 			flag := flags.Lookup(strings.TrimLeft(key, "-"))
+			if key == "-o" {
+				flag = flags.Lookup("output")
+			}
 			if key == "-h" {
 				flag = flags.Lookup("help")
 			}
@@ -730,7 +884,7 @@ func isDestructiveStep(command string) bool {
 		return false
 	}
 	if path[0] == "call" {
-		return len(path) == 3 && strings.HasPrefix(strings.ToLower(path[2]), "delete")
+		return len(path) == 3 && strings.HasPrefix(strings.ToLower(strings.TrimSpace(path[2])), "delete")
 	}
 	action := path[len(path)-1]
 	return action == "delete" || action == "rm" || action == "remove"

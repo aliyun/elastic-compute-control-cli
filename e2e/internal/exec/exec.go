@@ -6,6 +6,7 @@ package exec
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	osexec "os/exec"
 	"strings"
@@ -18,6 +19,7 @@ import (
 type Config struct {
 	Bin              string // substituted for a leading "ecctl" token (default "ecctl")
 	Region           string // appended as --region to ecctl commands when set
+	Profile          string // pinned profile for protected Quota lifecycle commands
 	Env              []string
 	ExpectedIdentity *IdentityPin
 }
@@ -51,8 +53,27 @@ func Run(ctx context.Context, cfg Config, rendered string) Result {
 		tokens[0] = bin
 	}
 	args := tokens[1:]
-	if cfg.Region != "" && !hasFlag(args, "--region") {
-		args = append(args, "--region", cfg.Region)
+	if cfg.Region != "" {
+		_, count, separator, regionErr := scanStringOption(args, "--region", false)
+		if regionErr != nil {
+			res.Err = fmt.Errorf("region selector is invalid: %w", regionErr)
+			res.Exit = -1
+			return res
+		}
+		if count == 0 {
+			args = appendDefaultOption(args, "--region", cfg.Region, separator)
+		}
+	}
+	if cfg.Profile != "" {
+		selected, count, profileErr := actualProfileOption(args)
+		if profileErr != nil || count > 1 || count == 1 && selected != cfg.Profile {
+			res.Err = fmt.Errorf("protected profile selector changed")
+			res.Exit = -1
+			return res
+		}
+		if count == 0 {
+			args = append(args, "--profile", cfg.Profile)
+		}
 	}
 	res.Command = recordedCommand(tokens[0], args)
 
@@ -123,13 +144,77 @@ func recordedCommand(bin string, args []string) string {
 	return strings.Join(shown, " ")
 }
 
-func hasFlag(args []string, flag string) bool {
-	for _, a := range args {
-		if a == flag || strings.HasPrefix(a, flag+"=") {
-			return true
+// The CLI's string options consume the next argv token even when it looks
+// like another flag. Count only actual profile options, not their values.
+func actualProfileOption(args []string) (string, int, error) {
+	return actualStringOption(args, "--profile")
+}
+
+func actualStringOption(args []string, wanted string) (string, int, error) {
+	value, count, _, err := scanStringOption(args, wanted, true)
+	return value, count, err
+}
+
+// Generic region injection must tolerate raw OpenAPI flags. The CLI treats an
+// unknown split parameter's following non-flag token as its value; a following
+// flag remains a real option. Protected profile parsing stays strict.
+func scanStringOption(args []string, wanted string, strict bool) (string, int, int, error) {
+	stringFlags := map[string]bool{}
+	for _, name := range []string{"region", "profile", "lang", "output", "name", "team-id", "runtime-config", "build-config", "timeout", "cpu-count", "memory-mb", "from-image", "from-template", "from-image-registry", "steps", "start-cmd", "ready-cmd", "tag", "step", "build-id", "cursor", "limit", "next-token", "filter", "alias", "disk-size-mb", "fields", "description", "resource-group", "plan", "request", "api-param", "aliyun-arg", "status", "policy-name", "policy-type", "fallback-default-version", "cluster", "instance-name", "cpu-cores", "memory-gb", "page"} {
+		stringFlags["--"+name] = true
+	}
+	stringFlags["-o"] = true
+	boolFlags := map[string]bool{}
+	for _, name := range []string{"force", "openapi", "no-wait", "json", "agent-envelope", "no-color", "help", "version", "public", "dry-run", "all"} {
+		boolFlags["--"+name] = true
+	}
+	boolFlags["-h"], boolFlags["-v"] = true, true
+	selected, count, separator := "", 0, -1
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if arg == "--" {
+			if strict {
+				return "", 0, -1, fmt.Errorf("protected command cannot hide its profile after --")
+			}
+			separator = index
+			break
+		}
+		if !strings.HasPrefix(arg, "-") {
+			continue
+		}
+		key, value, inline := strings.Cut(arg, "=")
+		if stringFlags[key] {
+			if !inline {
+				index++
+				if index >= len(args) {
+					return "", 0, -1, fmt.Errorf("missing protected command option value")
+				}
+				value = args[index]
+			}
+			if key == wanted {
+				count++
+				selected = value
+			}
+			continue
+		}
+		if !boolFlags[key] && strict {
+			return "", 0, -1, fmt.Errorf("unclassified protected command option")
+		}
+		if !boolFlags[key] && !inline && index+1 < len(args) && !strings.HasPrefix(args[index+1], "-") {
+			index++
 		}
 	}
-	return false
+	return selected, count, separator, nil
+}
+
+func appendDefaultOption(args []string, key, value string, separator int) []string {
+	if separator >= 0 {
+		args = append(args, "", "")
+		copy(args[separator+2:], args[separator:len(args)-2])
+		args[separator], args[separator+1] = key, value
+		return args
+	}
+	return append(args, key, value)
 }
 
 // sanitizedEnv reproduces the badcases hermetic env: drop FORCE_COLOR /

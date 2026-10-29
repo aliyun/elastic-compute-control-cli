@@ -4,6 +4,7 @@ package journalcmd
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/google/shlex"
@@ -24,6 +25,9 @@ func ValidateDelete(command string) error {
 	if len(tokens) >= 4 && tokens[1] == "rg" && tokens[2] == "associated-transfer" && tokens[3] == "update" {
 		return validateAssociatedTransferRestore(tokens)
 	}
+	if ordinaryTeamDeletePath(tokens) {
+		return nil
+	}
 	if tokens[1] != "call" {
 		for _, token := range tokens[1:] {
 			if strings.HasPrefix(token, "-") {
@@ -36,6 +40,57 @@ func ValidateDelete(command string) error {
 		return fmt.Errorf("teardown must be a delete command")
 	}
 	return validateOSSDelete(tokens)
+}
+
+// A known global flag may precede or separate the ordinary Team delete path.
+// Target, region, and ownership validation remain with the journalfile parser.
+func ordinaryTeamDeletePath(tokens []string) bool {
+	pathParts := 0
+	for index := 1; index < len(tokens); index++ {
+		arg := tokens[index]
+		if arg == "--" {
+			return false
+		}
+		if strings.HasPrefix(arg, "-") {
+			key, value, inline := strings.Cut(arg, "=")
+			switch key {
+			case "--region", "--lang", "--output":
+				if !inline {
+					index++
+					if index >= len(tokens) {
+						return false
+					}
+					value = tokens[index]
+				}
+				if value == "" {
+					return false
+				}
+			case "--json", "--no-color", "--agent-envelope":
+				if inline {
+					if _, err := strconv.ParseBool(value); err != nil {
+						return false
+					}
+				}
+			default:
+				return false
+			}
+			continue
+		}
+		switch pathParts {
+		case 0:
+			if arg != "sandbox" && arg != "sbx" {
+				return false
+			}
+		case 1:
+			if arg != "team" {
+				return false
+			}
+		case 2:
+			return arg == "delete" || arg == "rm" || arg == "remove"
+		}
+		pathParts++
+	}
+	return false
 }
 
 func validateAssociatedTransferRestore(tokens []string) error {

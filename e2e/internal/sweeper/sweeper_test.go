@@ -22,6 +22,52 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
+func canonicalJournalTestDir(t *testing.T) string {
+	t.Helper()
+	return canonicalJournalDir(t, t.TempDir())
+}
+
+func canonicalJournalDir(t *testing.T, path string) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestReplayJournalFixtureResolvesSymlinkTempAlias(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink fixture requires POSIX filesystem semantics")
+	}
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	if err := os.Mkdir(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(base, "alias")
+	if err := os.Symlink(real, alias); err != nil {
+		t.Fatal(err)
+	}
+	dir := canonicalJournalDir(t, alias)
+	if dir == alias {
+		t.Fatal("test fixture retained symlink alias")
+	}
+	path := filepath.Join(dir, "cleanup.json")
+	journal := report.CleanupJournal{Version: 2, JournalPath: path, RunID: "alias-run", ExecutionID: "alias-execution", RegionRole: "primary", Region: "cn-hangzhou", Surface: "public", EcctlBin: "must-not-launch"}
+	data, err := json.Marshal(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ReplayJournalWithOptions(context.Background(), path, ReplayOptions{Config: execpkg.Config{Bin: journal.EcctlBin, Region: journal.Region}, RunID: journal.RunID, Surface: journal.Surface})
+	if err != nil || result.Deleted != 0 || result.Errors != 0 {
+		t.Fatalf("canonical alias fixture was rejected: result=%+v err=%v", result, err)
+	}
+}
+
 func TestReplayJournalRunsTeardownsInReverseOrder(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake uses a bash script")
@@ -150,23 +196,9 @@ func TestReplayJournalDoesNotLoseConcurrentRunnerRegistration(t *testing.T) {
 				if replayFails {
 					t.Setenv("REPLAY_FAIL", "1")
 				}
-				dir := t.TempDir()
+				dir := canonicalJournalTestDir(t)
 				journalPath := filepath.Join(dir, "cleanup-journal.json")
 				oldEntry := report.Resource{Scope: "old", Teardown: "ecctl t thing delete old"}
-				var initial any = report.CleanupJournal{
-					Version: 2, RunID: "test", Surface: "public", Entries: []report.Resource{oldEntry},
-				}
-				if legacy {
-					initial = []report.Resource{oldEntry}
-				}
-				data, err := json.Marshal(initial)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(journalPath, data, 0o600); err != nil {
-					t.Fatal(err)
-				}
-
 				fake := filepath.Join(dir, "ecctl")
 				if err := os.WriteFile(fake, []byte(`#!/usr/bin/env bash
 if [[ "$*" == *"thing create"* ]]; then
@@ -179,6 +211,21 @@ else
   fi
 fi
 `), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				var initial any = report.CleanupJournal{
+					Version: 2, JournalPath: journalPath, RunID: "test", ExecutionID: "execution",
+					RegionRole: "primary", Region: "cn-hangzhou", Surface: "public", EcctlBin: fake,
+					Entries: []report.Resource{oldEntry},
+				}
+				if legacy {
+					initial = []report.Resource{oldEntry}
+				}
+				data, err := json.Marshal(initial)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(journalPath, data, 0o600); err != nil {
 					t.Fatal(err)
 				}
 
@@ -194,19 +241,33 @@ fi
 				defer func() { replayJournalAfterRead = previousHook }()
 
 				replayDone := make(chan error, 1)
+				replayCtx, cancelReplay := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancelReplay()
 				go func() {
-					_, err := ReplayJournal(context.Background(), journalPath, execpkg.Config{Bin: fake})
+					_, err := ReplayJournal(replayCtx, journalPath, execpkg.Config{Bin: fake})
 					replayDone <- err
 				}()
-				<-replayRead
+				select {
+				case <-replayRead:
+				case err := <-replayDone:
+					t.Fatalf("replay returned before read hook: %v", err)
+				case <-replayCtx.Done():
+					t.Fatalf("replay did not reach read hook: %v", replayCtx.Err())
+				}
 
-				writerDone := make(chan error, 1)
+				type writerOutcome struct {
+					run *report.Run
+					err error
+				}
+				writerDone := make(chan writerOutcome, 1)
 				writerStarted := filepath.Join(dir, "writer-started")
 				go func() {
 					run, err := runnerpkg.Run(context.Background(), runnerpkg.Options{
 						CleanupJournal: journalPath,
 						RunName:        "test",
 						RunID:          "test",
+						ExecutionID:    "execution",
+						Region:         "cn-hangzhou",
 						Surface:        "public",
 						EcctlBin:       fake,
 						StepTimeout:    30 * time.Second,
@@ -223,24 +284,55 @@ fi
 					if err == nil && run.Failed() {
 						err = fmt.Errorf("runner failed: %+v", run.Cases)
 					}
-					writerDone <- err
+					writerDone <- writerOutcome{run: run, err: err}
 				}()
-				waitForFile(t, writerStarted, 10*time.Second)
-
-				select {
-				case err := <-writerDone:
-					if err != nil {
+				if legacy {
+					select {
+					case outcome := <-writerDone:
+						if outcome.err == nil || !strings.Contains(outcome.err.Error(), "existing cleanup journal does not match") {
+							t.Fatalf("legacy journal did not reject new allocation: %v", outcome.err)
+						}
+					case <-time.After(time.Second):
+						t.Fatal("legacy runner did not reject an unbound journal before allocation")
+					}
+					if _, err := os.Stat(writerStarted); !os.IsNotExist(err) {
+						t.Fatalf("legacy journal reached provider before refusal: %v", err)
+					}
+				} else {
+					deadline := time.After(10 * time.Second)
+					var outcome writerOutcome
+					completed := false
+				waitForMarker:
+					for {
+						if _, err := os.Stat(writerStarted); err == nil {
+							break
+						}
+						select {
+						case outcome = <-writerDone:
+							completed = true
+							break waitForMarker
+						case <-deadline:
+							t.Fatal("timed out waiting for runner provider marker")
+						case <-time.After(10 * time.Millisecond):
+						}
+					}
+					if !completed {
+						select {
+						case outcome = <-writerDone:
+						case <-time.After(time.Second):
+							releaseReplay()
+							if err := <-replayDone; err != nil {
+								t.Fatal(err)
+							}
+							if outcome = <-writerDone; outcome.err != nil {
+								t.Fatal(outcome.err)
+							}
+							t.Fatal("runner journal registration blocked behind replay work")
+						}
+					}
+					if err := concurrentWriterEvidence(outcome.run, outcome.err, writerStarted); err != nil {
 						t.Fatal(err)
 					}
-				case <-time.After(time.Second):
-					releaseReplay()
-					if err := <-replayDone; err != nil {
-						t.Fatal(err)
-					}
-					if err := <-writerDone; err != nil {
-						t.Fatal(err)
-					}
-					t.Fatal("runner journal registration blocked behind replay work")
 				}
 				releaseReplay()
 				if err := <-replayDone; err != nil {
@@ -251,19 +343,104 @@ fi
 				if err != nil {
 					t.Fatal(err)
 				}
-				var journal report.CleanupJournal
-				if err := json.Unmarshal(data, &journal); err != nil {
-					t.Fatalf("final journal is not versioned: %v\n%s", err, data)
+				var entries []report.Resource
+				if legacy {
+					if !strings.HasPrefix(strings.TrimSpace(string(data)), "[") {
+						t.Fatalf("final legacy journal lost its array format: %s", data)
+					}
+					if err := json.Unmarshal(data, &entries); err != nil {
+						t.Fatalf("final legacy journal is not an array: %v\n%s", err, data)
+					}
+				} else {
+					if !strings.HasPrefix(strings.TrimSpace(string(data)), "{") {
+						t.Fatalf("final versioned journal lost its object format: %s", data)
+					}
+					var journal report.CleanupJournal
+					if err := json.Unmarshal(data, &journal); err != nil {
+						t.Fatalf("final journal is not versioned: %v\n%s", err, data)
+					}
+					entries = journal.Entries
 				}
 				wantTeardowns := []string{"ecctl t thing delete new"}
-				if replayFails {
-					wantTeardowns = []string{"ecctl t thing delete old", "ecctl t thing delete new"}
+				if legacy {
+					wantTeardowns = nil
 				}
-				if got := journalTeardowns(journal.Entries); !slices.Equal(got, wantTeardowns) {
+				if replayFails {
+					wantTeardowns = []string{"ecctl t thing delete old"}
+					if !legacy {
+						wantTeardowns = append(wantTeardowns, "ecctl t thing delete new")
+					}
+				}
+				if got := journalTeardowns(entries); !slices.Equal(got, wantTeardowns) {
 					t.Fatalf("final journal teardowns = %q, want %q: %s", got, wantTeardowns, data)
 				}
 			})
 		}
+	}
+}
+
+// A nil runner error is insufficient: skipped cases do not make Run.Failed true.
+func concurrentWriterEvidence(run *report.Run, runErr error, marker string) error {
+	if runErr != nil {
+		return fmt.Errorf("concurrent runner: %w", runErr)
+	}
+	if run == nil || run.RunID != "test" || run.Region != "cn-hangzhou" || run.Surface != "public" || run.Summary != (report.Summary{Cases: 1, Passed: 1}) || len(run.Cases) != 1 {
+		return fmt.Errorf("concurrent runner did not complete one passing case: %+v", run)
+	}
+	caseResult := run.Cases[0]
+	if caseResult.Resource != "t/thing" || caseResult.Status != report.StatusPass || len(caseResult.Steps) != 1 {
+		return fmt.Errorf("concurrent writer case did not pass: %+v", caseResult)
+	}
+	step := caseResult.Steps[0]
+	if step.Name != "create" || step.Status != report.StatusPass || step.Exit != 0 || strings.TrimSpace(step.Stdout) != `{"resource":{"id":"new"}}` {
+		return fmt.Errorf("concurrent writer provider create did not pass: %+v", step)
+	}
+	if len(run.Manifest) != 1 || run.Manifest[0].Teardown != "ecctl t thing delete new" || run.Manifest[0].ExecutionID != "execution" || run.Manifest[0].RegionRole != "primary" {
+		return fmt.Errorf("concurrent writer did not register one bound teardown: %+v", run.Manifest)
+	}
+	info, err := os.Stat(marker)
+	if err != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("concurrent writer provider marker is missing or invalid: %v", err)
+	}
+	return nil
+}
+
+func TestConcurrentWriterEvidenceRequiresProviderExecution(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "writer-started")
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	passing := &report.Run{
+		RunID: "test", Region: "cn-hangzhou", Surface: "public", Summary: report.Summary{Cases: 1, Passed: 1},
+		Cases:    []report.Case{{Resource: "t/thing", Status: report.StatusPass, Steps: []report.Step{{Name: "create", Status: report.StatusPass, Exit: 0, Stdout: `{"resource":{"id":"new"}}`}}}},
+		Manifest: []report.Resource{{Teardown: "ecctl t thing delete new", ExecutionID: "execution", RegionRole: "primary"}},
+	}
+	if err := concurrentWriterEvidence(passing, nil, marker); err != nil {
+		t.Fatalf("fast completed writer was rejected: %v", err)
+	}
+	skipped := *passing
+	skipped.Summary = report.Summary{Cases: 1, Skipped: 1}
+	skipped.Cases = []report.Case{{Resource: "t/thing", Status: report.StatusSkipped}}
+	failed := *passing
+	failed.Summary = report.Summary{Cases: 1, Failed: 1}
+	failed.Cases = []report.Case{{Resource: "t/thing", Status: report.StatusFail, Steps: []report.Step{{Name: "create", Status: report.StatusFail, Exit: 1}}}}
+	for _, test := range []struct {
+		name   string
+		run    *report.Run
+		err    error
+		marker string
+	}{
+		{name: "no run", marker: marker},
+		{name: "skipped", run: &skipped, marker: marker},
+		{name: "failed", run: &failed, marker: marker},
+		{name: "missing marker", run: passing, marker: marker + "-missing"},
+		{name: "runner error", run: passing, err: errors.New("setup failed"), marker: marker},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := concurrentWriterEvidence(test.run, test.err, test.marker); err == nil {
+				t.Fatal("missing provider evidence accepted")
+			}
+		})
 	}
 }
 
@@ -424,26 +601,6 @@ func TestReplayJournalConsumesSuccessAfterCallerCancellation(t *testing.T) {
 	}
 	if len(journal.Entries) != 0 {
 		t.Fatalf("successful deletion remained in journal after cancellation: %s", data)
-	}
-}
-
-func waitForFile(t *testing.T, path string, timeout time.Duration) {
-	t.Helper()
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	ticker := time.NewTicker(5 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if _, err := os.Stat(path); err == nil {
-			return
-		} else if !errors.Is(err, os.ErrNotExist) {
-			t.Fatal(err)
-		}
-		select {
-		case <-deadline.C:
-			t.Fatalf("timed out waiting for %s", path)
-		case <-ticker.C:
-		}
 	}
 }
 

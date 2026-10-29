@@ -447,6 +447,9 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		if c.isFCSandboxTeam() {
 			notFound = req.ApiName == "GetTeam" && teamAbsenceCode(code)
 		}
+		if c.isFCSandboxQuota() {
+			notFound = req.ApiName == "DescribeQuota" && quotaAbsenceCode(code)
+		}
 		if c.isFCTemplate() {
 			notFound = req.ApiName == "GetTemplate" && templateAbsenceCode(code)
 		}
@@ -476,7 +479,7 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		}
 		c.templateMu.Unlock()
 	}
-	if c.isFCSandboxTeam() || c.isFCSandboxTemplateCache() {
+	if c.isFCSandboxTeam() || c.isFCSandboxTemplateCache() || c.isFCSandboxQuota() {
 		// Hooks and probes retain successful request IDs in later errors.
 		// Normalize at the provider boundary before any consumer can retain it.
 		if requestID, ok := resp["requestId"].(string); ok {

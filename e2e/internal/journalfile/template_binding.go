@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"time"
 
@@ -155,4 +156,32 @@ func PrepareTemplateCleanup(ctx context.Context, path string, meta report.Cleanu
 	}
 	cfg.ExpectedIdentity = expected
 	return cfg, nil
+}
+
+// TemplateTeamCleanupBinding selects an exact Team target's native Template owner.
+// Callers first run PrepareTemplateCleanup under the shared replay fence, which
+// checks pending intents and probes every retained profile. Same-principal
+// profiles with the same source binding can share one verified Team finalizer.
+func TemplateTeamCleanupBinding(path string, meta report.CleanupJournal, cfg execpkg.Config, teamID string) (execpkg.Config, bool, error) {
+	intents, err := readTemplateCreateIntents(path, meta, cfg.Env)
+	if err != nil {
+		return cfg, false, err
+	}
+	var selected *TemplateCreateIntent
+	for i := range intents {
+		intent := &intents[i]
+		if intent.State != "journaled" || intent.TeamID != teamID {
+			continue
+		}
+		if selected != nil && (selected.Identity != intent.Identity || !reflect.DeepEqual(selected.ConfigPaths, intent.ConfigPaths) || !reflect.DeepEqual(selected.Selectors, intent.Selectors)) {
+			return cfg, false, fmt.Errorf("native Template Team credential bindings conflict")
+		}
+		selected = intent
+	}
+	if selected == nil {
+		return cfg, false, nil
+	}
+	bound := selected.BoundConfig(cfg)
+	bound.Profile = selected.Profile
+	return bound, true, nil
 }
