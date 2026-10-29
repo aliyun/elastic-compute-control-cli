@@ -283,7 +283,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: v2.17.0
+          version: v2.19.0
           args: check --config ../tooling/.goreleaser.yaml
           workdir: release-source
 
@@ -318,7 +318,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: v2.17.0
+          version: v2.19.0
           args: release --clean --skip=publish --config ../tooling/.goreleaser.yaml
           workdir: release-source
         env:
@@ -336,6 +336,7 @@ jobs:
           ruby -c release-source/dist/homebrew/Casks/ecctl.rb
           go -C tooling run ./cmd/releaseprep \
             --verify-homebrew-cask \
+            --cask-format v2 \
             --release-tag "${RELEASE_TAG}" \
             --cask "${GITHUB_WORKSPACE}/release-source/dist/homebrew/Casks/ecctl.rb" \
             --checksums-file "${GITHUB_WORKSPACE}/release-source/dist/checksums.txt"
@@ -464,7 +465,7 @@ jobs:
         uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           distribution: goreleaser
-          version: v2.17.0
+          version: v2.19.0
           args: release --clean --config ../tooling/.goreleaser.yaml
           workdir: release-source
         env:
@@ -488,10 +489,18 @@ jobs:
           ruby -c "${generated}"
           go -C tooling run ./cmd/releaseprep \
             --verify-homebrew-cask \
+            --cask-format v2 \
             --release-tag "${RELEASE_TAG}" \
             --cask "${GITHUB_WORKSPACE}/${generated}" \
             --checksums-file "${GITHUB_WORKSPACE}/release-source/dist/checksums.txt"
-          cp "${generated}" "release-cask/${asset}"
+          # Keep the immutable updater Cask v1 asset for already installed clients.
+          go -C tooling run ./cmd/releaseprep \
+            --convert-homebrew-cask --cask-format v1 \
+            --release-tag "${RELEASE_TAG}" \
+            --cask "${GITHUB_WORKSPACE}/${generated}" \
+            --checksums-file "${GITHUB_WORKSPACE}/release-source/dist/checksums.txt" \
+            > "release-cask/${asset}"
+          cp "release-cask/${asset}" "release-source/dist/${asset}"
           gh release upload "${RELEASE_TAG}" "release-cask/${asset}#${asset}" \
             --repo "${GITHUB_REPOSITORY}" --clobber
 
@@ -506,11 +515,16 @@ jobs:
           set -euo pipefail
           manifest="release-source/dist/ecctl-update-manifest-v2.json"
           bundle="release-source/dist/ecctl-update-manifest-v2.sigstore.json"
-          go -C release-source run ./cmd/releaseprep \
-            --generate-update-manifest \
-            --release-tag "${RELEASE_TAG}"
+          go -C tooling build -o "${RUNNER_TEMP}/ecctl-releaseprep" ./cmd/releaseprep
+          (
+            cd release-source
+            "${RUNNER_TEMP}/ecctl-releaseprep" --generate-update-manifest --release-tag "${RELEASE_TAG}"
+          )
           cosign sign-blob --yes --bundle "${bundle}" "${manifest}"
-          go -C release-source run ./cmd/releaseprep --verify-update-manifest
+          (
+            cd release-source
+            "${RUNNER_TEMP}/ecctl-releaseprep" --verify-update-manifest
+          )
           gh release upload "${RELEASE_TAG}" \
             "${manifest}#ecctl-update-manifest-v2.json" \
             "${bundle}#ecctl-update-manifest-v2.sigstore.json" \
@@ -637,7 +651,13 @@ jobs:
             --release-tag "${RELEASE_TAG}" \
             --cask "${GITHUB_WORKSPACE}/release-cask/${asset}" \
             --checksums-file "${work_dir}/checksums.txt"
-          mv "release-cask/${asset}" release-cask/ecctl.rb
+          # Derive the tap format from the verified immutable v1 asset.
+          go -C tooling run ./cmd/releaseprep \
+            --convert-homebrew-cask --cask-format v2 \
+            --release-tag "${RELEASE_TAG}" \
+            --cask "${GITHUB_WORKSPACE}/release-cask/${asset}" \
+            --checksums-file "${work_dir}/checksums.txt" \
+            > release-cask/ecctl.rb
 
       - name: Snapshot stable OSS pointer before prerelease webhook
         if: ${{ contains(needs.validate.outputs.version, '-') }}

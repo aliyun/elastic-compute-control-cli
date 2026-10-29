@@ -93,7 +93,6 @@ homebrew_casks:
     directory: Casks
     url:
       template: https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/elastic-compute-control-cli/{{ .Version }}/{{ .ArtifactName }}
-      verified: ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/elastic-compute-control-cli/
     homepage: https://github.com/aliyun/elastic-compute-control-cli
     description: Agent-first command-line controller for Alibaba Cloud elastic computing resources
     commit_msg_template: "chore: update Homebrew Cask for {{ .Tag }}"
@@ -102,8 +101,10 @@ homebrew_casks:
     skip_upload: true
     hooks:
       post:
-        install: |
-          system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/ecctl"]
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/ecctl"]
+          end
 
 release:
   # Build into a draft first so every artifact, including the generated Cask,
