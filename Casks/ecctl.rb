@@ -3,15 +3,13 @@ cask "ecctl" do
   version "0.2.4"
 
   on_macos do
-    on_intel do
-      sha256 "c8d971d1a0252f80e631cb28b9c89424b00eaf7d160009d0d20d86f4cef6014a"
-      url "https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/elastic-compute-control-cli/#{version}/ecctl_#{version}_darwin_amd64.tar.gz",
-        verified: "ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/elastic-compute-control-cli/"
-    end
     on_arm do
       sha256 "aecc93c390fe1b90abba484ff926ee5f5fc6786d06effbd5d927d47b06e81b58"
-      url "https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/elastic-compute-control-cli/#{version}/ecctl_#{version}_darwin_arm64.tar.gz",
-        verified: "ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/elastic-compute-control-cli/"
+      url "https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/elastic-compute-control-cli/#{version}/ecctl_#{version}_darwin_arm64.tar.gz"
+    end
+    on_intel do
+      sha256 "c8d971d1a0252f80e631cb28b9c89424b00eaf7d160009d0d20d86f4cef6014a"
+      url "https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/elastic-compute-control-cli/#{version}/ecctl_#{version}_darwin_amd64.tar.gz"
     end
   end
 
@@ -22,11 +20,14 @@ cask "ecctl" do
   livecheck do
     skip "Auto-generated on release."
   end
+  depends_on :macos
 
   binary "ecctl"
 
-  postflight do
-    system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/ecctl"]
+  postflight_steps do
+    on_macos do
+      run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{staged_path}}/ecctl"]
+    end
   end
 
   # No zap stanza required

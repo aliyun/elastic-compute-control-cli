@@ -38,11 +38,21 @@ func TestGenerateUpdateManifestWritesCanonicalV2(t *testing.T) {
 		}
 	}
 	writeFile(t, filepath.Join(dist, "checksums.txt"), checksums.String())
-	cask := filepath.Join("dist", "homebrew", "Casks", "ecctl.rb")
+	cask := filepath.Join("dist", "ecctl_"+version+"_cask.rb")
 	if err := os.MkdirAll(filepath.Dir(cask), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, cask, "stable cask\n")
+	intelSHA := releaseartifact.SHA256([]byte("archive ecctl_" + version + "_darwin_amd64.tar.gz"))
+	armSHA := releaseartifact.SHA256([]byte("archive ecctl_" + version + "_darwin_arm64.tar.gz"))
+	legacyCask := validReleaseCask(version, intelSHA, armSHA)
+	modernCask, err := releaseartifact.ConvertCask([]byte(legacyCask), releaseartifact.CaskExpectation{
+		Version: version, IntelSHA256: intelSHA, ArmSHA256: armSHA,
+	}, releaseartifact.CaskFormatV2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, cask, legacyCask)
+	writeFile(t, filepath.Join(dist, "homebrew", "Casks", "ecctl.rb"), string(modernCask))
 	if err := generateUpdateManifest("v" + version); err != nil {
 		t.Fatal(err)
 	}
@@ -62,6 +72,13 @@ func TestGenerateUpdateManifestWritesCanonicalV2(t *testing.T) {
 		if asset.Name == "version.txt" || asset.Kind == "version" {
 			t.Fatal("v2 manifest must use its version field and directory name, not a versioned version.txt asset")
 		}
+		if asset.Kind == "homebrew-cask" && asset.SHA256 != releaseartifact.SHA256([]byte(legacyCask)) {
+			t.Fatal("updater manifest must bind the v1 compatibility asset, not the modern tap Cask")
+		}
+	}
+	writeFile(t, cask, string(modernCask))
+	if err := generateUpdateManifest("v" + version); err == nil {
+		t.Fatal("manifest generation accepted a v2 Cask in the v1 compatibility path")
 	}
 }
 
@@ -269,7 +286,8 @@ func TestReleaseWorkflowPublishesSignedUpdateManifest(t *testing.T) {
 		releaseartifact.UpdateManifestV2Name,
 		releaseartifact.UpdateManifestV2BundleName,
 		"cosign sign-blob --yes --bundle",
-		"go -C release-source run ./cmd/releaseprep",
+		`go -C tooling build -o "${RUNNER_TEMP}/ecctl-releaseprep" ./cmd/releaseprep`,
+		`"${RUNNER_TEMP}/ecctl-releaseprep" --generate-update-manifest`,
 		"--verify-update-manifest",
 	} {
 		if !strings.Contains(publish, required) {
@@ -521,6 +539,53 @@ func TestReleaseConfigurationBuildsCompleteDraftBeforePublishing(t *testing.T) {
 	validateJob := releaseWorkflow[:strings.Index(releaseWorkflow, "  publish:")]
 	if strings.Contains(validateJob, "secrets.ECCTL_TELEMETRY_") {
 		t.Fatal("unprotected validate job reads production telemetry secrets")
+	}
+}
+
+func TestHomebrewCaskGenerationUsesStructuredInstallSteps(t *testing.T) {
+	root := filepath.Join("..", "..")
+	raw, err := os.ReadFile(filepath.Join(root, ".goreleaser.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := string(raw)
+	if strings.Contains(config, "verified:") || strings.Contains(config, "system_command") {
+		t.Fatal("GoReleaser still generates deprecated Homebrew Cask syntax")
+	}
+	if !strings.Contains(config, "install_steps:") || !strings.Contains(config, "{{ .StagedPath }}/ecctl") {
+		t.Fatal("GoReleaser must generate structured install steps with a literal staged-path token")
+	}
+	for _, name := range []string{"ci.yml", "release.yml"} {
+		raw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "version: v2.17.0") || !strings.Contains(string(raw), "version: v2.19.0") {
+			t.Fatalf("%s must use GoReleaser with structured install-step support", name)
+		}
+		if !strings.Contains(string(raw), "--cask-format v2") {
+			t.Fatalf("%s must verify the generated v2 Cask", name)
+		}
+	}
+	raw, err = os.ReadFile(filepath.Join(root, ".github", "workflows", "release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"--convert-homebrew-cask --cask-format v1",
+		`cp "release-cask/${asset}" "release-source/dist/${asset}"`,
+		"--convert-homebrew-cask --cask-format v2",
+	} {
+		if !strings.Contains(string(raw), required) {
+			t.Fatalf("release workflow is missing the versioned Cask compatibility path %q", required)
+		}
+	}
+	raw, err = os.ReadFile(filepath.Join(root, "Casks", "ecctl.rb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "verified:") || strings.Contains(string(raw), "postflight do") || !strings.Contains(string(raw), "postflight_steps do") {
+		t.Fatal("published tap Cask must use the modern syntax")
 	}
 }
 
@@ -829,7 +894,7 @@ func TestVerifyHomebrewCaskUsesImmutableReleaseChecksums(t *testing.T) {
 		intelSHA+"  ecctl_1.2.3_darwin_amd64.tar.gz\n"+
 			armSHA+"  ecctl_1.2.3_darwin_arm64.tar.gz\n")
 
-	if err := verifyHomebrewCask(input, checksums, "1.2.3"); err != nil {
+	if err := verifyHomebrewCask(input, checksums, "1.2.3", releaseartifact.CaskFormatV1); err != nil {
 		t.Fatalf("verifyHomebrewCask: %v", err)
 	}
 }
@@ -857,7 +922,7 @@ func TestVerifyHomebrewCaskRejectsUnsafeInputs(t *testing.T) {
 			checksums := filepath.Join(root, "checksums.txt")
 			writeFile(t, input, test.cask)
 			writeFile(t, checksums, test.checksums)
-			if err := verifyHomebrewCask(input, checksums, test.version); err == nil {
+			if err := verifyHomebrewCask(input, checksums, test.version, releaseartifact.CaskFormatV1); err == nil {
 				t.Fatal("verifyHomebrewCask succeeded, want error")
 			}
 		})

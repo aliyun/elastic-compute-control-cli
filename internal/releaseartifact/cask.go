@@ -14,6 +14,8 @@ const (
 	Homepage     = "https://github.com/aliyun/elastic-compute-control-cli"
 	Description  = "Agent-first command-line controller for Alibaba Cloud elastic computing resources"
 	maxCaskBytes = 64 << 10
+	CaskFormatV1 = "v1"
+	CaskFormatV2 = "v2"
 )
 
 var semverPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)
@@ -24,9 +26,13 @@ type CaskExpectation struct {
 	ArmSHA256   string
 }
 
-// ValidateCask validates data without evaluating Ruby. The accepted program is
-// deliberately limited to the Cask emitted for ecctl by GoReleaser.
+// ValidateCask preserves the immutable updater Cask v1 protocol without evaluating Ruby.
 func ValidateCask(data []byte, expected CaskExpectation) error {
+	return ValidateCaskFormat(data, expected, CaskFormatV1)
+}
+
+// ValidateCaskFormat accepts only the exact ecctl Cask program for the requested format.
+func ValidateCaskFormat(data []byte, expected CaskExpectation, format string) error {
 	if len(data) == 0 || len(data) > maxCaskBytes {
 		return fmt.Errorf("Homebrew Cask must be between 1 and %d bytes", maxCaskBytes)
 	}
@@ -43,7 +49,10 @@ func ValidateCask(data []byte, expected CaskExpectation) error {
 	}
 
 	got := significantCaskLines(string(data))
-	want := expectedCaskLines(expected)
+	want, err := expectedCaskFormatLines(expected, format)
+	if err != nil {
+		return err
+	}
 	if len(got) != len(want) {
 		return fmt.Errorf("Homebrew Cask has %d significant lines, want %d", len(got), len(want))
 	}
@@ -53,6 +62,36 @@ func ValidateCask(data []byte, expected CaskExpectation) error {
 		}
 	}
 	return nil
+}
+
+// ConvertCask changes only the format of an already strictly validated Cask.
+// Release assets retain v1 for old updaters; the tap uses v2 install steps.
+func ConvertCask(data []byte, expected CaskExpectation, format string) ([]byte, error) {
+	lines, err := expectedCaskFormatLines(expected, format)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateCask(data, expected); err != nil {
+		if err := ValidateCaskFormat(data, expected, CaskFormatV2); err != nil {
+			return nil, err
+		}
+	}
+	var converted strings.Builder
+	indent := 0
+	for _, line := range lines {
+		if line == "end" {
+			indent--
+		}
+		padding := indent
+		if strings.HasPrefix(line, "verified:") {
+			padding++
+		}
+		converted.WriteString(strings.Repeat("  ", padding) + line + "\n")
+		if strings.HasSuffix(line, " do") {
+			indent++
+		}
+	}
+	return []byte(converted.String()), nil
 }
 
 func SHA256(data []byte) string {
@@ -80,6 +119,44 @@ func significantCaskLines(raw string) []string {
 		lines = append(lines, trimmed)
 	}
 	return lines
+}
+
+func expectedCaskFormatLines(expected CaskExpectation, format string) ([]string, error) {
+	switch format {
+	case CaskFormatV1:
+		return expectedCaskLines(expected), nil
+	case CaskFormatV2:
+		return []string{
+			`cask "ecctl" do`,
+			`version "` + expected.Version + `"`,
+			`on_macos do`,
+			`on_arm do`,
+			`sha256 "` + expected.ArmSHA256 + `"`,
+			`url "` + OSSBaseURL + `/#{version}/ecctl_#{version}_darwin_arm64.tar.gz"`,
+			`end`,
+			`on_intel do`,
+			`sha256 "` + expected.IntelSHA256 + `"`,
+			`url "` + OSSBaseURL + `/#{version}/ecctl_#{version}_darwin_amd64.tar.gz"`,
+			`end`,
+			`end`,
+			`name "ecctl"`,
+			`desc "` + Description + `"`,
+			`homepage "` + Homepage + `"`,
+			`livecheck do`,
+			`skip "Auto-generated on release."`,
+			`end`,
+			`depends_on :macos`,
+			`binary "ecctl"`,
+			`postflight_steps do`,
+			`on_macos do`,
+			`run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{staged_path}}/ecctl"]`,
+			`end`,
+			`end`,
+			`end`,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported Homebrew Cask format %q", format)
+	}
 }
 
 func expectedCaskLines(expected CaskExpectation) []string {

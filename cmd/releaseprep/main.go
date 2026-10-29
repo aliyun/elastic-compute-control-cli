@@ -18,7 +18,6 @@ import (
 const (
 	releaseDistDir       = "dist"
 	releaseVersionFile   = "version.txt"
-	releaseCaskFile      = "dist/homebrew/Casks/ecctl.rb"
 	releaseManifestFile  = "dist/ecctl-update-manifest-v2.json"
 	releaseBundleFile    = "dist/ecctl-update-manifest-v2.sigstore.json"
 	releaseMetadataLimit = 1 << 20
@@ -43,6 +42,8 @@ func main() {
 	checkHomebrew := flag.Bool("check-homebrew-version", false, "check whether a release tag advances the current Homebrew Cask")
 	checkVersion := flag.Bool("check-version-file", false, "check the canonical release version file")
 	verifyHomebrew := flag.Bool("verify-homebrew-cask", false, "strictly validate a generated Homebrew Cask against immutable release checksums")
+	convertHomebrew := flag.Bool("convert-homebrew-cask", false, "validate a Homebrew Cask and print it in the requested format")
+	caskFormat := flag.String("cask-format", releaseartifact.CaskFormatV1, "Homebrew Cask format to verify or produce: v1 (updater compatibility) or v2 (tap)")
 	generateManifest := flag.Bool("generate-update-manifest", false, "generate the signed-updater v2 manifest from local release assets")
 	verifyManifest := flag.Bool("verify-update-manifest", false, "verify an updater v2 manifest with the production offline trust policy")
 	updateV2Required := flag.Bool("update-v2-required", false, "report whether a release tag requires signed updater v2 metadata")
@@ -59,7 +60,7 @@ func main() {
 	flag.Parse()
 
 	selected := 0
-	for _, enabled := range []bool{*write, *check, *checkHomebrew, *checkVersion, *verifyHomebrew, *generateManifest, *verifyManifest, *updateV2Required, *checkTelemetry} {
+	for _, enabled := range []bool{*write, *check, *checkHomebrew, *checkVersion, *verifyHomebrew, *convertHomebrew, *generateManifest, *verifyManifest, *updateV2Required, *checkTelemetry} {
 		if enabled {
 			selected++
 		}
@@ -101,7 +102,21 @@ func main() {
 		return
 	}
 	if *verifyHomebrew {
-		if err := verifyHomebrewCask(*cask, *checksumsFile, strings.TrimPrefix(*releaseTag, "v")); err != nil {
+		if err := verifyHomebrewCask(*cask, *checksumsFile, strings.TrimPrefix(*releaseTag, "v"), *caskFormat); err != nil {
+			exitError(err)
+		}
+		return
+	}
+	if *convertHomebrew {
+		raw, expected, err := readHomebrewCask(*cask, *checksumsFile, strings.TrimPrefix(*releaseTag, "v"))
+		if err != nil {
+			exitError(err)
+		}
+		converted, err := releaseartifact.ConvertCask(raw, expected, *caskFormat)
+		if err != nil {
+			exitError(err)
+		}
+		if _, err := os.Stdout.Write(converted); err != nil {
 			exitError(err)
 		}
 		return
@@ -189,7 +204,10 @@ func generateUpdateManifest(releaseTag string) error {
 	}
 	caskPath := ""
 	if len(parsed.prerelease) == 0 {
-		caskPath = releaseCaskFile
+		caskPath = filepath.Join(releaseDistDir, "ecctl_"+version+"_cask.rb")
+		if err := verifyHomebrewCask(caskPath, filepath.Join(releaseDistDir, "checksums.txt"), version, releaseartifact.CaskFormatV1); err != nil {
+			return fmt.Errorf("validate updater Cask v1: %w", err)
+		}
 	}
 	manifest, err := releaseartifact.BuildUpdateManifestV2(version, releaseDistDir, releaseVersionFile, caskPath)
 	if err != nil {
@@ -210,32 +228,41 @@ func checkTelemetryConfig(getenv func(string) string) error {
 	return err
 }
 
-func verifyHomebrewCask(caskPath string, checksumsPath string, releaseVersion string) error {
+func verifyHomebrewCask(caskPath string, checksumsPath string, releaseVersion string, format string) error {
+	raw, expected, err := readHomebrewCask(caskPath, checksumsPath, releaseVersion)
+	if err != nil {
+		return err
+	}
+	return releaseartifact.ValidateCaskFormat(raw, expected, format)
+}
+
+func readHomebrewCask(caskPath string, checksumsPath string, releaseVersion string) ([]byte, releaseartifact.CaskExpectation, error) {
+	var expected releaseartifact.CaskExpectation
 	if caskPath == "" || checksumsPath == "" || releaseVersion == "" {
-		return errors.New("--cask, --checksums-file, and --release-tag are required")
+		return nil, expected, errors.New("--cask, --checksums-file, and --release-tag are required")
 	}
 	if _, err := parseSemVersion(releaseVersion); err != nil {
-		return fmt.Errorf("invalid release version %q: %w", releaseVersion, err)
+		return nil, expected, fmt.Errorf("invalid release version %q: %w", releaseVersion, err)
 	}
 	caskRaw, err := os.ReadFile(caskPath)
 	if err != nil {
-		return err
+		return nil, expected, err
 	}
 	checksums, err := readReleaseChecksums(checksumsPath)
 	if err != nil {
-		return err
+		return nil, expected, err
 	}
 	intelName := "ecctl_" + releaseVersion + "_darwin_amd64.tar.gz"
 	armName := "ecctl_" + releaseVersion + "_darwin_arm64.tar.gz"
 	intel, ok := checksums[intelName]
 	if !ok {
-		return fmt.Errorf("release checksums are missing %s", intelName)
+		return nil, expected, fmt.Errorf("release checksums are missing %s", intelName)
 	}
 	arm, ok := checksums[armName]
 	if !ok {
-		return fmt.Errorf("release checksums are missing %s", armName)
+		return nil, expected, fmt.Errorf("release checksums are missing %s", armName)
 	}
-	return releaseartifact.ValidateCask(caskRaw, releaseartifact.CaskExpectation{Version: releaseVersion, IntelSHA256: intel, ArmSHA256: arm})
+	return caskRaw, releaseartifact.CaskExpectation{Version: releaseVersion, IntelSHA256: intel, ArmSHA256: arm}, nil
 }
 
 func readReleaseChecksums(path string) (map[string]string, error) {
