@@ -4,10 +4,10 @@ generated:
   cases_dir: cases
 summary:
   surface: public
-  resources: 63
-  operations: 298
+  resources: 64
+  operations: 302
   missing_cases: 0
-  passed: 279
+  passed: 283
   not_passed: 19
 resources:
   ack:
@@ -1570,6 +1570,32 @@ resources:
           time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
   sandbox:
+    quota:
+      operations:
+        delete:
+          status: live-pass
+          case: cases/sandbox/quota-lifecycle.yaml
+          fingerprint: sha256:cc9f567389c2819a840c73041e98021831b65065e2b40b837d1b937f07cb8119
+          time: "2026-10-29T03:16:03.80208803+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/sandbox/quota-lifecycle.yaml
+          fingerprint: sha256:cc9f567389c2819a840c73041e98021831b65065e2b40b837d1b937f07cb8119
+          time: "2026-10-29T03:16:03.80208803+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/sandbox/quota-lifecycle.yaml
+          fingerprint: sha256:cc9f567389c2819a840c73041e98021831b65065e2b40b837d1b937f07cb8119
+          time: "2026-10-29T03:16:03.80208803+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/sandbox/quota-lifecycle.yaml
+          fingerprint: sha256:cc9f567389c2819a840c73041e98021831b65065e2b40b837d1b937f07cb8119
+          time: "2026-10-29T03:16:03.80208803+08:00"
+          reason: live-verified
     sandbox:
       operations:
         create:

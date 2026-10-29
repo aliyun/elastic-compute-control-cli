@@ -1,0 +1,66 @@
+resource: sandbox/quota
+serial: true
+timeout: 15m
+
+steps:
+  - name: create owned Team
+    run: >
+      ecctl sandbox team create --name {{.team_name}}
+      --description "{{.team_owner}}" --plan eco --output=json
+    at: $.team
+    expect:
+      id: {type: string, min_len: 1}
+      status: {eq: active}
+    capture:
+      team_id: id
+    teardown: ecctl sandbox team delete {{.team_id}} --timeout 5m
+
+  - name: update
+    run: >
+      ecctl sandbox quota update {{.team_id}} --cpu-cores 32
+      --memory-gb 64 --output=json
+    at: $.quota
+    expect:
+      id: {eq: "{{.team_id}}"}
+      team_id: {eq: "{{.team_id}}"}
+      cpu_cores: {eq: 32}
+      memory_gb: {eq: 64}
+    teardown: ecctl sandbox quota delete {{.team_id}} --output=json
+
+  - name: get
+    run: ecctl sandbox quota get {{.team_id}} --output=json
+    at: $.quota
+    expect:
+      id: {eq: "{{.team_id}}"}
+      cpu_cores: {eq: 32}
+      memory_gb: {eq: 64}
+
+  - name: list
+    run: ecctl sandbox quota list --limit 100 --all --output=json
+    expect:
+      $.pagination.has_more: {eq: false}
+      $.pagination.next_token: {exists: false}
+      $.pagination.limit: {eq: 100}
+      $.pagination.returned: {ge: 1}
+    assert:
+      - 'len($.quotas[?(@.id == "{{.team_id}}")]) == 1'
+
+  - name: delete
+    run: ecctl sandbox quota delete {{.team_id}} --output=json
+    expect:
+      $.deleted: {eq: true}
+
+  - name: get after delete
+    run: ecctl sandbox quota get {{.team_id}} --output=json
+    exit: 4
+    expect:
+      $.error.kind: {eq: not_found}
+      $.error.code: {eq: NotFound}
+      $.actions[0].action_name: {eq: DescribeQuota}
+      $.actions[0].code: {type: string, min_len: 1}
+      $.actions[0].request_id: {type: string, min_len: 1}
+
+  - name: delete owned Team
+    run: ecctl sandbox team delete {{.team_id}} --timeout 5m
+    expect:
+      $.deleted: {eq: true}

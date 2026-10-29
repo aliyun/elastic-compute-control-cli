@@ -6,14 +6,20 @@ package runner
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/shlex"
+
 	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/fixtureconfig"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalcmd"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalfile"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/match"
 	paramspkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/params"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
@@ -52,6 +58,10 @@ type Options struct {
 	Logf               func(string, ...any)
 	PreResolvedLingjun *paramspkg.LingjunResult
 	Session            *Session
+
+	quotaLifecycleForbidden bool // set from the current suite before rendering steps
+	quotaLifecycle          bool // owned Team and Quota commands share one credential binding
+	quotaLifecycleKnown     bool // runCase classified all steps before allocation
 }
 
 // Region is one role's selected region profile and resolved prerequisite
@@ -89,11 +99,10 @@ func normalizeRegions(opt *Options) (map[string]Region, error) {
 	return regions, nil
 }
 
-// Run executes the suite and returns the result model. Like pytest, it never
-// aborts early on test failures: shared-stack provisioning failures and per-case
-// failures are recorded in the report and the run continues (cases that don't
-// depend on the stack still run). An error is returned only for fatal setup
-// problems (cannot load cases / fixtures).
+// Run executes the suites and returns the result model. It records per-case
+// failures and continues unless a pending Quota update has fenced cleanup;
+// later cases are then skipped before allocation. An error is returned only
+// for fatal setup problems (cannot load cases / fixtures).
 func Run(ctx context.Context, opt Options) (*report.Run, error) {
 	if opt.Logf == nil {
 		opt.Logf = func(string, ...any) {}
@@ -120,6 +129,18 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 		run.FinishedAt = time.Now()
 		return run, err
 	}
+	requestedJournal := opt.CleanupJournal
+	journalPaths := map[string]string{}
+	if requestedJournal != "" {
+		for role := range regions {
+			path, err := journalfile.ResolveJournalPath(cleanupJournalPath(requestedJournal, role))
+			if err != nil {
+				return setupErr(fmt.Errorf("bind cleanup journal for %s: %w", role, err))
+			}
+			journalPaths[role] = path
+		}
+		opt.CleanupJournal = journalPaths["primary"]
+	}
 
 	suites := opt.Suites
 	if suites == nil {
@@ -130,6 +151,24 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 	}
 	if len(suites) == 0 {
 		return setupErr(fmt.Errorf("no cases selected"))
+	}
+	if opt.Session != nil {
+		if err := opt.Session.checkRetainedQuotaOwnership(); err != nil {
+			return setupErr(err)
+		}
+	}
+	for _, suite := range suites {
+		for _, step := range suite.Steps {
+			if step.Local == nil && journalcmd.RawQuotaMutationCandidate(step.Run) {
+				return setupErr(fmt.Errorf("case %s step %s: raw FCSandbox Quota mutation is unsupported in E2E cases", suite.Resource, step.Name))
+			}
+			if !opt.DryRun && quotaUpdateCandidate(step, step.Run) && (!suite.Serial || suite.Execution == scenario.ExecutionDAG) {
+				return setupErr(fmt.Errorf("case %s: Quota update requires a serial sequential lifecycle", suite.Resource))
+			}
+			if quotaUpdateCandidate(scenario.Step{}, step.Teardown) || quotaDeleteCandidate(step.Teardown) && !quotaUpdateCandidate(step, step.Run) && !unresolvedCommandPath(step.Run) {
+				return setupErr(fmt.Errorf("case %s step %s: Quota mutation cannot be an ordinary teardown", suite.Resource, step.Name))
+			}
+		}
 	}
 	workDir, err := os.MkdirTemp("", "ecctl-e2e-")
 	if err != nil {
@@ -218,7 +257,41 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 		}
 	}
 	cl := newCleanup(execCfgs, operations, opt.Keep, opt.CleanupJournal, report.CleanupJournal{RunID: opt.RunID, ExecutionID: opt.ExecutionID, Surface: opt.Surface}, opt.Logf)
+	cl.requestedJournal, cl.journalPaths = requestedJournal, journalPaths
 	cl.session = opt.Session
+	if !opt.DryRun {
+		if cl.journal != "" {
+			paths := make([]string, 0, len(journalPaths))
+			seen := make(map[string]bool, len(journalPaths))
+			for _, path := range journalPaths {
+				if !seen[path] {
+					paths = append(paths, path)
+					seen[path] = true
+				}
+			}
+			sort.Strings(paths)
+			releases := make([]func() error, 0, len(paths))
+			releaseAll := func() {
+				for i := len(releases) - 1; i >= 0; i-- {
+					if err := releases[i](); err != nil {
+						opt.Logf("release cleanup journal run lease: %v", err)
+					}
+				}
+			}
+			for _, path := range paths {
+				release, err := journalfile.AcquireRunLease(path)
+				if err != nil {
+					releaseAll()
+					return setupErr(fmt.Errorf("admit cleanup journal before allocation: %w", err))
+				}
+				releases = append(releases, release)
+			}
+			defer releaseAll()
+		}
+		if err := cl.checkDurablePendingQuotaUpdate(ctx); err != nil {
+			return setupErr(fmt.Errorf("admit cleanup journal before allocation: %w", err))
+		}
+	}
 	regionValues := make(map[string]any, len(regions))
 	for role, region := range regions {
 		prerequisites := region.Prerequisites
@@ -353,6 +426,9 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 	run.Manifest = cl.manifest
 	run.Summary = summarize(run.Cases)
 	run.FinishedAt = time.Now()
+	if opt.Session != nil && cl.hasRetainedQuotaOwnership() {
+		opt.Session.retainQuotaOwnership()
+	}
 	return run, nil
 }
 
@@ -878,6 +954,9 @@ func resourcePrefix(runName string) string {
 }
 
 func validateStackTemplateCommand(command string) error {
+	if quotaUpdateCandidate(scenario.Step{}, command) || quotaDeleteCandidate(command) {
+		return fmt.Errorf("Quota shared-stack mutations are unsupported; use an owned case lifecycle")
+	}
 	native, err := nativeTemplateCommandStatus(command)
 	if err != nil {
 		return fmt.Errorf("cannot classify shared-stack Template command")
@@ -897,6 +976,58 @@ func validateStackTemplateCommand(command string) error {
 	return fmt.Errorf("native Template shared-stack mutations are unsupported; use an owned case lifecycle")
 }
 
+// A shared Team's finalizer must be registerable before the create can reach
+// the provider. Substitute safe IDs for this step's captures to check the
+// exact ordinary delete grammar without depending on a provider response.
+func validateStackTeamFinalizer(step ProvisionStep, command string, data map[string]any, region string) error {
+	if !isTeamCreate(command) {
+		return nil
+	}
+	args, err := shlex.Split(command)
+	if err != nil {
+		return fmt.Errorf("shared Team create command is invalid")
+	}
+	flags := teamCreateFlagSet()
+	if err := flags.Parse(args[1:]); err != nil {
+		return fmt.Errorf("shared Team create command is invalid")
+	}
+	if flags.Changed("profile") {
+		return fmt.Errorf("shared Team create cannot select an unbound profile")
+	}
+	if flags.Changed("region") {
+		selected, _ := flags.GetString("region")
+		if selected != region {
+			return fmt.Errorf("shared Team create region differs from cleanup region")
+		}
+	}
+	if step.Teardown == "" {
+		return fmt.Errorf("shared Team creation requires a cleanup finalizer")
+	}
+	values := vars.Clone(data)
+	ownedTargets := map[string]bool{}
+	index := 0
+	for name, field := range step.Capture {
+		index++
+		placeholder := fmt.Sprintf("ecctl-pending-team-%d", index)
+		values[name] = placeholder
+		if field == "id" {
+			ownedTargets[placeholder] = true
+		}
+	}
+	finalizer, err := vars.Render(step.Teardown, values)
+	if err != nil {
+		return fmt.Errorf("shared Team finalizer: %w", err)
+	}
+	if rawTeamDeleteCandidate(finalizer) {
+		return fmt.Errorf("shared Team finalizer cannot use an unattended raw delete")
+	}
+	target, err := teamDeleteTargetForOwnership(finalizer, region)
+	if err != nil || !ownedTargets[target] {
+		return fmt.Errorf("shared Team finalizer requires a captured ID and validated ordinary delete")
+	}
+	return nil
+}
+
 // provisionStack creates the selected shared-stack resources and records a
 // failure per node. Independent branches continue after a failure; nodes whose
 // dependencies failed are skipped.
@@ -906,6 +1037,12 @@ func provisionStack(ctx context.Context, opt Options, execCfg execpkg.Config, cl
 		failures[id] = failure
 	}
 	for _, ps := range fix.Provision {
+		if quotaUpdateCandidate(scenario.Step{}, ps.Teardown) || quotaDeleteCandidate(ps.Teardown) {
+			message := "Quota shared-stack teardown is unsupported; use an owned case lifecycle"
+			failures[ps.ID] = message
+			sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusError, Error: message})
+			continue
+		}
 		if failed := directFailedDependency(ps, failures); failed != "" {
 			message := fmt.Sprintf("dependency %q failed", failed)
 			if stackStepSkipped(failures[failed]) {
@@ -941,7 +1078,18 @@ func provisionStack(ctx context.Context, opt Options, execCfg execpkg.Config, cl
 			sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusError, Error: message})
 			continue
 		}
+		if journalcmd.RawQuotaMutationCandidate(cmd) {
+			message := "raw FCSandbox Quota mutation is unsupported in E2E stack steps"
+			failures[ps.ID] = message
+			sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusError, Error: message})
+			continue
+		}
 		if err := validateStackTemplateCommand(cmd); err != nil {
+			failures[ps.ID] = err.Error()
+			sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusError, Error: err.Error()})
+			continue
+		}
+		if err := validateStackTeamFinalizer(ps, cmd, data, execCfg.Region); err != nil {
 			failures[ps.ID] = err.Error()
 			sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusError, Error: err.Error()})
 			continue
@@ -1113,6 +1261,31 @@ func runCase(
 ) report.Case {
 	start := time.Now()
 	cr := report.Case{Name: caseName(s), Resource: s.Resource, Path: s.Path, Status: report.StatusPass}
+	if cl.hasUnresolvedQuotaTeamCreate() {
+		cr.Status, cr.Error = report.StatusSkipped, "unresolved Quota-bound Team create blocks later cases"
+		return cr
+	}
+	if cl.hasPendingQuotaUpdate() {
+		cr.Status, cr.Error = report.StatusSkipped, "pending Quota update blocks later cases"
+		return cr
+	}
+	opt.quotaLifecycleForbidden = !s.Serial || s.Execution == scenario.ExecutionDAG
+	opt.quotaLifecycleKnown = true
+	// Admission follows the operation rather than the suite's resource label:
+	// mixed serial suites can own a Team and then update its Quota.
+	opt.quotaLifecycle = false
+	for _, step := range s.Steps {
+		if step.Local == nil && journalcmd.RawQuotaMutationCandidate(step.Run) {
+			cr.Status, cr.Error = report.StatusError, "raw FCSandbox Quota mutation is unsupported in E2E cases"
+			return cr
+		}
+	}
+	for _, step := range s.Steps {
+		if quotaUpdateCandidate(step, step.Run) {
+			opt.quotaLifecycle = true
+			break
+		}
+	}
 
 	inputs, err := loadInputs(opt.InputsDir, s.Resource)
 	if err != nil {
@@ -1124,7 +1297,7 @@ func runCase(
 	data := vars.Clone(base)
 	data["run_name"] = opt.RunName + "-" + caseSlug(s.Resource)
 	data["inputs"] = inputs
-	if s.Resource == "sandbox/team" || s.Resource == "sandbox/template-cache" {
+	if s.Resource == "sandbox/team" || s.Resource == "sandbox/template-cache" || s.Resource == "sandbox/quota" {
 		if err := teamOwnership(data); err != nil {
 			cr.Status, cr.Error = report.StatusError, err.Error()
 			return cr
@@ -1172,6 +1345,7 @@ func runSequentialCase(
 	stepTimeout time.Duration,
 	cr *report.Case,
 ) {
+	teamCreates := 0
 	for _, st := range s.Steps {
 		if opt.DryRun {
 			sr := renderDryStep(data, st)
@@ -1187,6 +1361,18 @@ func runSequentialCase(
 			cr.Steps = append(cr.Steps, report.Step{Name: st.Name, Status: report.StatusSkipped, Error: "run cancelled"})
 			cr.Status = report.StatusFail
 			break
+		}
+		// A Quota pagination case needs two independently owned Teams. Rotate
+		// the nonce before the second protected create, never its captured ID.
+		if opt.quotaLifecycle && s.Resource == "sandbox/quota" && isTeamCreate(st.Run) {
+			if teamCreates > 0 {
+				if err := teamOwnership(data); err != nil {
+					cr.Steps = append(cr.Steps, report.Step{Name: st.Name, Status: report.StatusError, Error: err.Error()})
+					cr.Status = report.StatusFail
+					break
+				}
+			}
+			teamCreates++
 		}
 		var sr report.Step
 		var ok bool
@@ -1204,11 +1390,33 @@ func runSequentialCase(
 	}
 }
 
+// Only a template in the ecctl command path can make raw setup classification
+// inconclusive. Templates in IDs or flags do not hide an ordinary action.
+func unresolvedCommandPath(command string) bool {
+	path, err := commandAction(command)
+	if err != nil {
+		return strings.Contains(command, "{{")
+	}
+	for _, part := range path {
+		if strings.Contains(part, "{{") {
+			return true
+		}
+	}
+	return false
+}
+
+func ordinaryQuotaTeardown(step scenario.Step, renderedRun string) bool {
+	return quotaUpdateCandidate(scenario.Step{}, step.Teardown) ||
+		quotaDeleteCandidate(step.Teardown) && !quotaUpdateCandidate(step, renderedRun)
+}
+
 type dagStepOutcome struct {
 	step     report.Step
 	success  bool
 	captures map[string]any
 }
+
+var dagStepAfterCompletion = func(string) {}
 
 func runDAGCase(
 	ctx context.Context,
@@ -1319,6 +1527,7 @@ func runDAGCase(
 		result := <-completions
 		outcomes[result.index] = result.outcome
 		success[result.index] = result.outcome.success
+		dagStepAfterCompletion(s.Steps[result.index].Name)
 		if result.outcome.success {
 			capturesByStep[s.Steps[result.index].Name] = result.outcome.captures
 		}
@@ -1416,7 +1625,63 @@ func annotateStep(result *report.Step, step scenario.Step) {
 	result.Locks = append([]string(nil), step.Locks...)
 }
 
+// Test synchronization points for observing admission to the Team replay
+// fence. Production keeps both no-op defaults.
+var teamCreateBeforeReplayLock = func(string) {}
+var teamDeleteBeforeReplayLock = func() {}
+
 func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *cleanup, scope *[]*cleanupItem, data map[string]any, st scenario.Step, timeout time.Duration) (report.Step, bool) {
+	if st.Local == nil && cl.journal != "" {
+		command, err := vars.Render(st.Run, data)
+		if err == nil && isTeamCreate(command) {
+			path, err := cl.checkedJournalPath("primary")
+			if err == nil {
+				var result report.Step
+				var ok bool
+				teamCreateBeforeReplayLock(command)
+				known, parentErr := cl.rememberedJournalParent(path)
+				if parentErr != nil {
+					return report.Step{Name: st.Name, Status: report.StatusError, Error: parentErr.Error()}, false
+				}
+				lock := journalfile.WithReplayLock
+				if known != nil {
+					lock = journalfile.WithExistingReplayLock
+				}
+				err = lock(ctx, path, func() error {
+					if err := checkJournalParentIdentity(path, known); err != nil {
+						return err
+					}
+					if err := cl.checkDurablePendingQuotaUpdate(ctx); err != nil {
+						return err
+					}
+					result, ok = runStepUnfenced(ctx, opt, execCfg, cl, scope, data, st, timeout)
+					return nil
+				})
+				if err == nil {
+					return result, ok
+				}
+				if result.Name != "" {
+					result.Status = report.StatusError
+					if result.Error == "" {
+						result.Error = err.Error()
+					} else {
+						result.Error = errors.Join(errors.New(result.Error), err).Error()
+					}
+					return result, false
+				}
+			}
+			return report.Step{Name: st.Name, Status: report.StatusError, Error: err.Error()}, false
+		}
+	}
+	return runStepUnfenced(ctx, opt, execCfg, cl, scope, data, st, timeout)
+}
+
+func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, cl *cleanup, scope *[]*cleanupItem, data map[string]any, st scenario.Step, timeout time.Duration) (report.Step, bool) {
+	if opt.quotaLifecycle {
+		cl.mu.Lock()
+		cl.quotaLifecycleRequired = true
+		cl.mu.Unlock()
+	}
 	wantExit := 0
 	if st.Exit != nil {
 		wantExit = *st.Exit
@@ -1440,14 +1705,25 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 	var teamIntent *teamCreateIntent
 	var templateIntent *templateCreateIntent
 	var cacheReservation *cleanupItem
+	var quotaReservation *cleanupItem
+	var ownedTeamDelete bool
 	if st.Local != nil {
 		sctx, cancel := context.WithTimeout(ctx, timeout)
 		res = runLocalAction(sctx, data, *st.Local)
 		cancel()
+		sr.Command = report.Scrub(res.Command)
+		sr.Exit = res.Exit
+		sr.DurationMs = res.Duration.Milliseconds()
+		sr.Stdout = strings.TrimSpace(res.Stdout)
+		sr.Stderr = strings.TrimSpace(res.Stderr)
 	} else {
 		cmd, renderErr := vars.Render(st.Run, data)
 		if renderErr != nil {
 			sr.Status, sr.Error = report.StatusError, "render: "+renderErr.Error()
+			return sr, false
+		}
+		if journalcmd.RawQuotaMutationCandidate(cmd) {
+			sr.Status, sr.Error = report.StatusError, "raw FCSandbox Quota mutation is unsupported in E2E cases"
 			return sr, false
 		}
 		display, displayErr := renderReportCommand(st.Run, data)
@@ -1459,101 +1735,319 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 			privateDisplay = report.Scrub(display)
 		}
 		renderedCommand = cmd
-		nativeCreate, parseErr := nativeTemplateCreateStatus(cmd)
-		if parseErr != nil {
-			sr.Status, sr.Error = report.StatusError, parseErr.Error()
-			return sr, false
-		}
-		if isTeamCreate(cmd) {
-			teamIntent, err = reserveTeamCreate(cmd, data, execCfg, cl, st)
-			if err != nil {
-				sr.Status, sr.Error = report.StatusError, err.Error()
-				return sr, false
-			}
-			cmd = teamIntent.command()
-		} else if nativeCreate {
-			templateIntent, err = reserveTemplateCreate(ctx, cmd, execCfg, cl, st, timeout)
-			if err != nil {
-				sr.Status, sr.Error = report.StatusError, err.Error()
-				return sr, false
-			}
-			cmd, execCfg = templateIntent.command, templateIntent.cfg
-		}
-		if teamIntent == nil && templateIntent == nil {
-			cmd, execCfg, cacheReservation, err = cl.reserveTemplateCacheCreate(ctx, scope, cmd, execCfg, data, st, lockKeys)
-			if err != nil {
-				sr.Status, sr.Error = report.StatusError, err.Error()
-				return sr, false
-			}
-		}
-		cmd, err = cl.bindNativeTemplateDelete(*scope, cmd, "primary")
-		if err != nil {
-			sr.Status, sr.Error = report.StatusError, err.Error()
-			return sr, false
-		}
-		cmd, execCfg, err = cl.bindOwnedNativeTemplate(ctx, cmd, "primary", execCfg, timeout)
-		if err != nil {
-			sr.Status, sr.Error = report.StatusError, err.Error()
-			return sr, false
-		}
-		cmd, err = cl.bindOwnedTemplateCacheDelete(*scope, cmd, execCfg)
-		if err != nil {
-			sr.Status, sr.Error = report.StatusError, err.Error()
-			return sr, false
-		}
-		renderedCommand = cmd
-		for attempt := 0; ; attempt++ {
-			sctx, cancel := context.WithTimeout(ctx, timeout)
-			invoke := func(bound execpkg.Config) error {
-				cacheCommand, recognized, parseErr := parseTemplateCacheCommand(cmd)
-				if parseErr != nil {
-					return parseErr
+		if opt.quotaLifecycle {
+			if path, pathErr := commandAction(cmd); pathErr == nil && len(path) >= 2 && (path[0] == "sandbox" || path[0] == "sbx") && path[1] == "quota" {
+				cl.mu.Lock()
+				binding := cl.quotaBinding
+				cl.mu.Unlock()
+				if binding == nil {
+					sr.Status, sr.Error = report.StatusError, "protected Quota requires its owned Team credential binding"
+					return sr, false
 				}
-				if recognized && cacheCommand.action == "delete" {
-					cl.mu.Lock()
-					defer cl.mu.Unlock()
-					if err := cl.verifyReservedTemplateCacheDelete(*scope, cmd); err != nil {
-						return err
-					}
-				}
-				res = cl.runCommand(sctx, bound, cmd)
-				return nil
-			}
-			if isDestructiveStep(cmd) {
-				if err := cl.withTemplateCleanupGuard(sctx, "primary", invoke); err != nil {
-					cancel()
+				var verified execpkg.Config
+				verified, err = journalfile.ProbeQuotaBinding(ctx, binding, execCfg)
+				if err != nil {
 					sr.Status, sr.Error = report.StatusError, err.Error()
 					return sr, false
 				}
-			} else {
-				_ = invoke(execCfg)
-			}
-			cancel()
-			if teamIntent != nil || templateIntent != nil || cacheReservation != nil || res.Exit == 0 || !isTransientNetworkError(res) || attempt >= len(stepRetryDelays) {
-				break
-			}
-			shown := report.Scrub(renderedCommand)
-			if privateDisplay != "" {
-				shown = privateDisplay
-			}
-			opt.Logf("step retry %d/%d after transient network error: %s", attempt+1, len(stepRetryDelays), shown)
-			select {
-			case <-ctx.Done():
-			case <-time.After(stepRetryDelays[attempt]):
-			}
-			if ctx.Err() != nil {
-				break
+				// Keep the original selectors for later journal checks. A read
+				// executes outside the cleanup guard, so it needs the pinned config.
+				if !quotaUpdateCandidate(st, cmd) && !quotaDeleteCandidate(cmd) {
+					execCfg = verified
+				}
 			}
 		}
+		quotaCandidate := quotaUpdateCandidate(st, cmd)
+		quotaDelete := quotaDeleteCandidate(cmd)
+		teamDelete := ownedTeamDeleteCandidate(cmd)
+		if quotaCandidate && opt.quotaLifecycleKnown && !opt.quotaLifecycle {
+			sr.Status, sr.Error = report.StatusError, "Quota update was not identifiable before its Team allocation"
+			return sr, false
+		}
+		if ordinaryQuotaTeardown(st, cmd) {
+			sr.Status, sr.Error = report.StatusError, "Quota mutation cannot be an ordinary teardown"
+			return sr, false
+		}
+		if quotaCandidate && opt.quotaLifecycleForbidden {
+			sr.Status, sr.Error = report.StatusError, "Quota update requires a serial sequential lifecycle"
+			return sr, false
+		}
+		if !quotaCandidate && !quotaDelete {
+			nativeCreate, parseErr := nativeTemplateCreateStatus(cmd)
+			if parseErr != nil {
+				sr.Status, sr.Error = report.StatusError, parseErr.Error()
+				return sr, false
+			}
+			if isTeamCreate(cmd) {
+				var quotaBinding *report.QuotaCredentialBinding
+				if opt.quotaLifecycle {
+					quotaBinding, execCfg, err = captureQuotaCredentialBinding(ctx, execCfg, timeout)
+					if err != nil {
+						sr.Status, sr.Error = report.StatusError, err.Error()
+						return sr, false
+					}
+				}
+				cl.mu.Lock()
+				for _, existing := range *scope {
+					if !existing.done && !existing.teamCreateConfirmed && ownedTeamDeleteCandidate(existing.cmd) {
+						cl.mu.Unlock()
+						sr.Status, sr.Error = report.StatusError, "protected Team creation conflicts with an ordinary Team finalizer"
+						return sr, false
+					}
+				}
+				cl.teamCreatesPending++
+				cl.mu.Unlock()
+				defer func() {
+					cl.mu.Lock()
+					cl.teamCreatesPending--
+					cl.mu.Unlock()
+				}()
+				teamIntent, err = reserveTeamCreate(cmd, data, execCfg, cl, st, quotaBinding)
+				if err != nil {
+					sr.Status, sr.Error = report.StatusError, err.Error()
+					return sr, false
+				}
+				cmd = teamIntent.command()
+			} else if nativeCreate {
+				templateIntent, err = reserveTemplateCreate(ctx, cmd, execCfg, cl, st, timeout)
+				if err != nil {
+					sr.Status, sr.Error = report.StatusError, err.Error()
+					return sr, false
+				}
+				cmd, execCfg = templateIntent.command, templateIntent.cfg
+			}
+			if teamIntent == nil && templateIntent == nil {
+				cmd, execCfg, cacheReservation, err = cl.reserveTemplateCacheCreate(ctx, scope, cmd, execCfg, data, st, lockKeys)
+				if err != nil {
+					sr.Status, sr.Error = report.StatusError, err.Error()
+					return sr, false
+				}
+			}
+			cmd, err = cl.bindNativeTemplateDelete(*scope, cmd, "primary")
+			if err != nil {
+				sr.Status, sr.Error = report.StatusError, err.Error()
+				return sr, false
+			}
+			cmd, execCfg, err = cl.bindOwnedNativeTemplate(ctx, cmd, "primary", execCfg, timeout)
+			if err != nil {
+				sr.Status, sr.Error = report.StatusError, err.Error()
+				return sr, false
+			}
+			cmd, err = cl.bindOwnedTemplateCacheDelete(*scope, cmd, execCfg)
+			if err != nil {
+				sr.Status, sr.Error = report.StatusError, err.Error()
+				return sr, false
+			}
+		}
+		renderedCommand = cmd
+		invoked := false
+		invokeAttempts := func() error {
+			for attempt := 0; ; attempt++ {
+				sctx, cancel := context.WithTimeout(ctx, timeout)
+				invokeCommand := func(bound execpkg.Config) error {
+					if teamIntent != nil {
+						if err := checkJournalParentIdentity(teamIntent.journalPath, teamIntent.parent); err != nil {
+							return err
+						}
+					}
+					if quotaDelete {
+						if err := cl.verifyOwnedQuotaDelete(*scope, data, cmd, "primary"); err != nil {
+							return err
+						}
+					}
+					var teamItem *cleanupItem
+					if teamDelete {
+						var err error
+						teamItem, err = cl.prepareOwnedTeamDelete(*scope, cmd, "primary", nil)
+						if err != nil {
+							return err
+						}
+						ownedTeamDelete = teamItem != nil
+					}
+					cacheCommand, recognized, parseErr := parseTemplateCacheCommand(cmd)
+					if parseErr != nil {
+						return parseErr
+					}
+					if recognized && cacheCommand.action == "delete" {
+						cl.mu.Lock()
+						defer cl.mu.Unlock()
+						if err := cl.verifyReservedTemplateCacheDelete(*scope, cmd); err != nil {
+							return err
+						}
+					}
+					if quotaCandidate && opt.quotaLifecycle {
+						cl.mu.Lock()
+						binding := cl.quotaBinding
+						cl.mu.Unlock()
+						verified, err := journalfile.ProbeQuotaBinding(sctx, binding, cl.execCfg["primary"])
+						if err != nil {
+							return err
+						}
+						bound = verified
+					}
+					invoked = true
+					res = cl.runCommand(sctx, bound, cmd)
+					if quotaDelete && res.Err == nil && (res.Exit == 0 || res.Exit == exitNotFound && exitOK(res.Exit)) {
+						return cl.consumeOwnedQuotaDelete(*scope, cmd, "primary")
+					}
+					if teamItem != nil && res.Err == nil && (res.Exit == 0 || res.Exit == exitNotFound && exitOK(res.Exit)) {
+						if rawTeamDeleteCandidate(cmd) {
+							if res.Exit != 0 {
+								return fmt.Errorf("raw Team delete did not confirm business success")
+							}
+							if err := acceptedRawTeamDelete(res, bound.Region); err != nil {
+								return err
+							}
+							// Raw code 200 accepts deletion but does not wait for Team
+							// absence. Keep the marked finalizer for first-class cleanup.
+							return nil
+						}
+						return cl.consumeOwnedTeamDelete(teamItem)
+					}
+					return nil
+				}
+				invoke := func(bound execpkg.Config) error {
+					if quotaDelete || teamDelete {
+						claim := cmd
+						if teamDelete {
+							claim = ownedTeamClaimKey(cmd, cl.execCfg["primary"].Region)
+						}
+						return cl.withDeleteClaim("primary", claim, func() error { return invokeCommand(bound) })
+					}
+					return invokeCommand(bound)
+				}
+				if isDestructiveStep(cmd) {
+					if teamDelete {
+						teamDeleteBeforeReplayLock()
+					}
+					if err := cl.withTemplateCleanupGuard(sctx, "primary", invoke, cmd); err != nil {
+						cancel()
+						return err
+					}
+				} else {
+					if err := invoke(execCfg); err != nil {
+						cancel()
+						return err
+					}
+				}
+				cancel()
+				if teamIntent != nil || templateIntent != nil || cacheReservation != nil || quotaReservation != nil || res.Exit == 0 || !isTransientNetworkError(res) || attempt >= len(stepRetryDelays) {
+					break
+				}
+				shown := report.Scrub(renderedCommand)
+				if privateDisplay != "" {
+					shown = privateDisplay
+				}
+				opt.Logf("step retry %d/%d after transient network error: %s", attempt+1, len(stepRetryDelays), shown)
+				select {
+				case <-ctx.Done():
+				case <-time.After(stepRetryDelays[attempt]):
+				}
+				if ctx.Err() != nil {
+					break
+				}
+			}
+			return nil
+		}
+		if quotaCandidate {
+			if cl.journal == "" {
+				sr.Status, sr.Error = report.StatusError, "Quota update requires a run-bound cleanup journal"
+				return sr, false
+			}
+			_, _, requested := cl.journalValues(&cleanupItem{role: "primary"})
+			path, resolveErr := cl.checkedJournalPath("primary")
+			if resolveErr != nil {
+				sr.Status, sr.Error = report.StatusError, resolveErr.Error()
+				return sr, false
+			}
+			if path != requested {
+				sr.Status, sr.Error = report.StatusError, "Quota update requires a canonical cleanup journal path"
+				return sr, false
+			}
+			known, parentErr := cl.rememberedJournalParent(path)
+			if parentErr != nil {
+				sr.Status, sr.Error = report.StatusError, parentErr.Error()
+				return sr, false
+			}
+			if known == nil {
+				sr.Status, sr.Error = report.StatusError, "Quota update requires a remembered owned Team journal parent"
+				return sr, false
+			}
+			quotaBeforeReplayLock()
+			if err := checkJournalParentIdentity(path, known); err != nil {
+				sr.Status, sr.Error = report.StatusError, err.Error()
+				return sr, false
+			}
+			err = journalfile.WithExistingReplayLock(ctx, path, func() error {
+				if err := checkJournalParentIdentity(path, known); err != nil {
+					return err
+				}
+				var reserveErr error
+				quotaReservation, reserveErr = cl.reserveOwnedQuotaUpdate(ctx, path, scope, data, st, cmd, execCfg, lockKeys)
+				if reserveErr != nil {
+					return reserveErr
+				}
+				if quotaReservation == nil {
+					return fmt.Errorf("Quota update requires a durable owned reservation before invocation")
+				}
+				invokeErr := invokeAttempts()
+				if !res.Started {
+					cl.recordUnstartedQuotaUpdate(quotaReservation)
+					if retireErr := cl.retireUnstartedQuotaUpdate(quotaReservation); retireErr != nil {
+						return errors.Join(invokeErr, res.Err, fmt.Errorf("retire unstarted Quota reservation: %w", retireErr))
+					}
+				}
+				if invokeErr != nil {
+					return invokeErr
+				}
+				if quotaReservation != nil && res.Err == nil && res.Exit == 0 {
+					return cl.settleOwnedQuotaUpdate(quotaReservation)
+				}
+				return nil
+			})
+		} else {
+			err = invokeAttempts()
+		}
+		// A journal error after a subprocess must not erase its provider evidence.
+		// Preflight errors have no command result to record.
+		if invoked {
+			sr.Command = report.Scrub(res.Command)
+			if privateDisplay != "" {
+				sr.Command = privateDisplay
+			}
+			sr.Exit = res.Exit
+			sr.DurationMs = res.Duration.Milliseconds()
+			sr.Stdout = strings.TrimSpace(res.Stdout)
+			sr.Stderr = strings.TrimSpace(res.Stderr)
+		}
+		if err != nil {
+			sr.Status, sr.Error = report.StatusError, err.Error()
+			if quotaCandidate {
+				sr.Error = "Quota update coordination: " + sr.Error
+			} else if quotaDelete {
+				sr.Error = "Quota delete coordination: " + sr.Error
+			}
+			return sr, false
+		}
 	}
-	sr.Command = report.Scrub(res.Command)
-	if privateDisplay != "" {
-		sr.Command = privateDisplay
+	if quotaReservation != nil && !res.Started {
+		// The exact pending child was retired under the exclusive replay fence.
+		// A retirement error returned above with the in-memory fence retained.
+		sr.Status, sr.Error = report.StatusError, "Quota update did not start"
+		if res.Err != nil {
+			sr.Error = res.Err.Error()
+		}
+		return sr, false
 	}
-	sr.Exit = res.Exit
-	sr.DurationMs = res.Duration.Milliseconds()
-	sr.Stdout = strings.TrimSpace(res.Stdout)
-	sr.Stderr = strings.TrimSpace(res.Stderr)
+	if quotaReservation != nil && cl.isQuotaUpdatePending(quotaReservation) {
+		sr.Status, sr.Error = report.StatusError, "Quota update remains pending after an uncertain result"
+		if res.Err != nil {
+			sr.Error += ": " + res.Err.Error()
+		} else if res.Exit != 0 {
+			sr.Error += ": " + failureDetail(res)
+		}
+		return sr, false
+	}
 	if cacheReservation != nil && !res.Started {
 		if err := cl.retireUnstartedCacheCreate(cacheReservation); err != nil {
 			sr.Status, sr.Error = report.StatusError, "retire unstarted Template Cache create: "+err.Error()
@@ -1585,8 +2079,17 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 		}
 	}
 	teamID, validTeamID := teamCreateIdentity(res)
-	if teamIntent != nil && !validTeamID {
-		recoveryErr := reconcileTeamCreate(execCfg, cl, scope, data, st, lockKeys, timeout, teamIntent)
+	if teamIntent != nil && (!validTeamID || res.Err != nil || res.Exit != 0) {
+		if teamIntent.QuotaBinding != nil {
+			cl.mu.Lock()
+			cl.unresolvedQuotaTeamCreate = true
+			cl.mu.Unlock()
+		}
+		verifiedReturnedID := ""
+		if validTeamID {
+			verifiedReturnedID = teamID
+		}
+		recoveryErr := reconcileTeamCreate(execCfg, cl, scope, data, st, lockKeys, timeout, teamIntent, verifiedReturnedID)
 		sr.Status = report.StatusFail
 		sr.Error = failureDetail(res)
 		if res.Err != nil {
@@ -1638,9 +2141,23 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 				sr.Status, sr.Error = report.StatusError, "render teardown: "+terr.Error()
 				return sr, false
 			}
-		} else if err := cl.push(scope, caseScope(data), td, st.TeardownRegion, lockKeys); err != nil {
-			sr.Status, sr.Error = report.StatusError, "cleanup journal: "+err.Error()
-			return sr, false
+		} else {
+			if quotaReservation != nil {
+				if !commandsEquivalent(td, quotaReservation.cmd) {
+					sr.Status, sr.Error = report.StatusError, "Quota teardown differs from its durable reservation"
+					return sr, false
+				}
+			} else if teamIntent != nil {
+				confirmed := res.Err == nil && res.Exit == 0
+				_, err = cl.pushItem(scope, caseScope(data), td, st.TeardownRegion, lockKeys, false, confirmed, teamIntent.QuotaBinding != nil)
+				if err != nil {
+					sr.Status, sr.Error = report.StatusError, "cleanup journal: "+err.Error()
+					return sr, false
+				}
+			} else if err := cl.push(scope, caseScope(data), td, st.TeardownRegion, lockKeys); err != nil {
+				sr.Status, sr.Error = report.StatusError, "cleanup journal: "+err.Error()
+				return sr, false
+			}
 		}
 	}
 
@@ -1684,7 +2201,7 @@ func runStep(ctx context.Context, opt Options, execCfg execpkg.Config, cl *clean
 		sr.Status = report.StatusFail
 		return sr, false
 	}
-	if res.Exit == 0 && st.Local == nil {
+	if res.Exit == 0 && st.Local == nil && !quotaDeleteCandidate(renderedCommand) && !ownedTeamDelete {
 		if err := cl.satisfy(*scope, renderedCommand, "primary"); err != nil {
 			sr.Status, sr.Error = report.StatusError, "cleanup journal: "+err.Error()
 			return sr, false
@@ -1813,6 +2330,15 @@ func renderDryStep(data map[string]any, st scenario.Step) report.Step {
 		}
 		sr.Command = fmt.Sprintf("local %s %s %s", st.Local.Action, source, destination)
 	} else {
+		rendered, err := vars.Render(st.Run, data)
+		if err != nil {
+			sr.Status, sr.Error = report.StatusError, "render: "+err.Error()
+			return sr
+		}
+		if ordinaryQuotaTeardown(st, rendered) {
+			sr.Status, sr.Error = report.StatusError, "Quota mutation cannot be an ordinary teardown"
+			return sr
+		}
 		cmd, err := renderReportCommand(st.Run, data)
 		if err != nil {
 			sr.Status, sr.Error = report.StatusError, "render: "+err.Error()
