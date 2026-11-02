@@ -1341,22 +1341,27 @@ func TestUpdateWithHomebrewUsesVerifiedCaskInsideTap(t *testing.T) {
 			}
 			canonicalBrew := filepath.Join(canonicalPrefix, "bin", "brew")
 			canonicalLink := filepath.Join(canonicalPrefix, "bin", "ecctl")
-			intelSHA := strings.Repeat("a", 64)
-			armSHA := strings.Repeat("b", 64)
+			intelSHA := digestBytes([]byte("test archive ecctl_1.2.3_darwin_amd64.tar.gz"))
+			armSHA := digestBytes([]byte("test archive ecctl_1.2.3_darwin_arm64.tar.gz"))
 			caskRaw := testCask("1.2.3", intelSHA, armSHA)
+			manifest, _, assets := testUpdateManifestV2(t, "1.2.3", map[string][]byte{homebrewCaskAssetName("1.2.3"): caskRaw})
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-				if request.URL.Path == "/assets/ecctl_1.2.3_cask.rb" {
-					_, _ = w.Write(caskRaw)
-					return
+				switch request.URL.Path {
+				case "/oss/version.txt":
+					_, _ = io.WriteString(w, "1.2.3\n")
+				case "/oss/1.2.3/" + releaseartifact.UpdateManifestV2Name:
+					_, _ = w.Write(manifest)
+				case "/oss/1.2.3/" + releaseartifact.UpdateManifestV2BundleName:
+					_, _ = io.WriteString(w, "test-bundle")
+				default:
+					if raw, ok := assets[filepath.Base(request.URL.Path)]; ok {
+						_, _ = w.Write(raw)
+					} else {
+						http.NotFound(w, request)
+					}
 				}
-				http.NotFound(w, request)
 			}))
 			defer server.Close()
-			descriptor := releaseDescriptor{Version: "1.2.3", Assets: map[string]releaseAsset{
-				"ecctl_1.2.3_cask.rb":             {Name: "ecctl_1.2.3_cask.rb", SHA256: digestBytes(caskRaw), URL: server.URL + "/assets/ecctl_1.2.3_cask.rb"},
-				"ecctl_1.2.3_darwin_amd64.tar.gz": {SHA256: intelSHA},
-				"ecctl_1.2.3_darwin_arm64.tar.gz": {SHA256: armSHA},
-			}}
 			// Intel Homebrew's repository can differ from its installation prefix.
 			repository := filepath.Join(canonicalPrefix, "Homebrew")
 			tapPath := filepath.Join(repository, "Library", "Taps", "aliyun", "homebrew-ecctl")
@@ -1409,15 +1414,23 @@ func TestUpdateWithHomebrewUsesVerifiedCaskInsideTap(t *testing.T) {
 			}
 			options := Options{
 				CurrentVersion: "1.2.2", Force: test.force, Executable: link, GOOS: "darwin", GOARCH: "arm64",
-				Client: &Client{HTTP: server.Client()}, RunCommand: runner, LookPath: func(string) (string, error) { return "/usr/local/bin/brew", nil },
+				Client: &Client{HTTP: server.Client(), OSSBase: server.URL + "/oss", GitHubAPIBase: server.URL + "/api", verifyManifest: func(raw, bundle []byte) error {
+					if !bytes.Equal(raw, manifest) || string(bundle) != "test-bundle" {
+						return errors.New("unexpected signed release material")
+					}
+					return nil
+				}}, RunCommand: runner, LookPath: func(string) (string, error) { return "/usr/local/bin/brew", nil },
 			}
 			installer, err := detectInstaller(context.Background(), options)
 			if err != nil || installer.Kind != "homebrew" || installer.BrewPath != canonicalBrew {
 				t.Fatalf("installer = %#v, %v", installer, err)
 			}
-			updateErr := updateWithHomebrew(context.Background(), options, installer, descriptor)
+			result, updateErr := Update(context.Background(), options)
 			if wantErr := test.brewFailure || test.wrongVersion; (updateErr != nil) != wantErr {
 				t.Fatalf("update error = %v, want error = %t", updateErr, wantErr)
+			}
+			if updateErr == nil && (!result.Updated || result.UpdateAvailable || result.Source != "oss") {
+				t.Fatalf("successful Homebrew update result = %+v", result)
 			}
 			if _, err := os.Stat(filepath.Dir(stagedCask)); !os.IsNotExist(err) {
 				t.Fatalf("staged Cask directory remains: %v", err)
@@ -1943,6 +1956,9 @@ func testUpdateManifestV2(t *testing.T, version string, overrides map[string][]b
 	if !strings.Contains(version, "-") {
 		name := homebrewCaskAssetName(version)
 		raw := []byte("test cask")
+		if override, ok := overrides[name]; ok {
+			raw = override
+		}
 		files[name] = raw
 		records = append(records, map[string]any{
 			"name": name, "kind": "homebrew-cask", "sha256": digestBytes(raw), "size": len(raw),

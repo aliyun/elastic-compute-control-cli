@@ -15,6 +15,26 @@ func encodedRaw(value string) string {
 	return base64.StdEncoding.EncodeToString([]byte(value))
 }
 
+func TestEndpointHostAndPortBoundaries(t *testing.T) {
+	for _, host := range []string{"", "EXAMPLE.COM", "bad_host.aliyuncs.com", "127.0.0.1", "tracing-cn-hangzhou.arms.aliyuncs.com."} {
+		if validAlibabaCloudEndpointHost(host) {
+			t.Fatalf("invalid host accepted: %q", host)
+		}
+	}
+	for _, tt := range []struct {
+		host  string
+		valid bool
+	}{
+		{"[::1]", true}, {"[::1]:4318", true}, {"[::1", false},
+		{"[::1]suffix", false}, {"[::1]:", false}, {"::1", false},
+		{"host", true}, {"host:1", true}, {"host:0", false}, {"host:65536", false},
+	} {
+		if got := validEndpointPort(tt.host); got != tt.valid {
+			t.Fatalf("port validation %q = %t", tt.host, got)
+		}
+	}
+}
+
 func TestDecodeTelemetryConfig(t *testing.T) {
 	tests := []struct {
 		name     string

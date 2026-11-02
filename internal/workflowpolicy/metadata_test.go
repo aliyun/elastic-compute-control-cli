@@ -98,7 +98,7 @@ func TestMetadataPreparationCoversBuildWorkflows(t *testing.T) {
 						if line == "make metadata-prepare" || line == "go run ./cmd/openapimeta-sync -prepare" {
 							prepared[dir] = true
 						}
-						if strings.Contains(line, "go build") || strings.HasPrefix(line, "go test ") || line == "make lint" || line == "make test" || strings.HasPrefix(line, "make -C e2e ") {
+						if strings.Contains(line, "go build") || strings.HasPrefix(line, "go test ") || line == "make lint" || line == "make test" || line == "make coverage" || line == "make ci-test" || strings.HasPrefix(line, "make -C e2e ") {
 							builds++
 							if !prepared[dir] {
 								t.Errorf("%s/%s builds in %s before metadata preparation: %s", name, jobName, dir, line)

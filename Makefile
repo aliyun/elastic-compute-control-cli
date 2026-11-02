@@ -23,25 +23,31 @@ build: metadata-check ## Build bin/ecctl from prepared metadata
 test: metadata-check ## Run all Go tests offline after metadata preparation
 	go test $(TEST_PACKAGES)
 
-coverage: metadata-check ## Run Go tests with total coverage
-	@coverage=$$(mktemp); \
-	trap 'rm -f "$$coverage"' EXIT; \
-	pkgs=$$(go list $(TEST_PACKAGES) | grep -v '/cmd/specgen$$'); \
-	go test -coverprofile="$$coverage" $$pkgs && \
-	go tool cover -func="$$coverage" | awk '/^total:/ {print}'
+coverage: metadata-check ## Run Go tests and require at least 95% statement coverage
+	@mkdir -p reports
+	@set -eu; \
+	rm -f reports/coverage.out; \
+	pkgs=$$(go list $(TEST_PACKAGES)); \
+	pkgs=$$(printf '%s\n' "$$pkgs" | grep -v '/cmd/specgen$$'); \
+	coverpkgs=$$(printf '%s\n' "$$pkgs" | paste -sd, -); \
+	go test -coverpkg="$$coverpkgs" -coverprofile=reports/coverage.out $$pkgs; \
+	awk -f .github/scripts/check-coverage.awk reports/coverage.out
 
 ci-test: metadata-check ## Run CI tests and write reports
 	@mkdir -p reports
-	@set +e; \
-	pkgs=$$(go list $(TEST_PACKAGES) | grep -v '/cmd/specgen$$'); \
-	go run gotest.tools/gotestsum@v1.13.0 --junitfile reports/testcase.xml -- -coverprofile=reports/coverage.out $$pkgs; \
-	status=$$?; \
-	set -e; \
+	@set -eu; \
+	rm -f reports/coverage.out reports/coverage.xml reports/testcase.xml; \
+	pkgs=$$(go list $(TEST_PACKAGES)); \
+	pkgs=$$(printf '%s\n' "$$pkgs" | grep -v '/cmd/specgen$$'); \
+	coverpkgs=$$(printf '%s\n' "$$pkgs" | paste -sd, -); \
+	status=0; \
+	go run gotest.tools/gotestsum@v1.13.0 --junitfile reports/testcase.xml -- -coverpkg="$$coverpkgs" -coverprofile=reports/coverage.out $$pkgs || status=$$?; \
 	if [ -f reports/coverage.out ]; then \
 		go tool cover -func=reports/coverage.out | awk '/^total:/ {print}'; \
 		go run github.com/boumenot/gocover-cobertura@v1.5.0 < reports/coverage.out > reports/coverage.xml; \
 	fi; \
-	exit $$status
+	test "$$status" -eq 0; \
+	awk -f .github/scripts/check-coverage.awk reports/coverage.out
 
 generate: ## Generate Go catalog from resource specs
 	go run ./cmd/specgen -spec-dir specs -out pkg/spec/catalog_generated.go

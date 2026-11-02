@@ -74,8 +74,16 @@ jobs:
       - name: Lint
         run: make lint
 
-      - name: Test
-        run: make test
+      - name: Test and enforce 95% UT coverage
+        run: make coverage
+
+      - name: Upload UT coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ut-coverage
+          path: reports/coverage.out
+          if-no-files-found: ignore
 
       - name: Test DSH plugin
         run: make review-dsh-plugin

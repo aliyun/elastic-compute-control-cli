@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,114 @@ import (
 	"sync/atomic"
 	"testing"
 )
+
+type metadataRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f metadataRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func TestFetchPinnedArchiveEnforcesHTTPSAndRedirectLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		calls   int
+		wantErr bool
+	}{
+		{"direct", 1, false},
+		{"HTTPS redirect", 2, false},
+		{"insecure redirect", 1, true},
+		{"redirect loop", 10, true},
+		{"transport failure", 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previous := http.DefaultTransport
+			t.Cleanup(func() { http.DefaultTransport = previous })
+			calls := 0
+			http.DefaultTransport = metadataRoundTripper(func(request *http.Request) (*http.Response, error) {
+				calls++
+				if calls == 1 && request.URL.String() != "https://codeload.github.com/"+repository+"/tar.gz/"+testRevision {
+					t.Fatalf("download was not pinned: %s", request.URL)
+				}
+				if request.URL.Scheme != "https" {
+					t.Fatal("insecure redirect reached the transport")
+				}
+				if tc.name == "transport failure" {
+					return nil, errors.New("offline")
+				}
+				response := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("pinned archive"))}
+				if tc.name == "redirect loop" || (tc.name == "HTTPS redirect" && calls == 1) || tc.name == "insecure redirect" {
+					response.StatusCode = http.StatusFound
+					location := "https://example.invalid/source.tar.gz"
+					if tc.name == "insecure redirect" {
+						location = "http://example.invalid/source.tar.gz"
+					}
+					response.Header.Set("Location", location)
+				}
+				return response, nil
+			})
+			cache := t.TempDir()
+			path, err := fetchPinnedArchive(testRevision, cache)
+			if (err != nil) != tc.wantErr || calls != tc.calls {
+				t.Fatalf("download: calls=%d, err=%v", calls, err)
+			}
+			if !tc.wantErr {
+				if string(readBytes(t, path)) != "pinned archive" {
+					t.Fatal("downloaded content changed")
+				}
+			} else if files, err := os.ReadDir(cache); err != nil || len(files) != 0 {
+				t.Fatalf("failed download retained files: %v, %v", files, err)
+			}
+		})
+	}
+}
+
+func TestPrepareRejectsInvalidLockAndCache(t *testing.T) {
+	for _, kind := range []string{"missing lock", "directory lock", "file cache", "directory archive", "fetch failure"} {
+		t.Run(kind, func(t *testing.T) {
+			root, _ := syncFixture(t)
+			if err := os.RemoveAll(filepath.Join(root, ".generated")); err != nil {
+				t.Fatal(err)
+			}
+			lock := filepath.Join(root, "manifest.json")
+			switch kind {
+			case "missing lock", "directory lock":
+				if err := os.Remove(lock); err != nil {
+					t.Fatal(err)
+				}
+				if kind == "directory lock" {
+					if err := os.Mkdir(lock, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := checkPrepared(root); err == nil {
+					t.Fatal("offline check accepted an invalid lock")
+				}
+			case "file cache":
+				if err := os.WriteFile(filepath.Join(root, ".cache"), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			case "directory archive":
+				if err := os.MkdirAll(filepath.Join(root, ".cache", testRevision+".tar.gz"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fetched := false
+			fetch := func(string, string) (string, error) {
+				fetched = true
+				return "", errors.New("offline")
+			}
+			if err := prepareWithFetcher(root, "", io.Discard, fetch); err == nil {
+				t.Fatal("invalid lock/cache or failed fetch accepted")
+			}
+			if fetched != (kind == "fetch failure") {
+				t.Fatal("invalid lock/cache reached the downloader")
+			}
+			if _, err := os.Stat(filepath.Join(root, ".generated")); !os.IsNotExist(err) {
+				t.Fatalf("failed preparation installed output: %v", err)
+			}
+		})
+	}
+}
 
 func writeArchive(t *testing.T, files map[string]string) string {
 	t.Helper()
