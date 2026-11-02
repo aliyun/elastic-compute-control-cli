@@ -46,6 +46,7 @@ jobs:
 
       - name: build ecctl + ecctl-e2e
         run: |
+          make metadata-prepare
           go build -o bin/ecctl ./cmd/ecctl
           go -C e2e build -o "$GITHUB_WORKSPACE/bin/ecctl-e2e" ./cmd/ecctl-e2e
           echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"

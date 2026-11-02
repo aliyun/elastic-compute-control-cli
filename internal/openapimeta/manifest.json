@@ -1,14 +1,12 @@
 {
-  "format_version": 1,
+  "format_version": 2,
   "repository": "aliyun/aliyun-openapi-meta",
   "revision": "3c5b9bdc7d9f06fe06b5793713845820121f1f17",
-  "archive_sha256": "97ca083e16f5278a0c3756868b2c0771d0c67c0f062fa556f06ad6b1edb11fcd",
-  "snapshot_sha256": "3a6b2f447c6ff7699a2cd7de1f5249f5946c5ed169074276b8fc7b68dae25f4b",
+  "index_sha256": "ab79154e169026d33761b40b4b74b4102a3a5f6aba87355cef9aa2b3549cdfe9",
   "products": 351,
   "operations": 26231,
   "files": 26584,
   "uncompressed_bytes": 176644613,
-  "snapshot_bytes": 60692014,
   "default_versions": [
     {
       "code": "acc",

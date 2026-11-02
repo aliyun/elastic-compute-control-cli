@@ -2,19 +2,21 @@ package main
 
 import (
 	"archive/tar"
-	"archive/zip"
 	"bytes"
-	"compress/flate"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	metadata "github.com/aliyun/elastic-compute-control-cli/internal/openapimetaformat"
 )
 
 const testRevision = "3c5b9bdc7d9f06fe06b5793713845820121f1f17"
@@ -99,34 +101,32 @@ func TestGenerateDeterministicCompleteDefaults(t *testing.T) {
 	files := fixtureFiles()
 	entries := fixtureEntries(files)
 	archive := tarball(t, entries)
-	first, err := generate(bytes.NewReader(archive), testRevision)
+	firstDir, secondDir, reorderedDir := t.TempDir(), t.TempDir(), t.TempDir()
+	first, err := generate(bytes.NewReader(archive), testRevision, firstDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := generate(bytes.NewReader(archive), strings.ToUpper(testRevision))
+	second, err := generate(bytes.NewReader(archive), strings.ToUpper(testRevision), secondDir)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !bytes.Equal(first.zip, second.zip) || !bytes.Equal(first.manifestJSON, second.manifestJSON) {
-		t.Fatal("same input must produce byte-identical outputs")
 	}
 	slices.Reverse(entries)
-	reordered, err := generate(bytes.NewReader(tarball(t, entries)), testRevision)
+	reordered, err := generate(bytes.NewReader(tarball(t, entries)), testRevision, reorderedDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(first.zip, reordered.zip) {
-		t.Fatal("tar entry order changed snapshot bytes")
+	if !bytes.Equal(first.index, second.index) || !bytes.Equal(first.index, reordered.index) ||
+		!bytes.Equal(first.manifestJSON, second.manifestJSON) || !bytes.Equal(first.manifestJSON, reordered.manifestJSON) {
+		t.Fatal("same contents must produce byte-identical outputs despite input order or compression")
 	}
 	manifest := first.manifest
-	if manifest.Repository != repository || manifest.Revision != testRevision || manifest.FormatVersion != 1 {
+	if manifest.Repository != repository || manifest.Revision != testRevision || manifest.FormatVersion != metadata.Version {
 		t.Fatalf("source identity: %+v", manifest)
 	}
-	if manifest.ArchiveSHA256 != fmt.Sprintf("%x", sha256.Sum256(archive)) ||
-		manifest.SnapshotSHA256 != fmt.Sprintf("%x", sha256.Sum256(first.zip)) {
-		t.Fatal("manifest checksums do not match artifacts")
+	if manifest.IndexSHA256 != fmt.Sprintf("%x", sha256.Sum256(first.index)) {
+		t.Fatal("lock does not identify the logical file index")
 	}
-	if manifest.Products != 2 || manifest.Operations != 3 || manifest.Files != 7 || manifest.SnapshotBytes != len(first.zip) {
+	if manifest.Products != 2 || manifest.Operations != 3 || manifest.Files != 7 {
 		t.Fatalf("wrong counts: %+v", manifest)
 	}
 	wantDefaults := []defaultVersion{
@@ -134,7 +134,7 @@ func TestGenerateDeterministicCompleteDefaults(t *testing.T) {
 		{Code: "RAM", CanonicalCode: "ram", Version: "2015-05-01", Operations: 1},
 	}
 	if !reflect.DeepEqual(manifest.DefaultVersions, wantDefaults) {
-		t.Fatalf("default inventory: %+v", manifest.DefaultVersions)
+		t.Fatalf("default inventory: %+v", manifest)
 	}
 	var decoded snapshotManifest
 	if err := json.Unmarshal(first.manifestJSON, &decoded); err != nil || !reflect.DeepEqual(decoded, manifest) {
@@ -143,7 +143,7 @@ func TestGenerateDeterministicCompleteDefaults(t *testing.T) {
 	if string(first.license) != files["LICENSE"] {
 		t.Fatal("upstream license was changed")
 	}
-	zr, err := zip.NewReader(bytes.NewReader(first.zip), int64(len(first.zip)))
+	inventory, err := metadata.DecodeIndex(first.index, manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,55 +157,39 @@ func TestGenerateDeterministicCompleteDefaults(t *testing.T) {
 		"metadatas/products.json",
 	}
 	var paths []string
-	var size int64
-	for _, entry := range zr.File {
-		paths = append(paths, entry.Name)
-		if entry.Method != zip.Deflate || entry.Mode().Perm() != 0o644 ||
-			!entry.Modified.Equal(time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC)) {
-			t.Fatalf("non-deterministic header: %+v", entry.FileHeader)
-		}
-		r, err := entry.Open()
+	reader := metadata.NewReader(os.DirFS(firstDir), first.manifestJSON)
+	for _, entry := range inventory {
+		paths = append(paths, entry.Path)
+		data, err := reader.ReadFile(entry.Path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		data, err := io.ReadAll(r)
-		r.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
-		want := []byte(files[entry.Name])
-		if entry.Name != "LICENSE" {
+		want := []byte(files[entry.Path])
+		if entry.Path != "LICENSE" {
 			want, err = compactJSON(want)
 			if err != nil {
 				t.Fatal(err)
 			}
 		}
 		if !bytes.Equal(data, want) {
-			t.Fatalf("lost or changed raw JSON fields: %s", entry.Name)
+			t.Fatalf("lost or changed raw JSON fields: %s", entry.Path)
 		}
-		size += int64(len(data))
-		var best bytes.Buffer
-		compressor, err := flate.NewWriter(&best, flate.BestCompression)
+		compressed, err := os.ReadFile(filepath.Join(firstDir, filepath.FromSlash(entry.Path)+".gz"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := compressor.Write(data); err != nil {
-			t.Fatal(err)
-		}
-		if err := compressor.Close(); err != nil {
-			t.Fatal(err)
-		}
-		raw, err := entry.OpenRaw()
-		if err != nil {
-			t.Fatal(err)
-		}
-		compressed, err := io.ReadAll(raw)
-		if err != nil || !bytes.Equal(compressed, best.Bytes()) {
-			t.Fatalf("entry not best-compression deflate: %s, %v", entry.Name, err)
+		for _, dir := range []string{secondDir, reorderedDir} {
+			other, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(entry.Path)+".gz"))
+			if err != nil || !bytes.Equal(compressed, other) {
+				t.Fatalf("non-deterministic gzip for %s: %v", entry.Path, err)
+			}
 		}
 	}
-	if !reflect.DeepEqual(paths, wantPaths) || manifest.UncompressedBytes != size {
-		t.Fatalf("wrong inventory: %v, size %d", paths, size)
+	if !reflect.DeepEqual(paths, wantPaths) {
+		t.Fatalf("wrong inventory: %v", paths)
+	}
+	if err := reader.Check(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -253,7 +237,7 @@ func TestGenerateRejectsIncompleteMetadata(t *testing.T) {
 			} else {
 				files[test.path] = test.data
 			}
-			result, err := generate(bytes.NewReader(tarball(t, fixtureEntries(files))), testRevision)
+			result, err := generate(bytes.NewReader(tarball(t, fixtureEntries(files))), testRevision, t.TempDir())
 			if err == nil || !strings.Contains(err.Error(), test.want) || result != nil {
 				t.Fatalf("got result %v, error %v; want %q", result != nil, err, test.want)
 			}
@@ -264,7 +248,7 @@ func TestGenerateRejectsIncompleteMetadata(t *testing.T) {
 func TestGenerateKeepsProductWithNoDeclaredOperations(t *testing.T) {
 	files := fixtureFiles()
 	files["canonical/ram/2015-05-01/version.json"] = `{"version":"2015-05-01","apis":{}}`
-	result, err := generate(bytes.NewReader(tarball(t, fixtureEntries(files))), testRevision)
+	result, err := generate(bytes.NewReader(tarball(t, fixtureEntries(files))), testRevision, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +280,7 @@ func TestGenerateRejectsUnsafeArchives(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.entry.name, func(t *testing.T) {
 			entries := append(fixtureEntries(fixtureFiles()), test.entry)
-			result, err := generate(bytes.NewReader(tarball(t, entries)), testRevision)
+			result, err := generate(bytes.NewReader(tarball(t, entries)), testRevision, t.TempDir())
 			if result != nil || err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("got %v, want %q", err, test.want)
 			}
@@ -307,7 +291,7 @@ func TestGenerateRejectsUnsafeArchives(t *testing.T) {
 func TestGitHubGlobalPAXHeader(t *testing.T) {
 	global := tarEntry{name: "pax_global_header", kind: tar.TypeXGlobalHeader, pax: map[string]string{"comment": testRevision}}
 	entries := append([]tarEntry{global}, fixtureEntries(fixtureFiles())...)
-	if _, err := generate(bytes.NewReader(tarball(t, entries)), testRevision); err != nil {
+	if _, err := generate(bytes.NewReader(tarball(t, entries)), testRevision, t.TempDir()); err != nil {
 		t.Fatalf("GitHub global PAX header: %v", err)
 	}
 	for _, test := range []struct {
@@ -321,7 +305,7 @@ func TestGitHubGlobalPAXHeader(t *testing.T) {
 		{"late global header", append(fixtureEntries(fixtureFiles()), global), "before repository entries"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := generate(bytes.NewReader(tarball(t, test.entries)), testRevision); err == nil || !strings.Contains(err.Error(), test.want) {
+			if _, err := generate(bytes.NewReader(tarball(t, test.entries)), testRevision, t.TempDir()); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("got %v, want %q", err, test.want)
 			}
 		})
@@ -339,7 +323,7 @@ func TestEffectivePAXPathsAndImplicitDirectories(t *testing.T) {
 		{[]tarEntry{{name: "upstream/canonical", kind: tar.TypeReg}}, "file used as directory"},
 	} {
 		entries := append(fixtureEntries(fixtureFiles()), test.entries...)
-		if _, err := generate(bytes.NewReader(tarball(t, entries)), testRevision); err == nil || !strings.Contains(err.Error(), test.want) {
+		if _, err := generate(bytes.NewReader(tarball(t, entries)), testRevision, t.TempDir()); err == nil || !strings.Contains(err.Error(), test.want) {
 			t.Fatalf("got %v, want %q", err, test.want)
 		}
 	}
@@ -348,7 +332,7 @@ func TestEffectivePAXPathsAndImplicitDirectories(t *testing.T) {
 func TestGenerateRejectsBadArchiveChecksum(t *testing.T) {
 	archive := tarball(t, fixtureEntries(fixtureFiles()))
 	archive[len(archive)-8] ^= 0xff
-	if _, err := generate(bytes.NewReader(archive), testRevision); err == nil || !strings.Contains(err.Error(), "checksum") {
+	if _, err := generate(bytes.NewReader(archive), testRevision, t.TempDir()); err == nil || !strings.Contains(err.Error(), "checksum") {
 		t.Fatalf("gzip corruption not detected: %v", err)
 	}
 }
@@ -356,7 +340,7 @@ func TestGenerateRejectsBadArchiveChecksum(t *testing.T) {
 func TestGenerateRejectsAppendedTar(t *testing.T) {
 	archive := tarball(t, fixtureEntries(fixtureFiles()))
 	archive = append(archive, tarball(t, []tarEntry{{name: "upstream/LICENSE", kind: tar.TypeReg, data: "hidden"}})...)
-	if _, err := generate(bytes.NewReader(archive), testRevision); err == nil || !strings.Contains(err.Error(), "after end of tar") {
+	if _, err := generate(bytes.NewReader(archive), testRevision, t.TempDir()); err == nil || !strings.Contains(err.Error(), "after end of tar") {
 		t.Fatalf("concatenated tar not detected: %v", err)
 	}
 }

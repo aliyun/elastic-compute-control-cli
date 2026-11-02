@@ -230,7 +230,7 @@ func TestMetadataSyncMakeTargetIsExplicit(t *testing.T) {
 		}
 		forbidden := []string{"gh api", "curl ", "wget ", "specdrift baseline", "drift-baseline"}
 		if target == "lint" {
-			forbidden = append(forbidden, "metadata-sync", "openapimeta-sync")
+			forbidden = append(forbidden, "metadata-sync", "metadata-prepare", " -prepare", " -revision ")
 		}
 		for _, text := range forbidden {
 			if strings.Contains(string(log), text) {
@@ -302,7 +302,7 @@ func apiSyncWorkflowPolicyViolations(workflow string) []string {
 		return []string{fmt.Sprintf("api-sync.yml must parse as YAML: %v", err)}
 	}
 	var violations []string
-	for _, path := range []string{"pkg/aliyun/**", "internal/openapimeta/**", "cmd/openapimeta-sync/**", ".github/workflows/api-sync.yml"} {
+	for _, path := range []string{"pkg/aliyun/**", "internal/openapimeta/**", "internal/openapimetaformat/**", "cmd/openapimeta-sync/**", ".github/workflows/api-sync.yml"} {
 		found := false
 		for _, candidate := range document.On.Push.Paths {
 			if candidate == path {
@@ -343,8 +343,17 @@ func apiSyncWorkflowPolicyViolations(workflow string) []string {
 	checkoutFound := false
 	uploadAlways := false
 	upsertAlways := false
+	prepared := false
 	for index, step := range target.Steps {
 		allRun += "\n" + step.Run
+		for _, line := range strings.Split(step.Run, "\n") {
+			if strings.TrimSpace(line) == "make metadata-prepare" {
+				prepared = true
+			}
+			if strings.Contains(line, "go build") && !prepared {
+				violations = append(violations, "api-sync.yml must prepare pinned metadata before building")
+			}
+		}
 		if step.ID == "staleness" {
 			if step.Env["PINNED_SHA"] != "${{ steps.metadata.outputs.pinned_sha }}" || step.Env["GH_TOKEN"] != "${{ github.token }}" {
 				violations = append(violations, "api-sync.yml staleness must use the manifest SHA and GitHub token")
@@ -378,6 +387,9 @@ func apiSyncWorkflowPolicyViolations(workflow string) []string {
 	}
 	if !checkoutFound {
 		violations = append(violations, "api-sync.yml must check out the repository default branch")
+	}
+	if !prepared {
+		violations = append(violations, "api-sync.yml must prepare pinned metadata without updating its lock")
 	}
 	if !uploadAlways {
 		violations = append(violations, "api-sync.yml must upload drift evidence even when planning fails")

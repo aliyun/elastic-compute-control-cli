@@ -247,6 +247,11 @@ jobs:
             --release-tag "${RELEASE_TAG}" \
             "${cask_args[@]}"
 
+      - name: Prepare pinned OpenAPI metadata
+        if: steps.release.outputs.state != 'immutable'
+        working-directory: release-source
+        run: make metadata-prepare
+
       - name: Check public module release readiness
         if: steps.release.outputs.state != 'immutable'
         working-directory: release-source
@@ -430,6 +435,11 @@ jobs:
           ECCTL_TELEMETRY_HEADERS_B64: ${{ secrets.ECCTL_TELEMETRY_HEADERS_B64 }}
         shell: bash
         run: go -C tooling run ./cmd/releaseprep --check-telemetry-config
+
+      - name: Prepare pinned OpenAPI metadata
+        if: needs.validate.outputs.release_state != 'immutable'
+        working-directory: release-source
+        run: make metadata-prepare
 
       - name: Create or verify release tag
         if: needs.validate.outputs.release_state != 'immutable'
