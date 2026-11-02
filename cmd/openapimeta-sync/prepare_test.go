@@ -38,6 +38,9 @@ func TestFetchPinnedArchiveEnforcesHTTPSAndRedirectLimit(t *testing.T) {
 			calls := 0
 			http.DefaultTransport = metadataRoundTripper(func(request *http.Request) (*http.Response, error) {
 				calls++
+				if calls > tc.calls {
+					return nil, errors.New("unexpected extra download request")
+				}
 				if calls == 1 && request.URL.String() != "https://codeload.github.com/"+repository+"/tar.gz/"+testRevision {
 					t.Fatalf("download was not pinned: %s", request.URL)
 				}
@@ -119,6 +122,53 @@ func TestPrepareRejectsInvalidLockAndCache(t *testing.T) {
 				t.Fatalf("failed preparation installed output: %v", err)
 			}
 		})
+	}
+}
+
+func TestInstallDirectoryPreservesOutputOnRenameFailure(t *testing.T) {
+	for _, kind := range []string{"missing stage", "blocked backup"} {
+		t.Run(kind, func(t *testing.T) {
+			root := t.TempDir()
+			stage, target := filepath.Join(root, "stage"), filepath.Join(root, "output")
+			if err := os.Mkdir(target, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			marker := filepath.Join(target, "previous")
+			if err := os.WriteFile(marker, []byte("preserve"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if kind == "blocked backup" {
+				if err := os.Mkdir(stage, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(stage+"-previous", []byte("obstruction"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := installDirectory(stage, target); err == nil {
+				t.Fatal("failed rename accepted")
+			}
+			if string(readBytes(t, marker)) != "preserve" {
+				t.Fatal("failed installation changed the prior output")
+			}
+			if kind == "blocked backup" {
+				if string(readBytes(t, stage+"-previous")) != "obstruction" {
+					t.Fatal("failed installation changed the backup obstruction")
+				}
+			} else if _, err := os.Stat(stage + "-previous"); !os.IsNotExist(err) {
+				t.Fatalf("rollback left the previous output displaced: %v", err)
+			}
+		})
+	}
+}
+
+func TestWriteAtomicRejectsMissingParent(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing")
+	if err := writeAtomic(root, "manifest.json", []byte("lock")); err == nil {
+		t.Fatal("write to a missing parent accepted")
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("failed write created its parent: %v", err)
 	}
 }
 
