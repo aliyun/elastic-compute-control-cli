@@ -9,6 +9,7 @@ fails on a real contract regression, and does not endanger unrelated resources.
 Build both binaries and use their capability documents as the source of truth:
 
 ```bash
+make -C .. metadata-prepare
 make build-public build-full
 bin/ecctl-public capabilities --output json
 bin/ecctl-full capabilities --output json

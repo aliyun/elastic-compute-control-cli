@@ -7,7 +7,7 @@ REVIEW_NPM_CACHE ?= $(REVIEW_CACHE_DIR)/npm
 REVIEW_GOPROXY ?= https://proxy.golang.org,direct
 REVIEW_ENV = env GOPATH="$(REVIEW_GOPATH)" GOCACHE="$(REVIEW_GOCACHE)" GOMODCACHE="$(REVIEW_GOMODCACHE)" GOPROXY="$(REVIEW_GOPROXY)" npm_config_cache="$(REVIEW_NPM_CACHE)"
 
-.PHONY: help install build test coverage ci-test lint fmt clean generate metadata-sync drift drift-baseline drift-check specdrift prepare-public-release check-public-release check-release-version review-final review-dsh-plugin review-e2e review-website
+.PHONY: help install build test coverage ci-test lint fmt clean generate metadata-prepare metadata-check metadata-sync drift drift-baseline drift-check specdrift prepare-public-release check-public-release check-release-version review-final review-dsh-plugin review-e2e review-website
 
 install: ## Install git pre-commit hook
 	git config core.hooksPath .githooks
@@ -15,22 +15,22 @@ install: ## Install git pre-commit hook
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "; printf "Available targets:\n"} /^[a-zA-Z0-9_.-]+:.*## / {printf "  \033[1;36m%-10s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-build: ## Build bin/ecctl
+build: metadata-check ## Build bin/ecctl from prepared metadata
 	@mkdir -p bin
 	go build -o bin/ecctl ./cmd/ecctl
 	@printf '\033[1;32mbuilt bin/ecctl\033[0m (%s, %s bytes)\n' "$$(./bin/ecctl --version 2>/dev/null | head -1)" "$$(wc -c < bin/ecctl | tr -d ' ')"
 
-test: ## Run all Go tests
+test: metadata-check ## Run all Go tests offline after metadata preparation
 	go test $(TEST_PACKAGES)
 
-coverage: ## Run Go tests with total coverage
+coverage: metadata-check ## Run Go tests with total coverage
 	@coverage=$$(mktemp); \
 	trap 'rm -f "$$coverage"' EXIT; \
 	pkgs=$$(go list $(TEST_PACKAGES) | grep -v '/cmd/specgen$$'); \
 	go test -coverprofile="$$coverage" $$pkgs && \
 	go tool cover -func="$$coverage" | awk '/^total:/ {print}'
 
-ci-test: ## Run CI tests and write reports
+ci-test: metadata-check ## Run CI tests and write reports
 	@mkdir -p reports
 	@set +e; \
 	pkgs=$$(go list $(TEST_PACKAGES) | grep -v '/cmd/specgen$$'); \
@@ -46,10 +46,17 @@ ci-test: ## Run CI tests and write reports
 generate: ## Generate Go catalog from resource specs
 	go run ./cmd/specgen -spec-dir specs -out pkg/spec/catalog_generated.go
 
-metadata-sync: ## Rebuild the embedded metadata snapshot from an explicit archive and full revision
+# Metadata tools run on the host even when ecctl is cross-compiled.
+metadata-prepare: ## Prepare ignored metadata from the lock; download only when needed
+	GOOS="$$(go env GOHOSTOS)" GOARCH="$$(go env GOHOSTARCH)" go run ./cmd/openapimeta-sync -prepare -archive "$(METADATA_ARCHIVE)" -out internal/openapimeta
+
+metadata-check: ## Verify all prepared metadata offline without changing the lock
+	GOOS="$$(go env GOHOSTOS)" GOARCH="$$(go env GOHOSTARCH)" go run ./cmd/openapimeta-sync -check -out internal/openapimeta
+
+metadata-sync: ## Explicitly update the metadata lock from a local archive and full revision
 	@test -n "$(METADATA_ARCHIVE)" || (echo "METADATA_ARCHIVE is required (downloaded tar.gz)" >&2; exit 1)
 	@test -n "$(METADATA_REVISION)" || (echo "METADATA_REVISION is required (full 40-hex commit SHA)" >&2; exit 1)
-	go run ./cmd/openapimeta-sync -archive "$(METADATA_ARCHIVE)" -revision "$(METADATA_REVISION)" -out internal/openapimeta
+	GOOS="$$(go env GOHOSTOS)" GOARCH="$$(go env GOHOSTARCH)" go run ./cmd/openapimeta-sync -archive "$(METADATA_ARCHIVE)" -revision "$(METADATA_REVISION)" -out internal/openapimeta
 
 drift: specdrift ## Report OpenAPI metadata changes unmatched by resource bindings
 	bin/specdrift detect -spec-dir specs
@@ -60,7 +67,7 @@ drift-baseline: specdrift ## Record the current OpenAPI metadata as the drift ba
 drift-check: specdrift ## Fail on unacknowledged OpenAPI metadata or binding coverage drift
 	bin/specdrift detect -spec-dir specs -check
 
-specdrift: ## Build the specdrift CLI into bin/
+specdrift: metadata-check ## Build the specdrift CLI into bin/
 	@mkdir -p bin
 	go build -o bin/specdrift ./cmd/specdrift
 
@@ -74,7 +81,7 @@ check-public-release: ## Check public release readiness gates
 check-release-version: ## Check the canonical release version file
 	go run ./cmd/releaseprep --check-version-file --version-file version.txt
 
-lint: specdrift ## Run formatting, vet, generated-code, and offline spec drift checks
+lint: metadata-check specdrift ## Run formatting, vet, generated-code, and offline spec drift checks
 	@test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './bin/*'))"
 	go vet ./...
 	go run ./cmd/specgen -spec-dir specs -out pkg/spec/catalog_generated.go -check
@@ -116,6 +123,6 @@ review-website: ## Install and run website tests, typecheck, and production buil
 fmt: ## Format Go packages
 	go fmt ./...
 
-clean: ## Remove build artifacts and test cache
-	rm -rf bin reports
+clean: ## Remove build artifacts and test cache; retain downloaded metadata sources
+	rm -rf bin reports internal/openapimeta/.generated
 	go clean -testcache

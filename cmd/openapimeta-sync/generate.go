@@ -2,9 +2,7 @@ package main
 
 import (
 	"archive/tar"
-	"archive/zip"
 	"bytes"
-	"compress/flate"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,35 +11,18 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
-	"time"
+
+	metaformat "github.com/aliyun/elastic-compute-control-cli/internal/openapimetaformat"
 )
 
-const repository = "aliyun/aliyun-openapi-meta"
+const repository = metaformat.Repository
 
-// Revision is the caller's pinned source revision, not a claim that a local
-// tarball can authenticate a Git commit. ArchiveSHA256 identifies the exact input.
-type snapshotManifest struct {
-	FormatVersion     int              `json:"format_version"`
-	Repository        string           `json:"repository"`
-	Revision          string           `json:"revision"`
-	ArchiveSHA256     string           `json:"archive_sha256"`
-	SnapshotSHA256    string           `json:"snapshot_sha256"`
-	Products          int              `json:"products"`
-	Operations        int              `json:"operations"`
-	Files             int              `json:"files"`
-	UncompressedBytes int64            `json:"uncompressed_bytes"`
-	SnapshotBytes     int              `json:"snapshot_bytes"`
-	DefaultVersions   []defaultVersion `json:"default_versions"`
-}
-
-type defaultVersion struct {
-	Code          string `json:"code"`
-	CanonicalCode string `json:"canonical_code"`
-	Version       string `json:"version"`
-	Operations    int    `json:"operations"`
-}
+type snapshotManifest = metaformat.Manifest
+type defaultVersion = metaformat.DefaultVersion
 
 type product struct {
 	Code                 string   `json:"code"`
@@ -55,7 +36,7 @@ type versionManifest struct {
 }
 
 type generatedSnapshot struct {
-	zip          []byte
+	index        []byte
 	license      []byte
 	manifest     snapshotManifest
 	manifestJSON []byte
@@ -71,7 +52,7 @@ func normalizeRevision(revision string) (string, error) {
 	return strings.ToLower(revision), nil
 }
 
-func generate(archive io.ReadSeeker, revision string) (*generatedSnapshot, error) {
+func generate(archive io.ReadSeeker, revision, out string) (*generatedSnapshot, error) {
 	revision, err := normalizeRevision(revision)
 	if err != nil {
 		return nil, err
@@ -79,15 +60,10 @@ func generate(archive io.ReadSeeker, revision string) (*generatedSnapshot, error
 	if _, err := archive.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
-	hash := sha256.New()
-	if _, err := io.Copy(hash, archive); err != nil {
-		return nil, fmt.Errorf("hash archive: %w", err)
-	}
 	manifest := snapshotManifest{
-		FormatVersion: 1,
+		FormatVersion: metaformat.Version,
 		Repository:    repository,
 		Revision:      revision,
-		ArchiveSHA256: hex.EncodeToString(hash.Sum(nil)),
 	}
 
 	// Products may occur after canonical entries in a GitHub tarball. The first
@@ -100,7 +76,7 @@ func generate(archive io.ReadSeeker, revision string) (*generatedSnapshot, error
 			!(len(parts) == 4 && parts[0] == "canonical" && parts[3] == "version.json") {
 			return nil
 		}
-		data, err := io.ReadAll(r)
+		data, err := readMetadata(r)
 		if err != nil {
 			return err
 		}
@@ -124,9 +100,43 @@ func generate(archive io.ReadSeeker, revision string) (*generatedSnapshot, error
 	sort.Slice(catalog.Products, func(i, j int) bool {
 		return strings.ToLower(catalog.Products[i].Code) < strings.ToLower(catalog.Products[j].Code)
 	})
-	files := map[string][]byte{"LICENSE": metadata["LICENSE"]}
-	files["metadatas/products.json"], err = compactJSON(metadata["metadatas/products.json"])
+	var entries []metaformat.Entry
+	paths := make(map[string]bool)
+	compressor, err := gzip.NewWriterLevel(io.Discard, gzip.BestCompression)
 	if err != nil {
+		return nil, err
+	}
+	store := func(name string, data []byte) error {
+		if !metaformat.ValidPath(name) || paths[strings.ToLower(name)] {
+			return fmt.Errorf("unsafe or case-insensitive duplicate metadata path %q", name)
+		}
+		paths[strings.ToLower(name)] = true
+		file := filepath.Join(out, filepath.FromSlash(name)+".gz")
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			return err
+		}
+		output, err := os.OpenFile(file, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err != nil {
+			return err
+		}
+		compressor.Reset(output)
+		_, writeErr := compressor.Write(data)
+		err = errors.Join(writeErr, compressor.Close(), output.Close())
+		if err != nil {
+			return err
+		}
+		entries = append(entries, metaformat.Entry{Path: name, SHA256: fmt.Sprintf("%x", sha256.Sum256(data)), Size: int64(len(data))})
+		manifest.UncompressedBytes += int64(len(data))
+		return nil
+	}
+	if err := store("LICENSE", metadata["LICENSE"]); err != nil {
+		return nil, err
+	}
+	catalogJSON, err := compactJSON(metadata["metadatas/products.json"])
+	if err != nil {
+		return nil, err
+	}
+	if err := store("metadatas/products.json", catalogJSON); err != nil {
 		return nil, err
 	}
 	needed := make(map[string]string)
@@ -167,9 +177,12 @@ func generate(archive io.ReadSeeker, revision string) (*generatedSnapshot, error
 			problems = append(problems, fmt.Errorf("%s: version %q must match default %q and apis must be a non-null object", name, v.Version, p.PluginDefaultVersion))
 			continue
 		}
-		files[name], err = compactJSON(raw)
+		content, err := compactJSON(raw)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		if err := store(name, content); err != nil {
+			return nil, err
 		}
 		operations := sortedKeys(v.APIs)
 		for _, op := range operations {
@@ -192,7 +205,7 @@ func generate(archive io.ReadSeeker, revision string) (*generatedSnapshot, error
 		if !ok {
 			return nil
 		}
-		raw, err := io.ReadAll(r)
+		raw, err := readMetadata(r)
 		if err != nil {
 			return err
 		}
@@ -206,13 +219,16 @@ func generate(archive io.ReadSeeker, revision string) (*generatedSnapshot, error
 		if record.Name != op || record.Parameters == nil {
 			return fmt.Errorf("incomplete upstream operation %s: name must be %q and parameters must be an array (empty [] is allowed; null or missing is not)", name, op)
 		}
-		files[name], err = compactJSON(raw)
-		return err
+		content, err := compactJSON(raw)
+		if err != nil {
+			return err
+		}
+		return store(name, content)
 	}); err != nil {
 		return nil, err
 	}
 	for _, name := range sortedKeys(needed) {
-		if _, ok := files[name]; !ok {
+		if !paths[strings.ToLower(name)] {
 			problems = append(problems, fmt.Errorf("missing declared operation %s", name))
 		}
 	}
@@ -220,24 +236,25 @@ func generate(archive io.ReadSeeker, revision string) (*generatedSnapshot, error
 		return nil, fmt.Errorf("incomplete upstream metadata; no snapshot was written:\n%w", err)
 	}
 
-	data, err := makeZIP(files)
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+	index, err := json.Marshal(entries)
 	if err != nil {
 		return nil, err
 	}
 	manifest.Products = len(catalog.Products)
 	manifest.Operations = len(needed)
-	manifest.Files = len(files)
-	manifest.SnapshotBytes = len(data)
-	for _, content := range files {
-		manifest.UncompressedBytes += int64(len(content))
+	manifest.Files = len(entries)
+	index = append(index, '\n')
+	manifest.IndexSHA256 = fmt.Sprintf("%x", sha256.Sum256(index))
+	if err := os.WriteFile(filepath.Join(out, "index.json"), index, 0o644); err != nil {
+		return nil, err
 	}
-	manifest.SnapshotSHA256 = fmt.Sprintf("%x", sha256.Sum256(data))
 	manifestJSON, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	return &generatedSnapshot{
-		zip: data, license: metadata["LICENSE"], manifest: manifest,
+		index: index, license: metadata["LICENSE"], manifest: manifest,
 		manifestJSON: append(manifestJSON, '\n'),
 	}, nil
 }
@@ -355,6 +372,18 @@ func compactJSON(raw []byte) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+func readMetadata(reader io.Reader) ([]byte, error) {
+	const limit = 64 << 20
+	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > limit {
+		return nil, errors.New("metadata file exceeds 64 MiB")
+	}
+	return data, nil
+}
+
 func sortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for key := range m {
@@ -362,37 +391,4 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-func makeZIP(files map[string][]byte) ([]byte, error) {
-	var out bytes.Buffer
-	writer := zip.NewWriter(&out)
-	compressor, err := flate.NewWriter(io.Discard, flate.BestCompression)
-	if err != nil {
-		return nil, err
-	}
-	// ZIP entries are written sequentially; reuse the compressor's allocation
-	// rather than allocating a large deflate buffer for every operation.
-	writer.RegisterCompressor(zip.Deflate, func(w io.Writer) (io.WriteCloser, error) {
-		compressor.Reset(w)
-		return compressor, nil
-	})
-	for _, name := range sortedKeys(files) {
-		header := &zip.FileHeader{
-			Name: name, Method: zip.Deflate,
-			Modified: time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC),
-		}
-		header.SetMode(0o644)
-		entry, err := writer.CreateHeader(header)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := entry.Write(files[name]); err != nil {
-			return nil, err
-		}
-	}
-	if err := writer.Close(); err != nil {
-		return nil, err
-	}
-	return out.Bytes(), nil
 }
