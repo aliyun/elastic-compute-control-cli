@@ -13,7 +13,7 @@ func TestWithoutSensitivePreservesDesktopStateAndRemovesCredentials(t *testing.T
 		"OSS_SESSION_TOKEN=token",
 		"ECCTL_CONFIG_PATH=/tmp/config.json",
 	}
-	cleaned := WithoutKeysForOS(env, "linux", SensitiveKeys...)
+	cleaned := WithoutSensitive(env)
 	if !slices.Contains(cleaned, "DISPLAY=:1") || !slices.Contains(cleaned, "DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/bus") {
 		t.Fatalf("desktop environment was removed: %#v", cleaned)
 	}

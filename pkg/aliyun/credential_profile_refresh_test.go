@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -104,6 +105,9 @@ func TestOAuthHelperProcessDoesNotLeakCredentials(t *testing.T) {
 		}},
 	})
 	command := exec.Command(os.Args[0], "-test.run=^TestOAuthHelperProcessDoesNotLeakCredentials$")
+	if coverage := flag.Lookup("test.gocoverdir"); coverage != nil && coverage.Value.String() != "" {
+		command.Args = append(command.Args, "-test.gocoverdir="+coverage.Value.String())
+	}
 	command.Env = append(os.Environ(),
 		"DEBUG=credential", "ECCTL_OAUTH_HELPER=1", "ECCTL_OAUTH_ENDPOINT="+server.URL, "ECCTL_OAUTH_CONFIG="+configPath,
 		"ECCTL_OAUTH_CACHE_ROOT="+filepath.Join(dir, "credentials-v2"),
