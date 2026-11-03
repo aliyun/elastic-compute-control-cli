@@ -30,13 +30,14 @@ func TestDAGRunsIndependentStepsConcurrentlyAndHonorsLocks(t *testing.T) {
 			dir := t.TempDir()
 			fake := filepath.Join(dir, "ecctl")
 			if err := os.WriteFile(fake, []byte(`#!/usr/bin/env bash
-if mkdir "$FAKE_ACTIVE" 2>/dev/null; then
-  sleep 0.25
-  rmdir "$FAKE_ACTIVE"
+set -euo pipefail
+printf 'start\n' >> "$FAKE_EVENTS"
+if [ "$FAKE_EXPECT_OVERLAP" = 1 ]; then
+  while [ "$(grep -c '^start$' "$FAKE_EVENTS")" -lt 2 ]; do sleep 0.01; done
 else
-  echo overlap >> "$FAKE_OVERLAP"
   sleep 0.25
 fi
+printf 'end\n' >> "$FAKE_EVENTS"
 echo '{}'
 `), 0o755); err != nil {
 				t.Fatal(err)
@@ -51,20 +52,49 @@ echo '{}'
 			if err := os.WriteFile(filepath.Join(casesDir, "dag.yaml"), []byte(body), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			overlapPath := filepath.Join(dir, "overlap.log")
-			t.Setenv("FAKE_ACTIVE", filepath.Join(dir, "active"))
-			t.Setenv("FAKE_OVERLAP", overlapPath)
+			eventsPath := filepath.Join(dir, "events.log")
+			t.Setenv("FAKE_EVENTS", eventsPath)
+			if test.overlap {
+				t.Setenv("FAKE_EXPECT_OVERLAP", "1")
+			} else {
+				t.Setenv("FAKE_EXPECT_OVERLAP", "0")
+			}
 			run, err := Run(context.Background(), Options{
 				CasesDir: casesDir, InputsDir: filepath.Join(dir, "inputs"),
 				RunName: "test", RunID: "test", EcctlBin: fake, Parallel: test.parallel, StepTimeout: 5 * time.Second,
 			})
 			if err != nil || run.Summary.Failed != 0 {
-				t.Fatalf("run = %+v, err = %v", run, err)
+				events, _ := os.ReadFile(eventsPath)
+				t.Fatalf("run = %+v, err = %v; events = %s", run, err, events)
 			}
-			_, overlapErr := os.Stat(overlapPath)
-			gotOverlap := overlapErr == nil
+			events, err := os.ReadFile(eventsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			active, started, maxActive := 0, 0, 0
+			for _, event := range strings.Fields(string(events)) {
+				switch event {
+				case "start":
+					started++
+					active++
+					if active > maxActive {
+						maxActive = active
+					}
+				case "end":
+					active--
+				default:
+					t.Fatalf("unexpected operation event %q: %s", event, events)
+				}
+				if active < 0 {
+					t.Fatalf("operation ended before starting: %s", events)
+				}
+			}
+			if started != 2 || active != 0 {
+				t.Fatalf("incomplete operation events: %s", events)
+			}
+			gotOverlap := maxActive > 1
 			if gotOverlap != test.overlap {
-				t.Fatalf("overlap = %t, want %t", gotOverlap, test.overlap)
+				t.Fatalf("overlap = %t, want %t; events = %s; steps = %+v", gotOverlap, test.overlap, events, run.Cases[0].Steps)
 			}
 		})
 	}

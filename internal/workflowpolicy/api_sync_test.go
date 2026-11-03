@@ -13,7 +13,7 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
-func TestAPISyncWorkflowIsReportOnly(t *testing.T) {
+func TestAPISyncWorkflowReportsWithoutChangingMain(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", ".github", "workflows", "api-sync.yml")
 	raw, err := os.ReadFile(path)
@@ -25,12 +25,29 @@ func TestAPISyncWorkflowIsReportOnly(t *testing.T) {
 	}
 }
 
+func TestAPISyncCandidateRunsAfterIndependentDriftMonitorFailure(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		id   string
+		want string
+	}{
+		{"candidate", "steps.staleness.outputs.state == 'stale'"},
+		{"compare", "steps.candidate.outcome == 'success'"},
+		{"metadata-batch", "steps.candidate_artifact.outcome == 'success'"},
+	} {
+		step := apiSyncStep(t, tt.id)
+		if !strings.Contains(step.If, "always()") || !strings.Contains(step.If, tt.want) {
+			t.Errorf("%s must use an explicit status function and required upstream result: %q", tt.id, step.If)
+		}
+	}
+}
+
 func TestAPISyncWorkflowPolicyRejectsMutationAndCloudCredentials(t *testing.T) {
 	t.Parallel()
 	unsafe := `
 concurrency:
   group: api-sync-${{ github.run_id }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 permissions:
   contents: write
 jobs:
@@ -48,12 +65,13 @@ jobs:
       - run: go get github.com/aliyun/aliyun-openapi-meta@master
       - run: make metadata-sync
       - run: make drift-baseline
-      - run: go run ./cmd/openapimeta-sync
+      - run: go run ./cmd/openapimeta-sync -archive source.tar.gz -revision abc -out internal/openapimeta
+      - run: gh api repos/aliyun/aliyun-openapi-meta/tarball/master
 `
 	violations := strings.Join(apiSyncWorkflowPolicyViolations(unsafe), "\n")
 	for _, want := range []string{
 		"stable api-sync-plan concurrency group",
-		"must use cancel-in-progress",
+		"must serialize candidate batches without canceling",
 		"workflow permissions must be contents: read",
 		"must not use an environment",
 		"must not grant id-token: write",
@@ -65,7 +83,9 @@ jobs:
 		`must not contain "go get"`,
 		`must not contain "make metadata-sync"`,
 		`must not contain "make drift-baseline"`,
-		`must not contain "go run ./cmd/openapimeta-sync"`,
+		"openapimeta-sync must run only in the fixed candidate step",
+		"tarball downloads must run only in the fixed candidate step",
+		`must not contain "-out internal/openapimeta"`,
 		`push paths must include "pkg/aliyun/**"`,
 		`push paths must include "internal/openapimeta/**"`,
 		`push paths must include "cmd/openapimeta-sync/**"`,
@@ -173,6 +193,186 @@ func TestAPISyncWorkflowStalenessIsNonFatal(t *testing.T) {
 			}
 			if strings.Contains(log, "::warning::") != (tt.state == "unreachable") {
 				t.Errorf("only unreachable/invalid upstream should produce a warning: %s", log)
+			}
+		})
+	}
+}
+
+func TestAPISyncMetadataBatchIssueIsDeduplicated(t *testing.T) {
+	t.Parallel()
+	step := apiSyncStep(t, "metadata-batch")
+	key := strings.Repeat("b", 64)
+	candidate := strings.Repeat("c", 40)
+	marker := "<!-- ecctl-openapi-update:" + key + " -->"
+	otherMarker := "<!-- ecctl-openapi-update:" + strings.Repeat("d", 64) + " -->"
+	for _, tt := range []struct {
+		name         string
+		first        string
+		second       string
+		createExit   string
+		wantCreates  int
+		wantAPICalls int
+		wantError    bool
+		wantSummary  string
+	}{
+		{"same closed batch", fmt.Sprintf(`[{"number":41,"state":"closed","title":"OpenAPI metadata update cccccccccccc","user":{"login":"github-actions[bot]"},"body":%q}]`, marker), "", "0", 0, 1, false, "Reopened metadata batch issue #41"},
+		{"closed same batch waits for another open batch", fmt.Sprintf(`[{"number":41,"state":"closed","user":{"login":"github-actions[bot]"},"body":%q},{"number":42,"state":"open","user":{"login":"github-actions[bot]"},"body":%q}]`, marker, otherMarker), "", "0", 0, 1, false, "Metadata batch #42 remains open"},
+		{"same open batch with edited title", fmt.Sprintf(`[{"number":47,"state":"open","title":"[in progress] OpenAPI metadata update","user":{"login":"github-actions[bot]"},"body":%q}]`, marker), "", "0", 0, 1, false, "Existing metadata batch issue #47"},
+		{"other batch still open", fmt.Sprintf(`[{"number":42,"state":"open","title":"OpenAPI metadata update dddddddddddd","user":{"login":"github-actions[bot]"},"body":%q}]`, otherMarker), "", "0", 0, 1, false, "Metadata batch #42 remains open"},
+		{"other batch edited title still locks", fmt.Sprintf(`[{"number":48,"state":"open","title":"[in progress] metadata review","user":{"login":"github-actions[bot]"},"body":%q}]`, otherMarker), "", "0", 0, 1, false, "Metadata batch #48 remains open"},
+		{"spoofed same batch", fmt.Sprintf(`[{"number":44,"state":"open","title":"OpenAPI metadata update cccccccccccc","user":{"login":"untrusted"},"body":%q}]`, marker), "", "0", 1, 1, false, ""},
+		{"spoofed shared lock", fmt.Sprintf(`[{"number":45,"state":"open","title":"OpenAPI metadata update dddddddddddd","user":{"login":"untrusted"},"body":%q}]`, otherMarker), "", "0", 1, 1, false, ""},
+		{"malformed marker is not a lock", `[{"number":46,"state":"open","title":"OpenAPI metadata update invalid","user":{"login":"github-actions[bot]"},"body":"<!-- ecctl-openapi-update:other -->"}]`, "", "0", 1, 1, false, ""},
+		{"new batch", `[]`, "", "0", 1, 1, false, ""},
+		{"recover uncertain create", `[]`, fmt.Sprintf(`[{"number":43,"state":"open","title":"OpenAPI metadata update cccccccccccc","user":{"login":"github-actions[bot]"},"body":%q}]`, marker), "1", 1, 2, false, "Recovered metadata batch issue #43"},
+		{"unknown create remains unknown", `[]`, `[]`, "1", 1, 2, true, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "metadata-diff.json"), []byte(fmt.Sprintf(`{"batch_key":%q,"changes":[{"product":"ecs","resource":"instance","binding":"create","api":"RunInstances","path":"request.foo","compatibility":"unknown"}]}`, key)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for name, value := range map[string]string{"first.json": tt.first, "second.json": tt.second} {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(value), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			stub := `#!/bin/sh
+printf '%s\n' "$*" >> "$GH_CALLS"
+if [ "$1" = api ]; then
+  case "$2" in
+    repos/*/contents/internal/openapimeta/manifest.json*) printf '%s\n' "$BASE_SHA"; exit 0 ;;
+  esac
+  count=$(wc -l < "$GH_API_COUNT")
+  printf 'x\n' >> "$GH_API_COUNT"
+  if [ "$count" -eq 0 ]; then cat "$GH_FIRST"; else cat "$GH_SECOND"; fi
+  exit 0
+fi
+if [ "$1" = issue ] && [ "$2" = create ]; then exit "$GH_CREATE_EXIT"; fi
+if [ "$1" = issue ] && [ "$2" = reopen ]; then exit 0; fi
+exit 3
+`
+			if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(stub), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			calls := filepath.Join(dir, "calls")
+			apiCount := filepath.Join(dir, "api-count")
+			if err := os.WriteFile(apiCount, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, summary, log, runErr := runAPISyncStep(t, dir, step.Run,
+				"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"GITHUB_REPOSITORY=aliyun/elastic-compute-control-cli",
+				"BASE_SHA="+strings.Repeat("a", 40), "CANDIDATE_SHA="+candidate,
+				"RUN_URL=https://github.com/aliyun/elastic-compute-control-cli/actions/runs/1",
+				"GH_CALLS="+calls, "GH_API_COUNT="+apiCount,
+				"GH_FIRST="+filepath.Join(dir, "first.json"), "GH_SECOND="+filepath.Join(dir, "second.json"),
+				"GH_CREATE_EXIT="+tt.createExit,
+			)
+			if (runErr != nil) != tt.wantError {
+				t.Fatalf("error = %v, want error %v; log = %s", runErr, tt.wantError, log)
+			}
+			if tt.wantSummary != "" && !strings.Contains(summary, tt.wantSummary) {
+				t.Errorf("summary %q missing %q", summary, tt.wantSummary)
+			}
+			callLog, err := os.ReadFile(calls)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Count(string(callLog), "issue create"); got != tt.wantCreates {
+				t.Errorf("create calls = %d, want %d: %s", got, tt.wantCreates, callLog)
+			}
+			if got := strings.Count(string(callLog), "api --paginate"); got != tt.wantAPICalls {
+				t.Errorf("API calls = %d, want %d: %s", got, tt.wantAPICalls, callLog)
+			}
+			if tt.name == "same closed batch" && !strings.Contains(string(callLog), "issue reopen 41") {
+				t.Errorf("closed unresolved batch was not reopened: %s", callLog)
+			}
+			if tt.name == "closed same batch waits for another open batch" && strings.Contains(string(callLog), "issue reopen") {
+				t.Errorf("second open batch was created by reopening: %s", callLog)
+			}
+		})
+	}
+}
+
+func TestAPISyncMetadataBatchRejectsStaleMainBeforeIssueWrites(t *testing.T) {
+	t.Parallel()
+	step := apiSyncStep(t, "metadata-batch")
+	base, candidate := strings.Repeat("a", 40), strings.Repeat("c", 40)
+	key := strings.Repeat("b", 64)
+	closed := fmt.Sprintf(`[{"number":41,"state":"closed","user":{"login":"github-actions[bot]"},"body":"<!-- ecctl-openapi-update:%s -->"}]`, key)
+	for _, tt := range []struct {
+		name, issues, mainRevision, mainExit, wantWrite string
+		wantError                                       bool
+	}{
+		{"completed batch stays closed after merge", closed, candidate, "0", "", false},
+		{"stale new batch is not created", `[]`, candidate, "0", "", false},
+		{"current base can reopen unresolved batch", closed, base, "0", "issue reopen 41", false},
+		{"current base can create batch", `[]`, base, "0", "issue create", false},
+		{"malformed main revision fails closed", closed, "invalid", "0", "", true},
+		{"empty main revision fails closed", `[]`, "", "0", "", true},
+		{"main revision newline prevents reopening", closed, base + "\n", "0", "", true},
+		{"main revision newline prevents creation", `[]`, base + "\n", "0", "", true},
+		{"main lookup failure prevents reopening", closed, base, "1", "", true},
+		{"main lookup failure prevents creation", `[]`, base, "1", "", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, value := range map[string]string{
+				"metadata-diff.json": fmt.Sprintf(`{"batch_key":%q,"changes":[]}`, key),
+				"issues.json":        tt.issues,
+				"main.json":          fmt.Sprintf(`{"repository":"aliyun/aliyun-openapi-meta","revision":%q}`, tt.mainRevision),
+				"gh": `#!/bin/sh
+printf '%s\n' "$*" >> "$GH_CALLS"
+if [ "$1" = api ] && [ "$2" = --paginate ]; then cat "$GH_ISSUES"; exit 0; fi
+if [ "$1" = api ]; then
+  case "$2" in
+    repos/*/contents/internal/openapimeta/manifest.json*)
+      if [ "$GH_MAIN_EXIT" -ne 0 ]; then exit "$GH_MAIN_EXIT"; fi
+      while [ "$#" -gt 0 ]; do
+        if [ "$1" = --jq ]; then shift; exec jq -r "$1" "$GH_MAIN_MANIFEST"; fi
+        shift
+      done
+      exit 3 ;;
+  esac
+fi
+if [ "$1" = issue ]; then exit 0; fi
+exit 3
+`,
+			} {
+				mode := os.FileMode(0o600)
+				if name == "gh" {
+					mode = 0o700
+				}
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(value), mode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			calls := filepath.Join(dir, "calls")
+			_, summary, log, runErr := runAPISyncStep(t, dir, step.Run,
+				"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"GITHUB_REPOSITORY=aliyun/elastic-compute-control-cli",
+				"BASE_SHA="+base, "CANDIDATE_SHA="+candidate,
+				"RUN_URL=https://github.com/aliyun/elastic-compute-control-cli/actions/runs/1",
+				"GH_CALLS="+calls, "GH_ISSUES="+filepath.Join(dir, "issues.json"),
+				"GH_MAIN_MANIFEST="+filepath.Join(dir, "main.json"), "GH_MAIN_EXIT="+tt.mainExit,
+			)
+			if (runErr != nil) != tt.wantError {
+				t.Fatalf("error = %v, want error %t; log = %s", runErr, tt.wantError, log)
+			}
+			raw, err := os.ReadFile(calls)
+			if err != nil {
+				t.Fatal(err)
+			}
+			callLog := string(raw)
+			if !strings.HasPrefix(callLog, "api --paginate ") {
+				t.Fatalf("main must be read after issue state to detect a completed merge: %s", callLog)
+			}
+			if tt.wantWrite == "" && strings.Contains(callLog, "issue ") || tt.wantWrite != "" && !strings.Contains(callLog, tt.wantWrite) {
+				t.Fatalf("unexpected issue writes, want %q: %s", tt.wantWrite, callLog)
+			}
+			if !tt.wantError && tt.wantWrite == "" && !strings.Contains(summary, "main metadata changed") {
+				t.Fatalf("stale batch was not reported: %s", summary)
 			}
 		})
 	}
@@ -316,8 +516,8 @@ func apiSyncWorkflowPolicyViolations(workflow string) []string {
 	if document.Concurrency.Group != "api-sync-plan" {
 		violations = append(violations, "api-sync.yml must use the stable api-sync-plan concurrency group")
 	}
-	if !document.Concurrency.CancelInProgress {
-		violations = append(violations, "api-sync.yml must use cancel-in-progress")
+	if document.Concurrency.CancelInProgress {
+		violations = append(violations, "api-sync.yml must serialize candidate batches without canceling")
 	}
 	if len(document.Permissions) != 1 || document.Permissions["contents"] != "read" {
 		violations = append(violations, "api-sync.yml workflow permissions must be contents: read only")
@@ -344,8 +544,17 @@ func apiSyncWorkflowPolicyViolations(workflow string) []string {
 	uploadAlways := false
 	upsertAlways := false
 	prepared := false
+	candidateFixed := false
+	compareFixed := false
+	batchGuarded := false
 	for index, step := range target.Steps {
 		allRun += "\n" + step.Run
+		if step.ID != "candidate" && strings.Contains(step.Run, "go run ./cmd/openapimeta-sync") {
+			violations = append(violations, "api-sync.yml openapimeta-sync must run only in the fixed candidate step")
+		}
+		if step.ID != "candidate" && strings.Contains(step.Run, "tarball/") {
+			violations = append(violations, "api-sync.yml tarball downloads must run only in the fixed candidate step")
+		}
 		for _, line := range strings.Split(step.Run, "\n") {
 			if strings.TrimSpace(line) == "make metadata-prepare" {
 				prepared = true
@@ -358,6 +567,29 @@ func apiSyncWorkflowPolicyViolations(workflow string) []string {
 			if step.Env["PINNED_SHA"] != "${{ steps.metadata.outputs.pinned_sha }}" || step.Env["GH_TOKEN"] != "${{ github.token }}" {
 				violations = append(violations, "api-sync.yml staleness must use the manifest SHA and GitHub token")
 			}
+		}
+		if step.ID == "candidate" {
+			candidateFixed = strings.Contains(step.If, "always()") && strings.Contains(step.If, "staleness.outputs.state == 'stale'") &&
+				strings.Contains(step.If, "specdrift.outcome == 'success'") &&
+				step.Env["CANDIDATE_SHA"] == "${{ steps.staleness.outputs.upstream }}" &&
+				strings.Contains(step.Run, "tarball/${CANDIDATE_SHA}") &&
+				strings.Contains(step.Run, "-revision \"$CANDIDATE_SHA\" -out \"$candidate_dir\"") &&
+				strings.Contains(step.Run, "${RUNNER_TEMP}/ecctl-metadata-candidate-")
+		}
+		if step.ID == "compare" {
+			compareFixed = strings.Contains(step.If, "always()") && strings.Contains(step.If, "candidate.outcome == 'success'") &&
+				strings.Contains(step.Run, "specdrift compare") &&
+				strings.Contains(step.Run, "-base-dir internal/openapimeta") &&
+				strings.Contains(step.Run, "-candidate-dir \"$CANDIDATE_DIR\"")
+		}
+		if step.Name == "create one fixed metadata update batch issue" {
+			batchGuarded = strings.Contains(step.If, "always()") && strings.Contains(step.If, "compare.outputs.has_changes == 'true'") &&
+				strings.Contains(step.If, "candidate_artifact.outcome == 'success'") &&
+				strings.Contains(step.Run, "ecctl-openapi-update:${key}") &&
+				strings.Contains(step.Run, "gh api --paginate") &&
+				strings.Contains(step.Run, `.user.login == "github-actions[bot]"`) &&
+				strings.Contains(step.Run, `test("<!-- ecctl-openapi-update:[0-9a-f]{64} -->")`) &&
+				strings.Contains(step.Run, "if ! gh issue create")
 		}
 		if step.Name == "build dry-run sync plan and bounded issue body" || step.Name == "upsert drift monitor issue" {
 			if step.Env["METADATA_REVISION"] != "${{ steps.metadata.outputs.pinned_sha }}" || !strings.Contains(step.Run, "embedded metadata snapshot commit:") {
@@ -397,9 +629,12 @@ func apiSyncWorkflowPolicyViolations(workflow string) []string {
 	if !upsertAlways {
 		violations = append(violations, "api-sync.yml must maintain the drift issue even when planning fails")
 	}
+	if !candidateFixed || !compareFixed || !batchGuarded {
+		violations = append(violations, "api-sync.yml must pin, compare and deduplicate one metadata batch")
+	}
 	for _, forbidden := range []string{
 		"git push", "gh pr create", "specdrift baseline", "ecctl-e2e", "ECCTL_BOT", "configure-aliyun-credentials",
-		"go list -m", "git ls-remote", "go get", "make metadata-sync", "go run ./cmd/openapimeta-sync", "make drift-baseline", "tarball/",
+		"go list -m", "git ls-remote", "go get", "make metadata-sync", "make drift-baseline", "-out internal/openapimeta",
 	} {
 		if strings.Contains(allRun, forbidden) {
 			violations = append(violations, fmt.Sprintf("api-sync.yml must not contain %q", forbidden))

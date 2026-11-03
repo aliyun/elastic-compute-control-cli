@@ -776,18 +776,48 @@ SHA 下载。可通过 `METADATA_ARCHIVE` 显式提供本地 tarball，以便离
 CI、GoReleaser 及 E2E 构建入口在构建前执行准备步骤。`make clean` 删除生成目录，
 保留源包缓存，之后可重新准备。
 
-`.github/workflows/api-sync.yml` 是 report-only：在隔离 runner 中对固定快照检测
-drift，并维护一个有界的 GitHub issue。它仅生成匹配既有清单的忽略构建产物，不会
-修改受版本控制的文件、刷新清单或 baseline、创建
-分支或 PR，也不会获得云凭证。完整 `drift.json`、dry-run patch 和同步计划作为
-workflow artifact 保存；issue 只展示前 50 项。工作流通过
+`.github/workflows/api-sync.yml` 在隔离 runner 中对固定快照检测 drift，维护原有
+健康汇总 issue，并对固定上游候选进行语义比较，必要时创建单独的元数据更新批次
+issue。它不会修改 main、刷新快照或 baseline、创建分支或 PR，也不会获得云凭证。
+完整 `drift.json`、dry-run patch、同步计划和候选语义比较作为 workflow artifact
+保存；issue 只展示前 50 项。工作流通过
 `gh api repos/aliyun/aliyun-openapi-meta/commits/master --jq .sha` 获取上游完整 SHA，
-与 manifest revision 比较；不一致仅产生非 fatal staleness notice，上游不可达或返回
-无效 SHA 时仅告警，不阻止固定快照的 drift 检测。SHA 相同也不代表直接检测了上游内容。
+与 manifest revision 比较；不一致时按该完整 SHA 下载源包到 runner 的隔离目录，
+用 `openapimeta-sync` 生成候选 lock 与已校验数据，再运行 `specdrift compare`。
+上游不可达或返回无效 SHA 时仅告警，不阻止固定快照的 drift 检测，但不创建候选
+任务。SHA 相同也不代表直接检测了上游内容。候选下载、格式或校验失败时本轮失败，
+不得更新 lock/baseline 或制造 API 缺陷任务。
 
-更新快照必须由维护者显式执行：先选定并记录完整 SHA，再通过 `gh api` 下载该 SHA
-对应的 tarball，不能下载浮动 `master` tarball。以下命令先解析一次 master，再固定
-下载；复现已接受的快照时，将 `revision` 设为 manifest 中记录的 SHA：
+`compare -base-dir internal/openapimeta -candidate-dir <isolated> -spec-dir specs -format json`
+要求两边均有 manifest 与 `.generated`，完整校验来源、index 和压缩内容。结果记录
+base/candidate 完整 revision、受影响资源/binding/操作、变化路径、前后值和兼容性；
+无相关变化退出 0，有变化退出 1，输入或来源无效退出 2。参数增删、required、类型、
+enum、API/默认版本、传输风格与端点、废弃与响应结构进入比较；新增或移除的 API
+也展开其请求与响应语义。数字按精确十进制值比较，等值的指数或小数写法不产生变化。
+参数传输限定字段和新响应状态保守标为 unknown；已引用 API 的已知字段类型错误、
+显式 null、缺失参数 raw_name 或目录默认版本不一致则拒绝输入。文档描述、本地化
+schema 标题和字段顺序不创建代码任务，但这些名称作为真实响应属性时仍须比较。
+enum 对象内的字段和值按字面值保留。响应 schema 的 required 兼容布尔值与字段名
+数组，additionalProperties 兼容布尔值与子 schema；引用、格式和子 schema 同样校验类型。
+范围包含 binding、probe、声明的 hook API 与经 waiter 使用的 probe；未在 spec 声明的
+Go hook 外部调用不属于可自动证明的覆盖范围。
+非 POP 或没有对应元数据的 API 在报告中明确标记未覆盖，不能据此宣称无变化。
+
+批次 key 根据仓库、base/candidate revision 和受影响 binding 范围确定。工作流
+并发队列串行，一个开放的更新批次 issue 是 producer 与本地消费者共享的批次锁：
+处理期间固定候选，新上游版本只在工作流摘要中记为等待，不覆盖当前 issue。
+创建前逐页核对由 GitHub Actions bot 创建且精确 marker 匹配的 issue，不依赖可编辑标题；
+读取 issue 状态后重新核对 main 的元数据 revision，基准已变化或无法核实时不创建、
+重开批次。同批次 issue 若在更新进入 main 前关闭且没有其他开放批次则重新打开；
+创建响应不明时再查询，不在本轮盲重试。候选 producer 用独立状态条件运行，
+原 drift monitor 的更新失败不隐式跳过候选；候选报告 artifact 未上传成功时不创建 issue。原有 drift
+monitor 仍只处理固定快照健康状态，不关闭候选更新 issue。artifact 过期时以记录的
+完整 SHA 重建并核对；无法复现则 blocked。
+
+更新快照必须在处理更新批次的隔离 PR 中显式执行：先核对 issue 记录的完整 SHA、
+实际 producer run 和来源，再通过 `gh api` 下载该 SHA 对应的 tarball，不能下载
+浮动 `master` tarball。人工更新时以下命令先解析一次 master，再固定下载；复现
+批次候选时将 `revision` 设为 issue 记录的完整 SHA：
 
 ```bash
 set -euo pipefail
@@ -802,10 +832,11 @@ make metadata-sync METADATA_ARCHIVE="$archive" METADATA_REVISION="$revision"
 `go run ./cmd/openapimeta-sync -archive <downloaded.tar.gz> -revision <40hex> -out internal/openapimeta`，
 不自动下载或刷新 baseline，也不是 `make lint` 的依赖。此显式更新会重新生成清单、
 许可证与忽略的构建数据。审阅清单、产品/API 清单及 drift 差异，不提交 `.generated/`
-或 `.cache/`。保留旧 baseline，先 triage 并解决 drift，再接受新 baseline；不能用刷新 baseline
-掩盖快照更新造成的差异。
+或 `.cache/`。保留旧 baseline，先解决整个批次所有相关资源和 drift，再接受新
+baseline；不能用刷新 baseline 掩盖快照更新造成的差异。资源行为仍先修改 spec，
+必要时使用 Go hook 处理 spec 无法表达的跨 API 归一化，并运行 `make generate`。
 
-维护者在独立 worktree 中处理 drift：
+维护者或获授权的工作流 worker 在独立 worktree 中处理 drift：
 
 ```bash
 make specdrift
@@ -825,7 +856,8 @@ bin/specdrift sync \
 `detect -check` 发现 drift 时退出码为 `1`，但 `drift.json` 仍是后续同步的完整输入。
 先审阅 dry-run；确认所有 `patched` 项都属于纯请求映射后，才改用 `-write`。
 `required` 参数、复合类型、enum、名称到 ID、计费/权限字段、新父级结构和规范化
-重名都必须保持 `flagged`，由维护者手工建模。
+重名都必须保持 `flagged`，由处理该批次的 worker 明确建模；高风险或兼容性未知
+时先取得维护者设计决定。不能通过自动 patch 或刷新 baseline 隐藏未处理项。
 
 自动 patch 不生成 E2E case。资源验证必须修改现有的
 `e2e/cases/<product>/<resource>-lifecycle.yaml`：复用真实 fixture，传入规范的
