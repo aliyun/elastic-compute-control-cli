@@ -30,12 +30,19 @@ func TestDAGRunsIndependentStepsConcurrentlyAndHonorsLocks(t *testing.T) {
 			dir := t.TempDir()
 			fake := filepath.Join(dir, "ecctl")
 			if err := os.WriteFile(fake, []byte(`#!/usr/bin/env bash
+set -euo pipefail
 if mkdir "$FAKE_ACTIVE" 2>/dev/null; then
-  sleep 0.25
+  if [ "$FAKE_EXPECT_OVERLAP" = 1 ]; then
+    while [ ! -f "$FAKE_OVERLAP" ]; do sleep 0.01; done
+  else
+    sleep 0.25
+  fi
   rmdir "$FAKE_ACTIVE"
-else
+elif [ -d "$FAKE_ACTIVE" ]; then
   echo overlap >> "$FAKE_OVERLAP"
-  sleep 0.25
+else
+  echo 'cannot establish fake operation lock' >&2
+  exit 1
 fi
 echo '{}'
 `), 0o755); err != nil {
@@ -54,6 +61,11 @@ echo '{}'
 			overlapPath := filepath.Join(dir, "overlap.log")
 			t.Setenv("FAKE_ACTIVE", filepath.Join(dir, "active"))
 			t.Setenv("FAKE_OVERLAP", overlapPath)
+			if test.overlap {
+				t.Setenv("FAKE_EXPECT_OVERLAP", "1")
+			} else {
+				t.Setenv("FAKE_EXPECT_OVERLAP", "0")
+			}
 			run, err := Run(context.Background(), Options{
 				CasesDir: casesDir, InputsDir: filepath.Join(dir, "inputs"),
 				RunName: "test", RunID: "test", EcctlBin: fake, Parallel: test.parallel, StepTimeout: 5 * time.Second,
@@ -64,7 +76,7 @@ echo '{}'
 			_, overlapErr := os.Stat(overlapPath)
 			gotOverlap := overlapErr == nil
 			if gotOverlap != test.overlap {
-				t.Fatalf("overlap = %t, want %t", gotOverlap, test.overlap)
+				t.Fatalf("overlap = %t, want %t; steps = %+v", gotOverlap, test.overlap, run.Cases[0].Steps)
 			}
 		})
 	}

@@ -256,7 +256,11 @@ func TestFCSandboxTeamDeleteTruthfulCompletion(t *testing.T) {
 			if tc.absent {
 				fake.errors = []error{nil, nil, nil, ecerrors.NotFound("NotFound", "team not found")}
 			}
-			args := []string{"sandbox", "team", "delete", "team-1", "--region", "cn-hangzhou", "--timeout", "20ms"}
+			timeout := "5s"
+			if tc.want == "WaitTimeout" {
+				timeout = "20ms"
+			}
+			args := []string{"sandbox", "team", "delete", "team-1", "--region", "cn-hangzhou", "--timeout", timeout}
 			if tc.noWait {
 				args = append(args, "--no-wait")
 			}
