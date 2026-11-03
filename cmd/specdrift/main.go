@@ -22,6 +22,8 @@ func run(args []string) int {
 		return 2
 	}
 	switch args[0] {
+	case "compare":
+		return compare(args[1:])
 	case "detect":
 		return detect(args[1:])
 	case "baseline":
@@ -41,6 +43,7 @@ func run(args []string) int {
 
 func usage() {
 	fmt.Fprint(os.Stderr, `usage:
+  specdrift compare [flags]  compare two fixed, prepared OpenAPI metadata revisions
   specdrift detect [flags]   detect OpenAPI metadata drift
   specdrift baseline [flags] record the current OpenAPI metadata as the drift baseline
   specdrift sync [flags]     apply mechanical patches for missing OpenAPI parameters

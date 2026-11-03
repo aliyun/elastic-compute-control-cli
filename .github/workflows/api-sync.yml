@@ -1,6 +1,6 @@
 name: api-sync
 
-# Report-only OpenAPI drift monitor.
+# Report-only OpenAPI drift monitor and fixed-revision update batch producer.
 #
 # This workflow intentionally does not modify repository files, create a
 # branch or pull request, or obtain cloud credentials. Mechanical adaptation
@@ -13,12 +13,10 @@ name: api-sync
 # its repository and full commit SHA; `make lint` checks that fixed snapshot
 # offline, not the latest upstream content on every run.
 #
-# The scheduled upstream-staleness signal only compares the manifest revision
-# with the full SHA of upstream master. A different or unreachable upstream is
-# non-fatal. Updating the snapshot is an explicit maintainer action using a
-# tarball downloaded at a full SHA and `make metadata-sync`; triage drift before
-# accepting a new baseline. This workflow never refreshes either automatically.
-# metadata-prepare only generates ignored build data matching the existing lock.
+# The producer prepares an upstream candidate only in an isolated runner
+# directory. It never changes main's lock or baseline. One open update batch
+# issue is the shared producer/consumer lock; the existing drift monitor is
+# separate and cannot close a batch issue.
 
 on:
   schedule:
@@ -43,7 +41,7 @@ on:
 
 concurrency:
   group: api-sync-plan
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -112,6 +110,7 @@ jobs:
           printf -- '- upstream master: %s\n' "$upstream" >> "$GITHUB_STEP_SUMMARY"
 
       - name: build specdrift
+        id: specdrift
         shell: bash
         run: |
           set -euo pipefail
@@ -231,4 +230,128 @@ jobs:
             gh issue close "$number" --reason completed
           else
             echo "No OpenAPI drift against the embedded snapshot and no open monitor issue." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: prepare fixed upstream candidate in an isolated directory
+        if: always() && steps.staleness.outputs.state == 'stale' && steps.specdrift.outcome == 'success'
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ steps.staleness.outputs.upstream }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          candidate_dir="${RUNNER_TEMP}/ecctl-metadata-candidate-${GITHUB_RUN_ID}"
+          archive="${RUNNER_TEMP}/aliyun-openapi-meta-${CANDIDATE_SHA}.tar.gz"
+          mkdir -m 700 "$candidate_dir"
+          umask 077
+          gh api "repos/aliyun/aliyun-openapi-meta/tarball/${CANDIDATE_SHA}" > "$archive"
+          go run ./cmd/openapimeta-sync \
+            -archive "$archive" -revision "$CANDIDATE_SHA" -out "$candidate_dir"
+          jq -e --arg revision "$CANDIDATE_SHA" \
+            '.repository == "aliyun/aliyun-openapi-meta" and .revision == $revision' \
+            "$candidate_dir/manifest.json" >/dev/null
+          echo "dir=$candidate_dir" >> "$GITHUB_OUTPUT"
+
+      - name: compare referenced API semantics against the candidate
+        if: always() && steps.candidate.outcome == 'success'
+        id: compare
+        env:
+          CANDIDATE_DIR: ${{ steps.candidate.outputs.dir }}
+        shell: bash
+        run: |
+          set +e
+          bin/specdrift compare \
+            -base-dir internal/openapimeta \
+            -candidate-dir "$CANDIDATE_DIR" \
+            -spec-dir specs \
+            -format json > metadata-diff.json 2> metadata-diff.err
+          code=$?
+          set -e
+          case "$code" in
+            0) echo "has_changes=false" >> "$GITHUB_OUTPUT" ;;
+            1) echo "has_changes=true" >> "$GITHUB_OUTPUT" ;;
+            *) cat metadata-diff.err >&2; exit "$code" ;;
+          esac
+          jq -e \
+            --arg base "${{ steps.metadata.outputs.pinned_sha }}" \
+            --arg candidate "${{ steps.staleness.outputs.upstream }}" \
+            '.repository == "aliyun/aliyun-openapi-meta" and .base_revision == $base and .candidate_revision == $candidate' \
+            metadata-diff.json >/dev/null
+
+      - name: upload complete candidate comparison evidence
+        if: always() && steps.compare.outcome == 'success'
+        id: candidate_artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: api-sync-candidate-${{ github.run_id }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            metadata-diff.json
+            metadata-diff.err
+
+      - name: create one fixed metadata update batch issue
+        if: always() && steps.compare.outputs.has_changes == 'true' && steps.candidate_artifact.outcome == 'success'
+        id: metadata-batch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ steps.metadata.outputs.pinned_sha }}
+          CANDIDATE_SHA: ${{ steps.staleness.outputs.upstream }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          key=$(jq -er '.batch_key | select(type == "string" and test("^[0-9a-f]{64}$"))' metadata-diff.json)
+          marker="<!-- ecctl-openapi-update:${key} -->"
+          title="OpenAPI metadata update ${CANDIDATE_SHA:0:12}"
+          issues=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=all&per_page=100")
+          existing=$(jq -sr --arg marker "$marker" \
+            '[.[][] | select(has("pull_request") | not) | select(.user.login == "github-actions[bot]") | select((.body // "") | contains($marker))] | sort_by(.number) | first | .number // empty' \
+            <<< "$issues")
+          active=$(jq -sr \
+            '[.[][] | select(has("pull_request") | not) | select(.state == "open" and .user.login == "github-actions[bot]") | select((.body // "") | test("<!-- ecctl-openapi-update:[0-9a-f]{64} -->"))] | sort_by(.number) | first | .number // empty' \
+            <<< "$issues")
+          if [ -n "$existing" ]; then
+            existing_state=$(jq -sr --argjson number "$existing" \
+              '[.[][] | select(.number == $number)] | first | .state // empty' <<< "$issues")
+            if [ "$existing_state" = "closed" ]; then
+              if [ -n "$active" ] && [ "$active" != "$existing" ]; then
+                echo "Metadata batch #${active} remains open; closed matching batch #${existing} waits for the shared lock." >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              gh issue reopen "$existing"
+              echo "Reopened metadata batch issue #${existing} for unresolved key ${key}." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "Existing metadata batch issue #${existing} has key ${key}." >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 0
+          fi
+          if [ -n "$active" ]; then
+            echo "Metadata batch #${active} remains open; candidate ${CANDIDATE_SHA} waits for the shared batch lock." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            printf '%s\n\n# OpenAPI metadata update batch\n\n' "$marker"
+            printf -- '- repository: %s\n' "$GITHUB_REPOSITORY"
+            printf -- '- base revision: %s\n' "$BASE_SHA"
+            printf -- '- candidate revision: %s\n' "$CANDIDATE_SHA"
+            printf -- '- batch key: %s\n' "$key"
+            printf -- '- producer workflow run: %s\n' "$RUN_URL"
+            printf '\nThis is a fixed upstream candidate. The producer did not modify main, the metadata lock, resource specs or drift baseline. Download the complete comparison artifact from the run. If it expires, rebuild from the exact candidate revision and verify the report before work.\n\n'
+            printf '## Affected resource/API scope (first 50 changes)\n\n'
+            jq -r '.changes[:50][] | "- \(.product)/\(.resource) \(.binding) \(.api): \(.path) [\(.compatibility)]"' metadata-diff.json
+            printf '\nAll related resources must be adapted and validated before accepting the new baseline. Breaking and unknown items need explicit analysis.\n'
+          } > metadata-update-issue.md
+          if ! gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file metadata-update-issue.md; then
+            issues=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=all&per_page=100")
+            recovered=$(jq -sr --arg marker "$marker" \
+              '[.[][] | select(has("pull_request") | not) | select(.user.login == "github-actions[bot]") | select((.body // "") | contains($marker))] | sort_by(.number) | first | .number // empty' \
+              <<< "$issues")
+            if [ -z "$recovered" ]; then
+              echo "Issue creation result is unknown; no retry in this run." >&2
+              exit 1
+            fi
+            echo "Recovered metadata batch issue #${recovered} after an uncertain create response." >> "$GITHUB_STEP_SUMMARY"
           fi
