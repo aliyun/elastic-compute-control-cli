@@ -38,6 +38,9 @@ jobs:
           cache: npm
           cache-dependency-path: dsh-plugin/package-lock.json
 
+      - name: Prepare pinned OpenAPI metadata
+        run: make metadata-prepare
+
       - name: Check release version
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -144,6 +147,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Prepare pinned OpenAPI metadata
+        run: go run ./cmd/openapimeta-sync -prepare
+
       - name: Test Windows self-update and locking
         run: go test ./pkg/updater -run "TestWindows|TestCacheLock|TestAutoCheck" -count=1 -v
 
@@ -170,6 +176,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Prepare pinned OpenAPI metadata
+        run: go run ./cmd/openapimeta-sync -prepare
 
       - name: Test macOS credential metadata preservation and private ACLs
         run: |

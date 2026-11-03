@@ -20,6 +20,12 @@ vendor/
 /build/
 /reports/
 
+# OpenAPI inputs and generated metadata are local build artifacts.
+/internal/openapimeta/.generated/
+/internal/openapimeta/.cache/
+/internal/openapimeta/.prepare.lock
+/internal/openapimeta/.prepare-*
+
 # Project binary
 /ecctl
 

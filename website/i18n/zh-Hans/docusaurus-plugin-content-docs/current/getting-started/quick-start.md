@@ -11,6 +11,7 @@ description: 发现资源，并在执行前检查命令参数和执行行为。
 ## 构建并检查 CLI
 
 ```bash
+make metadata-prepare
 make build
 ./bin/ecctl --help
 ```

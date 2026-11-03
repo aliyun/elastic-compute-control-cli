@@ -77,10 +77,17 @@ source ~/.zfunc/_ecctl
 ```bash
 git clone https://github.com/aliyun/elastic-compute-control-cli.git
 cd elastic-compute-control-cli
+make metadata-prepare
 make build
 ```
 
 二进制会写入 `bin/ecctl`。
+
+`metadata-prepare` 会下载并校验仓库清单固定的 OpenAPI 版本。生成文件不进入 Git，
+构建时会内嵌到二进制，运行时无需下载元数据。修改元数据清单或执行 `make clean`
+后需要重新准备。离线准备可使用匹配的源码包：
+`make metadata-prepare METADATA_ARCHIVE=/path/to/source.tar.gz`。
+直接执行 `go install` 会跳过准备步骤，因此不再作为源码安装方式。
 
 验证：
 

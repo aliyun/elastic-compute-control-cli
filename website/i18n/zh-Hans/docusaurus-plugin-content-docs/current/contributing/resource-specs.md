@@ -53,6 +53,7 @@ make generate
 修改 spec 后，重新构建二进制并重新生成：
 
 ```bash
+make metadata-prepare
 make build
 npm --prefix website run gen:reference
 ```

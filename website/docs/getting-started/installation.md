@@ -83,10 +83,18 @@ Clone the repository and build from its root:
 ```bash
 git clone https://github.com/aliyun/elastic-compute-control-cli.git
 cd elastic-compute-control-cli
+make metadata-prepare
 make build
 ```
 
 The binary is written to `bin/ecctl`.
+
+`metadata-prepare` downloads and verifies the OpenAPI revision pinned in the
+repository. The generated files are ignored by Git and embedded in the binary,
+which needs no metadata downloads at runtime. Repeat preparation after changing
+the metadata lock or running `make clean`. For an offline preparation, supply the
+matching source tarball with `make metadata-prepare METADATA_ARCHIVE=/path/to/source.tar.gz`.
+Direct `go install` is unsupported because it skips preparation.
 
 Verify it:
 

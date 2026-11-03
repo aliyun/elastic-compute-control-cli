@@ -68,9 +68,14 @@ on the host `LANG` or `LC_*` environment.
 Use the project targets first:
 
 ```bash
+make metadata-prepare
 make test
 make lint
 ```
+
+Prepare metadata after checkout, a metadata lock change, or `make clean`.
+Preparation may download the pinned source; tests and lint validate it offline.
+Keep generated metadata and downloaded source archives out of Git.
 
 Use `go test ./...` when validating the whole open-source tree. Avoid live cloud
 API calls in default tests.

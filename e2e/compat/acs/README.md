@@ -24,6 +24,7 @@ validation.
 From the repository root, with the environment configured:
 
 ```sh
+make metadata-prepare
 make -C e2e lint
 e2e/bin/ecctl-e2e lint cases --config e2e/compat/acs/e2e.yaml
 e2e/bin/ecctl-e2e run --config e2e/compat/acs/e2e.yaml --surface public --ecctl-bin e2e/bin/ecctl-public --collect-only --validate-binary

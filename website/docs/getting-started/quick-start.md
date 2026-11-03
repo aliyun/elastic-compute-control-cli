@@ -12,6 +12,7 @@ mutate cloud resources; inspect their schema and account context first.
 ## Build and Check the CLI
 
 ```bash
+make metadata-prepare
 make build
 ./bin/ecctl --help
 ```

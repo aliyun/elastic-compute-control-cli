@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -98,6 +99,13 @@ func TestCoverageMakeTargetPropagatesFailures(t *testing.T) {
 			}
 			stub := `#!/bin/sh
 case "$1" in
+env)
+  case "$2" in
+  GOHOSTOS) printf '%s\n' "$COVERAGE_TEST_HOST_OS" ;;
+  GOHOSTARCH) printf '%s\n' "$COVERAGE_TEST_HOST_ARCH" ;;
+  *) exit 99 ;;
+  esac ;;
+run) test "$2" = ./cmd/openapimeta-sync && test "$3" = -check ;;
 list) printf '%s\n' example/pkg example/cmd/specgen; exit "$LIST_EXIT" ;;
 test) printf '%s' "$PROFILE" > reports/coverage.out; printf '%s\n' "$@" > test-args; exit "$TEST_EXIT" ;;
 *) exit 99 ;;
@@ -108,7 +116,8 @@ esac
 			}
 			cmd := exec.Command("make", "--no-print-directory", "coverage")
 			cmd.Dir = dir
-			cmd.Env = append(os.Environ(), "MAKEFLAGS=", "PATH="+filepath.Join(dir, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"), "LIST_EXIT="+tt.listExit, "TEST_EXIT="+tt.testExit, "PROFILE="+tt.profile)
+			cmd.Env = append(os.Environ(), "MAKEFLAGS=", "PATH="+filepath.Join(dir, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"), "LIST_EXIT="+tt.listExit, "TEST_EXIT="+tt.testExit, "PROFILE="+tt.profile,
+				"COVERAGE_TEST_HOST_OS="+runtime.GOOS, "COVERAGE_TEST_HOST_ARCH="+runtime.GOARCH)
 			out, err := cmd.CombinedOutput()
 			if (err == nil) != tt.pass {
 				t.Fatalf("pass=%t, want %t: %s", err == nil, tt.pass, out)

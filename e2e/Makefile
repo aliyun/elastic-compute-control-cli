@@ -5,7 +5,7 @@ FULL_ECCTL := bin/ecctl-full
 REPORTS := reports
 
 .DEFAULT_GOAL := help
-.PHONY: help build build-public build-full run run-public run-full coverage coverage-full coverage-resources coverage-operations sweep sweep-public sweep-full list validate validate-full lint test fmt
+.PHONY: help metadata-check build build-public build-full run run-public run-full coverage coverage-full coverage-resources coverage-operations sweep sweep-public sweep-full list validate validate-full lint test fmt
 
 help: ## Show this help
 	@echo "ecctl-e2e — make targets:"
@@ -15,11 +15,14 @@ help: ## Show this help
 
 build: build-public ## Build the public E2E runner and default public ecctl binary
 
-build-public: ## Build ecctl-e2e and the default public ecctl binary into bin/
+metadata-check:
+	$(MAKE) -C .. metadata-check
+
+build-public: metadata-check ## Build ecctl-e2e and the default public ecctl binary into bin/
 	go build -o $(BIN) ./cmd/ecctl-e2e
 	cd .. && go build -o e2e/$(PUBLIC_ECCTL) ./cmd/ecctl
 
-build-full: ## Build ecctl-e2e and the full-surface ecctl binary into bin/
+build-full: metadata-check ## Build ecctl-e2e and the full-surface ecctl binary into bin/
 	go build -o $(BIN) ./cmd/ecctl-e2e
 	cd .. && go build -o e2e/$(FULL_ECCTL) ./cmd/ecctl-full
 
@@ -64,7 +67,7 @@ lint: build-public ## Validate cases, stack dependencies, run config, and regist
 	$(BIN) lint cases --config e2e.yaml --cases cases --stack fixtures/stack.yaml --coverage coverage.yaml --parameter-policy fixtures/parameter-policy.yaml
 	$(BIN) coverage --specs ../specs --cases cases --ecctl-bin $(PUBLIC_ECCTL) --surface public --fail-on-gap --output json >/dev/null
 
-test: ## Run unit tests
+test: metadata-check ## Run unit tests
 	go test ./...
 
 fmt: ## Format Go sources

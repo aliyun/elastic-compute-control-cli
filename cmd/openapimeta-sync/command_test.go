@@ -24,15 +24,18 @@ func TestRunWritesValidatedSnapshot(t *testing.T) {
 		if !strings.Contains(stdout.String(), "2 products, 3 operations, 7 files") || stderr.Len() != 0 {
 			t.Fatalf("output = %q, %q", stdout.String(), stderr.String())
 		}
-		result, err := generate(bytes.NewReader(raw), testRevision)
+		result, err := generate(bytes.NewReader(raw), testRevision, t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
-		for name, want := range map[string][]byte{"snapshot.zip": result.zip, "LICENSE": result.license, "manifest.json": result.manifestJSON} {
+		for name, want := range map[string][]byte{".generated/index.json": result.index, "LICENSE": result.license, "manifest.json": result.manifestJSON} {
 			got, err := os.ReadFile(filepath.Join(out, name))
 			if err != nil || !bytes.Equal(got, want) {
 				t.Fatalf("%s differs: %v", name, err)
 			}
+		}
+		if err := checkPrepared(out); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
@@ -50,6 +53,7 @@ func TestRunRejectsInvalidLocalInputs(t *testing.T) {
 		{"-archive", dir, "-revision", testRevision},
 		{"-archive", archive, "-revision", testRevision},
 	} {
+		args = append(args, "-out", filepath.Join(t.TempDir(), "snapshot"))
 		var stdout, stderr bytes.Buffer
 		if err := run(args, &stdout, &stderr); err == nil || stdout.Len() != 0 {
 			t.Fatalf("run %v: err=%v, stdout=%q", args, err, stdout.String())
@@ -61,18 +65,10 @@ func TestRunRejectsInvalidLocalInputs(t *testing.T) {
 	}
 }
 
-func TestWriteSnapshotProtectsInputAndUnownedPaths(t *testing.T) {
-	dir := t.TempDir()
-	archive := filepath.Join(dir, "input")
-	if err := os.WriteFile(archive, []byte("input"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(archive)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result := &generatedSnapshot{zip: []byte("zip"), license: []byte("license"), manifestJSON: []byte("manifest")}
-	for _, kind := range []string{"file output", "missing parent", "directory artifact", "input hardlink", "artifact symlink"} {
+func TestRunProtectsInputAndUnownedPaths(t *testing.T) {
+	archive := writeArchive(t, fixtureFiles())
+	before := readBytes(t, archive)
+	for _, kind := range []string{"file output", "parent file", "directory artifact", "input hardlink", "artifact symlink"} {
 		t.Run(kind, func(t *testing.T) {
 			out := filepath.Join(t.TempDir(), "out")
 			switch kind {
@@ -80,13 +76,16 @@ func TestWriteSnapshotProtectsInputAndUnownedPaths(t *testing.T) {
 				if err := os.WriteFile(out, nil, 0o600); err != nil {
 					t.Fatal(err)
 				}
-			case "missing parent":
+			case "parent file":
+				if err := os.WriteFile(out, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
 				out = filepath.Join(out, "nested")
 			default:
 				if err := os.Mkdir(out, 0o700); err != nil {
 					t.Fatal(err)
 				}
-				path := filepath.Join(out, "snapshot.zip")
+				path := filepath.Join(out, "manifest.json")
 				var err error
 				switch kind {
 				case "directory artifact":
@@ -100,12 +99,13 @@ func TestWriteSnapshotProtectsInputAndUnownedPaths(t *testing.T) {
 					t.Skipf("fixture unavailable: %v", err)
 				}
 			}
-			if err := writeSnapshot(out, info, result); err == nil {
+			var stdout, stderr bytes.Buffer
+			if err := run([]string{"-archive", archive, "-revision", testRevision, "-out", out}, &stdout, &stderr); err == nil {
 				t.Fatal("unsafe output accepted")
 			}
 			raw, err := os.ReadFile(archive)
-			if err != nil || string(raw) != "input" {
-				t.Fatalf("input modified: %q, %v", raw, err)
+			if err != nil || !bytes.Equal(raw, before) {
+				t.Fatalf("input modified: %v", err)
 			}
 		})
 	}

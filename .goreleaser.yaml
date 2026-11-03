@@ -5,6 +5,7 @@ project_name: ecctl
 before:
   hooks:
     - go mod download
+    - make metadata-prepare
 
 builds:
   - id: ecctl-darwin

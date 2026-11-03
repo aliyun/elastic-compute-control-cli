@@ -42,11 +42,19 @@ Check for or install a newer release with `ecctl update --check` and
 `ecctl update`. The command supports both direct binary and Homebrew
 installations.
 
-Or install with Go 1.25 or later:
+Or build from source with Go 1.25.8 or later:
 
 ```bash
-go install github.com/aliyun/elastic-compute-control-cli/cmd/ecctl@latest
+git clone https://github.com/aliyun/elastic-compute-control-cli.git
+cd elastic-compute-control-cli
+make metadata-prepare
+make build
 ```
+
+The preparation step downloads and verifies the pinned OpenAPI metadata. Its
+generated files stay outside Git and are embedded in `bin/ecctl`; installed
+binaries do not download metadata at runtime. Source builds require this step,
+so direct `go install` is unsupported.
 
 See the [installation guide](https://aliyun.github.io/elastic-compute-control-cli/docs/getting-started/installation) for requirements and other installation options.
 
