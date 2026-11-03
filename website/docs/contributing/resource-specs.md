@@ -56,6 +56,7 @@ from `ecctl schema`, not hand-written. After changing a spec, rebuild the binary
 and regenerate them:
 
 ```bash
+make metadata-prepare
 make build
 npm --prefix website run gen:reference
 ```

@@ -20,6 +20,7 @@ sweep.yaml          sweepable kinds for the cleanup safety net
 ## Quick start
 
 ```bash
+make -C .. metadata-prepare # prepare the pinned metadata before building
 make build         # build the runner and the public ecctl binary
 make lint          # validate case/stack/run-config/dynamic-parameter contracts
 make coverage-resources # reject implemented resources that have no case

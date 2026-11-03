@@ -754,14 +754,31 @@ loader 必须校验：
 
 ## 18. OpenAPI drift 处理流程
 
-OpenAPI 元数据来自固定完整 40 位 commit SHA 的内置压缩快照，保留全产品的默认
-API 版本，而不是仅收录当前 resource specs 使用的产品。
+OpenAPI 元数据由构建前准备步骤从固定完整 40 位 commit SHA 生成，保留全产品的默认
+API 版本，而不是仅收录当前 resource specs 使用的产品。Git 只保存生成器、许可证与
+版本清单，不提交 ZIP、gzip 或其他元数据压缩产物。
 `internal/openapimeta/manifest.json` 的 `repository` 固定为
-`aliyun/aliyun-openapi-meta`，`revision` 是该快照的完整 SHA；版本不再来自 Go module。
-运行时、drift 检测和 `make lint` 都离线读取内置快照，不会每次探测或下载最新元数据。
+`aliyun/aliyun-openapi-meta`，`revision` 是数据来源的完整 SHA，格式版本为 `2`。
+`index_sha256` 固定按路径排序的文件索引；索引记录每个筛选后原始文件的 SHA-256
+与大小，不依赖上游 tar.gz 的压缩字节。GitHub 可以在内容不变时重新压缩源码包。
+
+首次源码构建执行 `make metadata-prepare`，再执行 `make build`。准备步骤优先校验并
+复用 `.generated/`；需要重建时读取 `.cache/<revision>.tar.gz`，缺少缓存才从固定
+SHA 下载。可通过 `METADATA_ARCHIVE` 显式提供本地 tarball，以便离线准备。
+两种目录都被 Git 忽略。准备步骤不能改写清单、许可证或 drift baseline。
+源码不再支持跳过准备步骤的 `go install` 安装方式。
+
+生成器保持两遍扫描，第二遍按文件生成 gzip，写入临时目录，完整校验后再替换
+`.generated/`。运行时通过 `embed.FS` 读取生成产物，先校验索引，再对请求的文件解压
+并检查大小、SHA-256 和 gzip 边界，不依赖工作目录、本地缓存或网络。
+`make metadata-check`、测试、drift 检测和 `make lint` 只校验已准备的数据，保持离线；
+数据缺失、损坏或与清单不匹配时明确失败，不自动更新清单或探测浮动上游版本。
+CI、GoReleaser 及 E2E 构建入口在构建前执行准备步骤。`make clean` 删除生成目录，
+保留源包缓存，之后可重新准备。
 
 `.github/workflows/api-sync.yml` 是 report-only：在隔离 runner 中对固定快照检测
-drift，并维护一个有界的 GitHub issue。它不会修改仓库、刷新快照或 baseline、创建
+drift，并维护一个有界的 GitHub issue。它仅生成匹配既有清单的忽略构建产物，不会
+修改受版本控制的文件、刷新清单或 baseline、创建
 分支或 PR，也不会获得云凭证。完整 `drift.json`、dry-run patch 和同步计划作为
 workflow artifact 保存；issue 只展示前 50 项。工作流通过
 `gh api repos/aliyun/aliyun-openapi-meta/commits/master --jq .sha` 获取上游完整 SHA，
@@ -783,8 +800,9 @@ make metadata-sync METADATA_ARCHIVE="$archive" METADATA_REVISION="$revision"
 
 `metadata-sync` 要求同时提供 `METADATA_ARCHIVE` 和 `METADATA_REVISION`，只执行
 `go run ./cmd/openapimeta-sync -archive <downloaded.tar.gz> -revision <40hex> -out internal/openapimeta`，
-不自动下载或刷新 baseline，也不是 `make lint` 的依赖。审阅生成的 manifest 和压缩
-快照，保留旧 baseline，先 triage 并解决 drift，再接受新 baseline；不能用刷新 baseline
+不自动下载或刷新 baseline，也不是 `make lint` 的依赖。此显式更新会重新生成清单、
+许可证与忽略的构建数据。审阅清单、产品/API 清单及 drift 差异，不提交 `.generated/`
+或 `.cache/`。保留旧 baseline，先 triage 并解决 drift，再接受新 baseline；不能用刷新 baseline
 掩盖快照更新造成的差异。
 
 维护者在独立 worktree 中处理 drift：
