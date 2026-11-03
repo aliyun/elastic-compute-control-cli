@@ -316,7 +316,7 @@ jobs:
           main_revision=$(gh api \
             "repos/${GITHUB_REPOSITORY}/contents/internal/openapimeta/manifest.json?ref=main" \
             --header 'Accept: application/vnd.github.raw+json' \
-            --jq 'select(.repository == "aliyun/aliyun-openapi-meta") | .revision')
+            --jq 'select(.repository == "aliyun/aliyun-openapi-meta") | .revision | select(type == "string") | select(length == 40 and test("^[0-9a-f]{40}$"))')
           [[ "$main_revision" =~ ^[0-9a-f]{40}$ ]] || exit 2
           if [ "$main_revision" != "$BASE_SHA" ]; then
             echo "Skipped stale metadata batch: main metadata changed from ${BASE_SHA} to ${main_revision}; a fresh producer run must compare the current base." >> "$GITHUB_STEP_SUMMARY"

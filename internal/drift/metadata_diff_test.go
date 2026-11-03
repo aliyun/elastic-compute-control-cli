@@ -772,6 +772,21 @@ func TestMetadataCompareRejectsMalformedResponseSemantics(t *testing.T) {
 		{"component type number", func(op map[string]any) {
 			op["components"] = map[string]any{"schemas": map[string]any{"Widget": map[string]any{"type": 123}}}
 		}},
+		{"reference null", func(op map[string]any) {
+			op["responses"] = map[string]any{"200": map[string]any{"schema": map[string]any{"$ref": nil}}}
+		}},
+		{"reference number", func(op map[string]any) {
+			op["responses"] = map[string]any{"200": map[string]any{"schema": map[string]any{"$ref": 123}}}
+		}},
+		{"format null", func(op map[string]any) {
+			op["responses"] = map[string]any{"200": map[string]any{"schema": map[string]any{"format": nil}}}
+		}},
+		{"format number", func(op map[string]any) {
+			op["responses"] = map[string]any{"200": map[string]any{"schema": map[string]any{"format": 123}}}
+		}},
+		{"additional properties type number", func(op map[string]any) {
+			op["responses"] = map[string]any{"200": map[string]any{"schema": map[string]any{"additionalProperties": map[string]any{"type": 123}}}}
+		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			valid, invalid := widgetOperation(), widgetOperation()
@@ -800,6 +815,49 @@ func TestMetadataCompareAcceptsCanonicalResponseRequiredForms(t *testing.T) {
 		report, err := CompareMetadataResources(base, candidate, widgetResources())
 		if err != nil || len(report.Changes) != 0 {
 			t.Fatalf("valid response required %v rejected or changed: %+v, %v", required, report, err)
+		}
+	}
+}
+
+func TestMetadataCompareKeepsSchemaNamesSeparateFromAnnotations(t *testing.T) {
+	for _, name := range []string{"properties", "schemas"} {
+		base, candidate := widgetOperation(), widgetOperation()
+		base["responses"] = map[string]any{"200": map[string]any{"schema": map[string]any{"properties": map[string]any{name: map[string]any{"type": "string", "title_en": "Old prose"}}}}}
+		candidate["responses"] = map[string]any{"200": map[string]any{"schema": map[string]any{"properties": map[string]any{name: map[string]any{"type": "string", "title_en": "New prose"}}}}}
+		b := metadataFixture(t, baseRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, base)
+		c := metadataFixture(t, candidateRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, candidate)
+		report, err := CompareMetadataResources(b, c, widgetResources())
+		if err != nil || len(report.Changes) != 0 || report.BatchKey != "" {
+			t.Fatalf("annotation on field %s created an update: %+v, %v", name, report, err)
+		}
+	}
+}
+
+func TestMetadataComparePreservesLiteralEnumObjects(t *testing.T) {
+	base, candidate := widgetOperation(), widgetOperation()
+	base["parameters"].([]any)[0].(map[string]any)["enum"] = []any{map[string]any{"title_en": "A", "properties": map[string]any{"description": []any{json.Number("1.0")}}}}
+	candidate["parameters"].([]any)[0].(map[string]any)["enum"] = []any{map[string]any{"title_en": "B", "properties": map[string]any{"description": []any{json.Number("1")}}}}
+	b := metadataFixture(t, baseRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, base)
+	c := metadataFixture(t, candidateRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, candidate)
+	report, err := CompareMetadataResources(b, c, widgetResources())
+	if err != nil {
+		t.Fatal(err)
+	}
+	change, found := findChange(report, "parameters.Name.enum")
+	if !found || change.Compatibility != "breaking" {
+		t.Fatalf("literal enum member change was erased: %+v", report)
+	}
+}
+
+func TestMetadataCompareAcceptsAdditionalPropertiesSchemasAndBooleans(t *testing.T) {
+	for _, additional := range []any{false, true, map[string]any{"type": "string", "format": "uuid"}} {
+		operation := widgetOperation()
+		operation["responses"].(map[string]any)["200"].(map[string]any)["schema"].(map[string]any)["additionalProperties"] = additional
+		base := metadataFixture(t, baseRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, operation)
+		candidate := metadataFixture(t, candidateRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, operation)
+		report, err := CompareMetadataResources(base, candidate, widgetResources())
+		if err != nil || len(report.Changes) != 0 {
+			t.Fatalf("valid additionalProperties %v rejected or changed: %+v, %v", additional, report, err)
 		}
 	}
 }

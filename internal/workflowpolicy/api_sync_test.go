@@ -311,6 +311,8 @@ func TestAPISyncMetadataBatchRejectsStaleMainBeforeIssueWrites(t *testing.T) {
 		{"current base can create batch", `[]`, base, "0", "issue create", false},
 		{"malformed main revision fails closed", closed, "invalid", "0", "", true},
 		{"empty main revision fails closed", `[]`, "", "0", "", true},
+		{"main revision newline prevents reopening", closed, base + "\n", "0", "", true},
+		{"main revision newline prevents creation", `[]`, base + "\n", "0", "", true},
 		{"main lookup failure prevents reopening", closed, base, "1", "", true},
 		{"main lookup failure prevents creation", `[]`, base, "1", "", true},
 	} {
@@ -319,12 +321,19 @@ func TestAPISyncMetadataBatchRejectsStaleMainBeforeIssueWrites(t *testing.T) {
 			for name, value := range map[string]string{
 				"metadata-diff.json": fmt.Sprintf(`{"batch_key":%q,"changes":[]}`, key),
 				"issues.json":        tt.issues,
+				"main.json":          fmt.Sprintf(`{"repository":"aliyun/aliyun-openapi-meta","revision":%q}`, tt.mainRevision),
 				"gh": `#!/bin/sh
 printf '%s\n' "$*" >> "$GH_CALLS"
 if [ "$1" = api ] && [ "$2" = --paginate ]; then cat "$GH_ISSUES"; exit 0; fi
 if [ "$1" = api ]; then
   case "$2" in
-    repos/*/contents/internal/openapimeta/manifest.json*) printf '%s\n' "$GH_MAIN_REVISION"; exit "$GH_MAIN_EXIT" ;;
+    repos/*/contents/internal/openapimeta/manifest.json*)
+      if [ "$GH_MAIN_EXIT" -ne 0 ]; then exit "$GH_MAIN_EXIT"; fi
+      while [ "$#" -gt 0 ]; do
+        if [ "$1" = --jq ]; then shift; exec jq -r "$1" "$GH_MAIN_MANIFEST"; fi
+        shift
+      done
+      exit 3 ;;
   esac
 fi
 if [ "$1" = issue ]; then exit 0; fi
@@ -346,7 +355,7 @@ exit 3
 				"BASE_SHA="+base, "CANDIDATE_SHA="+candidate,
 				"RUN_URL=https://github.com/aliyun/elastic-compute-control-cli/actions/runs/1",
 				"GH_CALLS="+calls, "GH_ISSUES="+filepath.Join(dir, "issues.json"),
-				"GH_MAIN_REVISION="+tt.mainRevision, "GH_MAIN_EXIT="+tt.mainExit,
+				"GH_MAIN_MANIFEST="+filepath.Join(dir, "main.json"), "GH_MAIN_EXIT="+tt.mainExit,
 			)
 			if (runErr != nil) != tt.wantError {
 				t.Fatalf("error = %v, want error %t; log = %s", runErr, tt.wantError, log)

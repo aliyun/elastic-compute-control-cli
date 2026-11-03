@@ -170,25 +170,28 @@ type metadataParameterShape struct {
 }
 
 type metadataSchemaShape struct {
-	Type       metadataField[string]                                        `json:"type"`
-	Properties metadataField[map[string]metadataField[metadataSchemaShape]] `json:"properties"`
-	Items      metadataField[*metadataSchemaShape]                          `json:"items"`
-	Required   metadataField[metadataSchemaRequired]                        `json:"required"`
-	Enum       metadataField[[]json.RawMessage]                             `json:"enum"`
-	AllOf      metadataField[[]metadataField[*metadataSchemaShape]]         `json:"allOf"`
-	AnyOf      metadataField[[]metadataField[*metadataSchemaShape]]         `json:"anyOf"`
-	OneOf      metadataField[[]metadataField[*metadataSchemaShape]]         `json:"oneOf"`
+	Ref                  metadataField[string]                                        `json:"$ref"`
+	Type                 metadataField[string]                                        `json:"type"`
+	Format               metadataField[string]                                        `json:"format"`
+	Properties           metadataField[map[string]metadataField[metadataSchemaShape]] `json:"properties"`
+	Items                metadataField[*metadataSchemaShape]                          `json:"items"`
+	AdditionalProperties metadataField[metadataBoolOr[*metadataSchemaShape]]          `json:"additionalProperties"`
+	Required             metadataField[metadataBoolOr[[]metadataField[string]]]       `json:"required"`
+	Enum                 metadataField[[]json.RawMessage]                             `json:"enum"`
+	AllOf                metadataField[[]metadataField[*metadataSchemaShape]]         `json:"allOf"`
+	AnyOf                metadataField[[]metadataField[*metadataSchemaShape]]         `json:"anyOf"`
+	OneOf                metadataField[[]metadataField[*metadataSchemaShape]]         `json:"oneOf"`
 }
 
-type metadataSchemaRequired struct{}
+type metadataBoolOr[T any] struct{}
 
-func (*metadataSchemaRequired) UnmarshalJSON(raw []byte) error {
-	var required bool
-	if err := json.Unmarshal(raw, &required); err == nil {
+func (*metadataBoolOr[T]) UnmarshalJSON(raw []byte) error {
+	var boolean bool
+	if err := json.Unmarshal(raw, &boolean); err == nil {
 		return nil
 	}
-	var names []metadataField[string]
-	return json.Unmarshal(raw, &names)
+	var other T
+	return json.Unmarshal(raw, &other)
 }
 
 type metadataResponseShape struct {
@@ -466,7 +469,11 @@ func normalizeMetadata(value any, key string) (any, error) {
 			if key != "properties" && key != "schemas" && ignoredMetadataKey(name) {
 				continue
 			}
-			normalized, err := normalizeMetadata(child, name)
+			childKind := name
+			if key == "properties" || key == "schemas" {
+				childKind = "schema"
+			}
+			normalized, err := normalizeMetadata(child, childKind)
 			if err != nil {
 				return nil, err
 			}
@@ -497,6 +504,10 @@ func normalizeMetadata(value any, key string) (any, error) {
 		}
 		out := make([]any, len(typed))
 		for i, child := range typed {
+			if key == "enum" {
+				out[i] = normalizeMetadataLiteral(child)
+				continue
+			}
 			normalized, err := normalizeMetadata(child, "")
 			if err != nil {
 				return nil, err
@@ -515,6 +526,27 @@ func normalizeMetadata(value any, key string) (any, error) {
 		return normalizeMetadataNumber(typed), nil
 	default:
 		return value, nil
+	}
+}
+
+func normalizeMetadataLiteral(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, child := range typed {
+			out[key] = normalizeMetadataLiteral(child)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for i, child := range typed {
+			out[i] = normalizeMetadataLiteral(child)
+		}
+		return out
+	case json.Number:
+		return normalizeMetadataNumber(typed)
+	default:
+		return value
 	}
 }
 

@@ -797,6 +797,8 @@ enum、API/默认版本、传输风格与端点、废弃与响应结构进入比
 参数传输限定字段和新响应状态保守标为 unknown；已引用 API 的已知字段类型错误、
 显式 null、缺失参数 raw_name 或目录默认版本不一致则拒绝输入。文档描述、本地化
 schema 标题和字段顺序不创建代码任务，但这些名称作为真实响应属性时仍须比较。
+enum 对象内的字段和值按字面值保留。响应 schema 的 required 兼容布尔值与字段名
+数组，additionalProperties 兼容布尔值与子 schema；引用、格式和子 schema 同样校验类型。
 范围包含 binding、probe、声明的 hook API 与经 waiter 使用的 probe；未在 spec 声明的
 Go hook 外部调用不属于可自动证明的覆盖范围。
 非 POP 或没有对应元数据的 API 在报告中明确标记未覆盖，不能据此宣称无变化。
