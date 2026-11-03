@@ -22,6 +22,6 @@ END {
         print "Invalid or empty coverage profile" > "/dev/stderr"
         exit 1
     }
-    printf "Total statement coverage: %.2f%% (%d/%d); required: 95%%\n", covered * 100 / total, covered, total
+    printf "Total statement coverage: %.6f%% (%d/%d); required: 95%%\n", covered * 100 / total, covered, total
     if (covered * 100 < total * 95) exit 1
 }

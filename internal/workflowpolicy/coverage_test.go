@@ -45,6 +45,21 @@ func TestCoverageGate(t *testing.T) {
 	}
 }
 
+func TestCoverageGateReportsBelowThresholdWithoutRoundingUp(t *testing.T) {
+	t.Parallel()
+	requireAPISyncTools(t, "awk")
+	cmd := exec.Command("awk", "-f", filepath.Join("..", "..", ".github", "scripts", "check-coverage.awk"))
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	cmd.Stdin = strings.NewReader("mode: set\nx.go:1.1,2.1 18646 1\nx.go:3.1,4.1 982 0\n")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("coverage below 95%% passed: %s", out)
+	}
+	if !strings.Contains(string(out), "94.996943% (18646/19628); required: 95%") {
+		t.Fatalf("coverage report hides the shortfall: %s", out)
+	}
+}
+
 func TestCIEnforcesCoverage(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
