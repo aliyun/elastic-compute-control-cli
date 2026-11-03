@@ -240,6 +240,9 @@ func TestAPISyncMetadataBatchIssueIsDeduplicated(t *testing.T) {
 			stub := `#!/bin/sh
 printf '%s\n' "$*" >> "$GH_CALLS"
 if [ "$1" = api ]; then
+  case "$2" in
+    repos/*/contents/internal/openapimeta/manifest.json*) printf '%s\n' "$BASE_SHA"; exit 0 ;;
+  esac
   count=$(wc -l < "$GH_API_COUNT")
   printf 'x\n' >> "$GH_API_COUNT"
   if [ "$count" -eq 0 ]; then cat "$GH_FIRST"; else cat "$GH_SECOND"; fi
@@ -287,6 +290,80 @@ exit 3
 			}
 			if tt.name == "closed same batch waits for another open batch" && strings.Contains(string(callLog), "issue reopen") {
 				t.Errorf("second open batch was created by reopening: %s", callLog)
+			}
+		})
+	}
+}
+
+func TestAPISyncMetadataBatchRejectsStaleMainBeforeIssueWrites(t *testing.T) {
+	t.Parallel()
+	step := apiSyncStep(t, "metadata-batch")
+	base, candidate := strings.Repeat("a", 40), strings.Repeat("c", 40)
+	key := strings.Repeat("b", 64)
+	closed := fmt.Sprintf(`[{"number":41,"state":"closed","user":{"login":"github-actions[bot]"},"body":"<!-- ecctl-openapi-update:%s -->"}]`, key)
+	for _, tt := range []struct {
+		name, issues, mainRevision, mainExit, wantWrite string
+		wantError                                       bool
+	}{
+		{"completed batch stays closed after merge", closed, candidate, "0", "", false},
+		{"stale new batch is not created", `[]`, candidate, "0", "", false},
+		{"current base can reopen unresolved batch", closed, base, "0", "issue reopen 41", false},
+		{"current base can create batch", `[]`, base, "0", "issue create", false},
+		{"malformed main revision fails closed", closed, "invalid", "0", "", true},
+		{"empty main revision fails closed", `[]`, "", "0", "", true},
+		{"main lookup failure prevents reopening", closed, base, "1", "", true},
+		{"main lookup failure prevents creation", `[]`, base, "1", "", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, value := range map[string]string{
+				"metadata-diff.json": fmt.Sprintf(`{"batch_key":%q,"changes":[]}`, key),
+				"issues.json":        tt.issues,
+				"gh": `#!/bin/sh
+printf '%s\n' "$*" >> "$GH_CALLS"
+if [ "$1" = api ] && [ "$2" = --paginate ]; then cat "$GH_ISSUES"; exit 0; fi
+if [ "$1" = api ]; then
+  case "$2" in
+    repos/*/contents/internal/openapimeta/manifest.json*) printf '%s\n' "$GH_MAIN_REVISION"; exit "$GH_MAIN_EXIT" ;;
+  esac
+fi
+if [ "$1" = issue ]; then exit 0; fi
+exit 3
+`,
+			} {
+				mode := os.FileMode(0o600)
+				if name == "gh" {
+					mode = 0o700
+				}
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(value), mode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			calls := filepath.Join(dir, "calls")
+			_, summary, log, runErr := runAPISyncStep(t, dir, step.Run,
+				"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"GITHUB_REPOSITORY=aliyun/elastic-compute-control-cli",
+				"BASE_SHA="+base, "CANDIDATE_SHA="+candidate,
+				"RUN_URL=https://github.com/aliyun/elastic-compute-control-cli/actions/runs/1",
+				"GH_CALLS="+calls, "GH_ISSUES="+filepath.Join(dir, "issues.json"),
+				"GH_MAIN_REVISION="+tt.mainRevision, "GH_MAIN_EXIT="+tt.mainExit,
+			)
+			if (runErr != nil) != tt.wantError {
+				t.Fatalf("error = %v, want error %t; log = %s", runErr, tt.wantError, log)
+			}
+			raw, err := os.ReadFile(calls)
+			if err != nil {
+				t.Fatal(err)
+			}
+			callLog := string(raw)
+			if !strings.HasPrefix(callLog, "api --paginate ") {
+				t.Fatalf("main must be read after issue state to detect a completed merge: %s", callLog)
+			}
+			if tt.wantWrite == "" && strings.Contains(callLog, "issue ") || tt.wantWrite != "" && !strings.Contains(callLog, tt.wantWrite) {
+				t.Fatalf("unexpected issue writes, want %q: %s", tt.wantWrite, callLog)
+			}
+			if !tt.wantError && tt.wantWrite == "" && !strings.Contains(summary, "main metadata changed") {
+				t.Fatalf("stale batch was not reported: %s", summary)
 			}
 		})
 	}

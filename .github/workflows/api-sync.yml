@@ -313,6 +313,15 @@ jobs:
           active=$(jq -sr \
             '[.[][] | select(has("pull_request") | not) | select(.state == "open" and .user.login == "github-actions[bot]") | select((.body // "") | test("<!-- ecctl-openapi-update:[0-9a-f]{64} -->"))] | sort_by(.number) | first | .number // empty' \
             <<< "$issues")
+          main_revision=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/contents/internal/openapimeta/manifest.json?ref=main" \
+            --header 'Accept: application/vnd.github.raw+json' \
+            --jq 'select(.repository == "aliyun/aliyun-openapi-meta") | .revision')
+          [[ "$main_revision" =~ ^[0-9a-f]{40}$ ]] || exit 2
+          if [ "$main_revision" != "$BASE_SHA" ]; then
+            echo "Skipped stale metadata batch: main metadata changed from ${BASE_SHA} to ${main_revision}; a fresh producer run must compare the current base." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [ -n "$existing" ]; then
             existing_state=$(jq -sr --argjson number "$existing" \
               '[.[][] | select(.number == $number)] | first | .state // empty' <<< "$issues")

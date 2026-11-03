@@ -792,7 +792,11 @@ issue。它不会修改 main、刷新快照或 baseline、创建分支或 PR，�
 要求两边均有 manifest 与 `.generated`，完整校验来源、index 和压缩内容。结果记录
 base/candidate 完整 revision、受影响资源/binding/操作、变化路径、前后值和兼容性；
 无相关变化退出 0，有变化退出 1，输入或来源无效退出 2。参数增删、required、类型、
-enum、API/默认版本、传输风格与端点、废弃与响应结构进入比较；新增或移除的 API 也展开其请求与响应语义。参数传输限定字段和新响应状态保守标为 unknown；已引用 API 的类型错误或目录默认版本不一致则拒绝输入。文档描述和字段顺序不创建代码任务，但名为 `summary`、`description` 的真实响应属性仍须比较。
+enum、API/默认版本、传输风格与端点、废弃与响应结构进入比较；新增或移除的 API
+也展开其请求与响应语义。数字按精确十进制值比较，等值的指数或小数写法不产生变化。
+参数传输限定字段和新响应状态保守标为 unknown；已引用 API 的已知字段类型错误、
+显式 null、缺失参数 raw_name 或目录默认版本不一致则拒绝输入。文档描述、本地化
+schema 标题和字段顺序不创建代码任务，但这些名称作为真实响应属性时仍须比较。
 范围包含 binding、probe、声明的 hook API 与经 waiter 使用的 probe；未在 spec 声明的
 Go hook 外部调用不属于可自动证明的覆盖范围。
 非 POP 或没有对应元数据的 API 在报告中明确标记未覆盖，不能据此宣称无变化。
@@ -800,7 +804,9 @@ Go hook 外部调用不属于可自动证明的覆盖范围。
 批次 key 根据仓库、base/candidate revision 和受影响 binding 范围确定。工作流
 并发队列串行，一个开放的更新批次 issue 是 producer 与本地消费者共享的批次锁：
 处理期间固定候选，新上游版本只在工作流摘要中记为等待，不覆盖当前 issue。
-创建前逐页核对由 GitHub Actions bot 创建且精确 marker 匹配的 issue，不依赖可编辑标题；同批次 issue 若在更新进入 main 前关闭且没有其他开放批次则重新打开；
+创建前逐页核对由 GitHub Actions bot 创建且精确 marker 匹配的 issue，不依赖可编辑标题；
+读取 issue 状态后重新核对 main 的元数据 revision，基准已变化或无法核实时不创建、
+重开批次。同批次 issue 若在更新进入 main 前关闭且没有其他开放批次则重新打开；
 创建响应不明时再查询，不在本轮盲重试。候选 producer 用独立状态条件运行，
 原 drift monitor 的更新失败不隐式跳过候选；候选报告 artifact 未上传成功时不创建 issue。原有 drift
 monitor 仍只处理固定快照健康状态，不关闭候选更新 issue。artifact 过期时以记录的

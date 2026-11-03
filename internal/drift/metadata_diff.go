@@ -1,9 +1,11 @@
 package drift
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -99,12 +101,12 @@ func loadMetadataSnapshot(root string) (*metadataSnapshot, error) {
 	}
 	var catalogShape struct {
 		Products []struct {
-			Code                 string            `json:"code"`
-			DefaultVersion       string            `json:"plugin_default_version"`
-			Style                string            `json:"api_style"`
-			GlobalEndpoint       string            `json:"global_endpoint"`
-			RegionalEndpoints    map[string]string `json:"regional_endpoints"`
-			RegionalVPCEndpoints map[string]string `json:"regional_vpc_endpoints"`
+			Code                 metadataField[string]                           `json:"code"`
+			DefaultVersion       metadataField[string]                           `json:"plugin_default_version"`
+			Style                metadataField[string]                           `json:"api_style"`
+			GlobalEndpoint       metadataField[string]                           `json:"global_endpoint"`
+			RegionalEndpoints    metadataField[map[string]metadataField[string]] `json:"regional_endpoints"`
+			RegionalVPCEndpoints metadataField[map[string]metadataField[string]] `json:"regional_vpc_endpoints"`
 		} `json:"products"`
 	}
 	if err := json.Unmarshal(raw, &catalogShape); err != nil {
@@ -117,7 +119,7 @@ func loadMetadataSnapshot(root string) (*metadataSnapshot, error) {
 		if code == "" || catalog[code] != nil {
 			return nil, fmt.Errorf("metadata %s product catalog has missing or duplicate code %q", root, code)
 		}
-		if pinned, found := products[code]; found && catalogShape.Products[i].DefaultVersion != pinned.Version {
+		if pinned, found := products[code]; found && catalogShape.Products[i].DefaultVersion.value != pinned.Version {
 			return nil, fmt.Errorf("metadata %s product %s catalog default version does not match manifest", root, code)
 		}
 		semantic := map[string]any{}
@@ -143,17 +145,57 @@ type operationMetadata struct {
 	detail     map[string]any
 }
 
+// A recognized field may be absent, but an explicit null is not its zero value.
+type metadataField[T any] struct{ value T }
+
+func (field *metadataField[T]) UnmarshalJSON(raw []byte) error {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return fmt.Errorf("metadata field must not be null")
+	}
+	return json.Unmarshal(raw, &field.value)
+}
+
 type metadataParameterShape struct {
-	RawName    string                   `json:"raw_name"`
-	Name       string                   `json:"name"`
-	Location   string                   `json:"location"`
-	Type       string                   `json:"type"`
-	Required   bool                     `json:"required"`
-	ParamStyle string                   `json:"param_style"`
-	DirectBody bool                     `json:"direct_body"`
-	Fields     []metadataParameterShape `json:"fields"`
-	Element    *metadataParameterShape  `json:"element"`
-	Value      *metadataParameterShape  `json:"value"`
+	RawName    metadataField[string]                   `json:"raw_name"`
+	Name       metadataField[string]                   `json:"name"`
+	Location   metadataField[string]                   `json:"location"`
+	Type       metadataField[string]                   `json:"type"`
+	Required   metadataField[bool]                     `json:"required"`
+	ParamStyle metadataField[string]                   `json:"param_style"`
+	DirectBody metadataField[bool]                     `json:"direct_body"`
+	Enum       metadataField[[]json.RawMessage]        `json:"enum"`
+	Fields     metadataField[[]metadataParameterShape] `json:"fields"`
+	Element    metadataField[*metadataParameterShape]  `json:"element"`
+	Value      metadataField[*metadataParameterShape]  `json:"value"`
+}
+
+type metadataSchemaShape struct {
+	Type       metadataField[string]                                        `json:"type"`
+	Properties metadataField[map[string]metadataField[metadataSchemaShape]] `json:"properties"`
+	Items      metadataField[*metadataSchemaShape]                          `json:"items"`
+	Required   metadataField[metadataSchemaRequired]                        `json:"required"`
+	Enum       metadataField[[]json.RawMessage]                             `json:"enum"`
+	AllOf      metadataField[[]metadataField[*metadataSchemaShape]]         `json:"allOf"`
+	AnyOf      metadataField[[]metadataField[*metadataSchemaShape]]         `json:"anyOf"`
+	OneOf      metadataField[[]metadataField[*metadataSchemaShape]]         `json:"oneOf"`
+}
+
+type metadataSchemaRequired struct{}
+
+func (*metadataSchemaRequired) UnmarshalJSON(raw []byte) error {
+	var required bool
+	if err := json.Unmarshal(raw, &required); err == nil {
+		return nil
+	}
+	var names []metadataField[string]
+	return json.Unmarshal(raw, &names)
+}
+
+type metadataResponseShape struct {
+	Schema  metadataField[*metadataSchemaShape] `json:"schema"`
+	Content metadataField[map[string]metadataField[struct {
+		Schema metadataField[*metadataSchemaShape] `json:"schema"`
+	}]] `json:"content"`
 }
 
 func (s *metadataSnapshot) operation(code, api string) (*operationMetadata, error) {
@@ -167,11 +209,11 @@ func (s *metadataSnapshot) operation(code, api string) (*operationMetadata, erro
 		return nil, fmt.Errorf("read %s version: %w", code, err)
 	}
 	var version struct {
-		Version string                     `json:"version"`
-		Style   string                     `json:"style"`
+		Version metadataField[string]      `json:"version"`
+		Style   metadataField[string]      `json:"style"`
 		APIs    map[string]json.RawMessage `json:"apis"`
 	}
-	if err := json.Unmarshal(raw, &version); err != nil || version.Version != product.Version || version.APIs == nil {
+	if err := json.Unmarshal(raw, &version); err != nil || version.Version.value != product.Version || version.APIs == nil {
 		return nil, fmt.Errorf("metadata %s version manifest is invalid: %v", code, err)
 	}
 	canonical := ""
@@ -203,22 +245,28 @@ func (s *metadataSnapshot) operation(code, api string) (*operationMetadata, erro
 		return nil, fmt.Errorf("read %s.%s: %w", code, canonical, err)
 	}
 	var shape struct {
-		Name        string                   `json:"name"`
-		Deprecated  bool                     `json:"deprecated"`
-		Protocol    string                   `json:"protocol"`
-		Method      string                   `json:"method"`
-		PathPattern string                   `json:"pathPattern"`
-		Parameters  []metadataParameterShape `json:"parameters"`
-		Operation   struct {
-			ResponseFormat string `json:"response_format"`
-			IsSSE          bool   `json:"is_sse"`
-		} `json:"operation"`
+		Name        metadataField[string]                                          `json:"name"`
+		Deprecated  metadataField[bool]                                            `json:"deprecated"`
+		Protocol    metadataField[string]                                          `json:"protocol"`
+		Method      metadataField[string]                                          `json:"method"`
+		PathPattern metadataField[string]                                          `json:"pathPattern"`
+		Parameters  []metadataParameterShape                                       `json:"parameters"`
+		Responses   metadataField[map[string]metadataField[metadataResponseShape]] `json:"responses"`
+		Components  metadataField[struct {
+			Schemas metadataField[map[string]metadataField[metadataSchemaShape]] `json:"schemas"`
+		}] `json:"components"`
+		Operation metadataField[struct {
+			ResponseFormat metadataField[string] `json:"response_format"`
+			IsSSE          metadataField[bool]   `json:"is_sse"`
+		}] `json:"operation"`
 	}
 	if err := json.Unmarshal(raw, &shape); err != nil {
 		return nil, fmt.Errorf("metadata %s.%s detail has invalid field types: %w", code, canonical, err)
 	}
 	var detail map[string]any
-	if err := json.Unmarshal(raw, &detail); err != nil || detail == nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&detail); err != nil || detail == nil {
 		return nil, fmt.Errorf("metadata %s.%s detail is invalid: %v", code, canonical, err)
 	}
 	name, _ := detail["name"].(string)
@@ -226,7 +274,7 @@ func (s *metadataSnapshot) operation(code, api string) (*operationMetadata, erro
 	if !strings.EqualFold(name, canonical) || name == "" || !hasParameters || parameters == nil {
 		return nil, fmt.Errorf("metadata %s.%s detail name or parameters invalid", code, canonical)
 	}
-	return &operationMetadata{name: canonical, deprecated: deprecated, style: version.Style, detail: detail}, nil
+	return &operationMetadata{name: canonical, deprecated: deprecated, style: version.Style.value, detail: detail}, nil
 }
 
 // CompareMetadata loads the spec directory and two independently prepared snapshots.
@@ -434,9 +482,6 @@ func normalizeMetadata(value any, key string) (any, error) {
 					return nil, fmt.Errorf("%s contains non-object parameter", key)
 				}
 				name, _ := parameter["raw_name"].(string)
-				if name == "" {
-					name, _ = parameter["name"].(string)
-				}
 				if name == "" || out[name] != nil {
 					return nil, fmt.Errorf("%s contains unnamed or duplicate parameter", key)
 				}
@@ -466,15 +511,45 @@ func normalizeMetadata(value any, key string) (any, error) {
 			})
 		}
 		return out, nil
+	case json.Number:
+		return normalizeMetadataNumber(typed), nil
 	default:
 		return value, nil
 	}
 }
 
+// Keep exact decimal values without expanding arbitrarily large exponents.
+func normalizeMetadataNumber(value json.Number) json.Number {
+	mantissa, power, _ := strings.Cut(strings.ToLower(value.String()), "e")
+	exponent := new(big.Int)
+	if power != "" {
+		exponent.SetString(power, 10) // The JSON decoder already validated the number.
+	}
+	sign := ""
+	if strings.HasPrefix(mantissa, "-") {
+		sign, mantissa = "-", mantissa[1:]
+	}
+	if dot := strings.IndexByte(mantissa, '.'); dot >= 0 {
+		exponent.Sub(exponent, big.NewInt(int64(len(mantissa)-dot-1)))
+		mantissa = mantissa[:dot] + mantissa[dot+1:]
+	}
+	digits := strings.TrimLeft(mantissa, "0")
+	if digits == "" {
+		return json.Number("0")
+	}
+	trimmed := strings.TrimRight(digits, "0")
+	exponent.Add(exponent, big.NewInt(int64(len(digits)-len(trimmed))))
+	if exponent.Sign() == 0 {
+		return json.Number(sign + trimmed)
+	}
+	return json.Number(sign + trimmed + "e" + exponent.String())
+}
+
 func ignoredMetadataKey(key string) bool {
 	return strings.HasPrefix(key, "description") || strings.HasPrefix(key, "help_") ||
 		key == "example" || key == "examples" || key == "camel_example" || key == "kebab_example" ||
-		key == "cmd_name" || key == "cmd_full_name" || key == "options" || key == "title" || key == "summary"
+		key == "cmd_name" || key == "cmd_full_name" || key == "options" || key == "title" ||
+		strings.HasPrefix(key, "title_") || key == "enumValueTitles" || key == "summary"
 }
 
 func diffMetadataMaps(prefix string, before, after map[string]any, add func(string, any, any)) {

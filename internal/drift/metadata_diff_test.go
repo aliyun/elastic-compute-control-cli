@@ -23,7 +23,7 @@ func metadataFixture(t *testing.T, revision, version string, api map[string]any,
 	return metadataFixtureWithOptions(t, revision, version, api, operation, "rpc", nil)
 }
 
-func metadataFixtureWithOptions(t *testing.T, revision, version string, api map[string]any, operation map[string]any, style string, product map[string]any, operationFileName ...string) string {
+func metadataFixtureWithOptions(t *testing.T, revision, version string, api map[string]any, operation map[string]any, style any, product map[string]any, operationFileName ...string) string {
 	t.Helper()
 	fileName := "CreateWidget"
 	if len(operationFileName) > 0 {
@@ -390,7 +390,7 @@ func TestMetadataComparePreservesNamedResponseProperties(t *testing.T) {
 	candidate := widgetOperation()
 	baseProperties := base["responses"].(map[string]any)["200"].(map[string]any)["schema"].(map[string]any)["properties"].(map[string]any)
 	candidateProperties := candidate["responses"].(map[string]any)["200"].(map[string]any)["schema"].(map[string]any)["properties"].(map[string]any)
-	for _, name := range []string{"summary", "description"} {
+	for _, name := range []string{"summary", "description", "title_en", "title_zh", "enumValueTitles"} {
 		baseProperties[name] = map[string]any{"type": "string"}
 		candidateProperties[name] = map[string]any{"type": "object"}
 	}
@@ -400,7 +400,7 @@ func TestMetadataComparePreservesNamedResponseProperties(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"summary", "description"} {
+	for _, name := range []string{"summary", "description", "title_en", "title_zh", "enumValueTitles"} {
 		path := "responses.200.schema.properties." + name + ".type"
 		if _, found := findChange(report, path); !found {
 			t.Errorf("named response property %s was erased: %+v", path, report.Changes)
@@ -557,11 +557,23 @@ func TestMetadataCompareRejectsMalformedParameterTypes(t *testing.T) {
 		mutate func(map[string]any)
 	}{
 		{"required string", func(param map[string]any) { param["required"] = "true" }},
+		{"required null", func(param map[string]any) { param["required"] = nil }},
 		{"direct body string", func(param map[string]any) { param["direct_body"] = "true" }},
+		{"direct body null", func(param map[string]any) { param["direct_body"] = nil }},
 		{"parameter style number", func(param map[string]any) { param["param_style"] = 3 }},
+		{"parameter style null", func(param map[string]any) { param["param_style"] = nil }},
 		{"location array", func(param map[string]any) { param["location"] = []any{"body"} }},
+		{"location null", func(param map[string]any) { param["location"] = nil }},
+		{"type null", func(param map[string]any) { param["type"] = nil }},
+		{"raw name null", func(param map[string]any) { param["raw_name"] = nil }},
+		{"fields null", func(param map[string]any) { param["fields"] = nil }},
+		{"element null", func(param map[string]any) { param["element"] = nil }},
+		{"value null", func(param map[string]any) { param["value"] = nil }},
 		{"nested field required string", func(param map[string]any) {
 			param["fields"] = []any{map[string]any{"raw_name": "Child", "required": "true"}}
+		}},
+		{"nested field required null", func(param map[string]any) {
+			param["fields"] = []any{map[string]any{"raw_name": "Child", "required": nil}}
 		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -585,7 +597,10 @@ func TestMetadataCompareRejectsInvalidProductCatalogSemantics(t *testing.T) {
 	}{
 		{"wrong default version", map[string]any{"code": "Ecs", "plugin_default_version": "2021-01-01", "api_style": "rpc"}},
 		{"invalid style type", map[string]any{"code": "Ecs", "plugin_default_version": "2020-01-01", "api_style": true}},
+		{"null style", map[string]any{"code": "Ecs", "plugin_default_version": "2020-01-01", "api_style": nil}},
 		{"invalid endpoint type", map[string]any{"code": "Ecs", "plugin_default_version": "2020-01-01", "regional_endpoints": map[string]any{"cn-hangzhou": 42}}},
+		{"null endpoint map", map[string]any{"code": "Ecs", "plugin_default_version": "2020-01-01", "regional_endpoints": nil}},
+		{"null endpoint", map[string]any{"code": "Ecs", "plugin_default_version": "2020-01-01", "regional_endpoints": map[string]any{"cn-hangzhou": nil}}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			candidate := metadataFixtureWithOptions(t, candidateRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, widgetOperation(), "rpc", tt.product)
@@ -593,6 +608,24 @@ func TestMetadataCompareRejectsInvalidProductCatalogSemantics(t *testing.T) {
 				t.Fatal("checksum-consistent invalid product catalog was accepted")
 			}
 		})
+	}
+}
+
+func TestMetadataCompareRejectsNullOperationMetadata(t *testing.T) {
+	base := metadataFixture(t, baseRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, widgetOperation())
+	for _, name := range []string{"operation", "method", "protocol", "pathPattern", "deprecated"} {
+		t.Run(name, func(t *testing.T) {
+			operation := widgetOperation()
+			operation[name] = nil
+			candidate := metadataFixture(t, candidateRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, operation)
+			if _, err := CompareMetadataResources(base, candidate, widgetResources()); err == nil {
+				t.Fatalf("explicit null %s produced a metadata report", name)
+			}
+		})
+	}
+	candidate := metadataFixtureWithOptions(t, candidateRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, widgetOperation(), nil, nil)
+	if _, err := CompareMetadataResources(base, candidate, widgetResources()); err == nil {
+		t.Fatal("explicit null version style produced a metadata report")
 	}
 }
 
@@ -637,5 +670,136 @@ func TestMetadataCompareRecordsNonPOPProviderAsUncovered(t *testing.T) {
 	}
 	if len(report.Skipped) != 1 || report.Skipped[0].Reason != "non-POP provider" {
 		t.Fatalf("uncovered provider hidden: %+v", report.Skipped)
+	}
+}
+
+func TestMetadataComparePreservesExactNumericSemantics(t *testing.T) {
+	for _, tt := range []struct {
+		name, before, after string
+		wantChange          bool
+	}{
+		{"adjacent large integers", "9007199254740992", "9007199254740993", true},
+		{"decimal spelling", "1", "1.0", false},
+		{"exponent spelling", "1000", "1e3", false},
+		{"negative zero", "0", "-0.0e100", false},
+		{"exact decimal", "0.10000000000000001", "0.1", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			base, candidate := widgetOperation(), widgetOperation()
+			base["parameters"].([]any)[0].(map[string]any)["enum"] = []any{json.Number(tt.before)}
+			candidate["parameters"].([]any)[0].(map[string]any)["enum"] = []any{json.Number(tt.after)}
+			b := metadataFixture(t, baseRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, base)
+			c := metadataFixture(t, candidateRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, candidate)
+			report, err := CompareMetadataResources(b, c, widgetResources())
+			if err != nil {
+				t.Fatal(err)
+			}
+			change, found := findChange(report, "parameters.Name.enum")
+			if found != tt.wantChange || found && change.Compatibility != "breaking" {
+				t.Fatalf("numeric enum comparison = %+v, want change %t", report.Changes, tt.wantChange)
+			}
+			if tt.name == "adjacent large integers" {
+				raw, err := json.Marshal(change)
+				if err != nil || !bytes.Contains(raw, []byte(tt.before)) || !bytes.Contains(raw, []byte(tt.after)) {
+					t.Fatalf("report lost exact numeric values: %s, %v", raw, err)
+				}
+			}
+			if !tt.wantChange && (len(report.Changes) != 0 || report.BatchKey != "") {
+				t.Fatalf("numeric spelling created an update batch: %+v", report)
+			}
+		})
+	}
+}
+
+func TestMetadataCompareRejectsDisplayNameAsWireName(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		base, candidate := widgetOperation(), widgetOperation()
+		parameter := candidate["parameters"].([]any)[0].(map[string]any)
+		if nested {
+			parameter["fields"] = []any{map[string]any{"name": "Child", "type": "string"}}
+		} else {
+			delete(parameter, "raw_name")
+			parameter["name"] = "Name"
+		}
+		b := metadataFixture(t, baseRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, base)
+		c := metadataFixture(t, candidateRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, candidate)
+		if _, err := CompareMetadataResources(b, c, widgetResources()); err == nil {
+			t.Fatalf("display name hid a missing wire name, nested=%t", nested)
+		}
+	}
+}
+
+func TestMetadataCompareIgnoresLocalizedSchemaAnnotations(t *testing.T) {
+	base, candidate := widgetOperation(), widgetOperation()
+	for _, operation := range []map[string]any{base, candidate} {
+		property := operation["responses"].(map[string]any)["200"].(map[string]any)["schema"].(map[string]any)["properties"].(map[string]any)["Id"].(map[string]any)
+		property["title_en"], property["title_zh"] = "Old title", "旧说明"
+		property["enumValueTitles"] = map[string]any{"a": "Old label"}
+	}
+	property := candidate["responses"].(map[string]any)["200"].(map[string]any)["schema"].(map[string]any)["properties"].(map[string]any)["Id"].(map[string]any)
+	property["title_en"], property["title_zh"] = "New title", "新说明"
+	property["enumValueTitles"] = map[string]any{"a": "New label"}
+	b := metadataFixture(t, baseRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, base)
+	c := metadataFixture(t, candidateRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, candidate)
+	report, err := CompareMetadataResources(b, c, widgetResources())
+	if err != nil || len(report.Changes) != 0 || report.BatchKey != "" {
+		t.Fatalf("localized prose created an update batch: %+v, %v", report, err)
+	}
+}
+
+func TestMetadataCompareRejectsMalformedResponseSemantics(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{"responses string", func(op map[string]any) { op["responses"] = "malformed" }},
+		{"responses null", func(op map[string]any) { op["responses"] = nil }},
+		{"response null", func(op map[string]any) { op["responses"] = map[string]any{"200": nil} }},
+		{"schema string", func(op map[string]any) { op["responses"] = map[string]any{"200": map[string]any{"schema": "bad"}} }},
+		{"schema null", func(op map[string]any) { op["responses"] = map[string]any{"200": map[string]any{"schema": nil}} }},
+		{"schema type number", func(op map[string]any) {
+			op["responses"] = map[string]any{"200": map[string]any{"schema": map[string]any{"type": 123}}}
+		}},
+		{"schema type null", func(op map[string]any) {
+			op["responses"] = map[string]any{"200": map[string]any{"schema": map[string]any{"type": nil}}}
+		}},
+		{"properties array", func(op map[string]any) {
+			op["responses"] = map[string]any{"200": map[string]any{"schema": map[string]any{"properties": []any{}}}}
+		}},
+		{"nested item type number", func(op map[string]any) {
+			op["responses"] = map[string]any{"200": map[string]any{"schema": map[string]any{"items": map[string]any{"type": 123}}}}
+		}},
+		{"component type number", func(op map[string]any) {
+			op["components"] = map[string]any{"schemas": map[string]any{"Widget": map[string]any{"type": 123}}}
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			valid, invalid := widgetOperation(), widgetOperation()
+			tt.mutate(invalid)
+			for _, badBase := range []bool{false, true} {
+				base, candidate := valid, invalid
+				if badBase {
+					base, candidate = invalid, valid
+				}
+				b := metadataFixture(t, baseRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, base)
+				c := metadataFixture(t, candidateRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, candidate)
+				if _, err := CompareMetadataResources(b, c, widgetResources()); err == nil {
+					t.Fatalf("malformed response produced an update report, badBase=%t", badBase)
+				}
+			}
+		})
+	}
+}
+
+func TestMetadataCompareAcceptsCanonicalResponseRequiredForms(t *testing.T) {
+	for _, required := range []any{false, true, []any{"Id"}} {
+		operation := widgetOperation()
+		operation["responses"].(map[string]any)["200"].(map[string]any)["schema"].(map[string]any)["required"] = required
+		base := metadataFixture(t, baseRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, operation)
+		candidate := metadataFixture(t, candidateRevision, "2020-01-01", map[string]any{"CreateWidget": map[string]any{}}, operation)
+		report, err := CompareMetadataResources(base, candidate, widgetResources())
+		if err != nil || len(report.Changes) != 0 {
+			t.Fatalf("valid response required %v rejected or changed: %+v, %v", required, report, err)
+		}
 	}
 }
