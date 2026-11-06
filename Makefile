@@ -44,7 +44,7 @@ ci-test: metadata-check ## Run CI tests and write reports
 	go run gotest.tools/gotestsum@v1.13.0 --junitfile reports/testcase.xml -- -coverpkg="$$coverpkgs" -coverprofile=reports/coverage.out $$pkgs || status=$$?; \
 	if [ -f reports/coverage.out ]; then \
 		go tool cover -func=reports/coverage.out | awk '/^total:/ {print}'; \
-		go run github.com/boumenot/gocover-cobertura@v1.5.0 < reports/coverage.out > reports/coverage.xml; \
+		go run github.com/boumenot/gocover-cobertura@v1.5.0 -strict < reports/coverage.out > reports/coverage.xml; \
 	fi; \
 	test "$$status" -eq 0; \
 	awk -f .github/scripts/check-coverage.awk reports/coverage.out
