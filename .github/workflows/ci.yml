@@ -76,11 +76,28 @@ jobs:
         run: make lint
 
       - name: Test and enforce 95% UT coverage
-        run: make coverage
+        run: make ci-test
 
-      - name: Generate main coverage XML
-        if: ${{ !cancelled() && hashFiles('reports/coverage.out') != '' }}
-        run: go run github.com/boumenot/gocover-cobertura@v1.5.0 -strict < reports/coverage.out > reports/coverage.xml
+      - name: Save main test results
+        if: ${{ !cancelled() && hashFiles('reports/testcase.xml') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ut-test-results-main
+          path: reports/testcase.xml
+          if-no-files-found: error
+
+      - name: Upload main test results to Codecov
+        if: ${{ !cancelled() && hashFiles('reports/testcase.xml') != '' }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: aliyun/elastic-compute-control-cli
+          report_type: test_results
+          files: reports/testcase.xml
+          flags: main
+          name: ut-test-results-main
+          disable_search: true
+          fail_ci_if_error: true
 
       - name: Save main coverage report
         if: ${{ !cancelled() && hashFiles('reports/coverage.xml') != '' }}

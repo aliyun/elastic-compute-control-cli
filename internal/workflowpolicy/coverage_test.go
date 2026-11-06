@@ -73,11 +73,11 @@ func TestCIEnforcesCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, step := range workflow.Jobs["test"].Steps {
-		if step.Run == "make coverage" && step.If == "" {
+		if step.Run == "make ci-test" && step.If == "" {
 			return
 		}
 	}
-	t.Fatal("CI must unconditionally run make coverage")
+	t.Fatal("CI must unconditionally run make ci-test")
 }
 
 func TestCoverageMakeTargetPropagatesFailures(t *testing.T) {
@@ -91,28 +91,29 @@ func TestCoverageMakeTargetPropagatesFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tt := range []struct {
-		name, listExit, testExit, profile string
-		pass                              bool
-	}{
-		{"threshold passes", "0", "0", "mode: set\nx.go:1.1,2.1 95 1\nx.go:3.1,4.1 5 0\n", true},
-		{"coverage fails", "0", "0", "mode: set\nx.go:1.1,2.1 94 1\nx.go:3.1,4.1 6 0\n", false},
-		{"tests fail despite full coverage", "0", "1", "mode: set\nx.go:1.1,2.1 100 1\n", false},
-		{"listing fails despite stale profile", "1", "0", "", false},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			for _, path := range []string{"bin", "reports", ".github/scripts"} {
-				if err := os.MkdirAll(filepath.Join(dir, path), 0o700); err != nil {
-					t.Fatal(err)
+	for _, target := range []string{"coverage", "ci-test"} {
+		for _, tt := range []struct {
+			name, listExit, testExit, profile string
+			pass                              bool
+		}{
+			{"threshold passes", "0", "0", "mode: set\nx.go:1.1,2.1 95 1\nx.go:3.1,4.1 5 0\n", true},
+			{"coverage fails", "0", "0", "mode: set\nx.go:1.1,2.1 94 1\nx.go:3.1,4.1 6 0\n", false},
+			{"tests fail despite full coverage", "0", "1", "mode: set\nx.go:1.1,2.1 100 1\n", false},
+			{"listing fails despite stale profile", "1", "0", "", false},
+		} {
+			t.Run(target+"/"+tt.name, func(t *testing.T) {
+				dir := t.TempDir()
+				for _, path := range []string{"bin", "reports", ".github/scripts"} {
+					if err := os.MkdirAll(filepath.Join(dir, path), 0o700); err != nil {
+						t.Fatal(err)
+					}
 				}
-			}
-			for path, raw := range map[string][]byte{"Makefile": makefile, ".github/scripts/check-coverage.awk": script, "reports/coverage.out": []byte("mode: set\nx.go:1.1,2.1 100 1\n")} {
-				if err := os.WriteFile(filepath.Join(dir, path), raw, 0o600); err != nil {
-					t.Fatal(err)
+				for path, raw := range map[string][]byte{"Makefile": makefile, ".github/scripts/check-coverage.awk": script, "reports/coverage.out": []byte("mode: set\nx.go:1.1,2.1 100 1\n")} {
+					if err := os.WriteFile(filepath.Join(dir, path), raw, 0o600); err != nil {
+						t.Fatal(err)
+					}
 				}
-			}
-			stub := `#!/bin/sh
+				stub := `#!/bin/sh
 case "$1" in
 env)
   case "$2" in
@@ -120,33 +121,56 @@ env)
   GOHOSTARCH) printf '%s\n' "$COVERAGE_TEST_HOST_ARCH" ;;
   *) exit 99 ;;
   esac ;;
-run) test "$2" = ./cmd/openapimeta-sync && test "$3" = -check ;;
+run)
+  case "$2" in
+  ./cmd/openapimeta-sync) test "$3" = -check ;;
+  gotest.tools/gotestsum@v1.13.0)
+    test "$3" = --junitfile && test "$4" = reports/testcase.xml || exit 99
+    printf '<testsuites/>\n' > reports/testcase.xml
+    printf '%s' "$PROFILE" > reports/coverage.out
+    printf '%s\n' "$@" > test-args
+    exit "$TEST_EXIT" ;;
+  github.com/boumenot/gocover-cobertura@v1.5.0)
+    test "$3" = -strict || exit 99
+    cat >/dev/null
+    printf '<coverage/>\n' ;;
+  *) exit 99 ;;
+  esac ;;
+tool) test "$2" = cover ;;
 list) printf '%s\n' example/pkg example/cmd/specgen; exit "$LIST_EXIT" ;;
 test) printf '%s' "$PROFILE" > reports/coverage.out; printf '%s\n' "$@" > test-args; exit "$TEST_EXIT" ;;
 *) exit 99 ;;
 esac
 `
-			if err := os.WriteFile(filepath.Join(dir, "bin", "go"), []byte(stub), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			cmd := exec.Command("make", "--no-print-directory", "coverage")
-			cmd.Dir = dir
-			cmd.Env = append(os.Environ(), "MAKEFLAGS=", "PATH="+filepath.Join(dir, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"), "LIST_EXIT="+tt.listExit, "TEST_EXIT="+tt.testExit, "PROFILE="+tt.profile,
-				"COVERAGE_TEST_HOST_OS="+runtime.GOOS, "COVERAGE_TEST_HOST_ARCH="+runtime.GOARCH)
-			out, err := cmd.CombinedOutput()
-			if (err == nil) != tt.pass {
-				t.Fatalf("pass=%t, want %t: %s", err == nil, tt.pass, out)
-			}
-			if tt.listExit != "0" {
-				if _, err := os.Stat(filepath.Join(dir, "reports", "coverage.out")); !os.IsNotExist(err) {
-					t.Fatalf("stale profile survived listing failure: %v", err)
+				if err := os.WriteFile(filepath.Join(dir, "bin", "go"), []byte(stub), 0o700); err != nil {
+					t.Fatal(err)
 				}
-			} else {
-				args, err := os.ReadFile(filepath.Join(dir, "test-args"))
-				if err != nil || !strings.Contains(string(args), "-coverpkg=example/pkg\n") || strings.Contains(string(args), "specgen") {
-					t.Fatalf("wrong test scope: %q, %v", args, err)
+				cmd := exec.Command("make", "--no-print-directory", target)
+				cmd.Dir = dir
+				cmd.Env = append(os.Environ(), "MAKEFLAGS=", "PATH="+filepath.Join(dir, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"), "LIST_EXIT="+tt.listExit, "TEST_EXIT="+tt.testExit, "PROFILE="+tt.profile,
+					"COVERAGE_TEST_HOST_OS="+runtime.GOOS, "COVERAGE_TEST_HOST_ARCH="+runtime.GOARCH)
+				out, err := cmd.CombinedOutput()
+				if (err == nil) != tt.pass {
+					t.Fatalf("pass=%t, want %t: %s", err == nil, tt.pass, out)
 				}
-			}
-		})
+				if tt.listExit != "0" {
+					if _, err := os.Stat(filepath.Join(dir, "reports", "coverage.out")); !os.IsNotExist(err) {
+						t.Fatalf("stale profile survived listing failure: %v", err)
+					}
+				} else {
+					args, err := os.ReadFile(filepath.Join(dir, "test-args"))
+					if err != nil || !strings.Contains(string(args), "-coverpkg=example/pkg\n") || strings.Contains(string(args), "specgen") {
+						t.Fatalf("wrong test scope: %q, %v", args, err)
+					}
+					if target == "ci-test" {
+						for _, report := range []string{"testcase.xml", "coverage.xml"} {
+							if _, err := os.Stat(filepath.Join(dir, "reports", report)); err != nil {
+								t.Fatalf("report missing after test exit %s: %s: %v", tt.testExit, report, err)
+							}
+						}
+					}
+				}
+			})
+		}
 	}
 }
