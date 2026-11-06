@@ -24,6 +24,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -77,13 +78,36 @@ jobs:
       - name: Test and enforce 95% UT coverage
         run: make coverage
 
-      - name: Upload UT coverage
-        if: always()
+      - name: Generate main coverage XML
+        if: ${{ !cancelled() && hashFiles('reports/coverage.out') != '' }}
+        run: go run github.com/boumenot/gocover-cobertura@v1.5.0 -strict < reports/coverage.out > reports/coverage.xml
+
+      - name: Save main coverage report
+        if: ${{ !cancelled() && hashFiles('reports/coverage.xml') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ut-coverage-main
+          path: reports/coverage.xml
+          if-no-files-found: error
+
+      - name: Save total coverage report
+        if: ${{ !cancelled() && hashFiles('reports/coverage.xml') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: ut-coverage
-          path: reports/coverage.out
-          if-no-files-found: ignore
+          path: reports/coverage.xml
+          if-no-files-found: error
+
+      - name: Upload main coverage to Codecov
+        if: ${{ !cancelled() && hashFiles('reports/coverage.xml') != '' }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: aliyun/elastic-compute-control-cli
+          files: reports/coverage.xml
+          flags: main
+          disable_search: true
+          fail_ci_if_error: true
 
       - name: Test DSH plugin
         run: make review-dsh-plugin
