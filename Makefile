@@ -7,7 +7,7 @@ REVIEW_NPM_CACHE ?= $(REVIEW_CACHE_DIR)/npm
 REVIEW_GOPROXY ?= https://proxy.golang.org,direct
 REVIEW_ENV = env GOPATH="$(REVIEW_GOPATH)" GOCACHE="$(REVIEW_GOCACHE)" GOMODCACHE="$(REVIEW_GOMODCACHE)" GOPROXY="$(REVIEW_GOPROXY)" npm_config_cache="$(REVIEW_NPM_CACHE)"
 
-.PHONY: help install build test coverage ci-test lint fmt clean generate metadata-prepare metadata-check metadata-sync drift drift-baseline drift-check specdrift prepare-public-release check-public-release check-release-version review-final review-dsh-plugin review-e2e review-website
+.PHONY: help install build test coverage branch-coverage branch-coverage-report ci-test lint fmt clean generate metadata-prepare metadata-check metadata-sync drift drift-baseline drift-check specdrift prepare-public-release check-public-release check-release-version review-final review-dsh-plugin review-e2e review-website
 
 install: ## Install git pre-commit hook
 	git config core.hooksPath .githooks
@@ -32,6 +32,12 @@ coverage: metadata-check ## Run Go tests and require at least 95% statement cove
 	coverpkgs=$$(printf '%s\n' "$$pkgs" | paste -sd, -); \
 	go test -coverpkg="$$coverpkgs" -coverprofile=reports/coverage.out $$pkgs; \
 	awk -f .github/scripts/check-coverage.awk reports/coverage.out
+
+branch-coverage: metadata-check ## Require at least 85% native Go branch-outcome coverage
+	node .github/scripts/branch-coverage.mjs $(TEST_PACKAGES)
+
+branch-coverage-report: metadata-check ## Report native Go branch outcomes without enforcing the floor
+	node .github/scripts/branch-coverage.mjs --report-only $(TEST_PACKAGES)
 
 ci-test: metadata-check ## Run CI tests and write reports
 	@mkdir -p reports

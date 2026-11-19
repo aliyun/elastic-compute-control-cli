@@ -152,3 +152,6 @@ Learn more in the [Quick Start](https://aliyun.github.io/elastic-compute-control
 ## Contributing
 
 Start with the [resource spec guide](https://aliyun.github.io/elastic-compute-control-cli/docs/contributing/resource-specs).
+
+See the [Go coverage guide](docs/testing/coverage.md) for the independent 95%
+statement and 85% branch-outcome gates, local reports, and measurement scope.

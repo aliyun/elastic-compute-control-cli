@@ -78,6 +78,20 @@ jobs:
       - name: Test and enforce 95% UT coverage
         run: make ci-test
 
+      - name: Test branch coverage tooling
+        run: node --test .github/scripts/branch-coverage.test.mjs
+
+      - name: Test and enforce 85% branch coverage
+        run: make branch-coverage
+
+      - name: Save branch coverage report
+        if: ${{ !cancelled() && hashFiles('reports/branch-coverage/coverage.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ut-branch-coverage-main
+          path: reports/branch-coverage/
+          if-no-files-found: error
+
       - name: Save main test results
         if: ${{ !cancelled() && hashFiles('reports/testcase.xml') != '' }}
         uses: actions/upload-artifact@v4

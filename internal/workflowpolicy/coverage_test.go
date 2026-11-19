@@ -80,6 +80,90 @@ func TestCIEnforcesCoverage(t *testing.T) {
 	t.Fatal("CI must unconditionally run make ci-test")
 }
 
+func TestCIEnforcesBranchCoverage(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]apiSyncWorkflowJob `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(raw, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	var tooling, gate, artifact bool
+	for _, step := range workflow.Jobs["test"].Steps {
+		if step.Run == "node --test .github/scripts/branch-coverage.test.mjs" && step.If == "" {
+			tooling = true
+		}
+		if step.Run == "make branch-coverage" && step.If == "" {
+			gate = true
+		}
+		if step.Uses == "actions/upload-artifact@v4" && workflowString(step.With["path"]) == "reports/branch-coverage/" && strings.Contains(step.If, "!cancelled()") {
+			artifact = true
+		}
+	}
+	if !tooling || !gate || !artifact {
+		t.Fatalf("CI branch coverage tooling=%t gate=%t failure artifacts=%t", tooling, gate, artifact)
+	}
+}
+
+func TestBranchCoverageMakeTargetsPropagateFailures(t *testing.T) {
+	t.Parallel()
+	requireAPISyncTools(t, "make")
+	makefile, err := os.ReadFile(filepath.Join("..", "..", "Makefile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"branch-coverage", "branch-coverage-report"} {
+		for _, exit := range []string{"0", "1"} {
+			t.Run(target+"/exit-"+exit, func(t *testing.T) {
+				dir := t.TempDir()
+				goStub := `#!/bin/sh
+case "$1" in
+env)
+  case "$2" in
+  GOHOSTOS) printf '%s\n' "$BRANCH_HOST_OS" ;;
+  GOHOSTARCH) printf '%s\n' "$BRANCH_HOST_ARCH" ;;
+  *) exit 99 ;;
+  esac ;;
+run) test "$2" = ./cmd/openapimeta-sync && test "$3" = -check ;;
+*) exit 99 ;;
+esac
+`
+				nodeStub := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$BRANCH_TEST_ARGS\"\nexit \"$BRANCH_TEST_EXIT\"\n"
+				for name, data := range map[string][]byte{"Makefile": makefile, "go": []byte(goStub), "node": []byte(nodeStub)} {
+					if err := os.WriteFile(filepath.Join(dir, name), data, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				argsPath := filepath.Join(dir, "args")
+				cmd := exec.Command("make", "--no-print-directory", target)
+				cmd.Dir = dir
+				cmd.Env = append(os.Environ(), "MAKEFLAGS=", "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
+					"BRANCH_TEST_ARGS="+argsPath, "BRANCH_TEST_EXIT="+exit, "BRANCH_HOST_OS="+runtime.GOOS, "BRANCH_HOST_ARCH="+runtime.GOARCH)
+				out, err := cmd.CombinedOutput()
+				if (err == nil) != (exit == "0") {
+					t.Fatalf("collector exit %s was not propagated: %v\n%s", exit, err, out)
+				}
+				args, err := os.ReadFile(argsPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := ".github/scripts/branch-coverage.mjs\n"
+				if target == "branch-coverage-report" {
+					want += "--report-only\n"
+				}
+				want += "./internal/...\n./pkg/...\n./cmd/...\n./specs/...\n"
+				if string(args) != want {
+					t.Fatalf("wrong branch collection scope or gate: %q, want %q", args, want)
+				}
+			})
+		}
+	}
+}
+
 func TestCoverageMakeTargetPropagatesFailures(t *testing.T) {
 	t.Parallel()
 	requireAPISyncTools(t, "make", "awk")
