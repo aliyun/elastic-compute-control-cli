@@ -60,8 +60,16 @@ func (r *openAPIRequest) BodyValue() any {
 		return nil
 	}
 	var decoded any
-	if err := json.Unmarshal(r.content, &decoded); err == nil {
-		return decoded
+	decoder := json.NewDecoder(bytes.NewReader(r.content))
+	// Volume IDs in nested configuration can exceed float64's exact integer
+	// range. Other ROA body consumers retain their established float64 shape.
+	if r.Product == "FCSandbox" && r.ApiName == "CreateVolume" {
+		decoder.UseNumber()
+	}
+	if err := decoder.Decode(&decoded); err == nil {
+		if err := decoder.Decode(new(any)); err == io.EOF {
+			return decoded
+		}
 	}
 	return string(r.content)
 }

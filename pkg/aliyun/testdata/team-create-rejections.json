@@ -1,0 +1,34 @@
+{
+  "proven": {
+    "error": {
+      "kind": "service",
+      "code": "CloudAPIError",
+      "message": "API call failed; see actions for details",
+      "retryable": false
+    },
+    "actions": [
+      {
+        "request_id": "req-rejected",
+        "action_name": "CreateTeam",
+        "code": "NoPermission",
+        "message": "denied",
+        "provider_verified": true
+      }
+    ]
+  },
+  "unproven": {
+    "error": {
+      "kind": "service",
+      "code": "CloudAPIError",
+      "message": "API call failed; see actions for details",
+      "retryable": false
+    },
+    "actions": [
+      {
+        "action_name": "CreateTeam",
+        "code": "NoPermission",
+        "message": "denied"
+      }
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "actions": [
+    {
+      "request_id": "req-wire",
+      "action_name": "GetTeam",
+      "code": "TeamNotFound",
+      "message": "gone",
+      "provider_verified": true
+    }
+  ],
+  "error": {
+    "kind": "not_found",
+    "code": "NotFound",
+    "message": "resource not found",
+    "retryable": false
+  }
+}

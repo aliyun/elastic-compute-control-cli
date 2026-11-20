@@ -12,34 +12,59 @@ const (
 )
 
 type AppError struct {
-	category   Category
-	payload    ErrorPayload
-	actions    []Action
-	requestID  string
-	rawCode    string
-	rawMessage string
+	category                 Category
+	payload                  ErrorPayload
+	actions                  []Action
+	requestID                string
+	rawCode                  string
+	rawMessage               string
+	verifiedProviderResponse bool
+}
+
+// AcceptedVolume carries only the validated allocation tuple from a Volume
+// create response whose unrelated output fields could not be decoded.
+type AcceptedVolume struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	TeamID    string `json:"team_id"`
+	Region    string `json:"region"`
+	RequestID string `json:"request_id"`
+	Operation string `json:"operation"`
+
+	AllocationConfirmed bool `json:"allocation_confirmed,omitempty"`
 }
 
 type ErrorPayload struct {
-	Kind            string   `json:"kind"`
-	Code            string   `json:"code"`
-	Message         string   `json:"message"`
-	Retryable       bool     `json:"retryable"`
-	Suggestion      string   `json:"suggestion,omitempty"`
-	SuggestedAction string   `json:"suggested_action,omitempty"`
-	Detail          string   `json:"detail,omitempty"`
-	Field           string   `json:"field,omitempty"`
-	AcceptedValues  []string `json:"accepted_values,omitempty"`
-	CurrentState    string   `json:"current_state,omitempty"`
-	ExpectedStates  []string `json:"expected_states,omitempty"`
-	RecoveryCommand []string `json:"recovery_command,omitempty"`
+	Kind            string          `json:"kind"`
+	Code            string          `json:"code"`
+	Message         string          `json:"message"`
+	Retryable       bool            `json:"retryable"`
+	Suggestion      string          `json:"suggestion,omitempty"`
+	SuggestedAction string          `json:"suggested_action,omitempty"`
+	Detail          string          `json:"detail,omitempty"`
+	Field           string          `json:"field,omitempty"`
+	AcceptedValues  []string        `json:"accepted_values,omitempty"`
+	CurrentState    string          `json:"current_state,omitempty"`
+	ExpectedStates  []string        `json:"expected_states,omitempty"`
+	RecoveryCommand []string        `json:"recovery_command,omitempty"`
+	AcceptedVolume  *AcceptedVolume `json:"accepted_volume,omitempty"`
 }
 
 type Action struct {
-	RequestID  string `json:"request_id,omitempty"`
-	ActionName string `json:"action_name"`
-	Code       string `json:"code,omitempty"`
-	Message    string `json:"message,omitempty"`
+	RequestID  string        `json:"request_id,omitempty"`
+	ActionName string        `json:"action_name"`
+	Code       string        `json:"code,omitempty"`
+	Message    string        `json:"message,omitempty"`
+	Target     *ActionTarget `json:"target,omitempty"`
+	// Only a structured provider response may set this. Diagnostic codes are
+	// still useful to callers, but cannot retire a cleanup finalizer.
+	ProviderVerified bool `json:"provider_verified,omitempty"`
+}
+
+type ActionTarget struct {
+	RoleName   string `json:"RoleName"`
+	PolicyName string `json:"PolicyName,omitempty"`
+	PolicyType string `json:"PolicyType,omitempty"`
 }
 
 type Option func(*AppError)
@@ -134,6 +159,29 @@ func WithRawCause(code, message string) Option {
 		err.rawCode = code
 		err.rawMessage = message
 	}
+}
+
+// WithVerifiedProviderResponse marks an error built from a structured SDK
+// response with an HTTP status. Human diagnostic text never sets this flag.
+func WithVerifiedProviderResponse() Option {
+	return func(err *AppError) { err.verifiedProviderResponse = true }
+}
+
+func HasVerifiedProviderResponse(source error) bool {
+	var appErr *AppError
+	return stderrors.As(source, &appErr) && appErr.verifiedProviderResponse
+}
+
+func WithAcceptedVolume(value AcceptedVolume) Option {
+	return func(err *AppError) { err.payload.AcceptedVolume = &value }
+}
+
+func AcceptedVolumeFrom(source error) (AcceptedVolume, bool) {
+	var appErr *AppError
+	if !stderrors.As(source, &appErr) || appErr.payload.AcceptedVolume == nil {
+		return AcceptedVolume{}, false
+	}
+	return *appErr.payload.AcceptedVolume, true
 }
 
 func WithDetails(source error, options ...Option) error {

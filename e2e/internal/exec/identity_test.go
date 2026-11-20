@@ -34,6 +34,21 @@ echo '{"response":{"AccountId":"1234567890123456","IdentityType":"AssumedRoleUse
 	}
 }
 
+func TestReadIdentityKeepsAccountForNonVolumeConsumers(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a shell script")
+	}
+	bin := filepath.Join(t.TempDir(), "ecctl")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho '{\"response\":{\"AccountId\":\"1234567890123456\",\"IdentityType\":\"Account\"}}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := IdentityPin{Version: 1, AccountID: "1234567890123456", Type: "Account"}
+	got, err := ReadIdentity(context.Background(), Config{Bin: bin, ExpectedIdentity: &want}, "non-volume")
+	if err != nil || got != want {
+		t.Fatalf("shared Account identity was rejected: got=%+v err=%v", got, err)
+	}
+}
+
 func TestExecRecordsWhetherMutationProcessStarted(t *testing.T) {
 	missing := Run(context.Background(), Config{Bin: filepath.Join(t.TempDir(), "missing")}, "ecctl test create")
 	if missing.Started || missing.Err == nil {

@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -50,6 +52,7 @@ type Options struct {
 	Surface            string
 	Parallel           int
 	EcctlBin           string
+	EcctlBinSHA256     string
 	StepTimeout        time.Duration
 	Keep               bool
 	DryRun             bool
@@ -59,9 +62,11 @@ type Options struct {
 	PreResolvedLingjun *paramspkg.LingjunResult
 	Session            *Session
 
-	quotaLifecycleForbidden bool // set from the current suite before rendering steps
-	quotaLifecycle          bool // owned Team and Quota commands share one credential binding
-	quotaLifecycleKnown     bool // runCase classified all steps before allocation
+	quotaLifecycleForbidden bool                                 // set from the current suite before rendering steps
+	quotaLifecycle          bool                                 // owned Team and Quota commands share one credential binding
+	quotaLifecycleKnown     bool                                 // runCase classified all steps before allocation
+	volumeLifecycle         bool                                 // Team creators use the run-owned Volume fixture credential
+	testFixtureSetup        func(*cleanup, map[string]any) error // package tests seed a fake run fixture
 }
 
 // Region is one role's selected region profile and resolved prerequisite
@@ -99,6 +104,24 @@ func normalizeRegions(opt *Options) (map[string]Region, error) {
 	return regions, nil
 }
 
+// CanonicalEcctlBin pins the executable spelling used in protected journals
+// and the later read-only reconciliation command.
+func CanonicalEcctlBin(value string) (string, error) {
+	found, err := exec.LookPath(value)
+	if err != nil {
+		return "", fmt.Errorf("resolve ecctl binary %q: %w", value, err)
+	}
+	absolute, err := filepath.Abs(found)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", fmt.Errorf("resolve ecctl binary target %q: %w", value, err)
+	}
+	return filepath.Abs(resolved)
+}
+
 // Run executes the suites and returns the result model. It records per-case
 // failures and continues unless a pending Quota update has fenced cleanup;
 // later cases are then skipped before allocation. An error is returned only
@@ -112,6 +135,13 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 	}
 	if opt.StepTimeout <= 0 {
 		opt.StepTimeout = 10 * time.Minute
+	}
+	if opt.CleanupJournal != "" && !opt.DryRun {
+		var err error
+		opt.EcctlBin, err = CanonicalEcctlBin(opt.EcctlBin)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	regions, err := normalizeRegions(&opt)
@@ -152,6 +182,33 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 	if len(suites) == 0 {
 		return setupErr(fmt.Errorf("no cases selected"))
 	}
+	volumeSelected, volumeTeamOwned := false, false
+	for _, suite := range suites {
+		if suite.Resource == "sandbox/volume" {
+			volumeSelected = true
+			for _, step := range suite.Steps {
+				if step.Local == nil && isTeamCreate(step.Run) {
+					volumeTeamOwned = true
+				}
+			}
+		}
+	}
+	binSHA256 := ""
+	if opt.CleanupJournal != "" && !opt.DryRun {
+		for _, suite := range suites {
+			if suite.Resource != "sandbox/volume" {
+				continue
+			}
+			binSHA256, err = journalfile.ExecutableSHA256(opt.EcctlBin)
+			if err != nil {
+				return setupErr(fmt.Errorf("pin Volume fixture executable: %w", err))
+			}
+			if opt.EcctlBinSHA256 != "" && opt.EcctlBinSHA256 != binSHA256 {
+				return setupErr(fmt.Errorf("Volume fixture executable changed after run selection"))
+			}
+			break
+		}
+	}
 	if opt.Session != nil {
 		if err := opt.Session.checkRetainedQuotaOwnership(); err != nil {
 			return setupErr(err)
@@ -159,8 +216,23 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 	}
 	for _, suite := range suites {
 		for _, step := range suite.Steps {
+			if step.Local == nil {
+				volumeAction, volumeErr := journalcmd.VolumeMutationAction(step.Run)
+				if (volumeAction != "" || volumeErr != nil) && suite.Resource != "sandbox/volume" {
+					return setupErr(fmt.Errorf("case %s step %s: Volume mutation requires the sandbox/volume case", suite.Resource, step.Name))
+				}
+				if volumeSelected && !volumeTeamOwned && suite.Resource != "sandbox/volume" && isTeamCreate(step.Run) {
+					return setupErr(fmt.Errorf("case %s step %s: ordinary Team creator cannot share a Volume run", suite.Resource, step.Name))
+				}
+				if volumeSelected && suite.Resource == "sandbox/volume" && (!suite.Serial || suite.Execution == scenario.ExecutionDAG) && (volumeAction != "" || isTeamCreate(step.Run)) {
+					return setupErr(fmt.Errorf("case %s: Volume lifecycle requires one serial case-owned Team", suite.Resource))
+				}
+			}
 			if step.Local == nil && journalcmd.RawQuotaMutationCandidate(step.Run) {
 				return setupErr(fmt.Errorf("case %s step %s: raw FCSandbox Quota mutation is unsupported in E2E cases", suite.Resource, step.Name))
+			}
+			if step.Local == nil && journalcmd.RawVolumeMutationCandidate(step.Run) {
+				return setupErr(fmt.Errorf("case %s step %s: raw FCSandbox Volume mutation is unsupported in E2E cases", suite.Resource, step.Name))
 			}
 			if !opt.DryRun && quotaUpdateCandidate(step, step.Run) && (!suite.Serial || suite.Execution == scenario.ExecutionDAG) {
 				return setupErr(fmt.Errorf("case %s: Quota update requires a serial sequential lifecycle", suite.Resource))
@@ -211,7 +283,7 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 
 	execCfgs := make(map[string]execpkg.Config, len(regions))
 	for role, region := range regions {
-		execCfgs[role] = execpkg.Config{Bin: opt.EcctlBin, Region: region.ID, Env: opt.Env}
+		execCfgs[role] = execpkg.Config{Bin: opt.EcctlBin, ExpectedBinSHA256: binSHA256, Region: region.ID, Env: opt.Env}
 	}
 	execCfg := execCfgs["primary"]
 	primaryPrerequisites := regions["primary"].Prerequisites
@@ -256,7 +328,7 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 			return setupErr(err)
 		}
 	}
-	cl := newCleanup(execCfgs, operations, opt.Keep, opt.CleanupJournal, report.CleanupJournal{RunID: opt.RunID, ExecutionID: opt.ExecutionID, Surface: opt.Surface}, opt.Logf)
+	cl := newCleanup(execCfgs, operations, opt.Keep, opt.CleanupJournal, report.CleanupJournal{RunID: opt.RunID, ExecutionID: opt.ExecutionID, Surface: opt.Surface, EcctlBinSHA256: binSHA256}, opt.Logf)
 	cl.requestedJournal, cl.journalPaths = requestedJournal, journalPaths
 	cl.session = opt.Session
 	if !opt.DryRun {
@@ -317,6 +389,11 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 		"global":        global,
 		"prerequisites": primaryPrerequisites,
 		"params":        parameters,
+	}
+	if opt.testFixtureSetup != nil {
+		if err := opt.testFixtureSetup(cl, base); err != nil {
+			return setupErr(err)
+		}
 	}
 
 	// Provision the shared stack only if some selected case needs it. A failure
@@ -953,9 +1030,28 @@ func resourcePrefix(runName string) string {
 	return prefix + suffix
 }
 
+func validateStackVolumeCommand(command string) error {
+	if journalcmd.RawVolumeMutationCandidate(command) {
+		return fmt.Errorf("raw FCSandbox Volume shared-stack mutations are unsupported; use an owned case lifecycle")
+	}
+	volumeAction, volumeErr := journalcmd.VolumeCommandAction(command)
+	if volumeErr != nil {
+		return fmt.Errorf("cannot classify shared-stack Volume command: %w", volumeErr)
+	}
+	switch volumeAction {
+	case "", "get", "show", "describe", "list", "ls":
+		return nil
+	default:
+		return fmt.Errorf("Volume shared-stack mutations are unsupported; use an owned case lifecycle")
+	}
+}
+
 func validateStackTemplateCommand(command string) error {
 	if quotaUpdateCandidate(scenario.Step{}, command) || quotaDeleteCandidate(command) {
 		return fmt.Errorf("Quota shared-stack mutations are unsupported; use an owned case lifecycle")
+	}
+	if err := validateStackVolumeCommand(command); err != nil {
+		return err
 	}
 	native, err := nativeTemplateCommandStatus(command)
 	if err != nil {
@@ -1043,6 +1139,11 @@ func provisionStack(ctx context.Context, opt Options, execCfg execpkg.Config, cl
 			sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusError, Error: message})
 			continue
 		}
+		if err := validateStackVolumeCommand(ps.Teardown); err != nil {
+			failures[ps.ID] = err.Error()
+			sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusError, Error: err.Error()})
+			continue
+		}
 		if failed := directFailedDependency(ps, failures); failed != "" {
 			message := fmt.Sprintf("dependency %q failed", failed)
 			if stackStepSkipped(failures[failed]) {
@@ -1119,9 +1220,79 @@ func provisionStack(ctx context.Context, opt Options, execCfg execpkg.Config, cl
 			continue
 		}
 
+		fixtureKind := volumeFixtureKind(ps.ID)
+		stepCfg := execCfg
+		var fixtureItem *cleanupItem
+		if fixtureKind != "" || ps.ID == "volume_oss_bucket_info" {
+			bucket, _ := base["oss_bucket_name"].(string)
+			stepCfg, err = cl.boundVolumeFixtureConfig(ctx, execCfg, bucket, opt.StepTimeout)
+			if err == nil && ps.ID == "volume_oss_bucket_info" {
+				err = validateVolumeFixtureBucketLookup(ps, cmd, bucket)
+			}
+			if err == nil && fixtureKind != "" {
+				var td string
+				td, err = vars.Render(ps.Teardown, data)
+				if err == nil {
+					fixtureItem, err = cl.reserveVolumeFixture(scope, fixtureKind, cmd, td)
+				}
+			}
+			if err != nil {
+				cl.discardUnreservedVolumeFixtureBinding()
+				failures[ps.ID] = err.Error()
+				sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusError, Error: err.Error()})
+				continue
+			}
+		}
 		opt.Logf("stack %q: %s", ps.ID, report.Scrub(display))
+		if fixtureItem != nil {
+			if err := cl.checkReservedVolumeFixture(fixtureItem); err != nil {
+				failures[ps.ID] = err.Error()
+				sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusError, Error: err.Error()})
+				continue
+			}
+			bucket, _ := base["oss_bucket_name"].(string)
+			if !cl.fixtureMutationAllowed("create", fixtureKind, bucket, fixtureItem, stepCfg) {
+				err := fmt.Errorf("Volume fixture allocation lacks its run-owned reservation or original credential binding")
+				if retireErr := cl.retireUnstartedVolumeFixture(fixtureItem); retireErr != nil {
+					err = errors.Join(err, retireErr)
+				}
+				failures[ps.ID] = err.Error()
+				sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusError, Error: err.Error()})
+				continue
+			}
+			if fixtureKind == "attachment" {
+				journal, role, policy, err := cl.volumeFixtureAttachmentParents(fixtureItem)
+				if err == nil {
+					_, err = journalfile.VolumeFixtureRoleMatches(ctx, stepCfg, role, journal, execpkg.Run)
+				}
+				if err == nil {
+					_, err = journalfile.VolumeFixturePolicyMatches(ctx, stepCfg, policy, journal, execpkg.Run)
+				}
+				if err != nil {
+					if retireErr := cl.retireUnstartedVolumeFixture(fixtureItem); retireErr != nil {
+						err = fmt.Errorf("attachment preflight failed: %v; reservation retirement failed: %w", err, retireErr)
+					}
+					failures[ps.ID] = err.Error()
+					sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusError, Error: "Volume fixture attachment endpoint: " + err.Error()})
+					continue
+				}
+			}
+		}
+		if fixtureItem != nil {
+			if err := ctx.Err(); err != nil {
+				retireErr := cl.retireUnstartedVolumeFixture(fixtureItem)
+				failures[ps.ID] = errors.Join(err, retireErr).Error()
+				sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusError, Error: failures[ps.ID]})
+				continue
+			}
+			if err := cl.markVolumeFixtureDispatch(fixtureItem); err != nil {
+				failures[ps.ID] = err.Error()
+				sc.Steps = append(sc.Steps, report.Step{Name: ps.ID, Status: report.StatusError, Error: "Volume fixture dispatch: " + err.Error()})
+				continue
+			}
+		}
 		sctx, cancel := context.WithTimeout(ctx, opt.StepTimeout)
-		res := execpkg.Run(sctx, execCfg, cmd)
+		res := execpkg.Run(sctx, stepCfg, cmd)
 		cancel()
 
 		step := report.Step{
@@ -1133,8 +1304,26 @@ func provisionStack(ctx context.Context, opt Options, execCfg execpkg.Config, cl
 		if display != cmd {
 			step.Command = report.Scrub(display)
 		}
+		if fixtureItem != nil && !res.Started {
+			if err := cl.retireObservedVolumeFixture(fixtureItem, res); err != nil {
+				step.Status, step.Error = report.StatusError, "Volume fixture dispatch result is uncertain; pending reservation retained: "+err.Error()
+			} else {
+				step.Status, step.Error = report.StatusError, "Volume fixture create did not start"
+			}
+			sc.Steps = append(sc.Steps, step)
+			failures[ps.ID] = step.Error
+			continue
+		}
+		if fixtureItem != nil && res.Err == nil && res.Exit == 0 {
+			if err := cl.recordVolumeFixtureCreateReceipt(fixtureItem, res); err != nil {
+				step.Status, step.Error = report.StatusError, "record Volume fixture create receipt: "+err.Error()
+				sc.Steps = append(sc.Steps, step)
+				failures[ps.ID] = step.Error
+				continue
+			}
+		}
 		// Register teardown as soon as the resource may exist.
-		if ps.Teardown != "" {
+		if ps.Teardown != "" && fixtureKind == "" {
 			td, terr := vars.Render(ps.Teardown, captureInto(data, res, ps.At, ps.Capture))
 			if terr != nil {
 				if res.Err == nil && res.Exit == 0 {
@@ -1157,6 +1346,14 @@ func provisionStack(ctx context.Context, opt Options, execCfg execpkg.Config, cl
 			continue
 		}
 		if res.Exit != 0 {
+			if fixtureItem != nil && journalfile.VolumeFixtureDefinitiveCreateRejection(fixtureKind, cl.volumeFixtureBucket, res) {
+				if err := cl.retireObservedVolumeFixture(fixtureItem, res); err != nil {
+					step.Status, step.Error = report.StatusError, "settle rejected Volume fixture create: "+err.Error()
+					sc.Steps = append(sc.Steps, step)
+					failures[ps.ID] = step.Error
+					continue
+				}
+			}
 			step.Status, step.Error = report.StatusFail, failureDetail(res)
 			sc.Steps = append(sc.Steps, step)
 			failures[ps.ID] = fmt.Sprintf("exit %d", res.Exit)
@@ -1177,6 +1374,61 @@ func provisionStack(ctx context.Context, opt Options, execCfg execpkg.Config, cl
 		sc.Steps = append(sc.Steps, step)
 		if captureFailed {
 			continue
+		}
+		if ps.ID == "volume_oss_bucket_info" {
+			if err := validVolumeFixtureBucketInfo(cl, stackVars, res); err != nil {
+				sc.Steps[len(sc.Steps)-1].Status = report.StatusFail
+				sc.Steps[len(sc.Steps)-1].Error = err.Error()
+				failures[ps.ID] = err.Error()
+				continue
+			}
+			var bucketItem *cleanupItem
+			for _, item := range *scope {
+				if item.volumeFixtureKind == "bucket" && !item.done {
+					if bucketItem != nil {
+						bucketItem = nil
+						break
+					}
+					bucketItem = item
+				}
+			}
+			if bucketItem == nil {
+				failures[ps.ID] = "Volume fixture original bucket finalizer is ambiguous"
+				sc.Steps[len(sc.Steps)-1].Status = report.StatusError
+				sc.Steps[len(sc.Steps)-1].Error = failures[ps.ID]
+				continue
+			}
+			bucketDate, _ := stackVars["volume_bucket_creation_date"].(string)
+			if err := cl.recordVolumeFixtureBucketEvidence(bucketItem, bucketDate); err != nil {
+				failures[ps.ID] = err.Error()
+				sc.Steps[len(sc.Steps)-1].Status = report.StatusError
+				sc.Steps[len(sc.Steps)-1].Error = "record Volume fixture bucket creation: " + err.Error()
+				continue
+			}
+		}
+		if fixtureKind == "role" {
+			if err := validVolumeFixtureRole(cl, stackVars, res); err != nil {
+				sc.Steps[len(sc.Steps)-1].Status = report.StatusFail
+				sc.Steps[len(sc.Steps)-1].Error = err.Error()
+				failures[ps.ID] = err.Error()
+				continue
+			}
+		}
+		if fixtureKind == "policy" || fixtureKind == "attachment" {
+			if err := validVolumeFixtureRAMCreate(cl, fixtureKind, res); err != nil {
+				sc.Steps[len(sc.Steps)-1].Status = report.StatusFail
+				sc.Steps[len(sc.Steps)-1].Error = err.Error()
+				failures[ps.ID] = err.Error()
+				continue
+			}
+		}
+		if fixtureItem != nil {
+			if err := cl.settleVolumeFixture(fixtureItem); err != nil {
+				sc.Steps[len(sc.Steps)-1].Status = report.StatusError
+				sc.Steps[len(sc.Steps)-1].Error = "settle Volume fixture ownership: " + err.Error()
+				failures[ps.ID] = err.Error()
+				continue
+			}
 		}
 	}
 	return failures
@@ -1271,12 +1523,17 @@ func runCase(
 	}
 	opt.quotaLifecycleForbidden = !s.Serial || s.Execution == scenario.ExecutionDAG
 	opt.quotaLifecycleKnown = true
+	opt.volumeLifecycle = s.Resource == "sandbox/volume"
 	// Admission follows the operation rather than the suite's resource label:
 	// mixed serial suites can own a Team and then update its Quota.
 	opt.quotaLifecycle = false
 	for _, step := range s.Steps {
 		if step.Local == nil && journalcmd.RawQuotaMutationCandidate(step.Run) {
 			cr.Status, cr.Error = report.StatusError, "raw FCSandbox Quota mutation is unsupported in E2E cases"
+			return cr
+		}
+		if step.Local == nil && journalcmd.RawVolumeMutationCandidate(step.Run) {
+			cr.Status, cr.Error = report.StatusError, "raw FCSandbox Volume mutation is unsupported in E2E cases"
 			return cr
 		}
 	}
@@ -1297,7 +1554,7 @@ func runCase(
 	data := vars.Clone(base)
 	data["run_name"] = opt.RunName + "-" + caseSlug(s.Resource)
 	data["inputs"] = inputs
-	if s.Resource == "sandbox/team" || s.Resource == "sandbox/template-cache" || s.Resource == "sandbox/quota" {
+	if s.Resource == "sandbox/team" || s.Resource == "sandbox/template-cache" || s.Resource == "sandbox/quota" || s.Resource == "sandbox/volume" {
 		if err := teamOwnership(data); err != nil {
 			cr.Status, cr.Error = report.StatusError, err.Error()
 			return cr
@@ -1362,10 +1619,15 @@ func runSequentialCase(
 			cr.Status = report.StatusFail
 			break
 		}
-		// A Quota pagination case needs two independently owned Teams. Rotate
-		// the nonce before the second protected create, never its captured ID.
-		if opt.quotaLifecycle && s.Resource == "sandbox/quota" && isTeamCreate(st.Run) {
+		// A Volume lifecycle owns one Team; Quota may rotate its nonce for a
+		// second protected Team without changing a captured Team ID.
+		if ((opt.quotaLifecycle && s.Resource == "sandbox/quota") || s.Resource == "sandbox/volume") && isTeamCreate(st.Run) {
 			if teamCreates > 0 {
+				if s.Resource == "sandbox/volume" {
+					cr.Steps = append(cr.Steps, report.Step{Name: st.Name, Status: report.StatusError, Error: "Volume lifecycle permits one owned Team"})
+					cr.Status = report.StatusFail
+					break
+				}
 				if err := teamOwnership(data); err != nil {
 					cr.Steps = append(cr.Steps, report.Step{Name: st.Name, Status: report.StatusError, Error: err.Error()})
 					cr.Status = report.StatusFail
@@ -1704,9 +1966,12 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 	var privateDisplay string
 	var teamIntent *teamCreateIntent
 	var templateIntent *templateCreateIntent
+	var volumeIntent *templateCreateIntent
 	var cacheReservation *cleanupItem
 	var quotaReservation *cleanupItem
 	var ownedTeamDelete bool
+	var volumeDeleteItem *cleanupItem
+	var teamCreateRejected bool
 	if st.Local != nil {
 		sctx, cancel := context.WithTimeout(ctx, timeout)
 		res = runLocalAction(sctx, data, *st.Local)
@@ -1722,8 +1987,23 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 			sr.Status, sr.Error = report.StatusError, "render: "+renderErr.Error()
 			return sr, false
 		}
+		if opt.volumeLifecycle {
+			cl.mu.Lock()
+			binding := cl.volumeFixtureBinding
+			cl.mu.Unlock()
+			if binding != nil {
+				if err := journalfile.ValidateVolumeFixtureIdentity(binding); err != nil {
+					sr.Status, sr.Error = report.StatusError, err.Error()
+					return sr, false
+				}
+			}
+		}
 		if journalcmd.RawQuotaMutationCandidate(cmd) {
 			sr.Status, sr.Error = report.StatusError, "raw FCSandbox Quota mutation is unsupported in E2E cases"
+			return sr, false
+		}
+		if journalcmd.RawVolumeMutationCandidate(cmd) {
+			sr.Status, sr.Error = report.StatusError, "raw FCSandbox Volume mutation is unsupported in E2E cases"
 			return sr, false
 		}
 		display, displayErr := renderReportCommand(st.Run, data)
@@ -1779,9 +2059,31 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 				return sr, false
 			}
 			if isTeamCreate(cmd) {
+				// The probe binds resolved paths for execution. Reservation must
+				// still validate the original selectors against the fixture.
+				sourceEnv := execCfg.Env
 				var quotaBinding *report.QuotaCredentialBinding
+				var volumeBinding *report.QuotaCredentialBinding
 				if opt.quotaLifecycle {
 					quotaBinding, execCfg, err = captureQuotaCredentialBinding(ctx, execCfg, timeout)
+					if err != nil {
+						sr.Status, sr.Error = report.StatusError, err.Error()
+						return sr, false
+					}
+				}
+				if opt.volumeLifecycle {
+					cl.mu.Lock()
+					volumeBinding = cl.volumeFixtureBinding
+					cl.mu.Unlock()
+				} else {
+					cl.discardUnreservedVolumeFixtureBinding()
+				}
+				if volumeBinding != nil || opt.volumeLifecycle {
+					if volumeBinding == nil {
+						sr.Status, sr.Error = report.StatusError, "Volume Team requires its run-owned fixture credential binding"
+						return sr, false
+					}
+					execCfg, err = journalfile.ProbeQuotaBinding(ctx, volumeBinding, execCfg)
 					if err != nil {
 						sr.Status, sr.Error = report.StatusError, err.Error()
 						return sr, false
@@ -1802,7 +2104,7 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 					cl.teamCreatesPending--
 					cl.mu.Unlock()
 				}()
-				teamIntent, err = reserveTeamCreate(cmd, data, execCfg, cl, st, quotaBinding)
+				teamIntent, err = reserveTeamCreate(cmd, data, execCfg, cl, st, sourceEnv, quotaBinding, volumeBinding)
 				if err != nil {
 					sr.Status, sr.Error = report.StatusError, err.Error()
 					return sr, false
@@ -1815,8 +2117,16 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 					return sr, false
 				}
 				cmd, execCfg = templateIntent.command, templateIntent.cfg
+			} else if volumeCreateCandidate(cmd) {
+				volumeIntent, err = reserveVolumeCreate(ctx, cmd, execCfg, cl, st, timeout, caseScope(data))
+				if err != nil {
+					sr.Status, sr.Error = report.StatusError, err.Error()
+					return sr, false
+				}
+				cmd, execCfg = volumeIntent.command, volumeIntent.cfg
+				data["volume_name"] = volumeIntent.Name
 			}
-			if teamIntent == nil && templateIntent == nil {
+			if teamIntent == nil && templateIntent == nil && volumeIntent == nil {
 				cmd, execCfg, cacheReservation, err = cl.reserveTemplateCacheCreate(ctx, scope, cmd, execCfg, data, st, lockKeys)
 				if err != nil {
 					sr.Status, sr.Error = report.StatusError, err.Error()
@@ -1828,7 +2138,17 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 				sr.Status, sr.Error = report.StatusError, err.Error()
 				return sr, false
 			}
+			cmd, volumeDeleteItem, err = cl.bindOwnedVolumeDelete(*scope, cmd, "primary")
+			if err != nil {
+				sr.Status, sr.Error = report.StatusError, err.Error()
+				return sr, false
+			}
 			cmd, execCfg, err = cl.bindOwnedNativeTemplate(ctx, cmd, "primary", execCfg, timeout)
+			if err != nil {
+				sr.Status, sr.Error = report.StatusError, err.Error()
+				return sr, false
+			}
+			cmd, execCfg, err = cl.bindOwnedVolumeRead(ctx, cmd, "primary", execCfg, timeout)
 			if err != nil {
 				sr.Status, sr.Error = report.StatusError, err.Error()
 				return sr, false
@@ -1845,6 +2165,7 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 			for attempt := 0; ; attempt++ {
 				sctx, cancel := context.WithTimeout(ctx, timeout)
 				invokeCommand := func(bound execpkg.Config) error {
+					freshVolumeAttempt := false
 					if teamIntent != nil {
 						if err := checkJournalParentIdentity(teamIntent.journalPath, teamIntent.parent); err != nil {
 							return err
@@ -1855,7 +2176,67 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 							return err
 						}
 					}
+					if volumeDeleteItem != nil {
+						if err := verifyOwnedVolumeExecution(volumeDeleteItem.templateBinding, execCfg); err != nil {
+							return err
+						}
+						if err := cl.verifyOwnedVolumeDelete(volumeDeleteItem, cmd); err != nil {
+							return err
+						}
+						binding := volumeDeleteItem.templateBinding
+						bound = binding.BoundConfig(bound)
+						bound.Region, bound.Profile = binding.Region, binding.Profile
+						request, err := journalfile.ParseVolumeDeleteRequest(cmd)
+						if err != nil {
+							return err
+						}
+						teams, err := cl.ownedVolumeDeleteScopes(volumeDeleteItem)
+						if err != nil {
+							return err
+						}
+						probeCtx, cancelProbe := context.WithTimeout(context.WithoutCancel(sctx), 30*time.Second)
+						currentTeam, absent, probeErr := journalfile.ProbeVolumeScopes(probeCtx, bound, request.ID, binding.Name, binding.Region, binding.Profile, teams, cl.runCommand)
+						cancelProbe()
+						if probeErr != nil {
+							return probeErr
+						}
+						if absent {
+							if err := cl.requireTerminalVolumeAbsence(volumeDeleteItem); err != nil {
+								return err
+							}
+							if err := cl.consumeOwnedVolumeDelete(volumeDeleteItem); err != nil {
+								return err
+							}
+							return fmt.Errorf("owned Volume was already absent; authored delete sent no DeleteVolume request")
+						}
+						if volumeDeleteItem.volumeDeleteAttempted {
+							waitCtx, cancelWait := context.WithTimeout(context.WithoutCancel(sctx), 45*time.Second)
+							terminal := journalfile.WaitVolumeAbsent(waitCtx, bound, request.ID, binding.Name, binding.Region, binding.Profile, teams, cl.runCommand)
+							cancelWait()
+							if !terminal {
+								return fmt.Errorf("Volume delete was already attempted and remains present; retain for controlled reconciliation")
+							}
+							if err := cl.requireTerminalVolumeAbsence(volumeDeleteItem); err != nil {
+								return err
+							}
+							return cl.consumeOwnedVolumeDelete(volumeDeleteItem)
+						}
+						if !request.TeamSet || request.TeamID != currentTeam {
+							return fmt.Errorf("Volume delete Team selector differs from the current owned scope")
+						}
+						if err := sctx.Err(); err != nil {
+							return err
+						}
+						if err := cl.markOwnedVolumeDeleteAttempt(volumeDeleteItem); err != nil {
+							return err
+						}
+						freshVolumeAttempt = true
+					}
 					var teamItem *cleanupItem
+					var volumeTeamPath string
+					var volumeTeamJournal report.CleanupJournal
+					var volumeTeamEntry report.Resource
+					volumeTeamAlreadyAbsent := false
 					if teamDelete {
 						var err error
 						teamItem, err = cl.prepareOwnedTeamDelete(*scope, cmd, "primary", nil)
@@ -1863,6 +2244,16 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 							return err
 						}
 						ownedTeamDelete = teamItem != nil
+						if teamItem != nil && teamItem.volumeTeamBound {
+							volumeTeamPath, volumeTeamJournal, volumeTeamEntry, err = cl.volumeTeamChildContext(teamItem)
+							if err != nil {
+								return err
+							}
+							volumeTeamAlreadyAbsent, err = journalfile.PrepareVolumeTeamChildren(sctx, volumeTeamPath, volumeTeamJournal, volumeTeamEntry, bound, cl.runCommand)
+							if err != nil {
+								return err
+							}
+						}
 					}
 					cacheCommand, recognized, parseErr := parseTemplateCacheCommand(cmd)
 					if parseErr != nil {
@@ -1885,8 +2276,77 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 						}
 						bound = verified
 					}
-					invoked = true
-					res = cl.runCommand(sctx, bound, cmd)
+					if volumeIntent != nil {
+						if err := volumeIntent.withVolumeLaunchFence(sctx, func() {
+							invoked = true
+							res = cl.runCommand(sctx, bound, cmd)
+						}); err != nil {
+							if !invoked {
+								return err
+							}
+							res.Err = errors.Join(res.Err, fmt.Errorf("Volume create reservation fence became uncertain: %w", err))
+						}
+					} else {
+						if teamIntent != nil && teamIntent.VolumeBinding != nil {
+							if err := markVolumeTeamCreateDispatch(cl, teamIntent); err != nil {
+								return err
+							}
+						}
+						if volumeTeamAlreadyAbsent {
+							res = execpkg.Result{Started: true, Exit: 0, JSON: map[string]any{"deleted": true}}
+						} else {
+							if teamItem != nil && teamItem.volumeTeamBound {
+								if err := journalfile.ReserveVolumeTeamDelete(sctx, volumeTeamPath, volumeTeamJournal, volumeTeamEntry, bound); err != nil {
+									return err
+								}
+							}
+							invoked = true
+							res = cl.runCommand(sctx, bound, cmd)
+							if teamItem != nil && teamItem.volumeTeamBound && journalfile.IsVolumeTeamChildConflict(res) {
+								if err := journalfile.RecordVolumeTeamConflict(sctx, volumeTeamPath, volumeTeamJournal, volumeTeamEntry, bound, res); err != nil {
+									return err
+								}
+								retry, err := journalfile.RetryVolumeTeamDeleteAfterConflict(sctx, volumeTeamPath, volumeTeamJournal, volumeTeamEntry, bound, cl.runCommand)
+								if err != nil {
+									return err
+								}
+								res = retry
+							}
+						}
+					}
+					if freshVolumeAttempt && !res.Started && res.Exit == -1 && res.Err != nil {
+						if err := cl.restoreUnstartedOwnedVolumeDeleteAttempt(volumeDeleteItem); err != nil {
+							return fmt.Errorf("restore unused Volume delete marker: %w", err)
+						}
+						return fmt.Errorf("Volume delete did not start: %w", res.Err)
+					}
+					if freshVolumeAttempt && journalfile.VolumeDefinitiveDeleteRejection(res) {
+						probeCtx, cancelProbe := context.WithTimeout(context.WithoutCancel(sctx), 30*time.Second)
+						err := cl.restoreRejectedOwnedVolumeDeleteAttempt(probeCtx, volumeDeleteItem, bound)
+						cancelProbe()
+						if err != nil {
+							return fmt.Errorf("retain rejected Volume delete marker: %w", err)
+						}
+						return fmt.Errorf("Volume delete was definitively rejected; retry is available")
+					}
+					if volumeDeleteItem != nil {
+						request, err := journalfile.ParseVolumeDeleteRequest(cmd)
+						if err != nil {
+							return err
+						}
+						binding := volumeDeleteItem.templateBinding
+						teams, err := cl.ownedVolumeDeleteScopes(volumeDeleteItem)
+						if err != nil {
+							return err
+						}
+						probeCtx, cancelProbe := context.WithTimeout(context.WithoutCancel(sctx), 45*time.Second)
+						absent := journalfile.WaitVolumeAbsent(probeCtx, bound, request.ID, binding.Name, binding.Region, binding.Profile, teams, cl.runCommand)
+						cancelProbe()
+						if !absent {
+							return fmt.Errorf("owned Volume absence is unproven after delete")
+						}
+						return cl.consumeOwnedVolumeDelete(volumeDeleteItem)
+					}
 					if quotaDelete && res.Err == nil && (res.Exit == 0 || res.Exit == exitNotFound && exitOK(res.Exit)) {
 						return cl.consumeOwnedQuotaDelete(*scope, cmd, "primary")
 					}
@@ -1902,15 +2362,26 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 							// absence. Keep the marked finalizer for first-class cleanup.
 							return nil
 						}
-						return cl.consumeOwnedTeamDelete(teamItem)
+						if teamItem.volumeTeamBound {
+							proofCtx, cancelProof := context.WithTimeout(context.WithoutCancel(sctx), 30*time.Second)
+							readback, proofErr := cl.ownedTeamAbsence(proofCtx, teamItem)
+							cancelProof()
+							if proofErr != nil {
+								return fmt.Errorf("owned Volume Team absence is unproven: %w", proofErr)
+							}
+							return cl.consumeOwnedTeamDelete(teamItem, res, readback)
+						}
+						return cl.consumeOwnedTeamDelete(teamItem, res)
 					}
 					return nil
 				}
 				invoke := func(bound execpkg.Config) error {
-					if quotaDelete || teamDelete {
+					if quotaDelete || teamDelete || volumeDeleteItem != nil {
 						claim := cmd
 						if teamDelete {
 							claim = ownedTeamClaimKey(cmd, cl.execCfg["primary"].Region)
+						} else if volumeDeleteItem != nil {
+							claim = volumeDeleteItem.cmd
 						}
 						return cl.withDeleteClaim("primary", claim, func() error { return invokeCommand(bound) })
 					}
@@ -1931,7 +2402,7 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 					}
 				}
 				cancel()
-				if teamIntent != nil || templateIntent != nil || cacheReservation != nil || quotaReservation != nil || res.Exit == 0 || !isTransientNetworkError(res) || attempt >= len(stepRetryDelays) {
+				if teamIntent != nil || templateIntent != nil || volumeIntent != nil || cacheReservation != nil || quotaReservation != nil || res.Exit == 0 || !isTransientNetworkError(res) || attempt >= len(stepRetryDelays) {
 					break
 				}
 				shown := report.Scrub(renderedCommand)
@@ -2007,6 +2478,21 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 			})
 		} else {
 			err = invokeAttempts()
+			if teamIntent != nil && teamIntent.VolumeBinding != nil {
+				var retireErr error
+				switch {
+				case !res.Started && teamIntent.Dispatched:
+					retireErr = retireObservedVolumeTeamCreate(cl, teamIntent, res)
+				case !res.Started:
+					retireErr = retireUnstartedVolumeTeamCreate(cl, teamIntent)
+				case definitiveVolumeTeamCreateRejection(res):
+					retireErr = retireObservedVolumeTeamCreate(cl, teamIntent, res)
+					teamCreateRejected = retireErr == nil
+				}
+				if retireErr != nil {
+					err = errors.Join(err, res.Err, fmt.Errorf("retire non-allocating Volume Team reservation: %w", retireErr))
+				}
+			}
 		}
 		// A journal error after a subprocess must not erase its provider evidence.
 		// Preflight errors have no command result to record.
@@ -2029,6 +2515,17 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 			}
 			return sr, false
 		}
+	}
+	if teamIntent != nil && teamIntent.VolumeBinding != nil && !res.Started {
+		sr.Status, sr.Error = report.StatusError, "Volume Team create did not start"
+		if res.Err != nil {
+			sr.Error = res.Err.Error()
+		}
+		return sr, false
+	}
+	if teamCreateRejected {
+		sr.Status, sr.Error = report.StatusFail, failureDetail(res)
+		return sr, false
 	}
 	if quotaReservation != nil && !res.Started {
 		// The exact pending child was retired under the exclusive replay fence.
@@ -2078,7 +2575,37 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 			return sr, false
 		}
 	}
+	if volumeIntent != nil {
+		if err := finishVolumeCreate(res, cl, scope, data, lockKeys, timeout, volumeIntent); err != nil {
+			sr.Status = report.StatusFail
+			sr.Error = failureDetail(res)
+			if res.Err != nil {
+				sr.Error = res.Err.Error()
+			}
+			if sr.Error != "" {
+				sr.Error += "; "
+			}
+			sr.Error += err.Error()
+			return sr, false
+		}
+		if opt.volumeLifecycle && volumeIntent.volumeWaitAfterReceipt && res.Err == nil && res.Exit == 0 {
+			if err := waitOwnedVolumeReady(ctx, volumeIntent, timeout, cl.runCommand); err != nil {
+				sr.Status, sr.Error = report.StatusFail, err.Error()
+				return sr, false
+			}
+		}
+	}
 	teamID, validTeamID := teamCreateIdentity(res)
+	if teamIntent != nil && teamIntent.VolumeBinding != nil && validTeamID && res.Err == nil && res.Exit == 0 {
+		if err := recordVolumeTeamCreateID(cl, teamIntent, teamID, res); err != nil {
+			sr.Status, sr.Error = report.StatusError, "Volume Team create receipt is unproven: "+err.Error()
+			return sr, false
+		}
+		if err := confirmVolumeTeamCreate(execCfg, teamIntent, res, timeout); err != nil {
+			sr.Status, sr.Error = report.StatusError, "Volume Team ownership is unproven: "+err.Error()
+			return sr, false
+		}
+	}
 	if teamIntent != nil && (!validTeamID || res.Err != nil || res.Exit != 0) {
 		if teamIntent.QuotaBinding != nil {
 			cl.mu.Lock()
@@ -2104,7 +2631,7 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 
 	// Register teardown as soon as the create-ish step ran (even if asserts
 	// later fail) so the resource it produced is cleaned up.
-	if st.Teardown != "" && templateIntent == nil && cacheReservation == nil {
+	if st.Teardown != "" && templateIntent == nil && volumeIntent == nil && cacheReservation == nil {
 		td, terr := vars.Render(st.Teardown, mergeCaptures(data, res, st))
 		if teamIntent != nil {
 			// The normal success path must use the same safe, exact target as
@@ -2149,9 +2676,13 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 				}
 			} else if teamIntent != nil {
 				confirmed := res.Err == nil && res.Exit == 0
-				_, err = cl.pushItem(scope, caseScope(data), td, st.TeardownRegion, lockKeys, false, confirmed, teamIntent.QuotaBinding != nil)
+				_, err = cl.pushItemWithFixture(scope, caseScope(data), td, st.TeardownRegion, lockKeys, false, confirmed, teamIntent.QuotaBinding != nil, teamIntent.VolumeBinding, "", teamIntent)
 				if err != nil {
 					sr.Status, sr.Error = report.StatusError, "cleanup journal: "+err.Error()
+					return sr, false
+				}
+				if err := settleVolumeTeamCreate(cl, teamIntent, teamID); err != nil {
+					sr.Status, sr.Error = report.StatusError, "Volume Team registration: "+err.Error()
 					return sr, false
 				}
 			} else if err := cl.push(scope, caseScope(data), td, st.TeardownRegion, lockKeys); err != nil {

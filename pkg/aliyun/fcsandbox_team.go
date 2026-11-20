@@ -18,6 +18,17 @@ func teamAbsenceCode(code string) bool {
 	return code == "TeamNotFound" || code == "404"
 }
 
+func teamCreateRejectionStatus(code string) int {
+	switch code {
+	case "Forbidden", "NoPermission":
+		return 403
+	case "InvalidParameter":
+		return 400
+	default:
+		return 0
+	}
+}
+
 func validTeamIdentity(id string) bool {
 	if id == "" || id[0] == '-' || id[0] == '_' {
 		return false
@@ -36,6 +47,9 @@ func (c *OpenAPICaller) resourceResponseError(req *openAPIRequest, response map[
 	}
 	if c.isFCSandboxQuota() {
 		return c.fcQuotaResponseError(req, response)
+	}
+	if c.isFCSandboxVolume() {
+		return c.fcVolumeResponseError(req, response)
 	}
 	if !c.isFCSandboxTeam() {
 		return openAPIBusinessError(response)
@@ -63,7 +77,13 @@ func (c *OpenAPICaller) resourceResponseError(req *openAPIRequest, response map[
 		message = callerSanitizeCloudError(errors.New(message))
 		options := []ecerrors.Option{ecerrors.WithRequestID(requestID), ecerrors.WithRawCause(code, message)}
 		if req.ApiName == "GetTeam" && teamAbsenceCode(code) {
+			if code == "TeamNotFound" && volumeErrorEnvelopeProof(response, code, requestID) {
+				options = append(options, ecerrors.WithVerifiedProviderResponse())
+			}
 			return ecerrors.NotFound("NotFound", i18n.NewLocalizer("en").Message("TeamNotFound"), options...)
+		}
+		if req.ApiName == "CreateTeam" && teamCreateRejectionStatus(code) != 0 && volumeErrorEnvelopeProof(response, code, requestID) {
+			options = append(options, ecerrors.WithVerifiedProviderResponse())
 		}
 		return ecerrors.Service("CloudAPIError", message, false, options...)
 	}

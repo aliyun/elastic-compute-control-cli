@@ -7,7 +7,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -86,17 +88,187 @@ func TestFCSandboxTeamSuccessfulIdentityAndAbsenceCompatibility(t *testing.T) {
 				t.Fatalf("canonical Team absence changed: %v", err)
 			}
 			action := ecerrors.ActionFromError("GetTeam", err)
-			if action.Code != code || action.Message != "https://example.com/?[REDACTED]" || action.RequestID != "Alibaba Cloud API request failed" {
+			if action.Code != code || action.Message != "https://example.com/?[REDACTED]" || action.RequestID != "Alibaba Cloud API request failed" || action.ProviderVerified {
 				t.Fatalf("absence provider evidence changed: %+v", action)
 			}
 		})
 	}
 }
 
+func TestFCSandboxTeamAbsenceProofRejectsContradictoryEnvelope(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		status     int
+		verified   bool
+	}{
+		{"business exact", `{"code":"TeamNotFound","requestId":"req-team"}`, 200, true},
+		{"business enriched mismatch", `{"code":"TeamNotFound","httpStatusCode":404,"message":"gone","requestId":"req-team","success":false}`, 200, false},
+		{"business Team", `{"code":"TeamNotFound","requestId":"req-team","team":{"teamID":"team-1"}}`, 200, false},
+		{"business success", `{"code":"TeamNotFound","requestId":"req-team","success":true}`, 200, false},
+		{"business missing ID", `{"code":"TeamNotFound"}`, 200, false},
+		{"typed exact", `{"code":"TeamNotFound","requestId":"req-team"}`, 404, true},
+		{"typed enriched 404", `{"code":"TeamNotFound","httpStatusCode":404,"message":"gone","requestId":"req-team","success":false}`, 404, true},
+		{"typed enriched wrong transport status", `{"code":"TeamNotFound","httpStatusCode":404,"message":"gone","requestId":"req-team","success":false}`, 400, false},
+		{"typed enriched wrong status", `{"code":"TeamNotFound","httpStatusCode":400,"message":"gone","requestId":"req-team","success":false}`, 404, false},
+		{"typed enriched status string", `{"code":"TeamNotFound","httpStatusCode":"404","message":"gone","requestId":"req-team","success":false}`, 404, false},
+		{"typed enriched success", `{"code":"TeamNotFound","httpStatusCode":404,"message":"gone","requestId":"req-team","success":true}`, 404, false},
+		{"typed enriched Team", `{"code":"TeamNotFound","httpStatusCode":404,"message":"gone","requestId":"req-team","success":false,"team":{"teamID":"team-1"}}`, 404, false},
+		{"typed enriched duplicate code", `{"code":"TeamNotFound","httpStatusCode":404,"message":"gone","requestId":"req-team","success":false,"code":"TeamNotFound"}`, 404, false},
+		{"typed Team", `{"code":"TeamNotFound","requestId":"req-team","team":{"teamID":"team-1"}}`, 404, false},
+		{"typed success", `{"code":"TeamNotFound","requestId":"req-team","success":true}`, 404, false},
+		{"typed missing ID", `{"code":"TeamNotFound"}`, 404, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var caller *OpenAPICaller
+			if tc.status == 200 {
+				caller = &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", executor: &fakeOpenAPIExecutor{response: tc.body}}
+			} else {
+				profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
+				executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+				if err != nil {
+					t.Fatal(err)
+				}
+				executor.client.HttpClient = sdkErrorHTTPClient{status: tc.status, body: tc.body}
+				caller = &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", Profile: profile, executor: executor}
+			}
+			_, err := caller.CallRaw(context.Background(), "GetTeam", map[string]any{"teamID": "team-1"})
+			var app *ecerrors.AppError
+			if !errors.As(err, &app) || app.Payload().Kind != "not_found" || ecerrors.ActionFromError("GetTeam", err).ProviderVerified != tc.verified {
+				t.Fatalf("GetTeam absence proof=%v, want %v: %v", ecerrors.ActionFromError("GetTeam", err).ProviderVerified, tc.verified, err)
+			}
+		})
+	}
+}
+
+// TeamSDKErrorCallerForTest drives the public CLI through the real SDK error
+// parser while replacing only the remote HTTP exchange.
+func TeamSDKErrorCallerForTest(t *testing.T, status int, body string) *OpenAPICaller {
+	t.Helper()
+	profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
+	executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor.client.HttpClient = sdkErrorHTTPClient{status: status, body: body}
+	return &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", Profile: profile, executor: executor}
+}
+
 func (s *teamSuccessHTTPSequence) Call(_ *http.Request, _ *http.Transport) (*http.Response, error) {
 	body := s.bodies[s.calls]
 	s.calls++
 	return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+}
+
+func TestFCSandboxTeamCreateRejectionProvenance(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, code string
+		status           int
+		verified         bool
+	}{
+		{"typed forbidden", `{"code":"Forbidden","message":"denied","requestId":"req-rejected"}`, "Forbidden", 403, true},
+		{"typed no permission", `{"code":"NoPermission","message":"denied","requestId":"req-rejected"}`, "NoPermission", 403, true},
+		{"typed invalid parameter", `{"code":"InvalidParameter","message":"denied","requestId":"req-rejected"}`, "InvalidParameter", 400, true},
+		{"business forbidden", `{"code":"Forbidden","message":"denied","requestId":"req-rejected"}`, "Forbidden", 200, true},
+		{"business no permission", `{"code":"NoPermission","message":"denied","requestId":"req-rejected"}`, "NoPermission", 200, true},
+		{"business invalid parameter", `{"code":"InvalidParameter","message":"denied","requestId":"req-rejected"}`, "InvalidParameter", 200, true},
+		{"missing request ID", `{"code":"NoPermission","message":"denied"}`, "NoPermission", 403, false},
+		{"wrong HTTP status", `{"code":"NoPermission","message":"denied","requestId":"req-rejected"}`, "NoPermission", 500, false},
+		{"contradictory Team", `{"code":"NoPermission","message":"denied","requestId":"req-rejected","team":{"teamID":"team-1"}}`, "NoPermission", 403, false},
+		{"contradictory success", `{"code":"NoPermission","message":"denied","requestId":"req-rejected","success":true}`, "NoPermission", 200, false},
+		{"unrelated code", `{"code":"DependencyViolation","message":"denied","requestId":"req-rejected"}`, "DependencyViolation", 403, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
+			executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+			if err != nil {
+				t.Fatal(err)
+			}
+			executor.client.HttpClient = sdkErrorHTTPClient{status: tc.status, body: tc.body}
+			caller := &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", Profile: profile, executor: executor}
+			_, err = caller.CallRaw(context.Background(), "CreateTeam", map[string]any{"body.teamName": "dev"})
+			var app *ecerrors.AppError
+			if !errors.As(err, &app) {
+				t.Fatalf("CreateTeam rejection did not produce a typed error: %v", err)
+			}
+			action := ecerrors.ActionFromError("CreateTeam", err)
+			if action.Code != tc.code || action.ProviderVerified != tc.verified || app.Payload().Retryable {
+				t.Fatalf("CreateTeam rejection provenance = %+v, error = %+v", action, app.Payload())
+			}
+		})
+	}
+	caller := &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", executor: &fakeOpenAPIExecutor{callError: errors.New("ErrorCode: NoPermission\nRequestId: req-rejected")}}
+	_, err := caller.CallRaw(context.Background(), "CreateTeam", map[string]any{"body.teamName": "dev"})
+	if ecerrors.ActionFromError("CreateTeam", err).ProviderVerified {
+		t.Fatal("diagnostic text proved a CreateTeam rejection")
+	}
+	caller = &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", executor: &fakeOpenAPIExecutor{callError: context.DeadlineExceeded}}
+	_, err = caller.CallRaw(context.Background(), "CreateTeam", map[string]any{"body.teamName": "dev"})
+	if err == nil || ecerrors.ActionFromError("CreateTeam", err).ProviderVerified {
+		t.Fatalf("timeout proved a CreateTeam rejection: %v", err)
+	}
+	profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
+	executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor.client.HttpClient = sdkErrorHTTPClient{status: 403, body: `{"code":`}
+	caller = &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", Profile: profile, executor: executor}
+	_, err = caller.CallRaw(context.Background(), "CreateTeam", map[string]any{"body.teamName": "dev"})
+	if err == nil || ecerrors.ActionFromError("CreateTeam", err).ProviderVerified {
+		t.Fatalf("malformed provider body proved a CreateTeam rejection: %v", err)
+	}
+}
+
+func TestFCSandboxTeamCreateRejectionOutputContract(t *testing.T) {
+	resource, err := spec.LoadResource("../../specs", "sandbox", "team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtures, err := os.ReadFile(filepath.Join("testdata", "team-create-rejections.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var expected map[string]json.RawMessage
+	if err := json.Unmarshal(fixtures, &expected); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, body string
+		status     int
+		verified   bool
+	}{
+		{"proven", `{"code":"NoPermission","message":"denied","requestId":"req-rejected"}`, 403, true},
+		{"unproven", `{"code":"NoPermission","message":"denied"}`, 200, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
+			executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+			if err != nil {
+				t.Fatal(err)
+			}
+			executor.client.HttpClient = sdkErrorHTTPClient{status: tc.status, body: tc.body}
+			caller := &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", Profile: resolvedOpenAPIProfile{Language: "en"}, executor: executor}
+			_, err = engine.NewExecutor(resource, caller).Execute(context.Background(), engine.Request{Action: "create", Input: map[string]any{"name": "dev"}})
+			var app *ecerrors.AppError
+			if !errors.As(err, &app) || app.Payload().Kind != "service" || app.Payload().Code != "CloudAPIError" || len(app.Actions()) != 1 || app.Actions()[0].ProviderVerified != tc.verified {
+				t.Fatalf("product CreateTeam error lost its exact action: %v", err)
+			}
+			var rendered bytes.Buffer
+			if err := output.Write(&rendered, output.ModeJSON, map[string]any{"error": i18n.NewLocalizer("en").ErrorPayload(app.Payload(), true), "actions": app.Actions()}, output.TextOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			var got, want any
+			if err := json.Unmarshal(rendered.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(expected[tc.name], &want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("product output differs from authored-runner fixture: got=%s want=%s", rendered.Bytes(), expected[tc.name])
+			}
+		})
+	}
 }
 
 func TestFCSandboxTeamRequestIDTypesCannotReachPublicActions(t *testing.T) {

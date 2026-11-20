@@ -150,8 +150,11 @@ echo '{}'
 				if strings.Count(string(calls), "delete parent-a profile=account-a pin=\n") != 1 {
 					t.Errorf("unrelated generic parent inherited native identity or ran twice: %s", calls)
 				}
-				if strings.Index(string(calls), "delete tpl-a ") > strings.Index(string(calls), "delete parent-a ") || !strings.Contains(string(calls), `"UserId":"user-a"`) {
-					t.Errorf("deferred cleanup lost child order or identity: %s", calls)
+				createB := strings.Index(string(calls), "create team-b")
+				deleteA := strings.Index(string(calls), "delete tpl-a ")
+				deleteParent := strings.Index(string(calls), "delete parent-a ")
+				if createB < 0 || deleteA <= createB || deleteParent <= deleteA || !strings.Contains(string(calls), `"UserId":"user-a"`) {
+					t.Errorf("deferred cleanup lost settled child-before-parent order or identity: %s", calls)
 				}
 			} else {
 				wantEntries := map[string]int{"unresolved": 2, "principal-change": 3}[mode]
@@ -339,6 +342,20 @@ if [[ "$*" == *"template delete"* || "$*" == *"tpl rm"* || "$*" == *"tpl remove"
  echo "template-delete profile=$profile flag=$given" >> "$FAKE_NATIVE_DIR/calls"
  if [[ "$profile" != account-a || -f "$FAKE_NATIVE_DIR/deleted" ]]; then echo '{"error":{"code":"UnsafeOrDuplicateDelete"}}'; exit 2; fi
  touch "$FAKE_NATIVE_DIR/deleted"; echo '{"deleted":true}'; exit 0
+fi
+if [[ "$*" == *"team delete"* ]]; then
+ prev=''; for arg in "$@"; do
+  [[ "$prev" == delete ]] && touch "$FAKE_NATIVE_DIR/team-deleted-$arg" && break
+  prev="$arg"
+ done
+fi
+if [[ "$*" == *"team get"* && "$*" == *"--agent-envelope=false"* ]]; then
+ prev=''; for arg in "$@"; do
+  if [[ "$prev" == get && -f "$FAKE_NATIVE_DIR/team-deleted-$arg" ]]; then
+   echo '{"error":{"kind":"not_found","code":"NotFound"},"actions":[{"action_name":"GetTeam","code":"TeamNotFound","request_id":"req-team-absent","provider_verified":true}]}'; exit 4
+  fi
+  prev="$arg"
+ done
 fi
 if [[ "$*" == *"team delete"* ]]; then echo team-delete >> "$FAKE_NATIVE_DIR/calls"; echo '{"deleted":true}'; exit 0; fi
 echo '{}'

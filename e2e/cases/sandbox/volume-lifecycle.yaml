@@ -1,0 +1,163 @@
+resource: sandbox/volume
+requires_prerequisites: [volume.fixture_ownership]
+needs: [volume_ram_attachment]
+serial: true
+timeout: 20m
+
+steps:
+  - name: create first owned Team
+    run: >
+      ecctl sandbox team create --name {{.team_name}}
+      --description "{{.team_owner}}" --plan eco --output=json
+    at: $.team
+    expect:
+      id: {type: string, min_len: 1}
+      status: {eq: active}
+    capture:
+      first_team_id: id
+    teardown: ecctl sandbox team delete {{.team_id}} --timeout 5m --output=json
+
+  - name: create
+    run: >
+      ecctl sandbox volume create --name {{.resource_prefix}}-fc-volume
+      --team-id {{.first_team_id}}
+      --oss-volume-config '{"bucketName":"{{.stack.volume_bucket_name}}","bucketPath":"/","endpoint":"https://{{.stack.volume_bucket_endpoint}}","readOnly":true}'
+      --mount-config '{"role":"{{.stack.volume_role_arn}}"}'
+      --timeout 5m --no-wait --output=json
+    at: $.volume
+    expect:
+      id: {type: string, min_len: 1}
+      name: {eq: "{{.volume_name}}"}
+      team_id: {eq: "{{.first_team_id}}"}
+      status: {type: string, min_len: 1}
+    capture:
+      volume_id: id
+    teardown: ecctl sandbox volume delete {{.volume_id}} --timeout 5m --output=json
+
+  - name: get
+    run: ecctl sandbox volume get {{.volume_id}} --team-id {{.first_team_id}} --output=json
+    at: $.volume
+    expect:
+      id: {eq: "{{.volume_id}}"}
+      team_id: {eq: "{{.first_team_id}}"}
+      status: {eq: AVAILABLE}
+      oss_volume_config.bucketName: {eq: "{{.stack.volume_bucket_name}}"}
+      oss_volume_config.bucketPath: {eq: /}
+      oss_volume_config.endpoint: {eq: "https://{{.stack.volume_bucket_endpoint}}"}
+      oss_volume_config.readOnly: {eq: true}
+      mount_config.role: {eq: "{{.stack.volume_role_arn}}"}
+
+  - name: create second owned Volume
+    run: >
+      ecctl sandbox volume create --name {{.resource_prefix}}-fc-volume-2
+      --team-id {{.first_team_id}}
+      --oss-volume-config '{"bucketName":"{{.stack.volume_bucket_name}}","bucketPath":"/","endpoint":"https://{{.stack.volume_bucket_endpoint}}","readOnly":true}'
+      --mount-config '{"role":"{{.stack.volume_role_arn}}"}'
+      --timeout 5m --no-wait --output=json
+    at: $.volume
+    expect:
+      id: {type: string, min_len: 1, ne: "{{.volume_id}}"}
+      name: {eq: "{{.volume_name}}"}
+      team_id: {eq: "{{.first_team_id}}"}
+      status: {type: string, min_len: 1}
+    capture:
+      second_volume_id: id
+    teardown: ecctl sandbox volume delete {{.second_volume_id}} --timeout 5m --output=json
+
+  - name: get second owned Volume backing
+    run: ecctl sandbox volume get {{.second_volume_id}} --team-id {{.first_team_id}} --output=json
+    at: $.volume
+    expect:
+      id: {eq: "{{.second_volume_id}}"}
+      team_id: {eq: "{{.first_team_id}}"}
+      status: {eq: AVAILABLE}
+      oss_volume_config.bucketName: {eq: "{{.stack.volume_bucket_name}}"}
+      oss_volume_config.bucketPath: {eq: /}
+      oss_volume_config.endpoint: {eq: "https://{{.stack.volume_bucket_endpoint}}"}
+      oss_volume_config.readOnly: {eq: true}
+      mount_config.role: {eq: "{{.stack.volume_role_arn}}"}
+
+  - name: first list page
+    run: >
+      ecctl sandbox volume list --team-id {{.first_team_id}}
+      --limit 1 --output=json
+    expect:
+      $.pagination.limit: {eq: 1}
+      $.pagination.returned: {eq: 1}
+      $.pagination.has_more: {eq: true}
+      $.pagination.next_token: {type: string, min_len: 1}
+      $.volumes[0].id: {type: string, min_len: 1}
+    capture:
+      volume_next_token: $.pagination.next_token
+      first_page_volume_id: $.volumes[0].id
+
+  - name: next list page
+    run: >
+      ecctl sandbox volume list --team-id {{.first_team_id}}
+      --limit 1 --next-token {{.volume_next_token | argv}} --output=json
+    expect:
+      $.pagination.limit: {eq: 1}
+      $.pagination.returned: {eq: 1}
+      $.volumes[0].id: {type: string, min_len: 1, ne: "{{.first_page_volume_id}}"}
+
+  - name: all list pages contain both owned Volumes
+    run: >
+      ecctl sandbox volume list --team-id {{.first_team_id}}
+      --limit 1 --all --output=json
+    expect:
+      $.pagination.limit: {eq: 1}
+      $.pagination.returned: {ge: 2}
+      $.pagination.has_more: {eq: false}
+      $.pagination.next_token: {exists: false}
+    assert:
+      - 'len($.volumes[?(@.id == "{{.volume_id}}" && @.team_id == "{{.first_team_id}}")]) == 1'
+      - 'len($.volumes[?(@.id == "{{.second_volume_id}}" && @.team_id == "{{.first_team_id}}")]) == 1'
+
+  - name: delete
+    run: >
+      ecctl sandbox volume delete {{.volume_id}}
+      --team-id {{.first_team_id}} --timeout 5m --output=json
+    expect:
+      $.absent_in_scope: {eq: true}
+      $.actions[0].action_name: {eq: DeleteVolume}
+      $.actions[0].request_id: {type: string, min_len: 1}
+      $.actions[1].action_name: {eq: GetVolume}
+    assert:
+      - 'len($.actions[?(@.action_name == "GetVolume" && @.code == "VolumeNotFound" && @.provider_verified == true)]) >= 1'
+
+  - name: deleted Volume is absent
+    run: ecctl sandbox volume get {{.volume_id}} --team-id {{.first_team_id}} --output=json
+    exit: 4
+    expect:
+      $.error.kind: {eq: not_found}
+      $.actions[0].action_name: {eq: GetVolume}
+      $.actions[0].code: {eq: VolumeNotFound}
+      $.actions[0].request_id: {type: string, min_len: 1}
+      $.actions[0].provider_verified: {eq: true}
+
+  - name: delete second owned Volume
+    run: >
+      ecctl sandbox volume delete {{.second_volume_id}}
+      --team-id {{.first_team_id}} --timeout 5m --output=json
+    expect:
+      $.absent_in_scope: {eq: true}
+      $.actions[0].action_name: {eq: DeleteVolume}
+      $.actions[0].request_id: {type: string, min_len: 1}
+      $.actions[1].action_name: {eq: GetVolume}
+    assert:
+      - 'len($.actions[?(@.action_name == "GetVolume" && @.code == "VolumeNotFound" && @.provider_verified == true)]) >= 1'
+
+  - name: deleted second Volume is absent
+    run: ecctl sandbox volume get {{.second_volume_id}} --team-id {{.first_team_id}} --output=json
+    exit: 4
+    expect:
+      $.error.kind: {eq: not_found}
+      $.actions[0].action_name: {eq: GetVolume}
+      $.actions[0].code: {eq: VolumeNotFound}
+      $.actions[0].request_id: {type: string, min_len: 1}
+      $.actions[0].provider_verified: {eq: true}
+
+  - name: delete first owned Team
+    run: ecctl sandbox team delete {{.first_team_id}} --timeout 5m --output=json
+    expect:
+      $.deleted: {eq: true}

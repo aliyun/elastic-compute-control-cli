@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 	spechooks "github.com/aliyun/elastic-compute-control-cli/specs"
 )
@@ -50,13 +51,19 @@ func (e *Executor) executeOperationCall(ctx context.Context, req Request, operat
 	return result, nil
 }
 
-func (e *Executor) executeOperationWorkflow(ctx context.Context, req Request, operation spec.Operation) (Result, error) {
+func (e *Executor) executeOperationWorkflow(ctx context.Context, req Request, operation spec.Operation) (out Result, err error) {
 	execCtx := ExecutionContext{
 		Input:    cloneMap(req.Input),
 		Context:  cloneMap(req.Context),
 		Captures: map[string]CaptureResult{},
 	}
 	result := Result{}
+	defer func() {
+		if err != nil && e.spec.Product == "sandbox" && e.spec.Resource == "volume" && req.Action == "create" && result.ID != "" {
+			out = result
+			err = acceptedVolumeCreateError(e.spec, req, execCtx, &result, err)
+		}
+	}()
 	var cached *cachedProbeResult
 
 	for _, step := range operation.Workflow {
@@ -79,6 +86,11 @@ func (e *Executor) executeOperationWorkflow(ctx context.Context, req Request, op
 		case step.Binding != "":
 			probeResult, err := e.runBinding(ctx, req, step, execCtx, &result)
 			if err != nil {
+				// A successful Volume create binding has already returned its ID
+				// before the readiness wait. Preserve that allocation evidence.
+				if e.spec.Product == "sandbox" && e.spec.Resource == "volume" && req.Action == "create" && result.ID != "" {
+					return result, err
+				}
 				return Result{}, err
 			}
 			cached = probeResult
@@ -370,6 +382,12 @@ func (e *Executor) runSingleBinding(ctx context.Context, req Request, step spec.
 	}
 	response, err := e.callTransition(ctx, transition, request, execCtx)
 	if err != nil {
+		if e.spec.Product == "sandbox" && e.spec.Resource == "volume" && req.Action == "create" && transition.Call == "CreateVolume" {
+			if accepted, ok := ecerrors.AcceptedVolumeFrom(err); ok && accepted.AllocationConfirmed && accepted.Operation == transition.Call && accepted.ID != "" && accepted.Name == stringFromMap(req.Input, "name") && accepted.TeamID != "" && (stringFromMap(req.Input, "team_id") == "" || accepted.TeamID == stringFromMap(req.Input, "team_id")) && accepted.Region == stringFromMap(req.Context, "region") {
+				result.ID = accepted.ID
+				result.RequestID = accepted.RequestID
+			}
+		}
 		hookRequest := afterErrorHookRequest(beforeHookRequest, request)
 		err = e.applyAfterErrorBindingHooks(ctx, binding, hookRequest, err)
 		return nil, ecerrors.WithActions(err, append(result.Actions, actionsFromError(err, transition.Call)...))
@@ -428,6 +446,24 @@ func (e *Executor) runSingleBinding(ctx context.Context, req Request, step spec.
 			execCtx.Context[name] = value
 		}
 	}
+	if binding.InitialStateFrom != "" {
+		state := ExtractString(response, binding.InitialStateFrom)
+		for _, failure := range e.spec.Waiters[transition.Wait].Failure.States {
+			if !strings.EqualFold(state, failure) {
+				continue
+			}
+			options := []ecerrors.Option{ecerrors.WithCurrentState(state), ecerrors.WithDetail(ExtractString(response, binding.InitialDetailFrom))}
+			if requestID != "" {
+				options = append(options, ecerrors.WithRequestID(requestID))
+			}
+			message := fmt.Sprintf("resource reached failure state %s", state)
+			if e.spec.Product == "sandbox" && e.spec.Resource == "volume" {
+				message = i18n.NewLocalizer("en").MessageData("VolumeInitialWaitFailed", map[string]any{"State": state})
+			}
+			err := ecerrors.Service("WaitFailed", message, false, options...)
+			return nil, acceptedVolumeCreateError(e.spec, req, execCtx, result, ecerrors.WithActions(err, result.Actions))
+		}
+	}
 
 	skipWait, err := shouldSkip(step.WaitUnless, execCtx)
 	if err != nil {
@@ -439,13 +475,29 @@ func (e *Executor) runSingleBinding(ctx context.Context, req Request, step spec.
 	ids := e.currentResourceIDs(execCtx)
 	probeResult, err := e.wait(ctx, req, transition.Wait, execCtx, ids)
 	if err != nil {
-		return nil, ecerrors.WithActions(err, append(result.Actions, actionsFromError(err, e.spec.Probes[e.spec.Waiters[transition.Wait].Probe].API)...))
+		return nil, acceptedVolumeCreateError(e.spec, req, execCtx, result, ecerrors.WithActions(err, append(result.Actions, actionsFromError(err, e.spec.Probes[e.spec.Waiters[transition.Wait].Probe].API)...)))
 	}
 	applyProbeResult(result, probeResult)
 	waitSpec := e.spec.Waiters[transition.Wait]
 	result.Actions = append(result.Actions, probeResult.Actions...)
 	result.Capabilities = appendCapability(result.Capabilities, "auto_wait")
 	return &cachedProbeResult{name: waitSpec.Probe, ids: ids, result: probeResult}, nil
+}
+
+// The accepted tuple comes from the CreateVolume response, not from a caller's
+// optional Team input. Keep it on every error after allocation was accepted.
+func acceptedVolumeCreateError(resource spec.ResourceSpec, req Request, execCtx ExecutionContext, result *Result, err error) error {
+	if resource.Product != "sandbox" || resource.Resource != "volume" || req.Action != "create" || result.ID == "" {
+		return err
+	}
+	teamID := stringFromMap(execCtx.Context, "accepted_team_id")
+	if teamID == "" {
+		return err
+	}
+	return ecerrors.WithDetails(err, ecerrors.WithAcceptedVolume(ecerrors.AcceptedVolume{
+		ID: result.ID, Name: stringFromMap(req.Input, "name"), TeamID: teamID,
+		Region: stringFromMap(req.Context, "region"), RequestID: result.RequestID, Operation: "CreateVolume", AllocationConfirmed: true,
+	}))
 }
 
 type bindingResponseCheck struct {

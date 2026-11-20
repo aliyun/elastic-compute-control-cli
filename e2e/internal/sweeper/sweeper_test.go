@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -34,6 +35,106 @@ func canonicalJournalDir(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+func TestSettleVolumeTransferReplayObservationKeepsExpectedSnapshot(t *testing.T) {
+	dir := canonicalJournalTestDir(t)
+	path := filepath.Join(dir, "cleanup.json")
+	name := "ecctl-p-0123456789abcdef01234567"
+	entry := report.Resource{Scope: "case", Teardown: "ecctl sandbox team delete team-destination --timeout 5m --output=json", TeamCreateConfirmed: true, VolumeTransferIntent: name, VolumeTransferPending: true}
+	expected := report.CleanupJournal{
+		Version: 2, JournalPath: path, RunID: "run", ExecutionID: "execution", RegionRole: "primary", Region: "cn-hangzhou", Surface: "public", EcctlBin: "/bin/ecctl",
+		Entries: []report.Resource{entry}, VolumeTeamBindings: map[string]string{"team-destination": name},
+		VolumeTransferHistory: map[string]map[string]bool{name: {"team-destination": true}},
+	}
+	body, err := json.Marshal(expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := journalfile.TemplateCreateIntent{Resource: "volume", Name: name}
+	updated, err := settleVolumeTransferReplayObservation(context.Background(), path, expected, binding, "team-destination", "AVAILABLE", parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !expected.VolumeTransferHistory[name]["team-destination"] || !expected.Entries[0].VolumeTransferPending {
+		t.Fatal("replay mutated its expected pre-write snapshot")
+	}
+	if updated.VolumeTransferHistory[name]["team-destination"] || updated.Entries[0].VolumeTransferPending {
+		t.Fatal("replay did not settle the transfer")
+	}
+	installed, legacy, err := readReplayJournal(path)
+	if err != nil || legacy || !reflect.DeepEqual(installed, updated) {
+		t.Fatalf("transfer observation was not durably installed: %v %+v", err, installed)
+	}
+}
+
+func TestReplayBinaryAcceptsMatchingRelativeSelectorForAbsoluteJournal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("relative test binary uses a POSIX shell script")
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "ecctl-public")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	relative, err := filepath.Rel(cwd, bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal := report.CleanupJournal{EcctlBin: bin}
+	opt := ReplayOptions{Config: execpkg.Config{Bin: relative}}
+	if err := validateJournalIdentity(journal, &opt); err != nil || opt.Config.Bin != bin {
+		t.Fatalf("matching relative replay selector rejected: bin=%q err=%v", opt.Config.Bin, err)
+	}
+	legacy := report.CleanupJournal{EcctlBin: relative}
+	legacyOpt := ReplayOptions{Config: execpkg.Config{Bin: relative}}
+	if err := validateJournalIdentity(legacy, &legacyOpt); err != nil || legacyOpt.Config.Bin != relative {
+		t.Fatalf("legacy relative journal spelling changed: bin=%q err=%v", legacyOpt.Config.Bin, err)
+	}
+	other := ReplayOptions{Config: execpkg.Config{Bin: filepath.Join(t.TempDir(), "other")}}
+	if err := validateJournalIdentity(journal, &other); err == nil {
+		t.Fatal("different replay binary was accepted")
+	}
+}
+
+func TestVolumeTeamReplayWaitsForPendingNonceRegistration(t *testing.T) {
+	dir := canonicalJournalTestDir(t)
+	path := filepath.Join(dir, "cleanup.json")
+	entry := report.Resource{Scope: "case", Teardown: "ecctl sandbox team delete team-owned --timeout 5m --output=json", TeamCreateConfirmed: true, VolumeTeamBound: true}
+	journal := report.CleanupJournal{
+		Version: 2, JournalPath: path, RunID: "run", ExecutionID: "execution", RegionRole: "primary", Region: "cn-hangzhou", Surface: "public", EcctlBin: "/bin/ecctl",
+		VolumeFixtureBinding: &report.QuotaCredentialBinding{}, VolumeTeamCreateIDs: map[string]string{"ecctl-t-0123456789abcdef01234567": ""},
+		Entries: []report.Resource{entry},
+	}
+	body, err := json.Marshal(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = markTeamReplayAttempt(context.Background(), path, ReplayOptions{Config: execpkg.Config{Bin: "/bin/ecctl", Region: "cn-hangzhou"}, RunID: "run", Surface: "public"}, entry, parent)
+	if err == nil || !strings.Contains(err.Error(), "pending registration") {
+		t.Fatalf("Team replay did not fence incomplete registration: %v", err)
+	}
+	installed, _, err := readReplayJournal(path)
+	if err != nil || installed.Entries[0].TeamReplayAttempted {
+		t.Fatalf("Team replay marked deletion despite pending registration: %v %+v", err, installed)
+	}
 }
 
 func TestReplayJournalFixtureResolvesSymlinkTempAlias(t *testing.T) {
@@ -65,6 +166,44 @@ func TestReplayJournalFixtureResolvesSymlinkTempAlias(t *testing.T) {
 	result, err := ReplayJournalWithOptions(context.Background(), path, ReplayOptions{Config: execpkg.Config{Bin: journal.EcctlBin, Region: journal.Region}, RunID: journal.RunID, Surface: journal.Surface})
 	if err != nil || result.Deleted != 0 || result.Errors != 0 {
 		t.Fatalf("canonical alias fixture was rejected: result=%+v err=%v", result, err)
+	}
+}
+
+func TestReplayJournalUsesRunLeaseForWholeReplay(t *testing.T) {
+	dir := canonicalJournalTestDir(t)
+	path := filepath.Join(dir, "cleanup.json")
+	if err := os.WriteFile(path, []byte(`{"version":2,"entries":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	release, err := journalfile.AcquireRunLease(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := ReplayJournal(context.Background(), path, execpkg.Config{Bin: "must-not-launch"}); err == nil {
+		t.Fatalf("replay entered an active runner's journal: %+v", result)
+	}
+	if err := release(); err != nil {
+		t.Fatal(err)
+	}
+	previous := replayJournalAfterRead
+	replayJournalAfterRead = func(string) {
+		otherRelease, err := journalfile.AcquireRunLease(path)
+		if err == nil {
+			_ = otherRelease()
+			t.Error("replay released the run lease before processing entries")
+		}
+	}
+	defer func() { replayJournalAfterRead = previous }()
+	result, err := ReplayJournal(context.Background(), path, execpkg.Config{Bin: "must-not-launch"})
+	if err != nil || result.Deleted != 0 || result.Errors != 0 {
+		t.Fatalf("idle replay: result=%+v err=%v", result, err)
+	}
+	missing := filepath.Join(dir, "missing", "cleanup.json")
+	if _, err := ReplayJournal(context.Background(), missing, execpkg.Config{}); err == nil {
+		t.Fatal("replay created a lost journal parent")
+	}
+	if _, err := os.Stat(filepath.Dir(missing)); !os.IsNotExist(err) {
+		t.Fatalf("lost journal parent was recreated: %v", err)
 	}
 }
 
@@ -179,7 +318,7 @@ func TestReplayJournalRunsControlledAssociatedTransferRestore(t *testing.T) {
 	}
 }
 
-func TestReplayJournalDoesNotLoseConcurrentRunnerRegistration(t *testing.T) {
+func TestReplayJournalExcludesConcurrentRunnerAndPreservesLaterRegistration(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake uses a bash script")
 	}
@@ -195,6 +334,8 @@ func TestReplayJournalDoesNotLoseConcurrentRunnerRegistration(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				if replayFails {
 					t.Setenv("REPLAY_FAIL", "1")
+				} else {
+					t.Setenv("REPLAY_FAIL", "0")
 				}
 				dir := canonicalJournalTestDir(t)
 				journalPath := filepath.Join(dir, "cleanup-journal.json")
@@ -261,82 +402,60 @@ fi
 				}
 				writerDone := make(chan writerOutcome, 1)
 				writerStarted := filepath.Join(dir, "writer-started")
-				go func() {
-					run, err := runnerpkg.Run(context.Background(), runnerpkg.Options{
-						CleanupJournal: journalPath,
-						RunName:        "test",
-						RunID:          "test",
-						ExecutionID:    "execution",
-						Region:         "cn-hangzhou",
-						Surface:        "public",
-						EcctlBin:       fake,
-						StepTimeout:    30 * time.Second,
-						Keep:           true,
-						Env:            []string{"WRITER_STARTED=" + writerStarted},
-						Suites: []*scenario.Suite{{
-							Surface: scenario.SurfacePublic, Resource: "t/thing", Path: "concurrent-writer.yaml",
-							Steps: []scenario.Step{{
-								Name: "create", Run: "ecctl t thing create", At: "$.resource",
-								Capture: map[string]string{"id": "id"}, Teardown: "ecctl t thing delete {{.id}}",
-							}},
+				writerOptions := runnerpkg.Options{
+					CleanupJournal: journalPath,
+					RunName:        "test",
+					RunID:          "test",
+					ExecutionID:    "execution",
+					Region:         "cn-hangzhou",
+					Surface:        "public",
+					EcctlBin:       fake,
+					StepTimeout:    30 * time.Second,
+					Keep:           true,
+					Env:            []string{"WRITER_STARTED=" + writerStarted},
+					Suites: []*scenario.Suite{{
+						Surface: scenario.SurfacePublic, Resource: "t/thing", Path: "concurrent-writer.yaml",
+						Steps: []scenario.Step{{
+							Name: "create", Run: "ecctl t thing create", At: "$.resource",
+							Capture: map[string]string{"id": "id"}, Teardown: "ecctl t thing delete {{.id}}",
 						}},
-					})
+					}},
+				}
+				go func() {
+					run, err := runnerpkg.Run(context.Background(), writerOptions)
 					if err == nil && run.Failed() {
 						err = fmt.Errorf("runner failed: %+v", run.Cases)
 					}
 					writerDone <- writerOutcome{run: run, err: err}
 				}()
-				if legacy {
-					select {
-					case outcome := <-writerDone:
-						if outcome.err == nil || !strings.Contains(outcome.err.Error(), "existing cleanup journal does not match") {
-							t.Fatalf("legacy journal did not reject new allocation: %v", outcome.err)
-						}
-					case <-time.After(time.Second):
-						t.Fatal("legacy runner did not reject an unbound journal before allocation")
+				select {
+				case outcome := <-writerDone:
+					if outcome.err == nil || !strings.Contains(outcome.err.Error(), "is in use by another run") || outcome.run == nil || len(outcome.run.Cases) != 1 || outcome.run.Cases[0].Resource != "setup" {
+						t.Fatalf("concurrent runner was not refused at run lease: run=%+v err=%v", outcome.run, outcome.err)
 					}
-					if _, err := os.Stat(writerStarted); !os.IsNotExist(err) {
-						t.Fatalf("legacy journal reached provider before refusal: %v", err)
-					}
-				} else {
-					deadline := time.After(10 * time.Second)
-					var outcome writerOutcome
-					completed := false
-				waitForMarker:
-					for {
-						if _, err := os.Stat(writerStarted); err == nil {
-							break
-						}
-						select {
-						case outcome = <-writerDone:
-							completed = true
-							break waitForMarker
-						case <-deadline:
-							t.Fatal("timed out waiting for runner provider marker")
-						case <-time.After(10 * time.Millisecond):
-						}
-					}
-					if !completed {
-						select {
-						case outcome = <-writerDone:
-						case <-time.After(time.Second):
-							releaseReplay()
-							if err := <-replayDone; err != nil {
-								t.Fatal(err)
-							}
-							if outcome = <-writerDone; outcome.err != nil {
-								t.Fatal(outcome.err)
-							}
-							t.Fatal("runner journal registration blocked behind replay work")
-						}
-					}
-					if err := concurrentWriterEvidence(outcome.run, outcome.err, writerStarted); err != nil {
-						t.Fatal(err)
-					}
+				case <-time.After(5 * time.Second):
+					t.Fatal("concurrent runner did not promptly reject active replay lease")
+				}
+				if _, err := os.Stat(writerStarted); !os.IsNotExist(err) {
+					t.Fatalf("concurrent runner reached provider before lease refusal: %v", err)
 				}
 				releaseReplay()
 				if err := <-replayDone; err != nil {
 					t.Fatal(err)
+				}
+				if legacy {
+					_, err := runnerpkg.Run(context.Background(), writerOptions)
+					if err == nil || !strings.Contains(err.Error(), "existing cleanup journal does not match") {
+						t.Fatalf("idle runner accepted an unbound legacy journal: %v", err)
+					}
+					if _, err := os.Stat(writerStarted); !os.IsNotExist(err) {
+						t.Fatalf("legacy journal reached provider after replay: %v", err)
+					}
+				} else {
+					run, err := runnerpkg.Run(context.Background(), writerOptions)
+					if evidenceErr := concurrentWriterEvidence(run, err, writerStarted); evidenceErr != nil {
+						t.Fatal(evidenceErr)
+					}
 				}
 
 				data, err = os.ReadFile(journalPath)
@@ -452,7 +571,7 @@ func journalTeardowns(entries []report.Resource) []string {
 	return result
 }
 
-func TestReplayJournalLockWaitHonorsContext(t *testing.T) {
+func TestReplayJournalCanceledContextPrecedesBusyRunLease(t *testing.T) {
 	dir := t.TempDir()
 	journalPath := filepath.Join(dir, "cleanup-journal.json")
 	data, err := json.Marshal(report.CleanupJournal{Version: 2, Entries: []report.Resource{}})
@@ -468,12 +587,9 @@ func TestReplayJournalLockWaitHonorsContext(t *testing.T) {
 	releaseReplay := sync.OnceFunc(func() { close(resumeReplay) })
 	defer releaseReplay()
 	previousHook := replayJournalAfterRead
-	var hookCalls atomic.Int32
 	replayJournalAfterRead = func(string) {
-		if hookCalls.Add(1) == 1 {
-			close(replayRead)
-			<-resumeReplay
-		}
+		close(replayRead)
+		<-resumeReplay
 	}
 	defer func() { replayJournalAfterRead = previousHook }()
 
@@ -482,33 +598,69 @@ func TestReplayJournalLockWaitHonorsContext(t *testing.T) {
 		_, err := ReplayJournal(context.Background(), journalPath, execpkg.Config{})
 		firstDone <- err
 	}()
-	<-replayRead
+	select {
+	case <-replayRead:
+	case err := <-firstDone:
+		t.Fatalf("first replay returned before read hook: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("first replay did not reach read hook")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	secondDone := make(chan error, 1)
-	go func() {
-		_, err := ReplayJournal(ctx, journalPath, execpkg.Config{})
-		secondDone <- err
-	}()
-	select {
-	case err := <-secondDone:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("second replay error = %v, want context canceled", err)
-		}
-	case <-time.After(time.Second):
-		releaseReplay()
-		if err := <-firstDone; err != nil {
-			t.Fatal(err)
-		}
-		if err := <-secondDone; err != nil && !errors.Is(err, context.Canceled) {
-			t.Fatal(err)
-		}
-		t.Fatal("canceled replay remained blocked waiting for the journal lock")
+	if _, err := ReplayJournal(ctx, journalPath, execpkg.Config{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled replay error = %v, want context canceled before lease contention", err)
+	}
+	busyCtx, cancelBusy := context.WithTimeout(context.Background(), time.Second)
+	defer cancelBusy()
+	if _, err := ReplayJournal(busyCtx, journalPath, execpkg.Config{}); err == nil || !strings.Contains(err.Error(), "is in use by another run") {
+		t.Fatalf("active replay lease did not exclude second replay: %v", err)
 	}
 
 	releaseReplay()
 	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReplayJournalLockWaitHonorsContext(t *testing.T) {
+	dir := canonicalJournalTestDir(t)
+	journalPath := filepath.Join(dir, "cleanup-journal.json")
+	if err := os.WriteFile(journalPath, []byte(`{"version":2,"entries":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := replayParentIdentity(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	releaseHolder := sync.OnceFunc(func() { close(release) })
+	defer releaseHolder()
+	holderDone := make(chan error, 1)
+	go func() {
+		holderDone <- journalfile.WithExistingReplayLock(context.Background(), journalPath, func() error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	select {
+	case <-entered:
+	case err := <-holderDone:
+		t.Fatalf("replay lock holder returned before admission: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("replay lock holder did not enter")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	called := false
+	err = withAnchoredReplayLock(ctx, journalPath, parent, func() error { called = true; return nil })
+	if !errors.Is(err, context.DeadlineExceeded) || called {
+		t.Fatalf("contended replay lock ignored context: err=%v called=%t", err, called)
+	}
+	releaseHolder()
+	if err := <-holderDone; err != nil {
 		t.Fatal(err)
 	}
 }
@@ -547,7 +699,22 @@ func TestReplayJournalConsumesSuccessAfterCallerCancellation(t *testing.T) {
 			holderDone <- journalfile.WithLock(context.Background(), path, func() error {
 				close(transactionHeld)
 				<-releaseTransaction
-				return nil
+				// A short journal transaction may merge a new entry while the
+				// replay owns the run lease; it performs no provider allocation.
+				body, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				var current report.CleanupJournal
+				if err := json.Unmarshal(body, &current); err != nil {
+					return err
+				}
+				current.Entries = append(current.Entries, report.Resource{Scope: "late", Teardown: "ecctl t thing delete late"})
+				body, err = json.Marshal(current)
+				if err != nil {
+					return err
+				}
+				return journalfile.WriteDurable(path, body)
 			})
 		}()
 		<-transactionHeld
@@ -599,8 +766,8 @@ func TestReplayJournalConsumesSuccessAfterCallerCancellation(t *testing.T) {
 	if err := json.Unmarshal(data, &journal); err != nil {
 		t.Fatal(err)
 	}
-	if len(journal.Entries) != 0 {
-		t.Fatalf("successful deletion remained in journal after cancellation: %s", data)
+	if got := journalTeardowns(journal.Entries); !slices.Equal(got, []string{"ecctl t thing delete late"}) {
+		t.Fatalf("replay lost merged entry or retained completed delete after cancellation: %q; journal=%s", got, data)
 	}
 }
 

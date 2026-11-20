@@ -5,10 +5,10 @@ package exec
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	osexec "os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -17,75 +17,70 @@ import (
 
 // Config controls how commands are executed.
 type Config struct {
-	Bin              string // substituted for a leading "ecctl" token (default "ecctl")
-	Region           string // appended as --region to ecctl commands when set
-	Profile          string // pinned profile for protected Quota lifecycle commands
-	Env              []string
-	ExpectedIdentity *IdentityPin
+	Bin               string // substituted for a leading "ecctl" token (default "ecctl")
+	ExpectedBinSHA256 string // protected calls execute a private copy with this digest
+	Region            string // appended as --region to ecctl commands when set
+	Profile           string // pinned profile for protected Quota lifecycle commands
+	Env               []string
+	ExpectedIdentity  *IdentityPin
+	MaxOutputBytes    int // optional per-stream bound for setup probes
 }
 
 // Result captures everything one invocation produced, for assertions/reports.
 type Result struct {
-	Command  string        `json:"command"` // rendered, bin-substituted, for repro
-	Exit     int           `json:"exit"`
-	Stdout   string        `json:"-"`
-	Stderr   string        `json:"stderr,omitempty"`
-	JSON     any           `json:"-"` // parsed Stdout, nil if not JSON
-	Duration time.Duration `json:"-"`
-	Err      error         `json:"-"` // process failed to start / context cancelled
-	Started  bool          `json:"started"`
+	Command           string        `json:"command"` // rendered, bin-substituted, for repro
+	Argv              []string      `json:"-"`       // exact argv passed to the verified executable
+	VerifiedBinSHA256 string        `json:"-"`       // set only after the executable copy is verified
+	Exit              int           `json:"exit"`
+	Stdout            string        `json:"-"`
+	Stderr            string        `json:"stderr,omitempty"`
+	JSON              any           `json:"-"` // parsed Stdout, nil if not JSON
+	Duration          time.Duration `json:"-"`
+	Err               error         `json:"-"` // process failed to start / context cancelled
+	Started           bool          `json:"started"`
 }
 
 // Run executes one rendered command line under ctx (which carries the timeout).
 func Run(ctx context.Context, cfg Config, rendered string) Result {
 	res := Result{Command: rendered}
-	tokens, err := shlex.Split(rendered)
-	if err != nil || len(tokens) == 0 {
+	launchBin, args, ecctlCommand, err := prepareCommandArgs(cfg, rendered)
+	if err != nil {
 		res.Err = err
 		res.Exit = -1
 		return res
 	}
-	bin := cfg.Bin
-	if bin == "" {
-		bin = "ecctl"
-	}
-	if tokens[0] == "ecctl" {
-		tokens[0] = bin
-	}
-	args := tokens[1:]
-	if cfg.Region != "" {
-		_, count, separator, regionErr := scanStringOption(args, "--region", false)
-		if regionErr != nil {
-			res.Err = fmt.Errorf("region selector is invalid: %w", regionErr)
+	res.Command = recordedCommand(launchBin, args)
+	if cfg.ExpectedBinSHA256 != "" {
+		if !ecctlCommand {
+			res.Err = fmt.Errorf("verified ecctl command changed its executable")
 			res.Exit = -1
 			return res
 		}
-		if count == 0 {
-			args = appendDefaultOption(args, "--region", cfg.Region, separator)
-		}
-	}
-	if cfg.Profile != "" {
-		selected, count, profileErr := actualProfileOption(args)
-		if profileErr != nil || count > 1 || count == 1 && selected != cfg.Profile {
-			res.Err = fmt.Errorf("protected profile selector changed")
+		var release func()
+		launchBin, release, err = VerifiedExecutableCopy(launchBin, cfg.ExpectedBinSHA256)
+		if err != nil {
+			res.Err = err
 			res.Exit = -1
 			return res
 		}
-		if count == 0 {
-			args = append(args, "--profile", cfg.Profile)
-		}
+		defer release()
+		res.VerifiedBinSHA256 = cfg.ExpectedBinSHA256
 	}
-	res.Command = recordedCommand(tokens[0], args)
+	res.Argv = append([]string(nil), args...)
 
-	cmd := osexec.CommandContext(ctx, tokens[0], args...)
+	cmd := osexec.CommandContext(ctx, launchBin, args...)
+	if cfg.MaxOutputBytes > 0 {
+		cmd.WaitDelay = time.Second
+	}
 	identityEnv, identityErr := identityEnvironment(cfg.ExpectedIdentity)
 	if identityErr != nil {
 		res.Err = identityErr
 		res.Exit = -1
 		return res
 	}
-	cmd.Env = append(sanitizedEnv(cfg.Env), identityEnv...)
-	var out, errb strings.Builder
+	cmd.Env = append(CommandEnvironment(cfg.Env), identityEnv...)
+	var out, errb boundedCommandOutput
+	out.limit, errb.limit = cfg.MaxOutputBytes, cfg.MaxOutputBytes
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 
@@ -98,6 +93,11 @@ func Run(ctx context.Context, cfg Config, rendered string) Result {
 	res.Duration = time.Since(start)
 	res.Stdout = out.String()
 	res.Stderr = errb.String()
+	if out.exceeded || errb.exceeded {
+		res.Err = fmt.Errorf("verified command output exceeded its setup bound")
+		res.Exit = -1
+		return res
+	}
 
 	switch e := runErr.(type) {
 	case nil:
@@ -110,14 +110,119 @@ func Run(ctx context.Context, cfg Config, rendered string) Result {
 	}
 
 	if v := strings.TrimSpace(res.Stdout); v != "" {
-		var parsed any
-		dec := json.NewDecoder(strings.NewReader(v))
-		dec.UseNumber()
-		if dec.Decode(&parsed) == nil {
+		if parsed, err := DecodeCommandJSON([]byte(v)); err == nil {
 			res.JSON = parsed
 		}
 	}
 	return res
+}
+
+func prepareCommandArgs(cfg Config, rendered string) (string, []string, bool, error) {
+	tokens, err := shlex.Split(rendered)
+	if err != nil || len(tokens) == 0 {
+		return "", nil, false, fmt.Errorf("invalid command: %v", err)
+	}
+	bin := cfg.Bin
+	if bin == "" {
+		bin = "ecctl"
+	}
+	ecctlCommand := tokens[0] == "ecctl"
+	if ecctlCommand {
+		tokens[0] = bin
+	}
+	args := tokens[1:]
+	if cfg.Region != "" {
+		_, count, separator, regionErr := scanStringOption(args, "--region", false)
+		if regionErr != nil {
+			return "", nil, false, fmt.Errorf("region selector is invalid: %w", regionErr)
+		}
+		if count == 0 {
+			args = appendDefaultOption(args, "--region", cfg.Region, separator)
+		}
+	}
+	if cfg.Profile != "" {
+		selected, count, profileErr := actualProfileOption(args)
+		if profileErr != nil || count > 1 || count == 1 && selected != cfg.Profile {
+			return "", nil, false, fmt.Errorf("protected profile selector changed")
+		}
+		if count == 0 {
+			args = append(args, "--profile", cfg.Profile)
+		}
+	}
+	// Protected raw fixture calls always use the JSON contract, including
+	// journals written before the explicit output flag was added to fixtures.
+	if cfg.ExpectedIdentity != nil && len(args) >= 2 && args[0] == "call" && (args[1] == "oss" || args[1] == "ram") {
+		output, count, separator, outputErr := scanStringOption(args, "--output", false)
+		if outputErr != nil || separator >= 0 || count > 1 || count == 1 && output != "json" {
+			return "", nil, false, fmt.Errorf("protected fixture output selector changed")
+		}
+		if count == 0 {
+			args = append(args, "--output=json")
+		}
+	}
+	if ecctlCommand && machineProofCommand(cfg, args) {
+		// Machine proofs must stay parseable even when the caller's display mode
+		// requests colored JSON. Keep this on the actual executed argv.
+		selected, count, separator, colorErr := scanStringOption(args, "--no-color", false)
+		if colorErr != nil || count > 1 || count == 1 && selected != "true" {
+			return "", nil, false, fmt.Errorf("machine output color selector changed")
+		}
+		if count == 0 {
+			if separator >= 0 {
+				args = append(args, "")
+				copy(args[separator+1:], args[separator:len(args)-1])
+				args[separator] = "--no-color=true"
+			} else {
+				args = append(args, "--no-color=true")
+			}
+		}
+	}
+	return tokens[0], args, ecctlCommand, nil
+}
+
+func machineProofCommand(cfg Config, args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	if args[0] == "capabilities" {
+		return true
+	}
+	if len(args) >= 2 && args[0] == "configure" && args[1] == "get" {
+		return true
+	}
+	if len(args) >= 3 && args[0] == "call" && args[1] == "sts" && args[2] == "GetCallerIdentity" {
+		return true
+	}
+	if cfg.ExpectedIdentity == nil || len(args) < 2 {
+		return false
+	}
+	if args[0] == "call" && (args[1] == "oss" || args[1] == "ram") {
+		return true
+	}
+	return (args[0] == "sandbox" || args[0] == "sbx") && (args[1] == "team" || args[1] == "volume")
+}
+
+type boundedCommandOutput struct {
+	strings.Builder
+	limit    int
+	exceeded bool
+}
+
+func (b *boundedCommandOutput) Write(p []byte) (int, error) {
+	length := len(p)
+	if b.limit > 0 {
+		remaining := b.limit - b.Len()
+		if remaining <= 0 {
+			b.exceeded = true
+			return length, nil
+		}
+		if len(p) > remaining {
+			b.exceeded = true
+			p = p[:remaining]
+		}
+	}
+	_, err := b.Builder.Write(p)
+	return length, err
 }
 
 // Record private configuration at actual argv boundaries. Reconstructing it
@@ -160,12 +265,12 @@ func actualStringOption(args []string, wanted string) (string, int, error) {
 // flag remains a real option. Protected profile parsing stays strict.
 func scanStringOption(args []string, wanted string, strict bool) (string, int, int, error) {
 	stringFlags := map[string]bool{}
-	for _, name := range []string{"region", "profile", "lang", "output", "name", "team-id", "runtime-config", "build-config", "timeout", "cpu-count", "memory-mb", "from-image", "from-template", "from-image-registry", "steps", "start-cmd", "ready-cmd", "tag", "step", "build-id", "cursor", "limit", "next-token", "filter", "alias", "disk-size-mb", "fields", "description", "resource-group", "plan", "request", "api-param", "aliyun-arg", "status", "policy-name", "policy-type", "fallback-default-version", "cluster", "instance-name", "cpu-cores", "memory-gb", "page"} {
+	for _, name := range []string{"region", "profile", "lang", "output", "name", "team-id", "oss-volume-config", "agentic-fs-volume-config", "agentic-bucket-volume-config", "mount-config", "runtime-config", "build-config", "timeout", "timeout-seconds", "duration", "count", "template", "cpu-count", "memory-mb", "from-image", "from-template", "from-image-registry", "steps", "start-cmd", "ready-cmd", "tag", "step", "build-id", "cursor", "limit", "next-token", "filter", "alias", "disk-size-mb", "fields", "description", "resource-group", "user-id", "plan", "request", "api-param", "aliyun-arg", "status", "policy-name", "policy-type", "fallback-default-version", "cluster", "instance-name", "cpu-cores", "memory-gb", "page", "Bucket", "Key", "metadata", "snapshot-name"} {
 		stringFlags["--"+name] = true
 	}
 	stringFlags["-o"] = true
 	boolFlags := map[string]bool{}
-	for _, name := range []string{"force", "openapi", "no-wait", "json", "agent-envelope", "no-color", "help", "version", "public", "dry-run", "all"} {
+	for _, name := range []string{"force", "openapi", "no-wait", "json", "agent-envelope", "no-color", "help", "version", "public", "dry-run", "all", "release", "hyper"} {
 		boolFlags["--"+name] = true
 	}
 	boolFlags["-h"], boolFlags["-v"] = true, true
@@ -200,6 +305,13 @@ func scanStringOption(args []string, wanted string, strict bool) (string, int, i
 		if !boolFlags[key] && strict {
 			return "", 0, -1, fmt.Errorf("unclassified protected command option")
 		}
+		if boolFlags[key] && key == wanted {
+			count++
+			selected = "true"
+			if inline {
+				selected = value
+			}
+		}
 		if !boolFlags[key] && !inline && index+1 < len(args) && !strings.HasPrefix(args[index+1], "-") {
 			index++
 		}
@@ -217,18 +329,54 @@ func appendDefaultOption(args []string, key, value string, separator int) []stri
 	return append(args, key, value)
 }
 
-// sanitizedEnv reproduces the badcases hermetic env: drop FORCE_COLOR /
-// CLICOLOR_FORCE, force NO_COLOR=1, then append caller env (e.g. STS creds).
-func sanitizedEnv(extra []string) []string {
+// CommandEnvironment keeps every verified E2E subprocess on the executable's
+// embedded command catalog, including capability and parser checks.
+func CommandEnvironment(extra []string) []string {
 	src := os.Environ()
 	out := make([]string, 0, len(src)+len(extra)+1)
 	for _, e := range src {
-		if strings.HasPrefix(e, "FORCE_COLOR=") || strings.HasPrefix(e, "CLICOLOR_FORCE=") {
+		name, _, _ := strings.Cut(e, "=")
+		if name == "FORCE_COLOR" || name == "CLICOLOR_FORCE" || strings.EqualFold(name, "ECCTL_SPEC_DIR") {
 			continue
 		}
 		out = append(out, e)
 	}
 	out = append(out, "NO_COLOR=1")
-	out = append(out, extra...)
+	for _, e := range extra {
+		name, _, _ := strings.Cut(e, "=")
+		if !strings.EqualFold(name, "ECCTL_SPEC_DIR") {
+			out = append(out, e)
+		}
+	}
+	return effectiveCommandEnvironment(out, runtime.GOOS == "windows")
+}
+
+// Windows gives the last definition of a variable to the child, regardless
+// of its spelling. Keep the environment inspected by replay identical to it.
+func effectiveCommandEnvironment(env []string, windows bool) []string {
+	if !windows {
+		return env
+	}
+	last := make(map[string]int, len(env))
+	for i, item := range env {
+		if strings.HasPrefix(item, "=") {
+			continue
+		}
+		name, _, ok := strings.Cut(item, "=")
+		if ok {
+			last[strings.ToUpper(name)] = i
+		}
+	}
+	out := make([]string, 0, len(last))
+	for i, item := range env {
+		if strings.HasPrefix(item, "=") {
+			out = append(out, item)
+			continue
+		}
+		name, _, ok := strings.Cut(item, "=")
+		if !ok || last[strings.ToUpper(name)] == i {
+			out = append(out, item)
+		}
+	}
 	return out
 }

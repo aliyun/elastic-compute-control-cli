@@ -120,6 +120,43 @@ resources:
 	}
 }
 
+func TestCheckAllowsUntaggableNestedPolicyVersionCreate(t *testing.T) {
+	root := t.TempDir()
+	cases := filepath.Join(root, "cases")
+	inputs := filepath.Join(root, "fixtures", "inputs")
+	coveragePath := filepath.Join(root, "coverage.yaml")
+	mustMkdir(t, filepath.Join(cases, "rg"))
+	mustMkdir(t, inputs)
+	mustWrite(t, filepath.Join(cases, "rg", "version-lifecycle.yaml"), `
+resource: rg/version
+steps:
+  - name: create
+    run: ecctl rg policy version create --policy-name owned --policy-document '{}'
+    teardown: ecctl rg policy version delete v2 --policy-name owned
+`)
+	mustWrite(t, coveragePath, `
+version: 3
+resources:
+  rg:
+    version:
+      operations:
+        create:
+          status: offline
+          case: cases/rg/version-lifecycle.yaml
+          fingerprint: sha256:0000000000000000000000000000000000000000000000000000000000000000
+          time: "2026-07-15T00:00:00Z"
+          reason: not-run
+`)
+
+	rep, err := Check(Options{CasesDir: cases, InputsDir: inputs, CoveragePath: coveragePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Invalid != 0 || len(rep.Errors) != 0 {
+		t.Fatalf("expected untaggable nested policy version create to lint, got %+v", rep.Errors)
+	}
+}
+
 func TestCheckAllowsReviewedCreateSafetyAlternatives(t *testing.T) {
 	tests := []struct {
 		name     string

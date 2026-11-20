@@ -3,10 +3,10 @@
 package journalfile
 
 import (
-	"bytes"
 	"os"
-	"os/exec"
 	"syscall"
+
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/privatefs"
 )
 
 // macOS ACLs can grant access even when POSIX mode is 0600. Match the
@@ -20,9 +20,27 @@ func quotaNativeNewFilePrivate(path string) bool {
 	if !ok || stat.Uid != uint32(os.Geteuid()) {
 		return false
 	}
-	command := exec.Command("/bin/ls", "-lde", path)
-	command.Env = []string{"LC_ALL=C", "PATH=/usr/bin:/bin"}
-	output, err := command.Output()
-	trimmed := bytes.TrimSpace(output)
-	return err == nil && len(trimmed) > 0 && len(bytes.Split(trimmed, []byte{'\n'})) == 1
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(info, opened) || !privateRecoveryDescriptor(file) {
+		return false
+	}
+	after, err := os.Lstat(path)
+	return err == nil && os.SameFile(opened, after)
+}
+
+func privateRecoveryDescriptor(file *os.File) bool {
+	if file == nil {
+		return false
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
+		return false
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && stat.Uid == uint32(os.Geteuid()) && privatefs.NoExtendedACLFile(file)
 }

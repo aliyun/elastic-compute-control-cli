@@ -22,6 +22,149 @@ type sdkErrorHTTPClient struct {
 	body   string
 }
 
+func TestFixtureAbsenceRequiresStructuredHTTP404(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"diagnostic text", errors.New("Error Code: EntityNotExist.Role\nRequest ID: req-spoof"), false},
+		{"typed non-404", &tea.SDKError{Code: tea.String("EntityNotExist.Role"), StatusCode: tea.Int(403)}, false},
+		{"typed 404", &tea.SDKError{Code: tea.String("EntityNotExist.Role"), StatusCode: tea.Int(404)}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wrapped := ecerrors.NotFound("NotFound", "role not found", cloudErrorOptions(tc.err)...)
+			if got := ecerrors.HasVerifiedProviderResponse(wrapped); got != tc.want {
+				t.Fatalf("structured provider proof = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRAMFixtureTypedAbsenceReachesRawCaller(t *testing.T) {
+	for _, tc := range []struct{ operation, code string }{
+		{"GetRole", "EntityNotExist.Role"}, {"DeleteRole", "EntityNotExist.Role"},
+		{"GetPolicy", "EntityNotExist.Policy"}, {"DeletePolicy", "EntityNotExist.Policy"},
+	} {
+		t.Run(tc.operation, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{"Code": tc.code, "RequestId": "req-ram"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			caller := &OpenAPICaller{Product: "ram", Region: "cn-hangzhou", executor: &fakeOpenAPIExecutor{callError: &tea.SDKError{Code: tea.String(tc.code), StatusCode: tea.Int(404), Message: tea.String("opaque"), Data: tea.String(string(body))}}}
+			request := map[string]any{"RoleName": "owned-role"}
+			if strings.Contains(tc.operation, "Policy") {
+				request = map[string]any{"PolicyName": "owned-policy", "PolicyType": "Custom"}
+			}
+			_, err = caller.CallRaw(context.Background(), tc.operation, request)
+			var app *ecerrors.AppError
+			if !errors.As(err, &app) || app.Payload().Kind != "not_found" || !ecerrors.ActionFromError(tc.operation, err).ProviderVerified || ecerrors.ActionFromError(tc.operation, err).Code != tc.code {
+				t.Fatalf("exact typed RAM absence did not reach caller: %v", err)
+			}
+		})
+	}
+}
+
+func TestRAMFixtureTypedPreallocationRejection(t *testing.T) {
+	for _, operation := range []string{"CreatePolicy", "CreateRole", "AttachPolicyToRole"} {
+		for _, tc := range []struct {
+			status   int
+			code     string
+			body     string
+			verified bool
+		}{
+			{403, "Forbidden", `{"Code":"Forbidden","RequestId":"req-fixture"}`, true},
+			{403, "NoPermission", `{"Code":"NoPermission","RequestId":"req-fixture"}`, true},
+			{400, "InvalidParameter", `{"Code":"InvalidParameter","RequestId":"req-fixture"}`, true},
+			{500, "Forbidden", `{"Code":"Forbidden","RequestId":"req-fixture"}`, false},
+			{403, "Forbidden", `{"Code":"Forbidden","RequestId":"req-fixture","request_id":"req-other"}`, false},
+			{403, "Forbidden", `{"Code":"Forbidden","RequestId":"req-fixture","Role":{"RoleId":"allocated"}}`, false},
+		} {
+			t.Run(operation+"/"+tc.code+"/"+fmt.Sprint(tc.status)+"/"+tc.body, func(t *testing.T) {
+				caller := &OpenAPICaller{Product: "ram", Region: "cn-hangzhou", executor: &fakeOpenAPIExecutor{callError: &tea.SDKError{Code: tea.String(tc.code), StatusCode: tea.Int(tc.status), Message: tea.String("rejected"), Data: tea.String(tc.body)}}}
+				request := map[string]any{"RoleName": "owned-role", "PolicyName": "owned-policy", "PolicyType": "Custom"}
+				_, err := caller.CallRaw(context.Background(), operation, request)
+				action := ecerrors.ActionFromError(operation, err)
+				if err == nil || action.ProviderVerified != tc.verified {
+					t.Fatalf("%s rejection proof = %+v, err=%v", operation, action, err)
+				}
+			})
+		}
+	}
+}
+
+func TestRAMFixtureHTTPProofRejectsDuplicateFields(t *testing.T) {
+	for _, tc := range []struct {
+		operation string
+		request   map[string]any
+	}{
+		{"CreateRole", map[string]any{"RoleName": "owned-role", "AssumeRolePolicyDocument": `{}`}},
+		{"AttachPolicyToRole", map[string]any{"RoleName": "owned-role", "PolicyName": "owned-policy", "PolicyType": "Custom"}},
+	} {
+		t.Run(tc.operation, func(t *testing.T) {
+			for _, disableSDKError := range []bool{false, true} {
+				profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
+				executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+				if err != nil {
+					t.Fatal(err)
+				}
+				executor.client.DisableSDKError = &disableSDKError
+				executor.client.HttpClient = sdkErrorHTTPClient{status: 403, body: `{"Code":"Forbidden","RequestId":"req-ram","RequestId":"req-ram"}`}
+				caller := &OpenAPICaller{Product: "ram", Region: "cn-hangzhou", Profile: profile, executor: executor}
+				_, err = caller.CallRaw(context.Background(), tc.operation, tc.request)
+				if err == nil || ecerrors.ActionFromError(tc.operation, err).ProviderVerified {
+					t.Fatalf("duplicate provider fields proved %s rejection: %v", tc.operation, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRAMFixtureAbsenceRejectsDiagnosticAndWrongStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"diagnostic text", errors.New("EntityNotExist.Role: role not found, Request ID: req-ram")},
+		{"wrong status", &tea.SDKError{Code: tea.String("EntityNotExist.Role"), StatusCode: tea.Int(403), Message: tea.String("role not found"), Data: tea.String(`{"Code":"EntityNotExist.Role","RequestId":"req-ram"}`)}},
+		{"missing request ID", &tea.SDKError{Code: tea.String("EntityNotExist.Role"), StatusCode: tea.Int(404), Message: tea.String("role not found"), Data: tea.String(`{"Code":"EntityNotExist.Role"}`)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caller := &OpenAPICaller{Product: "ram", Region: "cn-hangzhou", executor: &fakeOpenAPIExecutor{callError: tc.err}}
+			_, err := caller.CallRaw(context.Background(), "GetRole", map[string]any{"RoleName": "owned-role"})
+			var app *ecerrors.AppError
+			if !errors.As(err, &app) || app.Payload().Kind != "not_found" || ecerrors.ActionFromError("GetRole", err).ProviderVerified {
+				t.Fatalf("unproven RAM absence changed public classification or proved fixture absence: %v", err)
+			}
+		})
+	}
+}
+
+func TestRAMFixtureAbsenceRejectsContradictoryEnvelope(t *testing.T) {
+	for _, tc := range []struct {
+		operation, code, field, request string
+	}{
+		{"GetRole", "EntityNotExist.Role", "RoleName", "owned-role"},
+		{"GetPolicy", "EntityNotExist.Policy", "PolicyName", "owned-policy"},
+	} {
+		for _, body := range []string{
+			`{"Code":"` + tc.code + `","RequestId":"req-ram","success":true}`,
+			`{"Code":"` + tc.code + `","RequestId":"req-ram","Role":{"RoleId":"role-present"}}`,
+			`{"Code":"` + tc.code + `","RequestId":"req-ram","Policy":{"PolicyName":"policy-present"}}`,
+			`{"Code":"` + tc.code + `","RequestId":"req-ram","request_id":"req-other"}`,
+		} {
+			t.Run(tc.operation+"/"+body, func(t *testing.T) {
+				caller := &OpenAPICaller{Product: "ram", Region: "cn-hangzhou", executor: &fakeOpenAPIExecutor{callError: &tea.SDKError{Code: tea.String(tc.code), StatusCode: tea.Int(404), Message: tea.String("opaque"), Data: tea.String(body)}}}
+				_, err := caller.CallRaw(context.Background(), tc.operation, map[string]any{tc.field: tc.request})
+				var app *ecerrors.AppError
+				if !errors.As(err, &app) || app.Payload().Kind != "service" || ecerrors.ActionFromError(tc.operation, err).ProviderVerified {
+					t.Fatalf("contradictory RAM absence proved terminal deletion: %v", err)
+				}
+			})
+		}
+	}
+}
+
 func (c sdkErrorHTTPClient) Call(_ *http.Request, _ *http.Transport) (*http.Response, error) {
 	return &http.Response{StatusCode: c.status, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(c.body))}, nil
 }
@@ -98,6 +241,34 @@ func TestOpenAPICallerSDKResponseErrors(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestFCSandboxTeamMutationContradictoryReplyCannotProveRejection(t *testing.T) {
+	for _, tc := range []struct {
+		operation string
+		status    int
+		code      string
+	}{
+		{"CreateTeam", http.StatusNotFound, "InvalidParameter"},
+		{"DeleteTeam", http.StatusBadRequest, "TeamNotFound"},
+	} {
+		t.Run(tc.operation, func(t *testing.T) {
+			profile := testResolvedOpenAPIProfile(t, "cn-hangzhou")
+			executor, err := newDarabonbaExecutor(profile, testCredentialSnapshot(t, profile.Acquirer))
+			if err != nil {
+				t.Fatal(err)
+			}
+			executor.client.HttpClient = sdkErrorHTTPClient{tc.status, `{"code":"` + tc.code + `","message":"rejected","requestId":"req-team"}`}
+			caller := &OpenAPICaller{Product: "FCSandbox", Resource: "team", Region: "cn-hangzhou", executor: executor}
+			_, err = caller.CallRaw(context.Background(), tc.operation, map[string]any{"teamID": "team-1", "teamName": "owned"})
+			if err == nil {
+				t.Fatal("contradictory Team mutation reply was accepted")
+			}
+			if action := ecerrors.ActionFromError(tc.operation, err); action.ProviderVerified {
+				t.Fatalf("contradictory Team mutation was treated as definitive: %+v", action)
+			}
+		})
 	}
 }
 

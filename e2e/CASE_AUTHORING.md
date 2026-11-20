@@ -81,6 +81,11 @@ improve counts.
 - Every creatable prerequisite resource must be a node in
   `fixtures/stack.yaml`; cases declare only its fixture ID through `needs`.
   Do not create prerequisite resources in case steps.
+- FCSandbox Team is a protected exception: its create must use the runner's
+  case-level ownership nonce and durable Team reservation. A serial case that
+  needs an owned Team captures its ID and registers teardown on that create
+  step; do not move Team creation into generic fixtures until they support the
+  same reservation and recovery path.
 - Every fixture node declares `resource: product/resource`, `mode: create` or
   `lookup`, and a lifetime. The default `lifetime: execution` is cleaned after
   one execution unit. Use `lifetime: run` only for compatible resources that
@@ -92,6 +97,13 @@ improve counts.
   lifecycle case, including its cleanup and lost-response recovery.
   Native Template allocation is also rejected while the Session holds a
   run-lifetime Team fixture; a shared parent spans distinct execution journals.
+- Native `sandbox/volume create` cases need a case-owned Team and a teardown on
+  each create step. The runner replaces the authored Volume name with a random
+  ownership name, reserves a durable intent, and exposes it as `volume_name`
+  for assertions. A lost create response leaves cleanup fenced until its
+  exact Volume ID can be reconciled. The first-release case keeps both Volumes
+  under their original Team; the runner binds each delete finalizer to that
+  Team and requires an exact provider-verified absence read before retirement.
 - Reuse one run-lifetime parent for compatible operations, but isolate
   destructive mutations that change shared state. ACK uses two clusters: the
   run-lifetime `ack_shared_cluster` for reversible cases, and the cluster owned

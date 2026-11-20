@@ -135,6 +135,7 @@ type ResourceSchema struct {
 
 type SchemaField struct {
 	Type           string                 `yaml:"type"`
+	Nullable       bool                   `yaml:"nullable"`
 	Description    LocalizedText          `yaml:"description"`
 	Required       bool                   `yaml:"required"`
 	Repeatable     bool                   `yaml:"repeatable"`
@@ -143,6 +144,7 @@ type SchemaField struct {
 	AllowEmpty     bool                   `yaml:"allow_empty"`
 	InputStyle     string                 `yaml:"input_style"`
 	Default        any                    `yaml:"default"`
+	Min            *int                   `yaml:"min"`
 	Max            *int                   `yaml:"max"`
 	Enum           []string               `yaml:"enum"`
 	Items          *SchemaField           `yaml:"items"`
@@ -275,20 +277,22 @@ func OperationIdempotency(resource ResourceSpec, operation Operation) (Idempoten
 }
 
 type Binding struct {
-	API           string            `yaml:"api"`
-	Each          string            `yaml:"each"`
-	Capture       any               `yaml:"capture"`
-	Hooks         BindingHooks      `yaml:"hooks"`
-	Request       map[string]any    `yaml:"request"`
-	Response      BindingResponse   `yaml:"response"`
-	RequireAny    []Requirement     `yaml:"require_any"`
-	RequireAll    []Requirement     `yaml:"require_all"`
-	Idempotency   Idempotency       `yaml:"idempotency"`
-	Retry         TransitionRetry   `yaml:"retry"`
-	IDFrom        string            `yaml:"id_from"`
-	RequestIDFrom string            `yaml:"request_id_from"`
-	ContextFrom   map[string]string `yaml:"context_from"`
-	Wait          string            `yaml:"wait"`
+	API               string            `yaml:"api"`
+	Each              string            `yaml:"each"`
+	Capture           any               `yaml:"capture"`
+	Hooks             BindingHooks      `yaml:"hooks"`
+	Request           map[string]any    `yaml:"request"`
+	Response          BindingResponse   `yaml:"response"`
+	RequireAny        []Requirement     `yaml:"require_any"`
+	RequireAll        []Requirement     `yaml:"require_all"`
+	Idempotency       Idempotency       `yaml:"idempotency"`
+	Retry             TransitionRetry   `yaml:"retry"`
+	IDFrom            string            `yaml:"id_from"`
+	RequestIDFrom     string            `yaml:"request_id_from"`
+	ContextFrom       map[string]string `yaml:"context_from"`
+	InitialStateFrom  string            `yaml:"initial_state_from"`
+	InitialDetailFrom string            `yaml:"initial_detail_from"`
+	Wait              string            `yaml:"wait"`
 }
 
 type BindingResponse struct {
@@ -1156,6 +1160,9 @@ func Validate(spec ResourceSpec) error {
 				return fmt.Errorf("binding %q references unknown waiter %q", name, binding.Wait)
 			}
 		}
+		if binding.InitialStateFrom != "" && binding.Wait == "" || binding.InitialDetailFrom != "" && binding.InitialStateFrom == "" {
+			return fmt.Errorf("binding %q initial failure paths require a waiter and state path", name)
+		}
 		attachedHooks := make(map[string]bool, len(binding.Hooks.Before))
 		for _, hook := range binding.Hooks.Before {
 			attachedHooks[hook] = true
@@ -1382,6 +1389,15 @@ func operationFieldCLIFlagName(field OperationFieldRef) string {
 func validateSchemaField(field SchemaField) error {
 	if field.Type == "" {
 		return fmt.Errorf("type is required")
+	}
+	if field.Nullable && field.Type != "string" && field.Type != "boolean" {
+		return fmt.Errorf("nullable is only supported for string and boolean fields")
+	}
+	if field.Min != nil && field.Type != "integer" {
+		return fmt.Errorf("min is only supported for integer fields")
+	}
+	if field.Min != nil && field.Max != nil && *field.Min > *field.Max {
+		return fmt.Errorf("integer min exceeds max")
 	}
 	switch field.Type {
 	case "string", "integer", "number", "boolean", "duration", "cidr", "key_value", "string_array":

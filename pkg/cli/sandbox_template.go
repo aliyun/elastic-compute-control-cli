@@ -14,6 +14,16 @@ import (
 func sandboxTemplateRequestTimeout(cmd *cobra.Command, resource spec.ResourceSpec, action string, input map[string]any, timeout time.Duration) (time.Duration, error) {
 	native, _ := input["openapi"].(bool)
 	noWait, _ := input["no_wait"].(bool)
+	if resource.Product == "sandbox" && resource.Resource == "volume" && (action == "create" || action == "delete") {
+		if cmd.Flags().Changed("timeout") && timeout <= 0 {
+			return 0, ecerrors.Client("InvalidVolumeTimeout", i18n.NewLocalizer("en").Message("InvalidVolumeTimeout"), ecerrors.WithField("timeout"))
+		}
+		if noWait && !cmd.Flags().Changed("timeout") {
+			timeout = 30 * time.Second
+			input["timeout"] = timeout
+		}
+		return timeout, nil
+	}
 	if resource.Product != "sandbox" || resource.Resource != "template" || !native || (action != "create" && action != "update") {
 		return timeout, nil
 	}

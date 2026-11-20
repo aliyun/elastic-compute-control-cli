@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,14 +28,16 @@ var (
 )
 
 // OSSUtilCaller adapts the OSSUtil API commands exposed by aliyun CLI to the
-// generic ecctl call contract. Credentials are resolved by ecctl and passed to
-// the child process through environment variables, never command arguments.
+// generic ecctl call contract. Ordinary calls pass credentials to the child
+// through environment variables; the pinned Volume fixture read uses the SDK.
 type OSSUtilCaller struct {
-	Region         string
-	Profile        resolvedOpenAPIProfile
-	runner         CLICommandRunner
-	getenv         func(string) string
-	resolveRuntime func(func(string) string) (string, error)
+	Region               string
+	Profile              resolvedOpenAPIProfile
+	requestedProfile     string
+	fixtureReadTransport http.RoundTripper
+	runner               CLICommandRunner
+	getenv               func(string) string
+	resolveRuntime       func(func(string) string) (string, error)
 }
 
 func NewOSSUtilCaller(profileName, configPath, region string, getenv func(string) string) (*OSSUtilCaller, error) {
@@ -53,12 +56,23 @@ func newOSSUtilCaller(profileName, configPath string, region ecconfig.ResolvedRe
 	if getenv == nil {
 		getenv = func(string) string { return "" }
 	}
+	pin, identityHash, err := parseExpectedCredentialIdentity(getenv(expectedCredentialIdentityEnv))
+	if err != nil {
+		return nil, credentialResolutionError(err)
+	}
 	if configPath == "" {
 		configPath = ecconfig.EcctlConfigPath(getenv)
 	}
 	resolved, err := resolveOpenAPIProfile(profileName, configPath, region, getenv)
 	if err != nil {
 		return nil, err
+	}
+	if pin != nil {
+		if resolved.ExpectedAccountID != "" && resolved.ExpectedAccountID != pin.AccountID || resolved.ExpectedIdentityType != "" && resolved.ExpectedIdentityType != pin.Type {
+			return nil, credentialResolutionError(ErrCredentialIdentityChanged)
+		}
+		resolved.ExpectedAccountID, resolved.ExpectedIdentityType, resolved.ExpectedIdentityHash = pin.AccountID, pin.Type, identityHash
+		resolved.PinCredentialIdentity = true
 	}
 	resolvedRegion, regionErr := ecconfig.ResolveRegion(resolved.RegionID, nil)
 	if regionErr != nil {
@@ -68,11 +82,12 @@ func newOSSUtilCaller(profileName, configPath string, region ecconfig.ResolvedRe
 		runner = execCLICommandRunner{}
 	}
 	return &OSSUtilCaller{
-		Region:         resolvedRegion,
-		Profile:        resolved,
-		runner:         runner,
-		getenv:         getenv,
-		resolveRuntime: resolveInstalledOSSUtilRuntime,
+		Region:           resolvedRegion,
+		Profile:          resolved,
+		requestedProfile: profileName,
+		runner:           runner,
+		getenv:           getenv,
+		resolveRuntime:   resolveInstalledOSSUtilRuntime,
 	}, nil
 }
 
@@ -84,6 +99,15 @@ func (c *OSSUtilCaller) CallWithArgs(ctx context.Context, operation string, requ
 	args, metadata, err := c.commandArgs(operation, request, passthrough)
 	if err != nil {
 		return nil, err
+	}
+	if bucket, ok := c.ossFixtureReadBucket(operation, request, passthrough); ok {
+		return c.callOSSFixtureListObjects(ctx, bucket)
+	}
+	if bucket, ok := c.ossFixtureOwnedBucket(operation, request); ok {
+		if len(passthrough) != 0 || !ossFixtureExactRequest(operation, request) {
+			return nil, ecerrors.Client("InvalidParameter", "invalid owned OSS fixture request")
+		}
+		return c.callOSSFixtureBucketOperation(ctx, operation, bucket)
 	}
 	runtimePath, err := c.resolveRuntime(c.getenv)
 	if err != nil {
@@ -118,7 +142,7 @@ func (c *OSSUtilCaller) CallWithArgs(ctx context.Context, operation string, requ
 	var env []string
 	var identityGuard *operationIdentityGuard
 	renewable := credentialAcquirerIsRenewable(operationAcquirer)
-	if renewable && operationProfile.PinCredentialIdentity {
+	if operationProfile.ExpectedIdentityHash != "" || renewable && operationProfile.PinCredentialIdentity {
 		identityGuard, err = newOperationIdentityGuard(ctx, operationProfile, snapshot)
 		if err != nil {
 			return nil, credentialResolutionError(&credentialProviderError{mode: c.Profile.Mode, err: err})
@@ -186,7 +210,14 @@ func (c *OSSUtilCaller) CallWithArgs(ctx context.Context, operation string, requ
 				return nil, credentialResolutionError(&credentialProviderError{mode: c.Profile.Mode, err: refreshErr})
 			}
 		}
-		return nil, c.commandError(runErr, stdout, stderr, request)
+		commandErr := c.commandError(runErr, stdout, stderr, request)
+		if operation == "ListObjects" {
+			action := ecerrors.ActionFromError(operation, commandErr)
+			if action.Code == "NoSuchBucket" {
+				commandErr = ecerrors.WithActions(commandErr, []ecerrors.Action{action})
+			}
+		}
+		return nil, commandErr
 	}
 	if metadata.transfer != "" {
 		response := map[string]any{

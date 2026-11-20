@@ -22,6 +22,9 @@ func ValidateDelete(command string) error {
 	if len(tokens) < 2 || tokens[0] != "ecctl" {
 		return fmt.Errorf("teardown must be an ecctl command")
 	}
+	if volumeDeleteCandidate(tokens) {
+		return validateVolumeDelete(tokens)
+	}
 	if len(tokens) >= 4 && tokens[1] == "rg" && tokens[2] == "associated-transfer" && tokens[3] == "update" {
 		return validateAssociatedTransferRestore(tokens)
 	}
@@ -40,6 +43,82 @@ func ValidateDelete(command string) error {
 		return fmt.Errorf("teardown must be a delete command")
 	}
 	return validateOSSDelete(tokens)
+}
+
+// Normalize only spellings exposed by the public command tree. The original
+// tokens remain unchanged for execution and exact ownership comparisons.
+func canonicalReplayPositionals(positionals []string) []string {
+	if len(positionals) == 0 {
+		return positionals
+	}
+	canonical := append([]string(nil), positionals...)
+	if canonical[0] == "sbx" {
+		canonical[0] = "sandbox"
+	}
+	if canonical[0] == "ack" && len(canonical) >= 2 {
+		if canonical[1] == "cluster" {
+			canonical = append(canonical[:1], canonical[2:]...)
+		} else if canonical[1] == "np" {
+			canonical[1] = "nodepool"
+		}
+	}
+	if canonical[0] == "lingjun" && len(canonical) >= 2 && canonical[1] == "ng" {
+		canonical[1] = "node-group"
+	}
+	if canonical[0] == "rg" && len(canonical) >= 2 && canonical[1] == "slr" {
+		canonical[1] = "service-linked-role"
+	}
+	if canonical[0] == "vpc" && len(canonical) >= 2 && canonical[1] == "vsw" {
+		canonical[1] = "vswitch"
+	}
+	if canonical[0] == "sandbox" && len(canonical) >= 2 {
+		if len(canonical) >= 3 && canonical[1] == "sandbox" {
+			canonical = append(canonical[:1], canonical[2:]...)
+		}
+		switch canonical[1] {
+		case "tpl":
+			canonical[1] = "template"
+		case "tcache":
+			canonical[1] = "template-cache"
+		}
+		if len(canonical) >= 3 && (canonical[1] == "team" || canonical[1] == "template") && (canonical[2] == "rm" || canonical[2] == "remove") {
+			canonical[2] = "delete"
+		}
+	}
+	if canonical[0] == "tag" && len(canonical) >= 2 && canonical[1] == "arr" {
+		canonical[1] = "associated-resource-rule"
+	}
+	return canonical
+}
+
+// Native Volume cleanup is reserved by the runner. Only its canonical exact
+// target command can enter a replay journal; optional Team selectors would be
+// stale after the lifecycle transfers ownership.
+func volumeDeleteCandidate(tokens []string) bool {
+	for i := 1; i+1 < len(tokens); i++ {
+		if (tokens[i] != "sandbox" && tokens[i] != "sbx") || tokens[i+1] != "volume" {
+			continue
+		}
+		for _, token := range tokens[i+2:] {
+			if token == "delete" || token == "rm" || token == "remove" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func validateVolumeDelete(tokens []string) error {
+	if len(tokens) != 9 || tokens[1] != "sandbox" || tokens[2] != "volume" || tokens[3] != "delete" || tokens[5] != "--region" || tokens[7] != "--profile" || tokens[6] == "" || tokens[8] == "" || !safeVolumeDeleteID(tokens[4]) {
+		return fmt.Errorf("native Volume teardown requires one exact ID, region and profile")
+	}
+	return nil
+}
+
+func safeVolumeDeleteID(id string) bool {
+	return id != "" && id[0] != '-' && strings.IndexFunc(id, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_')
+	}) < 0
 }
 
 // A known global flag may precede or separate the ordinary Team delete path.
@@ -156,7 +235,7 @@ func validateOSSDelete(tokens []string) error {
 			}
 			value = tokens[index]
 		}
-		if strings.TrimSpace(value) == "" {
+		if strings.TrimSpace(value) == "" || strings.HasPrefix(value, "-") && (flag != "--Key" || !hasEquals) {
 			return fmt.Errorf("OSS cleanup parameter %q requires a value", flag)
 		}
 	}

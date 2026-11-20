@@ -7,17 +7,105 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/shlex"
+
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/fixtureconfig"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalcmd"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
 const PrimaryRole = "primary"
+
+// SuiteUsesVolumeFixture marks a suite whose assignment must include the
+// Hangzhou Volume fixture, including cross-resource coverage and commands.
+func SuiteUsesVolumeFixture(suite *scenario.Suite) bool {
+	if suite.Resource == "sandbox/volume" {
+		return true
+	}
+	for _, covered := range suite.Covers {
+		if covered == "sandbox/volume" {
+			return true
+		}
+	}
+	for _, step := range suite.Steps {
+		if step.Local == nil {
+			action, err := journalcmd.VolumeCommandAction(step.Run)
+			if action != "" || err != nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// SuiteUsesSandbox includes additional coverage and executable first-class
+// Volume steps, not only the suite's primary resource label.
+func SuiteUsesSandbox(suite *scenario.Suite) bool {
+	if strings.HasPrefix(suite.Resource, "sandbox/") {
+		return true
+	}
+	for _, covered := range suite.Covers {
+		if strings.HasPrefix(covered, "sandbox/") {
+			return true
+		}
+	}
+	for _, step := range suite.Steps {
+		if step.Local != nil {
+			continue
+		}
+		action, err := journalcmd.VolumeCommandAction(step.Run)
+		if action != "" || err != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// SuiteUsesRegionalSandbox excludes the global E2B sandbox lifecycle from
+// the product's Hangzhou-only test selection.
+func SuiteUsesRegionalSandbox(suite *scenario.Suite) bool {
+	regional := func(resource string) bool {
+		return strings.HasPrefix(resource, "sandbox/") && resource != "sandbox/sandbox" && resource != "sandbox/template"
+	}
+	if regional(suite.Resource) {
+		return true
+	}
+	for _, covered := range suite.Covers {
+		if regional(covered) {
+			return true
+		}
+	}
+	for _, step := range suite.Steps {
+		if step.Local != nil {
+			continue
+		}
+		if args, err := shlex.Split(step.Run); err != nil {
+			return true
+		} else {
+			for index := 0; index+1 < len(args); index++ {
+				if (args[index] == "sandbox" || args[index] == "sbx") && args[index+1] == "template" {
+					for _, arg := range args {
+						if arg == "--openapi" || arg == "--openapi=true" {
+							return true
+						}
+					}
+				}
+			}
+		}
+		action, err := journalcmd.VolumeCommandAction(step.Run)
+		if action != "" || err != nil {
+			return true
+		}
+	}
+	return false
+}
 
 // Request is the complete input needed to plan a run before cloud access.
 type Request struct {
 	Suites                     []*scenario.Suite
 	Profiles                   []fixtureconfig.RegionProfile
 	PrimaryRegion              string
+	OfflinePreview             bool                // render only; do not admit a live Volume fixture
 	StackPrerequisites         map[string][]string // case path -> suite-level stack bundle requirements
 	OptionalStackPrerequisites map[string][]string // case path -> step-level stack bundle requirements
 }
@@ -58,6 +146,11 @@ func Build(request Request) ([]ExecutionUnit, error) {
 				request.StackPrerequisites[suite.Path]...,
 			)),
 		}
+		if request.OfflinePreview && SuiteUsesVolumeFixture(suite) {
+			// The fixture is created during a live run. Offline rendering uses
+			// placeholder captures and cannot prove cloud ownership.
+			requirements[PrimaryRole] = withoutPrerequisite(requirements[PrimaryRole], "volume.fixture_ownership")
+		}
 		optional := map[string][]string{
 			PrimaryRole: optionalPrimaryRequirements(suite, request.OptionalStackPrerequisites[suite.Path], requirements[PrimaryRole]),
 		}
@@ -69,6 +162,16 @@ func Build(request Request) ([]ExecutionUnit, error) {
 			}
 		}
 		signature := requirementSignature(requirements, distinct)
+		// Region selection applies to an entire execution unit. Keep the
+		// regional product separate from global E2B and other products.
+		if SuiteUsesRegionalSandbox(suite) {
+			signature += ";product=sandbox-regional"
+		} else if SuiteUsesSandbox(suite) {
+			signature += ";product=sandbox-global"
+		}
+		if SuiteUsesVolumeFixture(suite) {
+			signature += ";fixture=volume-hangzhou"
+		}
 		if capability := dynamicCapabilitySignature(suite); capability != "" {
 			signature += ";capabilities=[" + capability + "]"
 		}
@@ -113,6 +216,16 @@ func Build(request Request) ([]ExecutionUnit, error) {
 		}
 	}
 	return units, nil
+}
+
+func withoutPrerequisite(values []string, excluded string) []string {
+	kept := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != excluded {
+			kept = append(kept, value)
+		}
+	}
+	return kept
 }
 
 func optionalPrimaryRequirements(suite *scenario.Suite, stack, hard []string) []string {
