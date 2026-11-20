@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -83,6 +84,11 @@ func TestOSSFixtureReadSelectorRequiresExactPinnedRequest(t *testing.T) {
 	if bucket, ok := caller.ossFixtureReadBucket("ListObjects", request, nil); !ok || bucket != fixtureReadTestBucket {
 		t.Fatalf("exact pinned request was not selected: %q, %v", bucket, ok)
 	}
+	for _, maxKeys := range []any{1, json.Number("1")} {
+		if bucket, ok := caller.ossFixtureReadBucket("ListObjects", map[string]any{"Bucket": fixtureReadTestBucket, "MaxKeys": maxKeys}, nil); !ok || bucket != fixtureReadTestBucket {
+			t.Fatalf("exact integer max-keys was not selected: %T %#v", maxKeys, maxKeys)
+		}
+	}
 	for _, tc := range []struct {
 		name        string
 		operation   string
@@ -93,6 +99,7 @@ func TestOSSFixtureReadSelectorRequiresExactPinnedRequest(t *testing.T) {
 		{name: "different operation", operation: "GetBucketInfo", request: request},
 		{name: "different bucket", operation: "ListObjects", request: map[string]any{"Bucket": "ordinary", "MaxKeys": float64(1)}},
 		{name: "string max keys", operation: "ListObjects", request: map[string]any{"Bucket": fixtureReadTestBucket, "MaxKeys": "1"}},
+		{name: "noncanonical number", operation: "ListObjects", request: map[string]any{"Bucket": fixtureReadTestBucket, "MaxKeys": json.Number("1.0")}},
 		{name: "extra parameter", operation: "ListObjects", request: map[string]any{"Bucket": fixtureReadTestBucket, "MaxKeys": float64(1), "Prefix": ""}},
 		{name: "passthrough", operation: "ListObjects", request: request, passthrough: []string{"--profile", "other"}},
 		{name: "wrong region", operation: "ListObjects", request: request, change: func(c *OSSUtilCaller) { c.Region = "cn-shanghai" }},
@@ -108,6 +115,94 @@ func TestOSSFixtureReadSelectorRequiresExactPinnedRequest(t *testing.T) {
 			}
 			if bucket, ok := copy.ossFixtureReadBucket(tc.operation, tc.request, tc.passthrough); ok {
 				t.Fatalf("unscoped request selected: %q", bucket)
+			}
+		})
+	}
+}
+
+func TestOSSFixtureReadValidatesSingleObjectPagination(t *testing.T) {
+	base := "<ListBucketResult><Name>" + fixtureReadTestBucket + "</Name><Prefix></Prefix><MaxKeys>1</MaxKeys>" +
+		"<EncodingType>url</EncodingType><IsTruncated>true</IsTruncated><KeyCount>1</KeyCount>" +
+		"<NextContinuationToken>cursor-2</NextContinuationToken><Contents><Key>object%20one</Key><Size>1</Size></Contents></ListBucketResult>"
+	for _, tc := range []struct {
+		name, body string
+		valid      bool
+	}{
+		{"one object and continuation", base, true},
+		{"wrong max keys", strings.Replace(base, "<MaxKeys>1</MaxKeys>", "<MaxKeys>2</MaxKeys>", 1), false},
+		{"wrong encoding", strings.Replace(base, "<EncodingType>url</EncodingType>", "<EncodingType>xml</EncodingType>", 1), false},
+		{"duplicate continuation", strings.Replace(base, "</NextContinuationToken>", "</NextContinuationToken><NextContinuationToken>cursor-3</NextContinuationToken>", 1), false},
+		{"noncanonical count", strings.Replace(base, "<KeyCount>1</KeyCount>", "<KeyCount>01</KeyCount>", 1), false},
+		{"count exceeds limit", strings.Replace(base, "<KeyCount>1</KeyCount>", "<KeyCount>2</KeyCount>", 1), false},
+		{"missing key", strings.Replace(base, "<Key>object%20one</Key>", "", 1), false},
+		{"empty key", strings.Replace(base, "<Key>object%20one</Key>", "<Key></Key>", 1), false},
+		{"invalid truncated flag", strings.Replace(base, "<IsTruncated>true</IsTruncated>", "<IsTruncated>maybe</IsTruncated>", 1), false},
+		{"unexpected start after", strings.Replace(base, "<Prefix></Prefix>", "<Prefix></Prefix><StartAfter>hidden</StartAfter>", 1), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := 0
+			caller := pinnedFixtureReadCaller(t, fixtureReadRoundTripper(func(*http.Request) (*http.Response, error) {
+				requests++
+				return fixtureReadResponse(200, "req-page", tc.body), nil
+			}))
+			response, err := caller.CallWithArgs(context.Background(), "ListObjects", map[string]any{"Bucket": fixtureReadTestBucket, "MaxKeys": 1}, nil)
+			if requests != 1 || len(caller.runner.(*fakeOSSUtilRunner).calls) != 0 {
+				t.Fatalf("page did not use one pinned SDK request: requests=%d", requests)
+			}
+			if !tc.valid {
+				if err == nil || response != nil || ecerrors.HasVerifiedProviderResponse(err) {
+					t.Fatalf("inconsistent page proved a result: %#v %v", response, err)
+				}
+				return
+			}
+			contents, ok := response["Contents"].([]map[string]any)
+			if err != nil || !ok || len(contents) != 1 || contents[0]["Key"] != "object one" || response["Name"] != fixtureReadTestBucket ||
+				response["KeyCount"] != 1 || response["IsTruncated"] != true || response["NextContinuationToken"] != "cursor-2" || response["EncodingType"] != "url" {
+				t.Fatalf("signed one-object page changed: %#v %v", response, err)
+			}
+		})
+	}
+}
+
+func TestOSSFixturePutBucketRequiresTrustedReceipt(t *testing.T) {
+	const serverDate = "Mon, 16 Nov 2026 13:00:00 GMT"
+	for _, tc := range []struct {
+		name, body, date string
+		status           int
+		followup         bool
+	}{
+		{"missing date", "", "", 200, false},
+		{"invalid date", "", "not-an-http-date", 200, false},
+		{"unexpected response body", "<Bucket/>", serverDate, 200, false},
+		{"wrong success status", "", serverDate, 204, false},
+		{"foreign bucket after PUT", "", serverDate, 200, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := 0
+			caller := pinnedFixtureReadCaller(t, fixtureReadRoundTripper(func(request *http.Request) (*http.Response, error) {
+				requests++
+				if request.URL.Query().Has("bucketInfo") {
+					body := "<BucketInfo><Bucket><Name>" + fixtureReadTestBucket + "</Name><Location>oss-cn-hangzhou</Location>" +
+						"<ExtranetEndpoint>oss-cn-hangzhou.aliyuncs.com</ExtranetEndpoint><CreationDate>2026-11-16T13:00:00Z</CreationDate>" +
+						"<Owner><ID>another-account</ID></Owner></Bucket></BucketInfo>"
+					return fixtureReadResponse(200, "req-info", body), nil
+				}
+				if request.Method != http.MethodPut {
+					t.Fatalf("unexpected mutation: %s", request.Method)
+				}
+				response := fixtureReadResponse(tc.status, "req-put", tc.body)
+				if tc.date != "" {
+					response.Header.Set("Date", tc.date)
+				}
+				return response, nil
+			}))
+			response, err := caller.CallWithArgs(context.Background(), "PutBucket", map[string]any{"Bucket": fixtureReadTestBucket, "ACL": "private"}, nil)
+			wantRequests := 1
+			if tc.followup {
+				wantRequests = 2
+			}
+			if err == nil || response != nil || requests != wantRequests || len(caller.runner.(*fakeOSSUtilRunner).calls) != 0 {
+				t.Fatalf("unverified PUT yielded an owned bucket: response=%#v err=%v requests=%d", response, err, requests)
 			}
 		})
 	}
@@ -315,16 +410,29 @@ func TestOSSFixtureReadRequestValidatorRejectsTargetChanges(t *testing.T) {
 		{name: "scheme", change: func(r *http.Request) { r.URL.Scheme = "http" }},
 		{name: "port", change: func(r *http.Request) { r.URL.Host += ":443"; r.Host = r.URL.Host }},
 		{name: "path", change: func(r *http.Request) { r.URL.Path = "/object" }},
+		{name: "raw path", change: func(r *http.Request) { r.URL.RawPath = "/%2F" }},
+		{name: "opaque URL", change: func(r *http.Request) { r.URL.Opaque = "//other.example/" }},
+		{name: "force query", change: func(r *http.Request) { r.URL.ForceQuery = true }},
+		{name: "malformed query", change: func(r *http.Request) { r.URL.RawQuery = "list-type=%ZZ" }},
 		{name: "missing encoding", change: func(r *http.Request) { r.URL.RawQuery = "list-type=2&max-keys=1" }},
 		{name: "duplicate max keys", change: func(r *http.Request) { r.URL.RawQuery += "&max-keys=1" }},
 		{name: "extra query", change: func(r *http.Request) { r.URL.RawQuery += "&prefix=hidden" }},
 		{name: "userinfo", change: func(r *http.Request) { r.URL.User = url.User("other") }},
 		{name: "fragment", change: func(r *http.Request) { r.URL.Fragment = "other" }},
 		{name: "signature missing", change: func(r *http.Request) { r.Header.Del("Authorization") }},
+		{name: "duplicate signature", change: func(r *http.Request) { r.Header.Add("Authorization", r.Header.Get("Authorization")) }},
+		{name: "nonhex signature", change: func(r *http.Request) {
+			authorization := r.Header.Get("Authorization")
+			r.Header.Set("Authorization", authorization[:len(authorization)-1]+"z")
+		}},
+		{name: "date missing", change: func(r *http.Request) { r.Header.Del("X-Oss-Date") }},
+		{name: "date duplicated", change: func(r *http.Request) { r.Header.Add("X-Oss-Date", r.Header.Get("X-Oss-Date")) }},
+		{name: "date outside signature scope", change: func(r *http.Request) { r.Header.Set("X-Oss-Date", "20000101T000000Z") }},
 		{name: "signed wrong key", change: func(r *http.Request) {
 			r.Header.Set("Authorization", strings.Replace(r.Header.Get("Authorization"), "test-ak", "other-ak", 1))
 		}},
 		{name: "unexpected token", change: func(r *http.Request) { r.Header.Set("X-Oss-Security-Token", "unexpected") }},
+		{name: "empty token header", change: func(r *http.Request) { r.Header["X-Oss-Security-Token"] = []string{""} }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			request := makeRequest()

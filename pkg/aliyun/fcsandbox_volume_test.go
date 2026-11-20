@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alibabacloud-go/tea/dara"
+	"github.com/alibabacloud-go/tea/tea"
+
 	"github.com/aliyun/elastic-compute-control-cli/pkg/engine"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
@@ -160,6 +163,156 @@ func TestVolumeListRejectsPageLargerThanOutboundLimit(t *testing.T) {
 	}
 	if err := caller.fcVolumeResponseError(req, map[string]any{"code": "200", "volumes": items[:1], "maxResults": 2}); err == nil {
 		t.Fatal("server limit echo changed the outbound page contract")
+	}
+}
+
+func TestVolumeCreateAcceptanceRequiresCoherentRequestAndResponseTuple(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		requestBody    string
+		changeRequest  func(*openAPIRequest)
+		changeResponse func(map[string]any, map[string]any)
+		accepted       bool
+	}{
+		{name: "accepted", accepted: true},
+		{name: "malformed request body", requestBody: `{"volumeName":"workspace"`},
+		{name: "request missing name", requestBody: `{"teamID":"team-1"}`},
+		{name: "request team is not text", requestBody: `{"volumeName":"workspace","teamID":42}`},
+		{name: "request team has path separator", requestBody: `{"volumeName":"workspace","teamID":"team/other"}`},
+		{name: "request missing region", changeRequest: func(req *openAPIRequest) { req.RegionId = "" }},
+		{name: "response missing ID", changeResponse: func(_ map[string]any, volume map[string]any) { delete(volume, "volumeID") }},
+		{name: "response blank status", changeResponse: func(_ map[string]any, volume map[string]any) { volume["status"] = " " }},
+		{name: "response wrong name", changeResponse: func(_ map[string]any, volume map[string]any) { volume["volumeName"] = "another" }},
+		{name: "response missing team", changeResponse: func(_ map[string]any, volume map[string]any) { delete(volume, "teamID") }},
+		{name: "response wrong team", changeResponse: func(_ map[string]any, volume map[string]any) { volume["teamID"] = "team-2" }},
+		{name: "response invalid request ID", changeResponse: func(response, _ map[string]any) { response["requestId"] = "req\nother" }},
+		{name: "response conflicting code alias", changeResponse: func(response, _ map[string]any) { response["Code"] = "409" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caller := &OpenAPICaller{Product: "FCSandbox", Resource: "volume", Region: "cn-hangzhou", Profile: resolvedOpenAPIProfile{Language: "en"}}
+			req, err := caller.commonRequest("CreateVolume", map[string]any{"body.volumeName": "workspace", "body.teamID": "team-1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.requestBody != "" {
+				req.SetContent([]byte(tc.requestBody))
+			}
+			if tc.changeRequest != nil {
+				tc.changeRequest(req)
+			}
+			volume := map[string]any{"volumeID": "vol-1", "volumeName": "workspace", "teamID": "team-1", "status": "CREATING"}
+			response := map[string]any{"code": "200", "requestId": "req-create", "volume": volume}
+			if tc.changeResponse != nil {
+				tc.changeResponse(response, volume)
+			}
+			accepted, ok := volumeCreateAcceptance(req, response)
+			if ok != tc.accepted || ok && (accepted.ID != "vol-1" || accepted.TeamID != "team-1" || accepted.RequestID != "req-create" || !accepted.AllocationConfirmed) {
+				t.Fatalf("allocation tuple accepted=%t: %+v", ok, accepted)
+			}
+		})
+	}
+}
+
+func TestFCSandboxVolumePositiveResponseRequiresScopedPageAndMutation(t *testing.T) {
+	for _, tc := range []struct {
+		name, api, response string
+	}{
+		{"create without team", "CreateVolume", `{"code":"200","requestId":"req-1","volume":{"volumeID":"vol-1","volumeName":"workspace","status":"CREATING"}}`},
+		{"get invalid status", "GetVolume", `{"code":"200","requestId":"req-1","volume":{"volumeID":"vol-1","teamID":"team-1","status":" "}}`},
+		{"get malformed optional field", "GetVolume", `{"code":"200","requestId":"req-1","volume":{"volumeID":"vol-1","teamID":"team-1","status":"AVAILABLE","userID":42}}`},
+		{"list malformed item", "ListVolumes", `{"code":"200","requestId":"req-1","volumes":["vol-1"],"maxResults":1}`},
+		{"list wrong team", "ListVolumes", `{"code":"200","requestId":"req-1","volumes":[{"volumeID":"vol-1","teamID":"team-2","status":"AVAILABLE"}],"maxResults":1}`},
+		{"list fractional page echo", "ListVolumes", `{"code":"200","requestId":"req-1","volumes":[],"maxResults":1.5}`},
+		{"list oversized page echo", "ListVolumes", `{"code":"200","requestId":"req-1","volumes":[],"maxResults":2147483648}`},
+		{"list nontext continuation", "ListVolumes", `{"code":"200","requestId":"req-1","volumes":[],"nextToken":42,"maxResults":1}`},
+		{"delete plural resource", "DeleteVolume", `{"code":"200","requestId":"req-1","volumes":[]}`},
+		{"invalid request ID type", "DeleteVolume", `{"code":"200","requestId":42}`},
+		{"invalid code type", "DeleteVolume", `{"code":200,"requestId":"req-1"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caller := &OpenAPICaller{Product: "FCSandbox", Resource: "volume", Region: "cn-hangzhou", executor: &fakeOpenAPIExecutor{response: tc.response}}
+			request := map[string]any{"volumeID": "vol-1", "teamID": "team-1"}
+			switch tc.api {
+			case "CreateVolume":
+				request = map[string]any{"body.volumeName": "workspace", "body.teamID": "team-1"}
+			case "ListVolumes":
+				request = map[string]any{"maxResults": 1, "teamID": "team-1"}
+			}
+			_, err := caller.CallRaw(context.Background(), tc.api, request)
+			var app *ecerrors.AppError
+			if !errors.As(err, &app) || app.Payload().Code != "InvalidVolumeResponse" || ecerrors.ActionFromError(tc.api, err).ProviderVerified {
+				t.Fatalf("unscoped Volume result was accepted: %v", err)
+			}
+		})
+	}
+}
+
+func TestVolumeTypedAbsenceRequiresOneCompleteSDKErrorEnvelope(t *testing.T) {
+	const body = `{"code":"VolumeNotFound","requestId":"req-typed"}`
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"exact tea envelope", &tea.SDKError{StatusCode: tea.Int(404), Data: tea.String(body)}, true},
+		{"JSON encoded envelope string", &tea.SDKError{StatusCode: tea.Int(404), Data: tea.String(`"{\"code\":\"VolumeNotFound\",\"requestId\":\"req-typed\"}"`)}, true},
+		{"missing status", &tea.SDKError{Data: tea.String(body)}, false},
+		{"wrong status", &tea.SDKError{StatusCode: tea.Int(403), Data: tea.String(body)}, false},
+		{"duplicate member", &tea.SDKError{StatusCode: tea.Int(404), Data: tea.String(`{"code":"VolumeNotFound","code":"200","requestId":"req-typed"}`)}, false},
+		{"malformed nested string", &tea.SDKError{StatusCode: tea.Int(404), Data: tea.String(`"{partial"`)}, false},
+		{"scalar payload", &tea.SDKError{StatusCode: tea.Int(404), Data: tea.String(`42`)}, false},
+		{"dara envelope", &dara.SDKError{StatusCode: tea.Int(404), Data: tea.String(body)}, true},
+		{"dara missing status", &dara.SDKError{Data: tea.String(body)}, false},
+		{"untyped error", errors.New(body), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := volumeStructuredTransportAbsence(tc.err, "VolumeNotFound", "req-typed"); got != tc.want {
+				t.Fatalf("typed absence proof = %t, want %t", got, tc.want)
+			}
+		})
+	}
+	for _, status := range []json.Number{"404", "404.5", "not-a-number"} {
+		body := map[string]any{"code": "VolumeNotFound", "requestId": "req-typed", "httpStatusCode": status, "success": false}
+		if got := volume404ErrorEnvelopeProof(body, "VolumeNotFound", "req-typed"); got != (status == "404") {
+			t.Fatalf("enriched numeric status %q proved absence=%t", status, got)
+		}
+	}
+}
+
+func TestVolumeRequestAndProofGuardsRejectAmbiguousCreateInput(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, field string
+	}{
+		{"nonobject body", `[]`, "body"},
+		{"nontext team", `{"volumeName":"workspace","teamID":42}`, "team_id"},
+		{"path in team", `{"volumeName":"workspace","teamID":"team/other"}`, "team_id"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := newOpenAPIRequest()
+			req.Product, req.ApiName = "FCSandbox", "CreateVolume"
+			req.SetContent([]byte(tc.body))
+			var app *ecerrors.AppError
+			if err := (&OpenAPICaller{}).validateVolumeRequest(req); !errors.As(err, &app) || app.Payload().Code != "InvalidVolumeInput" || app.Payload().Field != tc.field {
+				t.Fatalf("invalid %s request reached provider: %v", tc.field, err)
+			}
+		})
+	}
+	caller := &OpenAPICaller{Product: "FCSandbox", Resource: "volume", Region: "cn-hangzhou", Profile: resolvedOpenAPIProfile{Language: "en"}}
+	req, err := caller.commonRequest("CreateVolume", map[string]any{"body.volumeName": "workspace", "body.teamID": "team-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.SetContent([]byte(`{"volumeName":"workspace"`))
+	response := map[string]any{"code": "200", "requestId": "req-create", "volume": map[string]any{"volumeID": "vol-1", "volumeName": "workspace", "teamID": "team-1", "status": "CREATING"}}
+	var app *ecerrors.AppError
+	if err := caller.fcVolumeResponseError(req, response); !errors.As(err, &app) || app.Payload().Code != "InvalidVolumeResponse" {
+		t.Fatalf("malformed outbound request proved an allocation: %v", err)
+	}
+	if volumeErrorEnvelopeProof(map[string]any{"code": "VolumeNotFound", "Code": "VolumeNotFound", "requestId": "req-1"}, "VolumeNotFound", "req-1") {
+		t.Fatal("duplicate code aliases proved absence")
+	}
+	if scrubVolumeResponse(nil) != nil {
+		t.Fatal("nil provider response became a resource")
 	}
 }
 
