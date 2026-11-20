@@ -1827,6 +1827,65 @@ func TestSandboxTeamAutomaticCleanupMarksAttemptBeforeDelete(t *testing.T) {
 	}
 }
 
+func TestCoLocatedUnusedJournalDoesNotBlockOwnedTeamDeletion(t *testing.T) {
+	for _, mode := range []string{"explicit", "teardown"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg, cl, scope, data, _, path := quotaCleanupHarness(t)
+			cl.execCfg["secondary"] = cfg
+			secondaryPath := cleanupJournalPath(path, "secondary")
+			if _, err := os.Stat(secondaryPath); !os.IsNotExist(err) {
+				t.Fatalf("unused secondary journal already exists: %v", err)
+			}
+			calls := 0
+			cl.runCommand = func(_ context.Context, _ execpkg.Config, command string) execpkg.Result {
+				calls++
+				return execpkg.Result{Command: command, Started: true, Exit: 0, JSON: map[string]any{"deleted": true}}
+			}
+			if mode == "explicit" {
+				step := scenario.Step{Name: "delete owned Team", Run: "ecctl sandbox team delete {{.team_id}} --timeout 5m --output=json"}
+				if result, ok := runStep(context.Background(), Options{}, cfg, cl, scope, data, step, time.Second); !ok {
+					t.Fatalf("unused secondary journal blocked explicit Team delete: %+v", result)
+				}
+			} else {
+				cl.keep = false
+				if failures := cl.runCaseCleanup(*scope); len(failures) != 0 {
+					t.Fatalf("unused secondary journal blocked Team teardown: %v", failures)
+				}
+			}
+			if calls != 1 || !(*scope)[0].done || len(quotaJournal(t, path).Entries) != 0 || cl.journalEstablished[secondaryPath] {
+				t.Fatalf("co-located unused role changed Team ownership: calls=%d scope=%+v", calls, *scope)
+			}
+			if _, err := os.Stat(secondaryPath); !os.IsNotExist(err) {
+				t.Fatalf("unused secondary journal was created: %v", err)
+			}
+		})
+	}
+}
+
+func TestCoLocatedPreviouslyEstablishedJournalStillFencesOwnedTeamDeletion(t *testing.T) {
+	cfg, cl, scope, data, _, path := quotaCleanupHarness(t)
+	cl.execCfg["secondary"] = cfg
+	var secondary []*cleanupItem
+	if err := cl.push(&secondary, "reader", "ecctl sandbox team delete team-other --timeout 5m", "secondary", nil); err != nil {
+		t.Fatal(err)
+	}
+	secondaryPath := cleanupJournalPath(path, "secondary")
+	if !cl.journalEstablished[secondaryPath] {
+		t.Fatal("secondary journal existence was not recorded")
+	}
+	if err := os.Remove(secondaryPath); err != nil {
+		t.Fatal(err)
+	}
+	cl.runCommand = func(_ context.Context, _ execpkg.Config, command string) execpkg.Result {
+		t.Fatalf("lost co-located journal reached provider: %s", command)
+		return execpkg.Result{}
+	}
+	step := scenario.Step{Name: "delete owned Team", Run: "ecctl sandbox team delete {{.team_id}} --timeout 5m --output=json"}
+	if result, ok := runStep(context.Background(), Options{}, cfg, cl, scope, data, step, time.Second); ok || !strings.Contains(result.Error, "journal disappeared") || (*scope)[0].done || len(quotaJournal(t, path).Entries) != 1 {
+		t.Fatalf("lost co-located journal did not fence Team deletion: %+v", result)
+	}
+}
+
 func TestSandboxQuotaDAGDeletesUseOneClaimThroughInvocationAndConsumption(t *testing.T) {
 	cfg, cl, scope, data, suite, path := quotaCleanupHarness(t)
 	cl.runCommand = func(_ context.Context, _ execpkg.Config, command string) execpkg.Result {
@@ -2149,13 +2208,22 @@ func TestCleanupJournalBindingRejectsChangedSymlinkBeforeRegistration(t *testing
 
 func TestRunRejectsUnresolvableJournalBeforeAnyTeamMutation(t *testing.T) {
 	dir := t.TempDir()
+	bin := filepath.Join(dir, "ecctl")
+	marker := filepath.Join(dir, "launched")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf launched > \"$FAKE_ECCTL_MARKER\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_ECCTL_MARKER", marker)
 	alias := filepath.Join(dir, "dangling")
 	if err := os.Symlink(filepath.Join(dir, "missing"), alias); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Run(context.Background(), Options{CleanupJournal: filepath.Join(alias, "cleanup.json"), Region: "cn-hangzhou", Suites: []*scenario.Suite{{Resource: "sandbox/quota"}}})
+	_, err := Run(context.Background(), Options{EcctlBin: bin, CleanupJournal: filepath.Join(alias, "cleanup.json"), Region: "cn-hangzhou", Suites: []*scenario.Suite{{Resource: "sandbox/quota"}}})
 	if err == nil || !strings.Contains(err.Error(), "bind cleanup journal") {
 		t.Fatalf("unresolvable journal setup error = %v", err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("journal preflight launched the provider binary: %v", err)
 	}
 }
 
@@ -2758,12 +2826,20 @@ func TestSandboxQuotaUncertainNoStartRetirementRetainsPendingFence(t *testing.T)
 			if failures := cl.runCaseCleanup(*scope); len(failures) != 0 || len(cl.deferredScopes) != 1 || (*scope)[1].done {
 				t.Fatalf("transient retirement did not defer exact child: failures=%v scope=%+v", failures, *scope)
 			}
+			deferred := cl.deferredScopes[0]
+			if len(deferred) != 2 || deferred[0] != (*scope)[0] || deferred[1] != (*scope)[1] {
+				t.Fatalf("deferred Team and Quota lost registration order: %+v", deferred)
+			}
 			writeQuotaSettlementJournal = previous
 			teamCalls := 0
 			cl.runCommand = func(_ context.Context, _ execpkg.Config, command string) execpkg.Result {
 				teamCalls++
 				if !strings.Contains(command, "sandbox team delete team-owned") {
 					t.Fatalf("unexpected cleanup: %s", command)
+				}
+				entries := quotaJournal(t, journalPath).Entries
+				if len(entries) != 1 || !strings.Contains(entries[0].Teardown, "sandbox team delete team-owned") {
+					t.Fatalf("Team delete preceded durable Quota retirement: %+v", entries)
 				}
 				return execpkg.Result{Command: command, Started: true, Exit: 0}
 			}
@@ -2987,12 +3063,12 @@ func TestTeamDeleteAttemptPostRenameFailureRequiresBarrierOnRuntimeRetry(t *test
 		t.Run(fmt.Sprintf("automatic=%t", automatic), func(t *testing.T) {
 			cfg, cl, scope, data, suite, path := quotaCleanupHarness(t)
 			cl.keep = !automatic
-			previous := writeTeamAttemptJournal
-			t.Cleanup(func() { writeTeamAttemptJournal = previous })
+			previous := writeTeamAttemptJournalRoot
+			t.Cleanup(func() { writeTeamAttemptJournalRoot = previous })
 			writes := 0
-			writeTeamAttemptJournal = func(path string, journal report.CleanupJournal) error {
+			writeTeamAttemptJournalRoot = func(root *os.Root, path string, journal report.CleanupJournal) error {
 				writes++
-				if err := previous(path, journal); err != nil {
+				if err := previous(root, path, journal); err != nil {
 					return err
 				}
 				if writes <= 2 {

@@ -15,6 +15,49 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
 
+func TestCanonicalEcctlBinPinsPublicAndFullRelativePaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executable mode test uses POSIX permissions")
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, surface := range []string{"public", "full"} {
+		path := filepath.Join(t.TempDir(), "ecctl-"+surface)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		relative, err := filepath.Rel(cwd, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pinned, err := CanonicalEcctlBin(relative)
+		if err != nil || pinned != path {
+			t.Fatalf("%s binary pin = %q, %v; want %q", surface, pinned, err, path)
+		}
+	}
+}
+
+func TestCanonicalEcctlBinPinsSymlinkTargetForRecovery(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink setup requires privileges on Windows")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "ecctl-real")
+	link := filepath.Join(dir, "ecctl-link")
+	if err := os.WriteFile(target, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	pinned, err := CanonicalEcctlBin(link)
+	if err != nil || pinned != target {
+		t.Fatalf("symlink pin = %q, %v; want %q", pinned, err, target)
+	}
+}
+
 // TestRunWithFakeEcctl exercises the full runner — provision skip, step exec,
 // matchers, capture, and two-level teardown — against a fake ecctl that echoes
 // canned JSON, so the orchestration is verified without touching the cloud.

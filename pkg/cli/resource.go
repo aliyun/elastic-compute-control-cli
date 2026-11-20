@@ -1288,10 +1288,36 @@ func runResourceAction(cmd *cobra.Command, options *globalOptions, stdout io.Wri
 				err = native.TemplateCreateRecovery(err)
 			}
 		}
+		if resource.Product == "sandbox" && resource.Resource == "volume" && resource.Provider == "aliyun" && actionName == "create" && safeVolumeRecoveryID(result.ID) {
+			recovery := []string{"ecctl", "sandbox", "volume", "delete", result.ID, "--region", region.Value}
+			teamID, _ := input["team_id"].(string)
+			if teamID == "" {
+				if accepted, ok := ecerrors.AcceptedVolumeFrom(err); ok && accepted.AllocationConfirmed && accepted.ID == result.ID && accepted.Region == region.Value && safeVolumeRecoveryID(accepted.TeamID) {
+					teamID = accepted.TeamID
+				}
+			}
+			if teamID != "" {
+				recovery = append(recovery, "--team-id", teamID)
+			}
+			effectiveProfile := profileName
+			if native, ok := caller.(*aliyun.OpenAPICaller); ok && native.Profile.ProfileBound {
+				effectiveProfile = native.Profile.Name
+			}
+			if effectiveProfile != "" {
+				recovery = append(recovery, "--profile", effectiveProfile)
+			}
+			err = ecerrors.WithDetails(err, ecerrors.WithRecoveryCommand(recovery...))
+		}
 		return err
 	}
 	result = cropResultFields(result, selectedFields)
 	return writeCommandOutput(options, stdout, resourceActionPayload(resource, actionName, operation, input, region.Value, result))
+}
+
+func safeVolumeRecoveryID(id string) bool {
+	return id != "" && id[0] != '-' && strings.IndexFunc(id, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_')
+	}) < 0
 }
 
 func selectedOutputFields(resource spec.ResourceSpec, actionName string, operation spec.Operation, input map[string]any) ([]string, error) {
@@ -1502,11 +1528,18 @@ func flagInputValue(cmd *cobra.Command, resource spec.ResourceSpec, name string,
 	case "array":
 		return jsonFlagValue(flag.Value.String(), name, "array", assigned)
 	case "object":
-		return structuredObjectFlagValue(flag.Value.String(), flag.Name, schemaFieldForInput(resource, name), assigned)
+		value, assigned, err := structuredObjectFlagValue(flag.Value.String(), flag.Name, schemaFieldForInput(resource, name), assigned)
+		if err == nil && flag.Changed && value == nil && resource.Product == "sandbox" && resource.Resource == "volume" {
+			return nil, assigned, ecerrors.Client("InvalidParameter", i18n.NewLocalizer("en").Message("InvalidParameter"), ecerrors.WithField(flag.Name))
+		}
+		return value, assigned, err
 	case "string_array":
 		value, err := cmd.Flags().GetStringSlice(flag.Name)
 		return value, assigned, err
 	default:
+		if resource.Product == "sandbox" && resource.Resource == "volume" && name == "name" && flag.Changed && strings.TrimSpace(flag.Value.String()) == "" {
+			return nil, assigned, ecerrors.Client("InvalidVolumeInput", i18n.NewLocalizer("en").Message("InvalidVolumeInput"), ecerrors.WithField("name"))
+		}
 		if param.Repeatable {
 			value, err := cmd.Flags().GetStringArray(flag.Name)
 			return value, assigned, err
@@ -1581,19 +1614,31 @@ func structuredObjectFlagValue(raw string, flag string, field spec.SchemaField, 
 			return nil, assigned, ecerrors.Client("InvalidParameter", "--"+flag+" @file could not be read")
 		}
 		raw = strings.TrimSpace(string(loaded))
+		if raw == "" {
+			return nil, assigned, ecerrors.Client("InvalidParameter", i18n.NewLocalizer("en").Message("InvalidParameter"), ecerrors.WithField(flag))
+		}
 	}
 	if strings.HasPrefix(raw, "{") {
 		var decoded map[string]any
-		if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
-			return nil, assigned, ecerrors.Client("InvalidParameter", "--"+flag+" must be a JSON object")
-		}
 		if field.InputStyle == "json|@file" {
+			value, err := aliyun.DecodeStrictJSONWithNumbers([]byte(raw))
+			if err != nil {
+				return nil, assigned, ecerrors.Client("InvalidParameter", "--"+flag+" must be one unambiguous JSON object")
+			}
+			var ok bool
+			decoded, ok = value.(map[string]any)
+			if !ok {
+				return nil, assigned, ecerrors.Client("InvalidParameter", "--"+flag+" must be a JSON object")
+			}
 			// API-shaped JSON uses literal member names and value types. Its
 			// referenced API schema validates them without CLI key coercion.
-			if err := validateStructuredObject(decoded, flag, field); err != nil {
+			if err := validateAPIShapedValue(decoded, flag, field); err != nil {
 				return nil, assigned, err
 			}
 			return decoded, assigned, nil
+		}
+		if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+			return nil, assigned, ecerrors.Client("InvalidParameter", "--"+flag+" must be a JSON object")
 		}
 		normalized, err := normalizeStructuredObject(decoded, field)
 		if err != nil {
@@ -1669,6 +1714,71 @@ func validateStructuredObject(object map[string]any, flag string, field spec.Sch
 			if !structuredValueInEnum(value, child.Enum) {
 				return ecerrors.Client("InvalidParameter", "--"+flag+" field "+strings.ReplaceAll(name, "_", "-")+" must be one of "+strings.Join(child.Enum, ", "))
 			}
+		}
+	}
+	return nil
+}
+
+func validateAPIShapedValue(value any, path string, field spec.SchemaField) error {
+	invalid := func() error {
+		return ecerrors.Client("InvalidParameter", "--"+path+" does not match the API JSON schema")
+	}
+	if value == nil {
+		if field.Nullable {
+			return nil
+		}
+		return invalid()
+	}
+	switch field.Type {
+	case "object":
+		object, ok := value.(map[string]any)
+		if !ok || object == nil {
+			return invalid()
+		}
+		if err := validateStructuredObject(object, path, field); err != nil {
+			return err
+		}
+		for name, childValue := range object {
+			child, known := field.Fields[name]
+			if len(field.Fields) > 0 && !known {
+				return ecerrors.Client("InvalidParameter", "--"+path+" field "+name+" is not supported")
+			}
+			if known {
+				if err := validateAPIShapedValue(childValue, path+"."+name, child); err != nil {
+					return err
+				}
+			}
+		}
+	case "array":
+		items, ok := value.([]any)
+		if !ok || field.Items == nil {
+			return invalid()
+		}
+		for _, item := range items {
+			if err := validateAPIShapedValue(item, path, *field.Items); err != nil {
+				return err
+			}
+		}
+	case "string", "duration", "cidr", "key_value":
+		if _, ok := value.(string); !ok {
+			return invalid()
+		}
+	case "boolean":
+		if _, ok := value.(bool); !ok {
+			return invalid()
+		}
+	case "integer":
+		number, ok := value.(json.Number)
+		if !ok {
+			return invalid()
+		}
+		integer, err := strconv.ParseInt(number.String(), 10, 64)
+		if err != nil || field.Min != nil && integer < int64(*field.Min) || field.Max != nil && integer > int64(*field.Max) {
+			return invalid()
+		}
+	case "number":
+		if _, ok := value.(json.Number); !ok {
+			return invalid()
 		}
 	}
 	return nil
@@ -2789,6 +2899,9 @@ func structuredInputShape(field spec.SchemaField, item bool, lang string) string
 		field = *field.Items
 	}
 	localizer := i18n.NewLocalizer(lang)
+	if field.InputStyle == "json|@file" {
+		return localizer.MessageOrDefault("InputStyleObject", "JSON object or @file")
+	}
 	if isShallowObjectField(field) {
 		return localizer.MessageOrDefault("InputStyleInlineObject", "inline key=value, JSON object, or @file")
 	}

@@ -1,0 +1,275 @@
+schema_version: 2
+product: sandbox
+provider: aliyun
+api_product: FCSandbox
+resource: volume
+kind: regional
+display_name: {en: volume, zh-CN: 存储卷}
+description: {en: Manage native FC sandbox volume configurations., zh-CN: 管理原生 FC 沙箱存储卷配置。}
+examples:
+  - ecctl sandbox volume create --name workspace --team-id <team-id> --oss-volume-config @oss.json --region cn-hangzhou
+  - ecctl sandbox volume list --team-id <team-id> --region cn-hangzhou
+  - ecctl sandbox volume get <volume-id> --team-id <team-id> --region cn-hangzhou
+
+identity:
+  field: id
+  output_root: {one: volume, many: volumes}
+
+schema:
+  fields:
+    id:
+      type: string
+      description: {en: volume ID, zh-CN: 存储卷 ID}
+    name:
+      type: string
+      description: {en: volume name unique within a Team, zh-CN: 团队内唯一的存储卷名称}
+    team_id:
+      type: string
+      description: {en: owning Team ID, zh-CN: 所属团队 ID}
+    resource_group:
+      type: string
+      description: {en: resource group ID, zh-CN: 资源组 ID}
+    storage_class:
+      type: string
+      description: {en: provider storage class, zh-CN: 服务端存储类型}
+    oss_volume_config:
+      type: object
+      input_style: json|@file
+      description: {en: OSS volume configuration as JSON or @file, zh-CN: OSS 存储卷配置，使用 JSON 或 @file}
+      fields:
+        bucketName: {type: string}
+        bucketPath: {type: string}
+        endpoint: {type: string}
+        readOnly: {type: boolean}
+    agentic_fs_volume_config:
+      type: object
+      input_style: json|@file
+      description: {en: AgenticFS volume configuration as JSON or @file, zh-CN: AgenticFS 存储卷配置，使用 JSON 或 @file}
+      fields:
+        groupID: {type: integer, min: -2147483648, max: 2147483647}
+        serverAddr: {type: string}
+        userID: {type: integer, min: -2147483648, max: 2147483647}
+    agentic_bucket_volume_config:
+      type: object
+      input_style: json|@file
+      description: {en: AgenticBucket volume configuration as JSON or @file, zh-CN: AgenticBucket 存储卷配置，使用 JSON 或 @file}
+      fields:
+        agenticBucket: {type: string}
+        bucketName: {type: string}
+        bucketPath: {type: string, nullable: true}
+        endpoint: {type: string}
+        readOnly: {type: boolean, nullable: true}
+    mount_config:
+      type: object
+      input_style: json|@file
+      description: {en: mount role and VPC configuration as JSON or @file, zh-CN: 挂载角色与 VPC 配置，使用 JSON 或 @file}
+      fields:
+        role: {type: string}
+        vpcConfig:
+          type: object
+          fields:
+            securityGroupId: {type: string}
+            vpcId: {type: string}
+            vSwitchIds:
+              type: array
+              items: {type: string}
+    created_at:
+      type: string
+      description: {en: creation time, zh-CN: 创建时间}
+    updated_at:
+      type: string
+      description: {en: update time, zh-CN: 更新时间}
+    user_id:
+      type: string
+      description: {en: creator user ID, zh-CN: 创建者用户 ID}
+    status:
+      type: string
+      description: {en: provider volume status, zh-CN: 服务端存储卷状态}
+    status_reason:
+      type: string
+      description: {en: provider status reason, zh-CN: 服务端状态原因}
+
+controls:
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description: {en: maximum volumes per page (maxResults; CLI cap 100), zh-CN: 每页最多返回的存储卷数量（maxResults；CLI 上限 100）}
+  next_token:
+    type: string
+    description: {en: server pagination token, zh-CN: 服务端分页令牌}
+  all:
+    type: boolean
+    description: {en: fetch all token pages from the beginning, zh-CN: 从第一页获取所有令牌分页结果}
+  no_wait:
+    type: boolean
+    description: {en: return after creation or deletion is accepted, zh-CN: 创建或删除请求受理后立即返回}
+  timeout:
+    type: duration
+    default: 300s
+    description: {en: readiness or deletion wait timeout (no-wait defaults to 30s), zh-CN: 就绪或删除等待超时时间（不等待时默认 30 秒）}
+
+probes:
+  detail:
+    api: GetVolume
+    request: {volumeID: $.id, teamID: $.team_id}
+    response:
+      item: $.volume
+      request_id: $.requestId
+      id: $.volumeID
+      state: $.status
+      fields: &volume_fields
+        id: $.volumeID
+        name: $.volumeName
+        team_id: $.teamID
+        resource_group: $.resourceGroupID
+        storage_class: $.storageClass
+        oss_volume_config: $.ossVolumeConfig
+        agentic_fs_volume_config: $.agenticFSVolumeConfig
+        agentic_bucket_volume_config: $.agenticBucketVolumeConfig
+        mount_config: $.mountConfig
+        created_at: $.createdAt
+        updated_at: $.updatedAt
+        user_id: $.userID
+        status: $.status
+        status_reason: $.statusReason
+  create_detail:
+    api: GetVolume
+    request: {volumeID: $.id, teamID: $context.accepted_team_id}
+    response:
+      item: $.volume
+      request_id: $.requestId
+      id: $.volumeID
+      state: $.status
+      fields: *volume_fields
+  list:
+    api: ListVolumes
+    request: {volumeName: $.name, status: $.status, teamID: $.team_id, resourceGroupID: $.resource_group, userID: $.user_id, maxResults: $.limit, nextToken: $.next_token}
+    response:
+      items: $.volumes
+      next_token: $.nextToken
+      request_id: $.requestId
+      id: $.volumeID
+      state: $.status
+      fields: *volume_fields
+
+waiters:
+  ready:
+    probe: create_detail
+    target: AVAILABLE
+    interval: 2s
+    timeout: 300s
+    not_found_pending: true
+    failure: {states: [ERROR], detail_field: status_reason}
+  absent_after_delete:
+    probe: detail
+    target: absent
+    interval: 2s
+    timeout: 300s
+    failure: {states: [ERROR], detail_field: status_reason}
+
+bindings:
+  create_volume:
+    api: CreateVolume
+    request:
+      body:
+        volumeName: $.name
+        teamID: $.team_id
+        ossVolumeConfig: {from: $.oss_volume_config}
+        agenticFSVolumeConfig: {from: $.agentic_fs_volume_config}
+        agenticBucketVolumeConfig: {from: $.agentic_bucket_volume_config}
+        mountConfig: {from: $.mount_config}
+    require_all: [{request: body.volumeName}]
+    id_from: $.volume.volumeID
+    context_from: {created_volume: $.volume, accepted_team_id: $.volume.teamID}
+    request_id_from: $.requestId
+    initial_state_from: $.volume.status
+    initial_detail_from: $.volume.statusReason
+    wait: ready
+  delete_volume:
+    api: DeleteVolume
+    request: {volumeID: $.id, teamID: $.team_id}
+    require_all: [{request: volumeID}]
+    request_id_from: $.requestId
+    wait: absent_after_delete
+
+operations:
+  create:
+    description: {en: Create a native FC sandbox volume, zh-CN: 创建原生 FC 沙箱存储卷}
+    help:
+      en: Wait for AVAILABLE by default. --no-wait returns the accepted volume ID and status without claiming readiness. Storage and mount configurations accept JSON or @file.
+      zh-CN: 默认等待状态变为 AVAILABLE。--no-wait 返回已受理的存储卷 ID 和状态，不表示就绪。存储与挂载配置支持 JSON 或 @file。
+    input:
+      fields:
+        - name: {required: true}
+        - team_id
+        - oss_volume_config
+        - agentic_fs_volume_config
+        - agentic_bucket_volume_config
+        - mount_config
+      controls: [no_wait, timeout]
+    workflow:
+      - binding: create_volume
+        wait_unless: input.no_wait
+      - emit:
+          fields:
+            id: $context.created_volume.volumeID
+            name: $context.created_volume.volumeName
+            team_id: $context.created_volume.teamID
+            resource_group: $context.created_volume.resourceGroupID
+            storage_class: $context.created_volume.storageClass
+            oss_volume_config: $context.created_volume.ossVolumeConfig
+            agentic_fs_volume_config: $context.created_volume.agenticFSVolumeConfig
+            agentic_bucket_volume_config: $context.created_volume.agenticBucketVolumeConfig
+            mount_config: $context.created_volume.mountConfig
+            created_at: $context.created_volume.createdAt
+            updated_at: $context.created_volume.updatedAt
+            user_id: $context.created_volume.userID
+            status: $context.created_volume.status
+            status_reason: $context.created_volume.statusReason
+        when: input.no_wait
+    examples: [ecctl sandbox volume create --name workspace --team-id <team-id> --oss-volume-config @oss.json --region cn-hangzhou]
+  delete:
+    description: {en: Delete a native FC sandbox volume configuration, zh-CN: 删除原生 FC 沙箱存储卷配置}
+    help:
+      en: Wait for GetVolume to confirm absence in the queried Team scope. --no-wait reports only request acceptance. A scoped absence does not prove the volume is absent from every Team or establish what happened to its underlying storage.
+      zh-CN: 默认等待 GetVolume 确认所查询团队范围内不存在该存储卷；--no-wait 仅报告请求已受理。该范围内不存在不代表所有团队均不存在此存储卷，也不证明底层存储的处理结果。
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - team_id
+      controls: [no_wait, timeout]
+    workflow:
+      - binding: delete_volume
+        wait_unless: input.no_wait
+      - emit:
+          fields: {id: $input.id, team_id: $input.team_id, absent_in_scope: true}
+        unless: input.no_wait
+    output:
+      fields:
+        actions: $result.actions
+        volume: {id: $input.id, team_id: $input.team_id}
+        absent_in_scope: {value: $result.item.absent_in_scope, unless: $input.no_wait}
+        deletion_requested: {value: true, when: $input.no_wait}
+    examples: [ecctl sandbox volume delete <volume-id> --team-id <team-id> --region cn-hangzhou]
+  get:
+    aliases: [show, describe]
+    description: {en: Get a native FC sandbox volume, zh-CN: 获取原生 FC 沙箱存储卷}
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - team_id
+    workflow:
+      - probe: detail
+        ids: [$input.id]
+        not_found: error
+    examples: [ecctl sandbox volume get <volume-id> --team-id <team-id> --region cn-hangzhou]
+  list:
+    description: {en: List native FC sandbox volumes, zh-CN: 列出原生 FC 沙箱存储卷}
+    input:
+      fields: [name, status, team_id, resource_group, user_id]
+      controls: [limit, next_token, all]
+    workflow:
+      - probe: list
+        many: true
+    examples: [ecctl sandbox volume list --team-id <team-id> --limit 100 --region cn-hangzhou]

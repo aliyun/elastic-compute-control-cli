@@ -7062,6 +7062,54 @@
       ]
     },
     {
+      "product": "sandbox",
+      "resource": "volume",
+      "binding": "create_volume",
+      "api": "CreateVolume",
+      "parameters": [
+        "body.agenticBucketVolumeConfig.agenticBucket",
+        "body.agenticBucketVolumeConfig.bucketName",
+        "body.agenticBucketVolumeConfig.bucketPath",
+        "body.agenticBucketVolumeConfig.endpoint",
+        "body.agenticBucketVolumeConfig.readOnly",
+        "body.agenticFSVolumeConfig.groupID",
+        "body.agenticFSVolumeConfig.serverAddr",
+        "body.agenticFSVolumeConfig.userID",
+        "body.mountConfig.role",
+        "body.mountConfig.vpcConfig.securityGroupId",
+        "body.mountConfig.vpcConfig.vSwitchIds",
+        "body.mountConfig.vpcConfig.vpcId",
+        "body.ossVolumeConfig.bucketName",
+        "body.ossVolumeConfig.bucketPath",
+        "body.ossVolumeConfig.endpoint",
+        "body.ossVolumeConfig.readOnly",
+        "body.teamID",
+        "body.volumeName"
+      ],
+      "covered": [
+        "body.agenticBucketVolumeConfig",
+        "body.agenticFSVolumeConfig",
+        "body.mountConfig",
+        "body.ossVolumeConfig",
+        "body.teamID",
+        "body.volumeName"
+      ]
+    },
+    {
+      "product": "sandbox",
+      "resource": "volume",
+      "binding": "delete_volume",
+      "api": "DeleteVolume",
+      "parameters": [
+        "teamID",
+        "volumeID"
+      ],
+      "covered": [
+        "teamID",
+        "volumeID"
+      ]
+    },
+    {
       "product": "tag",
       "resource": "associated-resource-rule",
       "binding": "create_rule",

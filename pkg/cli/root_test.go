@@ -427,6 +427,12 @@ type fakeAPICaller struct {
 	response    map[string]any
 }
 
+type fixtureDeleteErrorCaller struct{ err error }
+
+func (f fixtureDeleteErrorCaller) Call(context.Context, string, map[string]any) (map[string]any, error) {
+	return nil, f.err
+}
+
 type callOnlyAPICaller struct {
 	calls     int
 	operation string
@@ -2675,6 +2681,172 @@ func TestCallCommandRegionFlagSetsPayloadRegion(t *testing.T) {
 	}
 	if len(fake.passthrough) != 0 {
 		t.Fatalf("passthrough = %#v, want none for ecctl --region", fake.passthrough)
+	}
+}
+
+func TestFixtureDeleteAbsenceActionIsNarrowAndVisible(t *testing.T) {
+	for _, tc := range []struct {
+		product, operation, code string
+		wantAction               bool
+	}{
+		{"oss", "DeleteBucket", "NoSuchBucket", true},
+		{"oss", "DeleteBucket", "404", false},
+		{"oss", "DeleteBucket", "InvalidAccessKeyId.NotFound", false},
+		{"oss", "ListObjects", "NoSuchBucket", true},
+		{"oss", "ListObjects", "404", false},
+		{"ram", "DeleteRole", "EntityNotExist.Role", true},
+		{"ram", "GetRole", "EntityNotExist.Role", true},
+		{"ram", "GetRole", "InvalidAccessKeyId.NotFound", false},
+		{"ram", "GetRole", "EntityNotExist.Policy", false},
+		{"ram", "DeletePolicy", "EntityNotExist.Policy", true},
+		{"ram", "GetPolicy", "EntityNotExist.Policy", true},
+		{"ram", "GetPolicy", "404", false},
+		{"ram", "GetPolicy", "InvalidAccessKeyId.NotFound", false},
+		{"ram", "DetachPolicyFromRole", "EntityNotExist.Role", true},
+		{"ram", "DetachPolicyFromRole", "EntityNotExist.Policy", true},
+		{"ram", "DeleteRole", "InvalidAccessKeyId.NotFound", false},
+		{"ram", "DeleteRole", "404", false},
+		{"ram", "DeleteRole", "EntityNotExist.Policy", false},
+		{"ecs", "DeleteRole", "EntityNotExist.Role", false},
+	} {
+		t.Run(tc.product+"/"+tc.operation+"/"+tc.code, func(t *testing.T) {
+			for _, typed := range []bool{false, true} {
+				options := []ecerrors.Option{ecerrors.WithRawCause(tc.code, "provider failure")}
+				if typed {
+					options = append(options, ecerrors.WithVerifiedProviderResponse())
+				}
+				err := ecerrors.NotFound("NotFound", "resource not found", options...)
+				wrapped := fixtureDeleteAbsenceError(tc.product, tc.operation, err)
+				var appErr *ecerrors.AppError
+				if !errors.As(wrapped, &appErr) || appErr.ExitCode() != 4 {
+					t.Fatalf("fixture error changed category: %v", wrapped)
+				}
+				actions := appErr.Actions()
+				want := tc.wantAction && (tc.product == "oss" || typed)
+				if want != (len(actions) == 1) {
+					t.Fatalf("typed=%v fixture action = %+v, want=%v", typed, actions, want)
+				}
+				if want && (actions[0].ActionName != tc.operation || actions[0].Code != tc.code || actions[0].ProviderVerified != typed) {
+					t.Fatalf("fixture action changed operation or provider code: %+v", actions)
+				}
+			}
+		})
+	}
+	for _, tc := range []struct {
+		product, operation, request, code, wantAction string
+	}{
+		{"oss", "DeleteBucket", `{"Bucket":"fixture-bucket"}`, "NoSuchBucket", "NoSuchBucket"},
+		{"oss", "ListObjects", `{"Bucket":"fixture-bucket","MaxKeys":1}`, "NoSuchBucket", "NoSuchBucket"},
+		{"oss", "ListObjects", `{"Bucket":"fixture-bucket","MaxKeys":1}`, "InvalidAccessKeyId.NotFound", ""},
+		{"ram", "GetRole", `{"RoleName":"fixture-role"}`, "EntityNotExist.Role", "EntityNotExist.Role"},
+		{"ram", "GetRole", `{"RoleName":"fixture-role"}`, "InvalidAccessKeyId.NotFound", ""},
+		{"ram", "GetPolicy", `{"PolicyName":"fixture-policy","PolicyType":"Custom"}`, "EntityNotExist.Policy", "EntityNotExist.Policy"},
+		{"ram", "GetPolicy", `{"PolicyName":"fixture-policy","PolicyType":"Custom"}`, "InvalidAccessKeyId.NotFound", ""},
+	} {
+		options := []ecerrors.Option{ecerrors.WithRawCause(tc.code, "provider failure")}
+		if tc.product == "ram" {
+			options = append(options, ecerrors.WithVerifiedProviderResponse())
+		}
+		providerErr := ecerrors.NotFound("NotFound", "fixture-bucket not found", options...)
+		factory := func(string, string, string, string, func(string) string) (engine.Caller, error) {
+			return fixtureDeleteErrorCaller{err: providerErr}, nil
+		}
+		stdout, stderr, code := runCLIWithAPI(factory, "--lang", "en", "--output=json", "--region", "cn-hangzhou", "call", tc.product, tc.operation, "--request", tc.request)
+		if code != 4 {
+			t.Fatalf("CLI fixture delete exit=%d stderr=%s stdout=%s", code, stderr, stdout)
+		}
+		root := decodeObject(t, stdout)
+		actions, _ := root["actions"].([]any)
+		if tc.wantAction == "" && len(actions) != 0 || tc.wantAction != "" && (len(actions) != 1 || actions[0].(map[string]any)["code"] != tc.wantAction || actions[0].(map[string]any)["action_name"] != tc.operation || (actions[0].(map[string]any)["provider_verified"] == true) != (tc.product == "ram")) {
+			t.Fatalf("CLI fixture delete action = %+v", actions)
+		}
+	}
+}
+
+func TestFixturePolicyCreateRejectionActionIsNarrowAndVisible(t *testing.T) {
+	for _, tc := range []struct {
+		code, operation string
+		verified        bool
+		wantAction      bool
+	}{
+		{"Forbidden", "CreatePolicy", true, true},
+		{"NoPermission", "CreatePolicy", true, true},
+		{"InvalidParameter", "CreatePolicy", true, true},
+		{"Forbidden", "CreatePolicy", false, false},
+		{"EntityAlreadyExists.Policy", "CreatePolicy", true, false},
+		{"Forbidden", "CreateRole", true, false},
+	} {
+		t.Run(tc.operation+"/"+tc.code, func(t *testing.T) {
+			options := []ecerrors.Option{ecerrors.WithRawCause(tc.code, "provider failure"), ecerrors.WithRequestID("request-policy-reject")}
+			if tc.verified {
+				options = append(options, ecerrors.WithVerifiedProviderResponse())
+			}
+			providerErr := ecerrors.Service("CloudAPIError", "provider failure", false, options...)
+			factory := func(string, string, string, string, func(string) string) (engine.Caller, error) {
+				return fixtureDeleteErrorCaller{err: providerErr}, nil
+			}
+			stdout, stderr, code := runCLIWithAPI(factory, "--lang", "en", "--output=json", "--region", "cn-hangzhou", "call", "ram", tc.operation, "--request", `{}`)
+			if code != 2 {
+				t.Fatalf("CLI fixture policy rejection exit=%d stderr=%s stdout=%s", code, stderr, stdout)
+			}
+			root := decodeObject(t, stdout)
+			actions, _ := root["actions"].([]any)
+			if (len(actions) == 1) != tc.wantAction {
+				t.Fatalf("CLI fixture policy actions = %+v, want=%v", actions, tc.wantAction)
+			}
+			if tc.wantAction {
+				action := actions[0].(map[string]any)
+				if action["action_name"] != tc.operation || action["code"] != tc.code || action["request_id"] != "request-policy-reject" || action["provider_verified"] != true {
+					t.Fatalf("CLI fixture policy action = %+v", action)
+				}
+			}
+		})
+	}
+}
+
+func TestFixtureRAMRejectionActionBindsAuthoredTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name, operation, request, code string
+		verified                       bool
+		wantTarget                     map[string]any
+	}{
+		{"role", "CreateRole", `{"RoleName":"owned-role"}`, "Forbidden", true, map[string]any{"RoleName": "owned-role"}},
+		{"attachment", "AttachPolicyToRole", `{"RoleName":"owned-role","PolicyName":"owned-policy","PolicyType":"Custom"}`, "NoPermission", true, map[string]any{"RoleName": "owned-role", "PolicyName": "owned-policy", "PolicyType": "Custom"}},
+		{"role missing target", "CreateRole", `{}`, "Forbidden", true, nil},
+		{"attachment missing policy", "AttachPolicyToRole", `{"RoleName":"owned-role","PolicyType":"Custom"}`, "Forbidden", true, nil},
+		{"attachment wrong policy type", "AttachPolicyToRole", `{"RoleName":"owned-role","PolicyName":"owned-policy","PolicyType":"System"}`, "Forbidden", true, nil},
+		{"role unverified", "CreateRole", `{"RoleName":"owned-role"}`, "Forbidden", false, nil},
+		{"attachment ambiguous", "AttachPolicyToRole", `{"RoleName":"owned-role","PolicyName":"owned-policy","PolicyType":"Custom"}`, "EntityAlreadyExists.Role", true, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			options := []ecerrors.Option{ecerrors.WithRawCause(tc.code, "provider failure"), ecerrors.WithRequestID("request-ram-reject")}
+			if tc.verified {
+				options = append(options, ecerrors.WithVerifiedProviderResponse())
+			}
+			providerErr := ecerrors.Service("CloudAPIError", "provider failure", false, options...)
+			factory := func(string, string, string, string, func(string) string) (engine.Caller, error) {
+				return fixtureDeleteErrorCaller{err: providerErr}, nil
+			}
+			stdout, stderr, code := runCLIWithAPI(factory, "--lang", "en", "--output=json", "--region", "cn-hangzhou", "call", "ram", tc.operation, "--request", tc.request)
+			if code != 2 {
+				t.Fatalf("CLI RAM rejection exit=%d stderr=%s stdout=%s", code, stderr, stdout)
+			}
+			root := decodeObject(t, stdout)
+			actions, _ := root["actions"].([]any)
+			if tc.wantTarget == nil {
+				if len(actions) != 0 {
+					t.Fatalf("unproven RAM rejection emitted action: %+v", actions)
+				}
+				return
+			}
+			if len(actions) != 1 {
+				t.Fatalf("verified RAM rejection actions = %+v", actions)
+			}
+			action := actions[0].(map[string]any)
+			if action["action_name"] != tc.operation || action["code"] != tc.code || action["request_id"] != "request-ram-reject" || action["provider_verified"] != true || !reflect.DeepEqual(action["target"], tc.wantTarget) {
+				t.Fatalf("verified RAM rejection lost exact target: %+v", action)
+			}
+		})
 	}
 }
 

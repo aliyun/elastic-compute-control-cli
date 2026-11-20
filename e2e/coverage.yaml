@@ -4,10 +4,10 @@ generated:
   cases_dir: cases
 summary:
   surface: public
-  resources: 64
-  operations: 302
+  resources: 65
+  operations: 306
   missing_cases: 0
-  passed: 283
+  passed: 287
   not_passed: 19
 resources:
   ack:
@@ -1801,6 +1801,32 @@ resources:
           case: cases/sandbox/template-cache-lifecycle.yaml
           fingerprint: sha256:5c56bf4e40887b94fe074a539c0da3516917b12104215611a19048db9885783f
           time: "2026-10-23T06:11:11.220717+08:00"
+          reason: live-verified
+    volume:
+      operations:
+        create:
+          status: live-pass
+          case: cases/sandbox/volume-lifecycle.yaml
+          fingerprint: sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451
+          time: "2026-11-20T15:09:13.697319535+00:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/sandbox/volume-lifecycle.yaml
+          fingerprint: sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451
+          time: "2026-11-20T15:09:13.697319535+00:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/sandbox/volume-lifecycle.yaml
+          fingerprint: sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451
+          time: "2026-11-20T15:09:13.697319535+00:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/sandbox/volume-lifecycle.yaml
+          fingerprint: sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451
+          time: "2026-11-20T15:09:13.697319535+00:00"
           reason: live-verified
   tag:
     associated-resource-rule:

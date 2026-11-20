@@ -1,7 +1,6 @@
 package journalfile
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -286,7 +285,7 @@ func TeamDeleteCandidateTargetForRegion(command, expectedRegion string) (string,
 					return "", fmt.Errorf("invalid Team delete timeout")
 				}
 			} else if key == "--output" {
-				if value != "json" {
+				if value != "json" && value != "text" {
 					return "", fmt.Errorf("invalid Team delete output")
 				}
 			} else if key == "--region" {
@@ -371,7 +370,7 @@ func RawTeamDeleteTarget(command, expectedRegion string) (string, error) {
 		}
 		switch key {
 		case "--request":
-			if seenRequest || strings.HasPrefix(value, "@") || json.Unmarshal([]byte(value), &request) != nil || request == nil {
+			if seenRequest || strings.HasPrefix(value, "@") || unmarshalRecoveryJSON([]byte(value), &request) != nil || request == nil {
 				return "", fmt.Errorf("invalid raw Team delete request")
 			}
 			seenRequest = true
@@ -385,7 +384,7 @@ func RawTeamDeleteTarget(command, expectedRegion string) (string, error) {
 			}
 			parameterID = raw
 			var decoded any
-			if json.Unmarshal([]byte(strings.TrimSpace(raw)), &decoded) == nil {
+			if unmarshalRecoveryJSON([]byte(strings.TrimSpace(raw)), &decoded) == nil {
 				stringID, ok := decoded.(string)
 				if !ok {
 					return "", fmt.Errorf("raw Team delete parameter must be a string")

@@ -83,6 +83,28 @@ func TestSandboxProductAliasResolvesToCanonicalSchemas(t *testing.T) {
 	}
 }
 
+func TestVolumeCreateSchemaHonorsNestedInputContract(t *testing.T) {
+	command, ok := CommandForLanguageMode("sandbox.volume.create", "en", CommandSchemaFull)
+	if !ok {
+		t.Fatal("Volume create schema is unavailable")
+	}
+	for _, name := range []string{"oss-volume-config", "agentic-fs-volume-config", "agentic-bucket-volume-config"} {
+		if got := command.Params[name].Input; got != "json|@file" {
+			t.Errorf("%s input = %q", name, got)
+		}
+	}
+	fs := command.Params["agentic-fs-volume-config"].Fields
+	for _, name := range []string{"groupID", "userID"} {
+		if fs[name].Min == nil || *fs[name].Min != -2147483648 || fs[name].Max == nil || *fs[name].Max != 2147483647 {
+			t.Errorf("%s bounds = %+v", name, fs[name])
+		}
+	}
+	bucket := command.Params["agentic-bucket-volume-config"].Fields
+	if !bucket["bucketPath"].Nullable || !bucket["readOnly"].Nullable {
+		t.Fatal("nullable Volume fields were not projected")
+	}
+}
+
 func TestProductSurfacesUseLocalizedSpecDescriptions(t *testing.T) {
 	surface, ok := ProductListForLanguage("ecs", "zh-CN")
 	if !ok {

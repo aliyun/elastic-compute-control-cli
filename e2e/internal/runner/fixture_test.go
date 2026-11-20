@@ -7,7 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalfile"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/vars"
 )
 
 func TestPublicACKUserFixtureUsesGenericRAMCall(t *testing.T) {
@@ -36,6 +40,74 @@ func TestPublicACKUserFixtureUsesGenericRAMCall(t *testing.T) {
 		return
 	}
 	t.Fatal("ack_test_user fixture step not found")
+}
+
+func TestVolumeFixtureClosureOwnsOnlyOSSAndRAMDependencies(t *testing.T) {
+	fixture, err := loadFixture(filepath.Join("..", "..", "fixtures", "stack.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	suite, err := scenario.Load(filepath.Join("..", "..", "cases", "sandbox", "volume-lifecycle.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(suite.RequiresPrerequisites, []string{"volume.fixture_ownership"}) || !reflect.DeepEqual(suite.Needs, []string{"volume_ram_attachment"}) {
+		t.Fatalf("Volume dependencies = needs %#v prerequisites %#v", suite.Needs, suite.RequiresPrerequisites)
+	}
+	planned, err := fixture.plan(suite.Needs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(planned))
+	for _, step := range planned {
+		ids = append(ids, step.ID)
+		if step.Lifetime != FixtureLifetimeExecution || len(step.RequiresParams) != 0 || len(step.RequiresPrerequisites) != 0 || step.Mode != "lookup" && step.Teardown == "" {
+			t.Fatalf("Volume fixture %s has an invalid execution-scoped lifecycle: %+v", step.ID, step)
+		}
+	}
+	if !reflect.DeepEqual(ids, []string{"volume_oss_bucket", "volume_oss_bucket_info", "volume_ram_role", "volume_ram_policy", "volume_ram_attachment"}) {
+		t.Fatalf("Volume fixture closure = %#v", ids)
+	}
+	bucket := "ecctl-e2e-20261104t120000-123456abcdef"
+	values := map[string]any{"oss_bucket_name": bucket, "volume_role_name": bucket + "-role"}
+	journal := report.CleanupJournal{RunID: "volume-run", ExecutionID: "volume-execution", RegionRole: "primary", Region: "cn-hangzhou", VolumeFixtureBucket: bucket,
+		VolumeFixtureBinding: &report.QuotaCredentialBinding{Identity: execpkg.IdentityPin{Version: 1, AccountID: "1234567890123456", Type: "RAMUser", UserID: "user-a"}}}
+	for _, step := range planned {
+		create, err := vars.Render(step.Run, values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if step.Mode == "lookup" {
+			if err := validateVolumeFixtureBucketLookup(step, create, bucket); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		teardown, err := vars.Render(step.Teardown, values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		kind := volumeFixtureKind(step.ID)
+		if err := journalfile.ValidateVolumeFixtureCreate(kind, create, journal); err != nil {
+			t.Fatalf("%s create is not bounded: %v", step.ID, err)
+		}
+		entry := report.Resource{Teardown: teardown, Scope: "stack", ExecutionID: journal.ExecutionID, RegionRole: "primary", Region: "cn-hangzhou", VolumeFixtureKind: kind}
+		if err := journalfile.ValidateVolumeFixtureTeardown(entry, journal); err != nil {
+			t.Fatalf("%s teardown is not bounded: %v", step.ID, err)
+		}
+	}
+	steps := caseStepsByName(t, suite)
+	for _, name := range []string{"create", "create second owned Volume"} {
+		command := steps[name].Run
+		for _, fragment := range []string{"{{.stack.volume_bucket_name}}", `"bucketPath":"/"`, `"readOnly":true`, "{{.stack.volume_bucket_endpoint}}", "{{.stack.volume_role_arn}}"} {
+			if !strings.Contains(command, fragment) {
+				t.Fatalf("Volume %s omitted generated config %s: %s", name, fragment, command)
+			}
+		}
+		if strings.Contains(command, ".prerequisites.") {
+			t.Fatalf("Volume %s still uses a private path prerequisite", name)
+		}
+	}
 }
 
 func TestACKKubeconfigLifecycleDoesNotExposeUpdate(t *testing.T) {

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"sort"
@@ -694,9 +695,50 @@ func runAPICall(cmd *cobra.Command, options *globalOptions, stdout io.Writer, pr
 		response, err = caller.Call(cmd.Context(), resolvedOperation, request)
 	}
 	if err != nil {
-		return err
+		return fixtureDeleteAbsenceError(resolvedProduct, resolvedOperation, err, request)
 	}
 	return writeCommandOutput(options, stdout, apiCallPayload(resolvedProduct, resolvedOperation, region.Value, response))
+}
+
+// The run-owned Volume fixture needs the verified provider action for narrow
+// create rejections, delete results, and read-only absence checks.
+func fixtureDeleteAbsenceError(product, operation string, err error, requests ...map[string]any) error {
+	var appErr *ecerrors.AppError
+	if !errors.As(err, &appErr) {
+		return err
+	}
+	action := ecerrors.ActionFromError(operation, err)
+	code := action.Code
+	verifiedRAMRejection := product == "ram" && appErr.ExitCode() == 2 && ecerrors.HasVerifiedProviderResponse(err) && (code == "Forbidden" || code == "NoPermission" || code == "InvalidParameter")
+	allowed := verifiedRAMRejection && (operation == "CreatePolicy" || operation == "CreateRole" || operation == "AttachPolicyToRole") ||
+		appErr.ExitCode() == 4 && (product == "oss" && (operation == "DeleteBucket" || operation == "ListObjects") && code == "NoSuchBucket" ||
+			product == "ram" && ecerrors.HasVerifiedProviderResponse(err) && (operation == "DeleteRole" || operation == "GetRole") && code == "EntityNotExist.Role" ||
+			product == "ram" && ecerrors.HasVerifiedProviderResponse(err) && (operation == "DeletePolicy" || operation == "GetPolicy") && code == "EntityNotExist.Policy" ||
+			product == "ram" && ecerrors.HasVerifiedProviderResponse(err) && operation == "DetachPolicyFromRole" && (code == "EntityNotExist.Role" || code == "EntityNotExist.Policy"))
+	if !allowed {
+		return err
+	}
+	if verifiedRAMRejection && (operation == "CreateRole" || operation == "AttachPolicyToRole") {
+		if len(requests) != 1 {
+			return err
+		}
+		request := requests[0]
+		role, ok := request["RoleName"].(string)
+		if !ok || role == "" {
+			return err
+		}
+		action.Target = &ecerrors.ActionTarget{RoleName: role}
+		if operation == "AttachPolicyToRole" {
+			policy, policyOK := request["PolicyName"].(string)
+			policyType, typeOK := request["PolicyType"].(string)
+			if !policyOK || policy == "" || !typeOK || policyType != "Custom" {
+				return err
+			}
+			action.Target.PolicyName = policy
+			action.Target.PolicyType = policyType
+		}
+	}
+	return ecerrors.WithActions(err, []ecerrors.Action{action})
 }
 
 func resolveRunnableAPIOperation(productCode, operation, lang string) (string, string, error) {

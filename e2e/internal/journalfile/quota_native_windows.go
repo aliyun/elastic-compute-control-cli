@@ -18,7 +18,28 @@ func quotaNativeNewFilePrivate(path string) bool {
 	if err != nil || !info.Mode().IsRegular() {
 		return false
 	}
-	descriptor, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(info, opened) || !privateRecoveryDescriptor(file) {
+		return false
+	}
+	after, err := os.Lstat(path)
+	return err == nil && os.SameFile(opened, after)
+}
+
+func privateRecoveryDescriptor(file *os.File) bool {
+	if file == nil {
+		return false
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	descriptor, err := windows.GetSecurityInfo(windows.Handle(file.Fd()), windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		return false
 	}
@@ -44,7 +65,11 @@ func quotaNativeNewFilePrivate(path string) bool {
 		return false
 	}
 	dacl, _, err := descriptor.DACL()
-	if err != nil || dacl == nil || dacl.AceCount != 2 {
+	wantCount := uint16(2)
+	if user.User.Sid.Equals(system) {
+		wantCount = 1
+	}
+	if err != nil || dacl == nil || dacl.AceCount != wantCount {
 		return false
 	}
 	foundUser, foundSystem := false, false
@@ -69,5 +94,5 @@ func quotaNativeNewFilePrivate(path string) bool {
 			return false
 		}
 	}
-	return foundUser && foundSystem
+	return foundUser && (foundSystem || user.User.Sid.Equals(system))
 }

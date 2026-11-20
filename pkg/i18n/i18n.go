@@ -100,6 +100,12 @@ func buildLocalizer(tag string, specs map[string]map[string]string) *Localizer {
 		&i18n.Message{ID: "TeamNotFound", Other: "team not found"},
 		&i18n.Message{ID: "QuotaNotFound", Other: "team quota not found"},
 		&i18n.Message{ID: "InvalidQuotaResponse", Other: "the FC Quota API returned an invalid response"},
+		&i18n.Message{ID: "InvalidVolumeResponse", Other: "the FC Volume API returned an invalid response"},
+		&i18n.Message{ID: "InvalidVolumeInput", Other: "FC volume parameters are invalid"},
+		&i18n.Message{ID: "VolumeRequiresSignedCredential", Other: "FC volume requires signed AK or STS credentials"},
+		&i18n.Message{ID: "InvalidVolumeTimeout", Other: "FC volume create and delete require --timeout greater than zero"},
+		&i18n.Message{ID: "VolumeNotFound", Other: "volume not found"},
+		&i18n.Message{ID: "VolumeInitialWaitFailed", Other: "volume reached failure state {{.State}}"},
 		&i18n.Message{ID: "TeamReadOnly", Other: "the team is read-only and cannot be changed or deleted"},
 		&i18n.Message{ID: "TeamRenameNotAllowed", Other: "the team name cannot be changed"},
 		&i18n.Message{ID: "InvalidAllPages", Other: "fetching all pages requires a supported list from its first page"},
@@ -404,6 +410,12 @@ func buildLocalizer(tag string, specs map[string]map[string]string) *Localizer {
 		&i18n.Message{ID: "TeamNotFound", Other: "团队不存在"},
 		&i18n.Message{ID: "QuotaNotFound", Other: "未找到团队配额"},
 		&i18n.Message{ID: "InvalidQuotaResponse", Other: "FC 配额 API 返回了无效响应"},
+		&i18n.Message{ID: "InvalidVolumeResponse", Other: "FC 存储卷 API 返回了无效响应"},
+		&i18n.Message{ID: "InvalidVolumeInput", Other: "FC 存储卷参数无效"},
+		&i18n.Message{ID: "VolumeRequiresSignedCredential", Other: "FC 存储卷需要 AK 或 STS 签名凭据"},
+		&i18n.Message{ID: "InvalidVolumeTimeout", Other: "FC 存储卷创建和删除要求 --timeout 大于零"},
+		&i18n.Message{ID: "VolumeNotFound", Other: "未找到存储卷"},
+		&i18n.Message{ID: "VolumeInitialWaitFailed", Other: "存储卷进入失败状态 {{.State}}"},
 		&i18n.Message{ID: "TeamReadOnly", Other: "该团队为只读，不能修改或删除"},
 		&i18n.Message{ID: "TeamRenameNotAllowed", Other: "该团队不允许修改名称"},
 		&i18n.Message{ID: "InvalidAllPages", Other: "获取所有页需要从受支持列表的第一页开始"},
@@ -836,11 +848,15 @@ func (l *Localizer) ErrorPayload(payload ecerrors.ErrorPayload, hasActions bool)
 	if payload.Code == "CloudAPIError" {
 		return payload
 	}
+	if payload.Code == "WaitFailed" && payload.CurrentState != "" && payload.Message == NewLocalizer("en").MessageData("VolumeInitialWaitFailed", map[string]any{"State": payload.CurrentState}) {
+		payload.Message = l.MessageData("VolumeInitialWaitFailed", map[string]any{"State": payload.CurrentState})
+		return payload
+	}
 	if !l.ShouldLocalizeHelp() {
 		return payload
 	}
 	// Preserve provider-specific messages that share a stable generic error code.
-	for _, id := range []string{"UnsupportedACSOperation", "InvalidSandboxResponse", "TeamNotFound", "QuotaNotFound", "TemplateCacheNotFound", "FCTemplateNotFound", "InvalidNativeFCTemplateResponse"} {
+	for _, id := range []string{"UnsupportedACSOperation", "InvalidSandboxResponse", "TeamNotFound", "QuotaNotFound", "TemplateCacheNotFound", "FCTemplateNotFound", "VolumeNotFound", "InvalidNativeFCTemplateResponse"} {
 		if payload.Message == NewLocalizer("en").Message(id) {
 			payload.Message = l.Message(id)
 			return payload

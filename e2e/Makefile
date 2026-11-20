@@ -1,8 +1,15 @@
 # ecctl-e2e developer targets. Run from the e2e/ directory.
-BIN := bin/ecctl-e2e
-PUBLIC_ECCTL := bin/ecctl-public
-FULL_ECCTL := bin/ecctl-full
+EXE :=
+ifeq ($(shell go env GOHOSTOS),windows)
+EXE := .exe
+endif
+BIN := bin/ecctl-e2e$(EXE)
+PUBLIC_ECCTL := bin/ecctl-public$(EXE)
+FULL_ECCTL := bin/ecctl-full$(EXE)
 REPORTS := reports
+ifeq ($(shell go env GOHOSTOS),darwin)
+E2E_NATIVE_CGO := CGO_ENABLED=1
+endif
 
 .DEFAULT_GOAL := help
 .PHONY: help metadata-check build build-public build-full run run-public run-full coverage coverage-full coverage-resources coverage-operations sweep sweep-public sweep-full list validate validate-full lint test fmt
@@ -19,11 +26,11 @@ metadata-check:
 	$(MAKE) -C .. metadata-check
 
 build-public: metadata-check ## Build ecctl-e2e and the default public ecctl binary into bin/
-	go build -o $(BIN) ./cmd/ecctl-e2e
+	$(E2E_NATIVE_CGO) go build -o $(BIN) ./cmd/ecctl-e2e
 	cd .. && go build -o e2e/$(PUBLIC_ECCTL) ./cmd/ecctl
 
 build-full: metadata-check ## Build ecctl-e2e and the full-surface ecctl binary into bin/
-	go build -o $(BIN) ./cmd/ecctl-e2e
+	$(E2E_NATIVE_CGO) go build -o $(BIN) ./cmd/ecctl-e2e
 	cd .. && go build -o e2e/$(FULL_ECCTL) ./cmd/ecctl-full
 
 run: run-public ## Run the public E2E surface against cloud

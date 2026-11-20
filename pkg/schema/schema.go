@@ -83,6 +83,9 @@ type APICall struct {
 
 type Param struct {
 	Type           string           `json:"type"`
+	Nullable       bool             `json:"nullable,omitempty"`
+	Min            *int             `json:"min,omitempty"`
+	Max            *int             `json:"max,omitempty"`
 	Description    string           `json:"description,omitempty"`
 	Required       bool             `json:"required,omitempty"`
 	Repeatable     bool             `json:"repeatable,omitempty"`
@@ -964,6 +967,9 @@ func operationInputSchemaParam(resource spec.ResourceSpec, ref spec.OperationFie
 func paramFromSchemaDefinition(value spec.SchemaField, lang string) Param {
 	param := Param{
 		Type:        value.Type,
+		Nullable:    value.Nullable,
+		Min:         value.Min,
+		Max:         value.Max,
 		Description: value.Description.Text(lang),
 		Required:    value.Required,
 		Repeatable:  value.Repeatable,
@@ -1004,6 +1010,9 @@ func applyStructuredInputShape(param *Param, definition spec.SchemaField, lang s
 }
 
 func structuredInputShape(field spec.SchemaField) string {
+	if field.InputStyle != "" {
+		return field.InputStyle
+	}
 	if isShallowObjectField(field) {
 		return "inline-key-value|json|@file"
 	}

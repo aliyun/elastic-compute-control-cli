@@ -16,6 +16,21 @@ func profile(id string, bundles ...string) fixtureconfig.RegionProfile {
 	return fixtureconfig.RegionProfile{ID: id, Prerequisites: prerequisites}
 }
 
+func TestSuiteUsesRegionalSandboxExcludesGlobalE2B(t *testing.T) {
+	if SuiteUsesRegionalSandbox(&scenario.Suite{Resource: "sandbox/sandbox"}) {
+		t.Fatal("global E2B sandbox was assigned a product region")
+	}
+	if SuiteUsesRegionalSandbox(&scenario.Suite{Resource: "sandbox/template", Steps: []scenario.Step{{Run: "ecctl sandbox template create --name e2b-template"}}}) {
+		t.Fatal("global E2B Template was assigned a product region")
+	}
+	if !SuiteUsesRegionalSandbox(&scenario.Suite{Resource: "sandbox/template", Steps: []scenario.Step{{Run: "ecctl sandbox template create --openapi --name native-template"}}}) {
+		t.Fatal("native Template lost its product region")
+	}
+	if !SuiteUsesRegionalSandbox(&scenario.Suite{Resource: "sandbox/volume"}) || !SuiteUsesRegionalSandbox(&scenario.Suite{Resource: "ecs/instance", Covers: []string{"sandbox/volume"}}) {
+		t.Fatal("regional sandbox coverage lost its region constraint")
+	}
+}
+
 func completeBundle(name string) map[string]any {
 	switch name {
 	case "test.primary":
@@ -69,6 +84,24 @@ func TestBuildIsolatesCrossResourceQuotaLifecycle(t *testing.T) {
 	}
 	if len(units) != 2 || len(units[0].Suites) != 1 || units[0].Suites[0] != suites[0] || !strings.Contains(units[0].Signature, "cleanup=owned-quota") || len(units[1].Suites) != 1 || units[1].Suites[0] != suites[1] {
 		t.Fatalf("cross-resource Quota lifecycle shared a cleanup scope: %+v", units)
+	}
+}
+
+func TestBuildSeparatesSandboxCoverageAndVolumeCommandsFromPureECS(t *testing.T) {
+	suites := []*scenario.Suite{
+		{Path: "ecs/pure.yaml", Resource: "ecs/instance"},
+		{Path: "ecs/covers-volume.yaml", Resource: "ecs/instance", Covers: []string{"sandbox/volume"}},
+		{Path: "ecs/volume-command.yaml", Resource: "ecs/instance", Steps: []scenario.Step{{Run: "ecctl sandbox volume list --team-id team-1 --output=json"}}},
+	}
+	if SuiteUsesSandbox(suites[0]) || !SuiteUsesSandbox(suites[1]) || !SuiteUsesSandbox(suites[2]) {
+		t.Fatal("sandbox use was not classified from coverage and commands")
+	}
+	units, err := Build(Request{Suites: suites, Profiles: []fixtureconfig.RegionProfile{profile("cn-zhangjiakou"), profile("cn-hangzhou")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(units) != 2 || len(units[0].Suites) != 1 || units[0].Suites[0] != suites[0] || len(units[1].Suites) != 2 || !strings.Contains(units[1].Signature, "product=sandbox") {
+		t.Fatalf("mixed sandbox use shared a pure ECS execution: %+v", units)
 	}
 }
 

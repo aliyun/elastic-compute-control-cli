@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/spec"
 	spechooks "github.com/aliyun/elastic-compute-control-cli/specs"
 )
@@ -63,6 +64,16 @@ func expandBindingNode(resource spec.ResourceSpec, request map[string]any, captu
 		value, ok, err := ResolveExpression(typed, ctx)
 		if err != nil {
 			return err
+		}
+		if resource.Product == "sandbox" && resource.Resource == "volume" {
+			if prefix == "volumeID" && typed == "$.id" && (!ok || isEmpty(value)) {
+				return ecerrors.Client("InvalidVolumeInput", i18n.NewLocalizer("en").Message("InvalidVolumeInput"), ecerrors.WithField("id"))
+			}
+			if (prefix == "teamID" || prefix == "body.teamID") && typed == "$.team_id" {
+				if _, explicit := ctx.Input["team_id"]; explicit && (!ok || isEmpty(value)) {
+					return ecerrors.Client("InvalidVolumeInput", i18n.NewLocalizer("en").Message("InvalidVolumeInput"), ecerrors.WithField("team_id"))
+				}
+			}
 		}
 		if ok && !isEmpty(value) {
 			request[prefix] = value

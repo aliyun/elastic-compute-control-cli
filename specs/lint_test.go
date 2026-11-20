@@ -383,45 +383,8 @@ func TestSpecLintDeleteEmitsDeleted(t *testing.T) {
 			continue
 		}
 		t.Run(sf.product+"/"+sf.resource, func(t *testing.T) {
-			inOps := false
-			inDelete := false
-			hasEmit := false
-			hasDeleted := false
-
-			for _, line := range strings.Split(string(sf.raw), "\n") {
-				trimmed := strings.TrimSpace(line)
-				if trimmed == "operations:" {
-					inOps = true
-					continue
-				}
-				if !inOps {
-					continue
-				}
-				if regexp.MustCompile(`^  [a-z]`).MatchString(line) {
-					if inDelete && hasEmit && !hasDeleted {
-						t.Errorf("delete operation has emit but missing 'deleted: true'")
-					}
-					if inDelete && !hasEmit {
-						t.Errorf("delete operation missing emit with 'deleted: true'")
-					}
-					inDelete = strings.HasPrefix(trimmed, "delete:")
-					hasEmit = false
-					hasDeleted = false
-				}
-				if inDelete {
-					if strings.Contains(line, "emit:") {
-						hasEmit = true
-					}
-					if strings.Contains(line, "deleted: true") {
-						hasDeleted = true
-					}
-				}
-			}
-			if inDelete && hasEmit && !hasDeleted {
-				t.Errorf("delete operation has emit but missing 'deleted: true'")
-			}
-			if inDelete && !hasEmit {
-				t.Errorf("delete operation missing emit with 'deleted: true'")
+			if err := deleteEmitContract(sf.loaded); err != nil {
+				t.Error(err)
 			}
 		})
 	}

@@ -53,7 +53,11 @@ func Decode(data []byte) (Capabilities, error) {
 }
 
 func LoadFromBinary(ctx context.Context, bin string) (Capabilities, error) {
-	result := execpkg.Run(ctx, execpkg.Config{Bin: bin}, "ecctl capabilities --output json")
+	return LoadFromConfig(ctx, execpkg.Config{Bin: bin})
+}
+
+func LoadFromConfig(ctx context.Context, cfg execpkg.Config) (Capabilities, error) {
+	result := execpkg.Run(ctx, cfg, "ecctl capabilities --output json")
 	if result.Err != nil {
 		return Capabilities{}, result.Err
 	}
@@ -101,6 +105,10 @@ func ValidateSuites(suites []*scenario.Suite, caps Capabilities) []Issue {
 // `ecctl call` commands are intentionally excluded because their API parameter
 // flags are discovered dynamically rather than declared by the CLI parser.
 func ValidateCommandParsers(ctx context.Context, bin string, suites []*scenario.Suite) []Issue {
+	return ValidateCommandParsersWithConfig(ctx, execpkg.Config{Bin: bin}, suites)
+}
+
+func ValidateCommandParsersWithConfig(ctx context.Context, cfg execpkg.Config, suites []*scenario.Suite) []Issue {
 	var issues []Issue
 	for _, suite := range suites {
 		for _, step := range suite.Steps {
@@ -114,6 +122,10 @@ func ValidateCommandParsers(ctx context.Context, bin string, suites []*scenario.
 				if strings.TrimSpace(command.run) == "" {
 					continue
 				}
+				if _, err := journalcmd.VolumeCommandAction(command.run); err != nil {
+					issues = append(issues, Issue{Path: suite.Path, Step: command.label, Code: "invalid_cli_command", Message: err.Error()})
+					continue
+				}
 				tokens, err := shlex.Split(command.run)
 				if err != nil || len(tokens) == 0 || tokens[0] != "ecctl" {
 					continue // ValidateSuites reports malformed commands.
@@ -123,7 +135,19 @@ func ValidateCommandParsers(ctx context.Context, bin string, suites []*scenario.
 					continue
 				}
 				args := append(append([]string(nil), tokens[1:]...), "--help")
-				out, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
+				bin := cfg.Bin
+				release := func() {}
+				if cfg.ExpectedBinSHA256 != "" {
+					bin, release, err = execpkg.VerifiedExecutableCopy(cfg.Bin, cfg.ExpectedBinSHA256)
+					if err != nil {
+						issues = append(issues, Issue{Path: suite.Path, Step: command.label, Code: "invalid_cli_command", Message: err.Error()})
+						continue
+					}
+				}
+				child := exec.CommandContext(ctx, bin, args...)
+				child.Env = execpkg.CommandEnvironment(cfg.Env)
+				out, err := child.CombinedOutput()
+				release()
 				if err == nil {
 					continue
 				}
@@ -166,6 +190,12 @@ func indexCapabilities(caps Capabilities) resourceActions {
 func commandCapability(command string, index resourceActions) (resource, action, code string, err error) {
 	if journalcmd.RawQuotaMutationCandidate(command) {
 		return "", "", "unsupported_raw_quota_mutation", fmt.Errorf("raw FCSandbox Quota mutation is unsupported in E2E cases")
+	}
+	if journalcmd.RawVolumeMutationCandidate(command) {
+		return "", "", "unsupported_raw_volume_mutation", fmt.Errorf("raw FCSandbox Volume mutation is unsupported in E2E cases")
+	}
+	if _, err := journalcmd.VolumeCommandAction(command); err != nil {
+		return "", "", "invalid_volume_command", err
 	}
 	tokens, splitErr := shlex.Split(command)
 	if splitErr != nil {

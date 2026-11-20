@@ -1,7 +1,7 @@
 package journalfile
 
 import (
-	"encoding/json"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -12,12 +12,15 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalcmd"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
 	"github.com/google/shlex"
-	"github.com/spf13/pflag"
 )
 
 // ErrTemplateCacheCreatePending keeps a reserved delete until the first
 // asynchronous cache create is known to have completed and become visible.
 var ErrTemplateCacheCreatePending = errors.New("pending Template Cache create")
+
+// ErrTemplateCleanupChildPending keeps a native parent untouched until its
+// exact Cache or Template finalizer is durably consumed.
+var ErrTemplateCleanupChildPending = errors.New("pending native Template cleanup child")
 
 // ResolveJournalPath gives lock, journal IO and sidecar discovery one target.
 func ResolveJournalPath(path string) (string, error) {
@@ -39,9 +42,33 @@ func CheckJournalPath(path string, journal report.CleanupJournal) error {
 		return fmt.Errorf("cleanup journal canonical path changed")
 	}
 	for _, entry := range journal.Entries {
-		if entry.TeamCreateConfirmed || entry.QuotaBound || entry.QuotaReserved || entry.QuotaUpdatePending {
+		if entry.TeamCreateConfirmed {
+			nativeAnchor := journal.JournalPath == "" && journal.NativeJournalPath == path && len(journal.NativeIntentPaths) > 0 && !entry.QuotaBound && !entry.QuotaReserved && !entry.QuotaUpdatePending && entry.VolumeFixtureKind == "" && !entry.VolumeFixturePending
+			if journal.Version != 2 || journal.JournalPath != path && !nativeAnchor {
+				return fmt.Errorf("protected cleanup journal anchor missing or changed")
+			}
+		}
+		if entry.QuotaBound || entry.QuotaReserved || entry.QuotaUpdatePending || entry.VolumeFixtureKind != "" || entry.VolumeFixturePending {
 			if journal.Version != 2 || journal.JournalPath != path {
-				return fmt.Errorf("protected Team/Quota journal anchor missing or changed")
+				return fmt.Errorf("protected cleanup journal anchor missing or changed")
+			}
+		}
+		if entry.VolumeFixtureKind != "" || entry.VolumeFixturePending {
+			if err := ValidateVolumeFixtureTeardown(entry, journal); err != nil {
+				return err
+			}
+		}
+	}
+	if len(journal.VolumeTeamCreateIDs) > 0 {
+		if journal.Version != 2 || journal.JournalPath != path || journal.VolumeFixtureBinding == nil {
+			return fmt.Errorf("Volume Team create journal anchor or fixture binding is missing")
+		}
+		for name, id := range journal.VolumeTeamCreateIDs {
+			if len(name) != 32 || !strings.HasPrefix(name, "ecctl-t-") || !safeTemplateID(name) || id != "" && !safeTemplateID(id) {
+				return fmt.Errorf("Volume Team create ownership state is invalid")
+			}
+			if _, err := hex.DecodeString(name[8:]); err != nil {
+				return fmt.Errorf("Volume Team create owner is invalid")
 			}
 		}
 	}
@@ -49,10 +76,20 @@ func CheckJournalPath(path string, journal report.CleanupJournal) error {
 }
 
 func loadTemplateLedger(path string, expected report.CleanupJournal) (report.CleanupJournal, bool, error) {
+	if expected.NativeJournalPath != "" {
+		return loadTemplateLedgerWithRead(path, expected, func(target string) ([]byte, error) {
+			snapshot, err := ReadPrivateRecoverySnapshot(target)
+			return snapshot.Body, err
+		})
+	}
+	return loadTemplateLedgerWithRead(path, expected, os.ReadFile)
+}
+
+func loadTemplateLedgerWithRead(path string, expected report.CleanupJournal, read func(string) ([]byte, error)) (report.CleanupJournal, bool, error) {
 	if expected.NativeJournalPath != "" && path != expected.NativeJournalPath {
 		return report.CleanupJournal{}, false, fmt.Errorf("retained native ownership journal target changed")
 	}
-	body, err := os.ReadFile(path)
+	body, err := read(path)
 	if os.IsNotExist(err) {
 		if expected.NativeJournalPath != "" {
 			return report.CleanupJournal{}, false, fmt.Errorf("required native ownership journal is missing")
@@ -69,7 +106,7 @@ func loadTemplateLedger(path string, expected report.CleanupJournal) (report.Cle
 		return expected, true, nil
 	}
 	var actual report.CleanupJournal
-	if json.Unmarshal(body, &actual) != nil {
+	if unmarshalRecoveryJSON(body, &actual) != nil {
 		return actual, true, fmt.Errorf("invalid cleanup journal metadata")
 	}
 	if err := CheckJournalPath(path, actual); err != nil {
@@ -101,27 +138,20 @@ func loadTemplateLedger(path string, expected report.CleanupJournal) (report.Cle
 }
 
 func nativeTemplateDeleteEntry(command string) bool {
-	args, err := shlex.Split(command)
-	if err != nil || len(args) < 4 || args[0] != "ecctl" || (args[1] != "sandbox" && args[1] != "sbx") || (args[2] != "template" && args[2] != "tpl") || (args[3] != "delete" && args[3] != "rm" && args[3] != "remove") {
-		return false
-	}
-	flags := pflag.NewFlagSet("journal native Template", pflag.ContinueOnError)
-	for _, key := range []string{"region", "profile", "team-id", "lang", "output"} {
-		flags.String(key, "", "")
-	}
-	for _, key := range []string{"openapi", "json", "agent-envelope", "no-color"} {
-		flags.Bool(key, false, "")
-	}
-	if flags.Parse(args[4:]) != nil {
-		return true
-	}
-	native, _ := flags.GetBool("openapi")
-	return native
+	route, found, err := journalcmd.ParseSandboxDeleteRoute(command)
+	return err == nil && found && route.Resource == "template" && route.Native
 }
 
 // IsNativeTemplateDelete classifies the native finalizer for credential
 // selection after the shared Template ledger preflight succeeds.
 func IsNativeTemplateDelete(command string) bool { return nativeTemplateDeleteEntry(command) }
+
+// IsNativeVolumeDelete marks the exact native Volume command family for the
+// retained intent's credential binding and ownership checks.
+func IsNativeVolumeDelete(command string) bool {
+	args, err := shlex.Split(command)
+	return err == nil && len(args) >= 4 && args[0] == "ecctl" && (args[1] == "sandbox" || args[1] == "sbx") && args[2] == "volume" && (args[3] == "delete" || args[3] == "rm" || args[3] == "remove")
+}
 
 func sameTemplateDelete(left, right string) bool {
 	a, ea := shlex.Split(left)
@@ -202,6 +232,86 @@ func ValidateOwnedTemplateCacheDelete(command string, intent TemplateCreateInten
 	return fmt.Errorf("Template Cache delete target lacks retained Template ownership")
 }
 
+// CheckNativeCleanupDependencies uses the current validated ledger, not entry
+// order, to keep a Team behind its native Template and Cache children and a
+// Template behind its Cache. It grants no cleanup ownership or delete right.
+func CheckNativeCleanupDependencies(path string, expected report.CleanupJournal, env []string, parentCommand string, roots ...*os.Root) (retErr error) {
+	nativeTemplate := IsNativeTemplateDelete(parentCommand)
+	var root *os.Root
+	if len(roots) != 0 {
+		root = roots[0]
+	} else {
+		var err error
+		root, err = os.OpenRoot(filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		defer root.Close()
+	}
+	snapshot, err := ReadPrivateRecoverySnapshotRoot(root, filepath.Base(path))
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, snapshot.VerifyRoot(root, filepath.Base(path))) }()
+	current, _, err := loadTemplateLedgerWithRead(path, expected, func(string) ([]byte, error) { return snapshot.Body, nil })
+	if err != nil {
+		return err
+	}
+	teamID, teamErr := TeamDeleteCandidateTargetForRegion(parentCommand, current.Region)
+	if teamErr != nil && !nativeTemplate {
+		return fmt.Errorf("native cleanup parent is not a validated Team or Template delete: %w", teamErr)
+	}
+	intents, err := readTemplateCreateIntentsMode(path, current, env, false, nil, root)
+	if err != nil {
+		return err
+	}
+	ownedTemplate := func(command string, intent TemplateCreateIntent) bool {
+		if intent.Resource != "" || intent.State != "journaled" || intent.ValidateDelete(command) != nil {
+			return false
+		}
+		for _, retained := range intent.Deletes {
+			if sameTemplateDelete(retained, command) {
+				return true
+			}
+		}
+		return false
+	}
+	if nativeTemplate {
+		var owner *TemplateCreateIntent
+		for i := range intents {
+			if ownedTemplate(parentCommand, intents[i]) {
+				if owner != nil {
+					return fmt.Errorf("native Template cleanup parent has ambiguous creation ownership")
+				}
+				owner = &intents[i]
+			}
+		}
+		if owner == nil {
+			return fmt.Errorf("native Template cleanup parent lacks retained creation ownership")
+		}
+		for _, entry := range current.Entries {
+			if IsTemplateCacheDelete(entry.Teardown) && ValidateOwnedTemplateCacheDelete(entry.Teardown, *owner) == nil {
+				return fmt.Errorf("%w: Cache for Team %s", ErrTemplateCleanupChildPending, owner.TeamID)
+			}
+		}
+		return nil
+	}
+	for _, entry := range current.Entries {
+		if !IsNativeTemplateDelete(entry.Teardown) && !IsTemplateCacheDelete(entry.Teardown) {
+			continue
+		}
+		for _, intent := range intents {
+			if intent.Resource != "" || intent.State != "journaled" || intent.TeamID != teamID {
+				continue
+			}
+			if ownedTemplate(entry.Teardown, intent) || IsTemplateCacheDelete(entry.Teardown) && ValidateOwnedTemplateCacheDelete(entry.Teardown, intent) == nil {
+				return fmt.Errorf("%w: Team %s", ErrTemplateCleanupChildPending, teamID)
+			}
+		}
+	}
+	return nil
+}
+
 func validateTemplateLedger(path string, meta report.CleanupJournal, intents []TemplateCreateIntent, seen map[string]bool, allowPendingCache bool) error {
 	if err := CheckJournalPath(path, meta); err != nil {
 		return err
@@ -217,6 +327,29 @@ func validateTemplateLedger(path string, meta report.CleanupJournal, intents []T
 			return fmt.Errorf("native creation ownership reference is missing")
 		}
 	}
+	for name, receipt := range meta.VolumeTerminalReceipts {
+		matched := false
+		for _, intent := range intents {
+			if intent.Name != name || intent.Resource != "volume" {
+				continue
+			}
+			if matched || intent.State != "journaled" || !intent.VolumeObserved || intent.AcceptedVolumeID == "" ||
+				len(intent.Deletes) != 1 || !oneNativeIntentReference(meta, path, name) ||
+				len(meta.VolumeScopeBindings[name]) != 0 || len(meta.VolumeTransferHistory[name]) != 0 ||
+				receipt != volumeTerminalReceipt(meta, intent) || CheckRetiredVolumeTeamCreatorSource(meta, intent.TeamID, intent) != nil {
+				return fmt.Errorf("Volume terminal receipt differs from its observed creation binding")
+			}
+			for _, entry := range meta.Entries {
+				if sameTemplateDelete(entry.Teardown, intent.Deletes[0]) {
+					return fmt.Errorf("Volume terminal receipt still has an active finalizer")
+				}
+			}
+			matched = true
+		}
+		if !matched {
+			return fmt.Errorf("Volume terminal receipt lacks an accepted creation binding")
+		}
+	}
 	for _, entry := range meta.Entries {
 		if entry.CacheCreatePending && !IsTemplateCacheDelete(entry.Teardown) {
 			return fmt.Errorf("cache creation pending marker is not a Template Cache delete")
@@ -224,7 +357,7 @@ func validateTemplateLedger(path string, meta report.CleanupJournal, intents []T
 		if IsTemplateCacheDelete(entry.Teardown) {
 			proven := false
 			for _, intent := range intents {
-				if intent.State == "journaled" && ValidateOwnedTemplateCacheDelete(entry.Teardown, intent) == nil {
+				if intent.Resource == "" && intent.State == "journaled" && ValidateOwnedTemplateCacheDelete(entry.Teardown, intent) == nil {
 					proven = true
 					break
 				}
@@ -237,12 +370,29 @@ func validateTemplateLedger(path string, meta report.CleanupJournal, intents []T
 			}
 			continue
 		}
+		if IsNativeVolumeDelete(entry.Teardown) {
+			proven := false
+			for _, intent := range intents {
+				if intent.Resource != "volume" || intent.State != "journaled" {
+					continue
+				}
+				for _, command := range intent.Deletes {
+					if sameTemplateDelete(command, entry.Teardown) && intent.ValidateDelete(entry.Teardown) == nil && oneNativeIntentReference(meta, path, intent.Name) && entry.Scope == intent.CaseScope && entry.ExecutionID == intent.ExecutionID && entry.RegionRole == intent.RegionRole && entry.Region == intent.Region {
+						proven = true
+					}
+				}
+			}
+			if !proven || len(meta.NativeIntentPaths) == 0 {
+				return fmt.Errorf("native Volume deletion lacks exact creation ownership evidence")
+			}
+			continue
+		}
 		if !nativeTemplateDeleteEntry(entry.Teardown) {
 			continue
 		}
 		proven := false
 		for _, intent := range intents {
-			if intent.State != "journaled" {
+			if intent.Resource != "" || intent.State != "journaled" {
 				continue
 			}
 			for _, command := range intent.Deletes {
@@ -261,13 +411,21 @@ func validateTemplateLedger(path string, meta report.CleanupJournal, intents []T
 // PendingTemplateCacheCreate inspects one pending finalizer without making it
 // replayable. All native ownership checks still apply; only reconciliation may
 // inspect a pending marker before proving the cache's terminal cloud state.
-func PendingTemplateCacheCreate(path string, meta report.CleanupJournal, env []string) (TemplateCreateIntent, report.Resource, string, error) {
-	resolved, err := ResolveJournalPath(path)
-	if err != nil {
-		return TemplateCreateIntent{}, report.Resource{}, "", err
+func PendingTemplateCacheCreate(path string, meta report.CleanupJournal, env []string, roots ...*os.Root) (TemplateCreateIntent, report.Resource, string, error) {
+	var root *os.Root
+	if len(roots) != 0 {
+		root = roots[0]
 	}
-	path = resolved
-	intents, err := readTemplateCreateIntentsForRecovery(path, meta, env)
+	if root == nil {
+		resolved, err := ResolveJournalPath(path)
+		if err != nil {
+			return TemplateCreateIntent{}, report.Resource{}, "", err
+		}
+		path = resolved
+	} else if !filepath.IsAbs(path) {
+		return TemplateCreateIntent{}, report.Resource{}, "", fmt.Errorf("rooted Template Cache journal path is not absolute")
+	}
+	intents, err := readTemplateCreateIntentsForRecovery(path, meta, env, root)
 	if err != nil {
 		return TemplateCreateIntent{}, report.Resource{}, "", err
 	}

@@ -491,7 +491,7 @@ exit 1
 				t.Fatal(err)
 			}
 			const quotaCall = "sandbox quota delete team-owned --output=json --region cn-hangzhou --profile quota-test"
-			const teamCall = "sandbox team delete team-owned --timeout 5m --region cn-hangzhou --profile quota-test"
+			const teamCall = "sandbox team delete team-owned --timeout 5m --region cn-hangzhou --profile quota-test --no-color=true"
 			if mode != "success" {
 				if result.Errors != 1 || result.Deleted != 0 || strings.TrimSpace(string(calls)) != quotaCall || !slices.Equal(stored.Entries, entries) {
 					t.Fatalf("failed/unknown Quota replay reached Team or consumed recovery: result=%+v calls=%q entries=%+v", result, calls, stored.Entries)

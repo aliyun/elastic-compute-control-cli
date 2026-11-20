@@ -2,7 +2,6 @@ package journalfile
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -126,7 +125,7 @@ func quotaProfileConfigState(path, profile string) (report.CredentialConfigState
 	var config struct {
 		Profiles []map[string]any `json:"profiles"`
 	}
-	if err := json.Unmarshal(data, &config); err != nil {
+	if err := unmarshalRecoveryJSON(data, &config); err != nil {
 		return report.CredentialConfigState{}, nil, fmt.Errorf("protected Quota configuration target is invalid")
 	}
 	state := report.CredentialConfigState{Exists: true, Mode: uint32(info.Mode().Perm())}
@@ -428,7 +427,7 @@ func PrepareQuotaCleanup(ctx context.Context, path string, meta report.CleanupJo
 			return cfg, fmt.Errorf("protected Quota binding requires a version 2 journal")
 		}
 		var entries []report.Resource
-		if err := json.Unmarshal(data, &entries); err != nil {
+		if err := unmarshalRecoveryJSON(data, &entries); err != nil {
 			return cfg, err
 		}
 		if err := CheckJournalPath(path, report.CleanupJournal{Entries: entries}); err != nil {
@@ -442,7 +441,7 @@ func PrepareQuotaCleanup(ctx context.Context, path string, meta report.CleanupJo
 		return cfg, nil
 	}
 	var current report.CleanupJournal
-	if err := json.Unmarshal(data, &current); err != nil {
+	if err := unmarshalRecoveryJSON(data, &current); err != nil {
 		return cfg, err
 	}
 	if err := CheckJournalPath(path, current); err != nil {

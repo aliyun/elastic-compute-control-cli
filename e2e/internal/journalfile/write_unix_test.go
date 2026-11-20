@@ -3,12 +3,105 @@
 package journalfile
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestDurableRootedWriteCannotFollowReplacedParent(t *testing.T) {
+	base := t.TempDir()
+	parent := filepath.Join(base, "journal-parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := WriteDurableRoot(root, "intent.json", []byte("pending\n")); err != nil {
+		t.Fatal(err)
+	}
+	moved := parent + "-moved"
+	if err := os.Rename(parent, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "intent.json"), []byte("replacement\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteDurableRoot(root, "intent.json", []byte("accepted\n")); err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.ReadFile(filepath.Join(moved, "intent.json"))
+	if err != nil || !bytes.Equal(original, []byte("accepted\n")) {
+		t.Fatalf("original parent lost rooted write: %v %q", err, original)
+	}
+	replacement, err := os.ReadFile(filepath.Join(parent, "intent.json"))
+	if err != nil || !bytes.Equal(replacement, []byte("replacement\n")) {
+		t.Fatalf("replacement parent received rooted write: %v %q", err, replacement)
+	}
+}
+
+func TestFailedDeleteMarkerBarrierRestoresUnusedMarker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cleanup.json")
+	original, marked := []byte("unattempted\n"), []byte("attempted\n")
+	if err := WriteDurable(path, original); err != nil {
+		t.Fatal(err)
+	}
+	previous := syncJournalDirectory
+	t.Cleanup(func() { syncJournalDirectory = previous })
+	failOnce := true
+	syncJournalDirectory = func(dir string) error {
+		if failOnce && dir == filepath.Dir(path) {
+			failOnce = false
+			return errors.New("synthetic post-rename directory sync failure")
+		}
+		return syncDirectory(dir)
+	}
+	if err := WriteDurable(path, marked); err == nil {
+		t.Fatal("marker write unexpectedly passed the injected barrier")
+	}
+	if err := RestoreUninvokedMarker(path, marked, original); err != nil {
+		t.Fatal(err)
+	}
+	installed, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(installed, original) {
+		t.Fatalf("unused marker remained installed: %q %v", installed, err)
+	}
+}
+
+func TestInstalledRecoveryFileNeedsRetryBarrier(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "volume-intent.json")
+	if err := WriteDurable(path, []byte("pending\n")); err != nil {
+		t.Fatal(err)
+	}
+	previous := syncJournalDirectory
+	t.Cleanup(func() { syncJournalDirectory = previous })
+	failOnce := true
+	syncJournalDirectory = func(dir string) error {
+		if failOnce && dir == filepath.Dir(path) {
+			failOnce = false
+			return errors.New("synthetic post-rename directory sync failure")
+		}
+		return syncDirectory(dir)
+	}
+	accepted := []byte("journaled\n")
+	if err := WriteDurable(path, accepted); err == nil {
+		t.Fatal("recovery write unexpectedly passed the injected barrier")
+	}
+	if installed, err := os.ReadFile(path); err != nil || !bytes.Equal(installed, accepted) {
+		t.Fatalf("post-rename recovery file was not visible: %q %v", installed, err)
+	}
+	if err := ReaffirmDurable(path, accepted); err != nil {
+		t.Fatalf("visible recovery file did not receive a retry barrier: %v", err)
+	}
+}
 
 func TestIntentFreshDirectoryAncestorsAreDurableBeforeReturn(t *testing.T) {
 	root := t.TempDir()
