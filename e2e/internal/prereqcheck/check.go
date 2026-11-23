@@ -21,6 +21,7 @@ const (
 	LingjunNetwork               = "lingjun.network"
 	RGAssociatedTransferDisabled = "rg.associated_transfer_disabled"
 	RGNotificationDisabled       = "rg.notification_disabled"
+	VolumeFixtureOwnership       = "volume.fixture_ownership"
 )
 
 type fieldContract struct {
@@ -44,7 +45,7 @@ var declarativeFieldContracts = []fieldContract{
 // prerequisite. Other prerequisites are scheduled by the generic run planner.
 func RequiresValidation(prerequisite string) bool {
 	switch prerequisite {
-	case LingjunCluster:
+	case LingjunCluster, VolumeFixtureOwnership:
 		return true
 	}
 	for _, contract := range declarativeFieldContracts {
@@ -58,11 +59,12 @@ func RequiresValidation(prerequisite string) bool {
 // Options describes the profiles and prerequisite bundles needed by the
 // selected cases. PrimaryRegion limits probes when --region pins the run.
 type Options struct {
-	Profiles      []fixtureconfig.RegionProfile
-	Required      map[string]bool
-	PrimaryRegion string
-	EcctlBin      string
-	Env           []string
+	Profiles       []fixtureconfig.RegionProfile
+	Required       map[string]bool
+	PrimaryRegion  string
+	EcctlBin       string
+	EcctlBinSHA256 string
+	Env            []string
 }
 
 // Warning records one configured prerequisite that cannot be used. Fatal
@@ -91,6 +93,18 @@ func Check(ctx context.Context, opt Options) (Result, error) {
 		profile := &result.Profiles[i]
 		if opt.PrimaryRegion != "" && profile.ID != opt.PrimaryRegion {
 			continue
+		}
+		if opt.Required[VolumeFixtureOwnership] {
+			if bundle, declared := profile.Prerequisites[VolumeFixtureOwnership]; declared {
+				approved, _ := bundle["approved"].(bool)
+				if profile.ID != "cn-hangzhou" || !approved {
+					removePrerequisite(profile, VolumeFixtureOwnership)
+					result.Warnings = append(result.Warnings, Warning{
+						Region: profile.ID, Prerequisite: VolumeFixtureOwnership,
+						Reason: "Volume fixture requires explicit approval in cn-hangzhou",
+					})
+				}
+			}
 		}
 		for _, contract := range declarativeFieldContracts {
 			if !opt.Required[contract.Prerequisite] {
@@ -208,7 +222,7 @@ func Check(ctx context.Context, opt Options) (Result, error) {
 }
 
 func probeStringField(ctx context.Context, opt Options, region, prerequisite, command, field string) (string, error) {
-	result := execpkg.Run(ctx, execpkg.Config{Bin: opt.EcctlBin, Region: region, Env: opt.Env}, command)
+	result := execpkg.Run(ctx, execpkg.Config{Bin: opt.EcctlBin, ExpectedBinSHA256: opt.EcctlBinSHA256, Region: region, Env: opt.Env}, command)
 	if result.Err != nil {
 		return "", fmt.Errorf("probe region %q prerequisite %s: %w", region, prerequisite, result.Err)
 	}
@@ -228,7 +242,7 @@ func probeStringField(ctx context.Context, opt Options, region, prerequisite, co
 }
 
 func probeBoolField(ctx context.Context, opt Options, region, prerequisite, command, field string) (bool, error) {
-	result := execpkg.Run(ctx, execpkg.Config{Bin: opt.EcctlBin, Region: region, Env: opt.Env}, command)
+	result := execpkg.Run(ctx, execpkg.Config{Bin: opt.EcctlBin, ExpectedBinSHA256: opt.EcctlBinSHA256, Region: region, Env: opt.Env}, command)
 	if result.Err != nil {
 		return false, fmt.Errorf("probe region %q prerequisite %s: %w", region, prerequisite, result.Err)
 	}
@@ -254,7 +268,7 @@ func probeLingjunClusterNetwork(ctx context.Context, opt Options, region string,
 		"--ElasticNetworkInterfaceId", strconv.Quote(strings.TrimSpace(eniID)),
 		"--PageSize", "10",
 	}, " ")
-	result := execpkg.Run(ctx, execpkg.Config{Bin: opt.EcctlBin, Region: region, Env: opt.Env}, command)
+	result := execpkg.Run(ctx, execpkg.Config{Bin: opt.EcctlBin, ExpectedBinSHA256: opt.EcctlBinSHA256, Region: region, Env: opt.Env}, command)
 	if result.Err != nil {
 		return false, "", fmt.Errorf("probe region %q prerequisite %s: %w", region, LingjunClusterNetwork, result.Err)
 	}
@@ -372,7 +386,7 @@ func deriveHPNZone(zone string) (string, error) {
 // probeResourceGroup returns the ID of a usable resource group in the region.
 // Resource groups are account-owned and cannot be created by the run.
 func probeResourceGroup(ctx context.Context, opt Options, region string) (string, error) {
-	result := execpkg.Run(ctx, execpkg.Config{Bin: opt.EcctlBin, Region: region, Env: opt.Env},
+	result := execpkg.Run(ctx, execpkg.Config{Bin: opt.EcctlBin, ExpectedBinSHA256: opt.EcctlBinSHA256, Region: region, Env: opt.Env},
 		"ecctl rg group list --limit 100")
 	if result.Err != nil {
 		return "", fmt.Errorf("list resource groups: %w", result.Err)
@@ -443,7 +457,7 @@ func usableResourceGroup(status string) bool {
 
 func query(opt Options, region string) paramspkg.Query {
 	return func(ctx context.Context, command string) (any, error) {
-		result := execpkg.Run(ctx, execpkg.Config{Bin: opt.EcctlBin, Region: region, Env: opt.Env}, command)
+		result := execpkg.Run(ctx, execpkg.Config{Bin: opt.EcctlBin, ExpectedBinSHA256: opt.EcctlBinSHA256, Region: region, Env: opt.Env}, command)
 		if result.Err != nil {
 			return nil, paramspkg.MarkFatalQueryError(result.Err)
 		}
@@ -545,7 +559,7 @@ func findJSONBool(value any, key string) (bool, bool) {
 }
 
 func probeLingjunZone(ctx context.Context, opt Options, region string) (string, error) {
-	result := execpkg.Run(ctx, execpkg.Config{Bin: opt.EcctlBin, Region: region, Env: opt.Env},
+	result := execpkg.Run(ctx, execpkg.Config{Bin: opt.EcctlBin, ExpectedBinSHA256: opt.EcctlBinSHA256, Region: region, Env: opt.Env},
 		"ecctl call eflo-controller DescribeZones")
 	if result.Err != nil {
 		return "", fmt.Errorf("DescribeZones: %w", result.Err)

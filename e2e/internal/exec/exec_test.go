@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -28,6 +29,31 @@ func TestRunPreservesLargeJSONNumbers(t *testing.T) {
 	}
 }
 
+func TestProtectedRawFixturePinsJSONWithTextDefault(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake CLI uses a shell script")
+	}
+	bin := filepath.Join(t.TempDir(), "ecctl")
+	script := "#!/bin/sh\ncase \" $* \" in *' --output=json '*) printf '%s' '{\"ok\":true}';; *) printf '%s' 'text output';; esac\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pin := IdentityPin{Version: 1, AccountID: "1234567890123456", Type: "RAMUser", UserID: "user"}
+	cfg := Config{Bin: bin, Region: "cn-hangzhou", Profile: "fixture", ExpectedIdentity: &pin}
+	result := Run(context.Background(), cfg, `ecctl call oss GetBucketInfo --request '{"Bucket":"owned"}' --region cn-hangzhou`)
+	if result.Err != nil || result.Exit != 0 || result.JSON == nil || !strings.Contains(result.Command, "--output=json") {
+		t.Fatalf("protected fixture did not pin JSON: %+v", result)
+	}
+	changed := Run(context.Background(), cfg, `ecctl call ram GetRole --request '{"RoleName":"owned"}' --output=text`)
+	if changed.Err == nil || changed.Started {
+		t.Fatalf("protected fixture accepted text override: %+v", changed)
+	}
+	hidden := Run(context.Background(), cfg, `ecctl call ram GetRole --request '{"RoleName":"owned"}' -- --output=text`)
+	if hidden.Err == nil || hidden.Started {
+		t.Fatalf("protected fixture accepted an option separator: %+v", hidden)
+	}
+}
+
 func TestActualProfileOptionConsumesStringValues(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -39,6 +65,7 @@ func TestActualProfileOptionConsumesStringValues(t *testing.T) {
 		{"flag-shaped language value", []string{"sandbox", "team", "create", "--lang", "--profile=prod"}, "", 0, false},
 		{"real split profile after string value", []string{"sandbox", "team", "create", "--lang", "--profile=other", "--profile", "prod"}, "prod", 1, false},
 		{"real inline profile", []string{"sandbox", "team", "create", "--profile=prod"}, "prod", 1, false},
+		{"owned Volume config", []string{"--output=json", "--agent-envelope=false", "--region", "cn-hangzhou", "--profile", "prod", "sandbox", "volume", "create", "--mount-config={}", "--no-wait=true", "--oss-volume-config={}", "--agentic-fs-volume-config={}", "--agentic-bucket-volume-config={}", "--team-id=team-1"}, "prod", 1, false},
 		{"conflicting duplicate", []string{"sandbox", "team", "create", "--profile", "prod", "--profile=other"}, "other", 2, false},
 		{"separator", []string{"sandbox", "team", "create", "--", "--profile=prod"}, "", 0, true},
 	} {

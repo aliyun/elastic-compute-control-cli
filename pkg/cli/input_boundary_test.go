@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -35,10 +36,17 @@ func TestStructuredInputCoercionBoundaries(t *testing.T) {
 	}
 	apiField := field
 	apiField.InputStyle = "json|@file"
-	for _, raw := range []string{`{"mode":"safe"}`, `count=1`} {
+	for _, raw := range []string{`{"mode":"safe"}`, `count=1`, `{"count":1,"count":2}`, `{"count":1,"nested":{"x":1,"x":2}}`} {
 		if _, _, err := structuredObjectFlagValue(raw, "settings", apiField, true); err == nil {
 			t.Fatalf("invalid API-shaped input accepted: %q", raw)
 		}
+	}
+	duplicateFile := filepath.Join(t.TempDir(), "duplicate.json")
+	if err := os.WriteFile(duplicateFile, []byte(`{"count":1,"count":2}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := structuredObjectFlagValue("@"+duplicateFile, "settings", apiField, true); err == nil {
+		t.Fatal("duplicate JSON members in API input file were accepted")
 	}
 	if _, _, err := structuredObjectArrayFlagValue([]string{"count=bad"}, "settings", spec.SchemaField{Items: &field}, true); err == nil {
 		t.Fatal("invalid object array accepted")
@@ -151,5 +159,25 @@ func TestSandboxTemplateTransportAndTimeoutBoundaries(t *testing.T) {
 	input["no_wait"] = true
 	if timeout, err := sandboxTemplateRequestTimeout(cmd, resource, "create", input, 0); err != nil || timeout != 30*time.Second || input["timeout"] != timeout {
 		t.Fatalf("no-wait timeout = %s, %v", timeout, err)
+	}
+}
+
+func TestVolumeNoWaitUsesRequestBudgetUnlessTimeoutIsExplicit(t *testing.T) {
+	resource := spec.ResourceSpec{Product: "sandbox", Resource: "volume"}
+	for _, action := range []string{"create", "delete"} {
+		cmd := &cobra.Command{Use: "ecctl"}
+		cmd.Flags().Duration("timeout", 5*time.Minute, "")
+		input := map[string]any{"no_wait": true, "timeout": 5 * time.Minute}
+		got, err := sandboxTemplateRequestTimeout(cmd, resource, action, input, 5*time.Minute)
+		if err != nil || got != 30*time.Second || input["timeout"] != got {
+			t.Fatalf("%s no-wait budget = %v, %v", action, got, err)
+		}
+		if err := cmd.Flags().Set("timeout", "45s"); err != nil {
+			t.Fatal(err)
+		}
+		got, err = sandboxTemplateRequestTimeout(cmd, resource, action, input, 45*time.Second)
+		if err != nil || got != 45*time.Second {
+			t.Fatalf("%s explicit budget = %v, %v", action, got, err)
+		}
 	}
 }

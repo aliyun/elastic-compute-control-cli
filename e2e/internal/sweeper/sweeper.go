@@ -5,12 +5,15 @@
 package sweeper
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -53,6 +56,8 @@ var replayJournalAfterSuccess = func(string) {}
 
 // Injectable at the attempt barrier for post-rename failure tests.
 var writeTeamReplayAttemptJournal = journalfile.WriteDurable
+var writeVolumeFixtureReplayAttemptJournal = journalfile.WriteDurable
+var writeVolumeFixtureReplayRestoreJournal = journalfile.WriteDurable
 
 // Injectable at the consumption barrier for post-rename failure tests.
 var writeReplayConsumptionJournal = journalfile.WriteDurable
@@ -123,6 +128,21 @@ type ReplayOptions struct {
 	Config  execpkg.Config
 	RunID   string
 	Surface string
+	// Package tests may model an exclusive fake-provider scope.
+	fixtureMutationScope func(report.CleanupJournal, report.Resource, execpkg.Config) bool
+}
+
+func (o ReplayOptions) fixtureMutationAllowed(journal report.CleanupJournal, entry report.Resource, cfg execpkg.Config) bool {
+	if journal.VolumeFixtureBinding != nil &&
+		cfg.Bin == journal.EcctlBin && cfg.Region == journal.Region &&
+		cfg.Profile == journal.VolumeFixtureBinding.Profile && cfg.ExpectedIdentity != nil &&
+		*cfg.ExpectedIdentity == journal.VolumeFixtureBinding.Identity {
+		if journalfile.VolumeFixtureMutationAllowed("delete", journal, entry, cfg) {
+			return true
+		}
+		return o.fixtureMutationScope != nil && o.fixtureMutationScope(journal, entry, cfg)
+	}
+	return false
 }
 
 // ReplayJournal replays registered teardown commands in reverse creation order.
@@ -135,7 +155,10 @@ func ReplayJournal(ctx context.Context, path string, cfg execpkg.Config) (*Resul
 // ReplayJournalWithOptions replays a journal after validating its run identity.
 // Raw []Resource journals from older runners remain readable, but new journals
 // always carry metadata and are never replayed against conflicting options.
-func ReplayJournalWithOptions(ctx context.Context, path string, opt ReplayOptions) (*Result, error) {
+func ReplayJournalWithOptions(ctx context.Context, path string, opt ReplayOptions) (result *Result, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	resolved, resolveErr := journalfile.ResolveJournalPath(path)
 	if resolveErr != nil {
 		return nil, resolveErr
@@ -145,8 +168,15 @@ func ReplayJournalWithOptions(ctx context.Context, path string, opt ReplayOption
 	if err != nil {
 		return nil, err
 	}
+	releaseRun, err := journalfile.AcquireExistingRunLease(path)
+	if err != nil {
+		if canceled := ctx.Err(); canceled != nil {
+			return nil, canceled
+		}
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, releaseRun()) }()
 	replayJournalAfterResolve(path)
-	var result *Result
 	err = withAnchoredReplayLock(ctx, path, parent, func() error {
 		var journal report.CleanupJournal
 		err := withAnchoredJournalLock(ctx, path, parent, func() error {
@@ -218,8 +248,18 @@ func withAnchoredReplayLock(ctx context.Context, path string, parent os.FileInfo
 }
 
 func readReplayJournal(path string) (report.CleanupJournal, bool, error) {
-	data, err := os.ReadFile(path)
+	root, err := os.OpenRoot(filepath.Dir(path))
 	if err != nil {
+		return report.CleanupJournal{}, false, err
+	}
+	defer root.Close()
+	name := filepath.Base(path)
+	file, err := root.Open(name)
+	if err != nil {
+		return report.CleanupJournal{}, false, err
+	}
+	data, private, readErr := journalfile.ReadRecoveryFileRoot(root, file, name)
+	if err := errors.Join(readErr, file.Close()); err != nil {
 		return report.CleanupJournal{}, false, err
 	}
 	var journal report.CleanupJournal
@@ -231,6 +271,9 @@ func readReplayJournal(path string) (report.CleanupJournal, bool, error) {
 	} else if err := json.Unmarshal(data, &journal); err != nil {
 		return report.CleanupJournal{}, false, fmt.Errorf("cleanup journal %s: %w", path, err)
 	}
+	if !legacy && journalfile.ProtectedRecoveryJournal(journal) && !private {
+		return report.CleanupJournal{}, false, fmt.Errorf("protected cleanup journal is not a private regular file")
+	}
 	if err := journalfile.CheckJournalPath(path, journal); err != nil {
 		return report.CleanupJournal{}, false, err
 	}
@@ -239,10 +282,66 @@ func readReplayJournal(path string) (report.CleanupJournal, bool, error) {
 
 func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, journal report.CleanupJournal, parent os.FileInfo) (*Result, error) {
 	entries := journal.Entries
+	originalEntries := append([]report.Resource(nil), entries...)
 	result := &Result{}
-	for i := len(entries) - 1; i >= 0; i-- {
+	// A transferred Volume can be older than its destination Team. Delete
+	// Volumes and Teams before the bucket, then retain RAM fixture dependencies
+	// until confirmed bucket removal is committed to the journal.
+	order := make([]int, 0, len(entries))
+	for pass := 0; pass < 4; pass++ {
+		for i := len(entries) - 1; i >= 0; i-- {
+			kind := entries[i].VolumeFixtureKind
+			group := 1
+			switch {
+			case journalfile.IsNativeVolumeDelete(entries[i].Teardown):
+				group = 0
+			case kind == "bucket":
+				group = 2
+			case kind == "attachment" || kind == "policy" || kind == "role":
+				group = 3
+			}
+			if group == pass {
+				order = append(order, i)
+			}
+		}
+	}
+	consumed := make(map[int]bool)
+	volumeBlocked := false
+	refresh := func(originalIndex, index int) error {
+		consumed[originalIndex] = true
+		current, _, err := readReplayJournal(path)
+		if err != nil {
+			return err
+		}
+		currentOpt := opt
+		expected := append([]report.Resource(nil), entries[:index]...)
+		expected = append(expected, entries[index+1:]...)
+		if validateJournalIdentity(current, &currentOpt) != nil || current.Version != journal.Version || len(current.Entries) < len(expected) {
+			return fmt.Errorf("cleanup journal changed during replay")
+		}
+		for i, entry := range expected {
+			if current.Entries[i] != entry {
+				return fmt.Errorf("cleanup journal changed during replay")
+			}
+		}
+		journal, entries = current, current.Entries
+		return nil
+	}
+	for _, originalIndex := range order {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
 		if err := checkReplayParent(path, parent); err != nil {
 			return result, err
+		}
+		i := originalIndex
+		for removed := range consumed {
+			if removed < originalIndex {
+				i--
+			}
+		}
+		if i < 0 || i >= len(entries) || entries[i].Scope != originalEntries[originalIndex].Scope || entries[i].Teardown != originalEntries[originalIndex].Teardown {
+			return result, fmt.Errorf("cleanup journal entry changed during replay")
 		}
 		entry := entries[i]
 		if strings.TrimSpace(entry.Teardown) == "" {
@@ -253,11 +352,20 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 			result.Details = append(result.Details, fmt.Sprintf("journal %s: invalid Quota teardown", entry.Scope))
 			break
 		}
-		if err := validateJournalTeardown(entry.Teardown); err != nil {
+		validateTeardown := validateJournalTeardown(entry.Teardown)
+		if entry.VolumeFixtureKind != "" {
+			validateTeardown = journalfile.ValidateVolumeFixtureTeardown(entry, journal)
+		}
+		if err := validateTeardown; err != nil {
 			result.Errors++
 			result.Details = append(result.Details, fmt.Sprintf("journal %s: invalid teardown: %v", entry.Scope, err))
 			// The invalid command may be a child whose parents are earlier.
 			break
+		}
+		// A retained Volume fences its ancestors, but independent finalizers
+		// can still pass through their ordinary replay checks.
+		if volumeBlocked && (journalfile.IsTeamDeleteCandidate(entry.Teardown) || entry.VolumeFixtureKind != "") {
+			continue
 		}
 		if journalfile.IsTeamDeleteCandidate(entry.Teardown) && !entry.TeamCreateConfirmed {
 			if err := checkOrdinaryTeamReplay(ctx, path, opt, journal, entry, parent); err != nil {
@@ -304,7 +412,55 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 			return result, err
 		}
 		bound := opt.Config
-		if entry.QuotaReserved || entry.QuotaBound {
+		if entry.VolumeFixtureKind != "" {
+			bucketPresence := journalfile.VolumeFixtureBucketUnknown
+			if entry.VolumeFixturePending || journal.VolumeFixtureBinding == nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume fixture creation outcome is uncertain", entry.Scope))
+				break
+			}
+			bound, err = journalfile.ProbeQuotaBinding(ctx, journal.VolumeFixtureBinding, opt.Config)
+			if err != nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume fixture credential binding changed: %v", entry.Scope, err))
+				break
+			}
+			err = withAnchoredJournalLock(ctx, path, parent, func() error {
+				current, legacy, err := readReplayJournal(path)
+				if err != nil || legacy {
+					return fmt.Errorf("Volume fixture journal is unavailable")
+				}
+				currentOpt := opt
+				if validateJournalIdentity(current, &currentOpt) != nil || !reflect.DeepEqual(current.VolumeFixtureBinding, journal.VolumeFixtureBinding) || current.VolumeFixtureBucket != journal.VolumeFixtureBucket {
+					return fmt.Errorf("Volume fixture journal ownership changed")
+				}
+				return journalfile.VolumeFixtureCleanupReady(path, current, entry, opt.Config.Env)
+			})
+			if err == nil {
+				bucketPresence, err = journalfile.VolumeFixtureBucketEmpty(ctx, bound, journal.VolumeFixtureBucket, execpkg.Run)
+			}
+			if err != nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume fixture dependency is not safe to delete: %v", entry.Scope, err))
+				break
+			}
+			if entry.VolumeFixtureKind != "bucket" && bucketPresence != journalfile.VolumeFixtureBucketVerifiedAbsent {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume fixture RAM teardown requires verified bucket absence", entry.Scope))
+				break
+			}
+			if entry.VolumeFixtureKind == "bucket" && bucketPresence == journalfile.VolumeFixtureBucketVerifiedAbsent {
+				replayJournalAfterSuccess(path)
+				if err := consumeVerifiedAbsentVolumeFixtureBucket(ctx, path, opt, journal, entry, parent); err != nil {
+					return result, fmt.Errorf("retire absent Volume fixture bucket: %w", err)
+				}
+				result.Deleted++
+				if err := refresh(originalIndex, i); err != nil {
+					return result, err
+				}
+				continue
+			}
+		} else if entry.QuotaReserved || entry.QuotaBound {
 			bound, err = journalfile.PrepareQuotaCleanup(ctx, path, journal, opt.Config)
 			if err != nil {
 				return result, err
@@ -312,7 +468,7 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 			if err := checkReplayParent(path, parent); err != nil {
 				return result, err
 			}
-		} else if journalfile.IsTemplateCacheDelete(entry.Teardown) || journalfile.IsNativeTemplateDelete(entry.Teardown) {
+		} else if journalfile.IsTemplateCacheDelete(entry.Teardown) || journalfile.IsNativeTemplateDelete(entry.Teardown) || journalfile.IsNativeVolumeDelete(entry.Teardown) {
 			bound = templateBound
 		} else if journalfile.IsTeamDeleteCandidate(entry.Teardown) {
 			var teamID string
@@ -332,6 +488,43 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 			if err != nil {
 				return result, err
 			}
+			creatorBound, found, creatorErr := journalfile.VolumeTeamCreatorConfig(ctx, journal, opt.Config, teamID)
+			if creatorErr != nil {
+				return result, creatorErr
+			}
+			if found {
+				bound = creatorBound
+			}
+		}
+		volumeTeamAlreadyAbsent := false
+		var volumeTeamID string
+		if entry.VolumeTeamBound && journalfile.IsTeamDeleteCandidate(entry.Teardown) {
+			volumeTeamID, err = journalfile.TeamDeleteTarget(entry.Teardown)
+			if err != nil {
+				return result, err
+			}
+			if entry.TeamReplayAttempted {
+				present, checkErr := journalfile.VolumeTeamChildInventoryPresent(path, volumeTeamID)
+				if checkErr != nil {
+					return result, checkErr
+				}
+				if !present {
+					if journalfile.ProbeVolumeTeamAbsent(ctx, bound, volumeTeamID, journal.Region, bound.Profile, execpkg.Run) != nil {
+						result.Errors++
+						result.Details = append(result.Details, fmt.Sprintf("journal %s: attempted Volume Team lacks a child inventory; deletion remains uncertain", entry.Scope))
+						continue
+					}
+					volumeTeamAlreadyAbsent = true
+				}
+			}
+			if !volumeTeamAlreadyAbsent {
+				volumeTeamAlreadyAbsent, err = journalfile.PrepareVolumeTeamChildren(ctx, path, journal, entry, bound, execpkg.Run)
+				if err != nil {
+					result.Errors++
+					result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume Team child cleanup is unproven: %v", entry.Scope, err))
+					continue
+				}
+			}
 		}
 		if entry.TeamCreateConfirmed {
 			entry, err = markTeamReplayAttempt(ctx, path, opt, entry, parent)
@@ -344,14 +537,317 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 		if err := checkReplayParent(path, parent); err != nil {
 			return result, err
 		}
-		res := execpkg.Run(ctx, bound, entry.Teardown)
+		deleteCommand := entry.Teardown
+		volumeDelete := journalfile.IsNativeVolumeDelete(entry.Teardown)
+		var volumeBinding journalfile.TemplateCreateIntent
+		var volumeTeams []string
+		volumeReadOnly := false
+		freshVolumeAttempt := false
+		if volumeDelete {
+			volumeBinding, err = journalfile.VolumeDeleteBinding(path, journal, opt.Config.Env, entry.Teardown)
+			if err == nil {
+				volumeTeams, err = journalfile.VolumePossibleTeams(journal, volumeBinding)
+			}
+			if err != nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume scope binding is unavailable: %v", entry.Scope, err))
+				break
+			}
+			bound = volumeBinding.BoundConfig(opt.Config)
+			bound.Region, bound.Profile = volumeBinding.Region, volumeBinding.Profile
+			if _, err := execpkg.ReadIdentity(ctx, bound, volumeBinding.Profile); err != nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume identity binding is unavailable: %v", entry.Scope, err))
+				break
+			}
+			request, parseErr := journalfile.ParseVolumeDeleteRequest(entry.Teardown)
+			if parseErr != nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume delete target is invalid: %v", entry.Scope, parseErr))
+				break
+			}
+			current, status, absent, probeErr := journalfile.ProbeVolumeScopesWithStatus(ctx, bound, request.ID, volumeBinding.Name, volumeBinding.Region, volumeBinding.Profile, volumeTeams, execpkg.Run)
+			if probeErr != nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume scope read is unavailable: %v", entry.Scope, probeErr))
+				volumeBlocked = true
+				continue
+			}
+			if status == "DELETING" {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume is already deleting", entry.Scope))
+				volumeBlocked = true
+				continue
+			}
+			if absent {
+				if !journalfile.VolumeAbsenceTerminal(journal, volumeBinding, entry) {
+					result.Errors++
+					result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume absence is provisional", entry.Scope))
+					volumeBlocked = true
+					continue
+				}
+				volumeReadOnly = true
+			} else {
+				if !volumeBinding.VolumeObserved {
+					result.Errors++
+					result.Details = append(result.Details, fmt.Sprintf("journal %s: accepted Volume requires durable positive observation before replay delete", entry.Scope))
+					volumeBlocked = true
+					continue
+				}
+				updated, observeErr := settleVolumeTransferReplayObservation(ctx, path, journal, volumeBinding, current, status, parent)
+				if observeErr != nil {
+					result.Errors++
+					result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume transfer observation is unavailable: %v", entry.Scope, observeErr))
+					break
+				}
+				journal, entries, entry = updated, updated.Entries, updated.Entries[i]
+				if entry.VolumeDeleteAttempted {
+					volumeReadOnly = true
+				} else {
+					if err := ctx.Err(); err != nil {
+						return result, err
+					}
+					entry, err = markVolumeDeleteReplayAttempt(ctx, path, opt, journal, entry, parent)
+					if err != nil {
+						return result, fmt.Errorf("record Volume delete attempt before replay: %w", err)
+					}
+					entries[i], journal.Entries[i] = entry, entry
+					freshVolumeAttempt = true
+					deleteCommand += " --team-id " + current
+				}
+			}
+			deleteCommand += " --output=json --agent-envelope=false"
+		}
+		fencedFixture := journalfile.VolumeFixtureFencedKind(entry.VolumeFixtureKind)
+		fixtureReadOnly := fencedFixture && (entry.VolumeFixtureDeleteAttempted || entry.VolumeFixtureDeleteProtocol != 1)
+		var fixtureAbsentRead *execpkg.Result
+		freshFixtureAttempt := false
+		if fencedFixture && !fixtureReadOnly {
+			if !opt.fixtureMutationAllowed(journal, entry, bound) {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume fixture name mutation requires a provider-bound target or an exclusive mutation scope", entry.Scope))
+				break
+			}
+			switch entry.VolumeFixtureKind {
+			case "role":
+				read, readErr := journalfile.VolumeFixtureRoleMatches(ctx, bound, entry, journal, execpkg.Run)
+				err = readErr
+				if err != nil {
+					if _, absentErr := journalfile.VolumeFixtureRoleAbsent(ctx, bound, entry, journal, func(context.Context, execpkg.Config, string) execpkg.Result { return read }); absentErr == nil {
+						fixtureReadOnly = true
+						fixtureAbsentRead = &read
+						err = nil
+					}
+				}
+			case "policy":
+				read, readErr := journalfile.VolumeFixturePolicyMatches(ctx, bound, entry, journal, execpkg.Run)
+				err = readErr
+				if err != nil && read.Err == nil && read.Started && read.Exit == 4 {
+					if _, absentErr := journalfile.VolumeFixturePolicyAbsent(ctx, bound, entry, journal, func(context.Context, execpkg.Config, string) execpkg.Result { return read }); absentErr == nil {
+						fixtureReadOnly = true
+						fixtureAbsentRead = &read
+						err = nil
+					} else {
+						err = absentErr
+					}
+				}
+			case "bucket":
+				_, err = journalfile.VolumeFixtureBucketMatches(ctx, bound, entry, journal, execpkg.Run)
+			case "attachment":
+				var role, policy report.Resource
+				role, policy, err = journalfile.VolumeFixtureRAMParents(journal)
+				if err == nil {
+					read, readErr := journalfile.VolumeFixtureRoleMatches(ctx, bound, role, journal, execpkg.Run)
+					err = readErr
+					if err != nil && read.Err == nil && read.Started && read.Exit == 4 {
+						if _, absentErr := journalfile.VolumeFixtureRoleAbsent(ctx, bound, role, journal, func(context.Context, execpkg.Config, string) execpkg.Result { return read }); absentErr == nil {
+							fixtureReadOnly = true
+							fixtureAbsentRead = &read
+							err = nil
+						} else {
+							err = absentErr
+						}
+					}
+				}
+				if err == nil && !fixtureReadOnly {
+					read, readErr := journalfile.VolumeFixturePolicyMatches(ctx, bound, policy, journal, execpkg.Run)
+					err = readErr
+					if err != nil && read.Err == nil && read.Started && read.Exit == 4 {
+						if _, absentErr := journalfile.VolumeFixturePolicyAbsent(ctx, bound, policy, journal, func(context.Context, execpkg.Config, string) execpkg.Result { return read }); absentErr == nil {
+							fixtureReadOnly = true
+							fixtureAbsentRead = &read
+							err = nil
+						} else {
+							err = absentErr
+						}
+					}
+				}
+			}
+			if err != nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: current Volume fixture identity is unproven: %v", entry.Scope, err))
+				break
+			}
+			if !fixtureReadOnly {
+				entry, err = markVolumeFixtureReplayAttempt(ctx, path, opt, journal, entry, parent)
+				if err != nil {
+					return result, fmt.Errorf("record Volume fixture delete attempt before replay: %w", err)
+				}
+				entries[i], journal.Entries[i] = entry, entry
+				freshFixtureAttempt = true
+			}
+		}
+		var res execpkg.Result
+		if fixtureReadOnly {
+			if fixtureAbsentRead != nil {
+				res = *fixtureAbsentRead
+			} else {
+				switch entry.VolumeFixtureKind {
+				case "role":
+					res, err = journalfile.VolumeFixtureRoleAbsent(ctx, bound, entry, journal, execpkg.Run)
+				case "bucket":
+					res, err = journalfile.VolumeFixtureBucketAbsent(ctx, bound, entry, journal, execpkg.Run)
+				case "policy":
+					res, err = journalfile.VolumeFixturePolicyAbsent(ctx, bound, entry, journal, execpkg.Run)
+				case "attachment":
+					res, err = journalfile.VolumeFixtureAttachmentAbsent(ctx, bound, entry, journal, execpkg.Run)
+				}
+			}
+			if err != nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume fixture absence is unproven: %v", entry.Scope, err))
+				break
+			}
+		} else if volumeTeamAlreadyAbsent {
+			res = execpkg.Result{Started: true, Exit: 4, JSON: map[string]any{"deleted": true}}
+		} else if volumeReadOnly {
+			res = execpkg.Result{Started: true, Exit: 0, JSON: map[string]any{"deleted": true}}
+		} else {
+			if entry.VolumeTeamBound {
+				if err := journalfile.ReserveVolumeTeamDelete(ctx, path, journal, entry, bound); err != nil {
+					result.Errors++
+					result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume Team delete is fenced: %v", entry.Scope, err))
+					continue
+				}
+			}
+			res = execpkg.Run(ctx, bound, deleteCommand)
+			if entry.VolumeTeamBound && journalfile.IsVolumeTeamChildConflict(res) {
+				if err := journalfile.RecordVolumeTeamConflict(ctx, path, journal, entry, bound, res); err != nil {
+					return result, fmt.Errorf("record Volume Team conflict: %w", err)
+				}
+				retry, retryErr := journalfile.RetryVolumeTeamDeleteAfterConflict(ctx, path, journal, entry, bound, execpkg.Run)
+				if retryErr != nil {
+					result.Errors++
+					result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume Team conflict retry is fenced: %v", entry.Scope, retryErr))
+					continue
+				}
+				res = retry
+			}
+		}
+		if freshVolumeAttempt && !res.Started && res.Exit == -1 && res.Err != nil {
+			commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), replayJournalCommitTimeout)
+			restored, restoreErr := restoreUnstartedVolumeDeleteReplayAttempt(commitCtx, path, opt, journal, entry, parent)
+			cancel()
+			if restoreErr != nil {
+				return result, fmt.Errorf("restore unused Volume replay marker: %w", restoreErr)
+			}
+			entry = restored
+			entries[i], journal.Entries[i] = entry, entry
+			result.Errors++
+			result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume delete did not start: %v", entry.Scope, res.Err))
+			volumeBlocked = true
+			continue
+		}
+		if freshVolumeAttempt && journalfile.VolumeDefinitiveDeleteRejection(res) {
+			current, absent, probeErr := journalfile.ProbeVolumeScopes(ctx, bound, volumeBinding.AcceptedVolumeID, volumeBinding.Name, volumeBinding.Region, volumeBinding.Profile, volumeTeams, execpkg.Run)
+			if probeErr != nil || absent || current == "" {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: rejected Volume presence is unproven: %v", entry.Scope, probeErr))
+				volumeBlocked = true
+				continue
+			}
+			commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), replayJournalCommitTimeout)
+			restored, restoreErr := restoreUnstartedVolumeDeleteReplayAttempt(commitCtx, path, opt, journal, entry, parent)
+			cancel()
+			if restoreErr != nil {
+				return result, fmt.Errorf("restore rejected Volume replay marker: %w", restoreErr)
+			}
+			entry = restored
+			entries[i], journal.Entries[i] = entry, entry
+			result.Errors++
+			result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume delete was definitively rejected; retry is available", entry.Scope))
+			volumeBlocked = true
+			continue
+		}
+		if freshFixtureAttempt && !res.Started && res.Err != nil && res.Exit == -1 {
+			commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), replayJournalCommitTimeout)
+			restored, restoreErr := restoreUnstartedVolumeFixtureReplayAttempt(commitCtx, path, opt, journal, entry, parent)
+			cancel()
+			if restoreErr != nil {
+				return result, fmt.Errorf("restore unused Volume fixture replay marker: %w", restoreErr)
+			}
+			entry = restored
+			entries[i], journal.Entries[i] = entry, entry
+		}
+		if freshFixtureAttempt && entry.VolumeFixtureKind == "attachment" && entry.VolumeFixtureDeleteAttempted {
+			res, err = journalfile.VolumeFixtureAttachmentAbsent(ctx, bound, entry, journal, execpkg.Run)
+			if err != nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume fixture attachment absence is unproven: %v", entry.Scope, err))
+				break
+			}
+		}
+		if freshFixtureAttempt && entry.VolumeFixtureKind != "attachment" && entry.VolumeFixtureDeleteAttempted {
+			if err := journalfile.VolumeFixtureDeleteConfirmed(entry, journal, bound, res); err != nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume fixture delete outcome is unproven: %v", entry.Scope, err))
+				break
+			}
+			res, err = journalfile.VolumeFixtureTerminalAbsent(ctx, bound, entry, journal, execpkg.Run)
+			if err != nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume fixture terminal absence is unproven: %v", entry.Scope, err))
+				break
+			}
+		}
 		if err := checkReplayParent(path, parent); err != nil {
 			return result, err
 		}
-		if res.Err != nil || (res.Exit != 0 && res.Exit != 4) {
+		volumeConfirmed := true
+		if volumeDelete {
+			request, parseErr := journalfile.ParseVolumeDeleteRequest(entry.Teardown)
+			waitCtx, cancelWait := context.WithTimeout(ctx, 45*time.Second)
+			volumeConfirmed = parseErr == nil && journalfile.WaitVolumeAbsent(waitCtx, bound, request.ID, volumeBinding.Name, volumeBinding.Region, volumeBinding.Profile, volumeTeams, execpkg.Run)
+			cancelWait()
+			volumeConfirmed = volumeConfirmed && journalfile.VolumeAbsenceTerminal(journal, volumeBinding, entry)
+			if volumeConfirmed {
+				res.Err = nil
+				res.Exit = 0
+			}
+		}
+		if entry.VolumeTeamBound && journalfile.IsTeamDeleteCandidate(entry.Teardown) && (res.Exit == 0 || res.Exit == 4) {
+			teamID, parseErr := journalfile.TeamDeleteTarget(entry.Teardown)
+			if parseErr != nil {
+				return result, parseErr
+			}
+			if proofErr := journalfile.ProbeVolumeTeamAbsent(ctx, bound, teamID, journal.Region, bound.Profile, execpkg.Run); proofErr != nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume Team absence is unproven: %v", entry.Scope, proofErr))
+				break
+			}
+		}
+		if res.Err != nil || !volumeConfirmed || (res.Exit != 0 && res.Exit != 4 && !volumeDelete) {
 			result.Errors++
-			result.Details = append(result.Details, fmt.Sprintf("journal %s: delete exit=%d %s", entry.Scope, res.Exit, failureReason(res)))
-			if journalfile.IsTemplateCacheDelete(entry.Teardown) || journalfile.IsQuotaDeleteCandidate(entry.Teardown) {
+			detail := fmt.Sprintf("journal %s: delete exit=%d %s", entry.Scope, res.Exit, failureReason(res))
+			if volumeDelete && !volumeConfirmed {
+				detail += "; Volume absence unproven"
+			}
+			result.Details = append(result.Details, detail)
+			if volumeDelete {
+				volumeBlocked = true
+				continue
+			}
+			if journalfile.IsTemplateCacheDelete(entry.Teardown) || journalfile.IsQuotaDeleteCandidate(entry.Teardown) || entry.VolumeFixtureKind != "" {
 				break
 			}
 			continue
@@ -364,8 +860,288 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 		if err != nil {
 			return result, fmt.Errorf("rewrite cleanup journal %s after replay: %w", path, err)
 		}
+		if err := refresh(originalIndex, i); err != nil {
+			return result, err
+		}
 	}
 	return result, nil
+}
+
+func settleVolumeTransferReplayObservation(ctx context.Context, path string, expected report.CleanupJournal, binding journalfile.TemplateCreateIntent, current, status string, parent os.FileInfo) (report.CleanupJournal, error) {
+	updated := expected
+	updated.Entries = append([]report.Resource(nil), expected.Entries...)
+	if expected.VolumeTransferHistory != nil {
+		updated.VolumeTransferHistory = make(map[string]map[string]bool, len(expected.VolumeTransferHistory))
+		for name, history := range expected.VolumeTransferHistory {
+			updated.VolumeTransferHistory[name] = make(map[string]bool, len(history))
+			for team, pending := range history {
+				updated.VolumeTransferHistory[name][team] = pending
+			}
+		}
+	}
+	changed, err := journalfile.ResolveVolumeTransferObservation(&updated, binding, current, status)
+	if err != nil || !changed {
+		return expected, err
+	}
+	err = withAnchoredJournalLock(ctx, path, parent, func() error {
+		journal, legacy, err := readReplayJournal(path)
+		if err != nil || legacy || !reflect.DeepEqual(journal, expected) {
+			return fmt.Errorf("Volume transfer replay journal changed: %v", err)
+		}
+		if _, err := journalfile.ResolveVolumeTransferObservation(&journal, binding, current, status); err != nil {
+			return err
+		}
+		body, err := json.MarshalIndent(journal, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := checkReplayParent(path, parent); err != nil {
+			return err
+		}
+		if err := journalfile.WriteDurable(path, append(body, '\n')); err != nil {
+			return err
+		}
+		installed, legacy, err := readReplayJournal(path)
+		if err != nil || legacy || !reflect.DeepEqual(installed, journal) {
+			return fmt.Errorf("Volume transfer replay observation was not installed exactly")
+		}
+		updated = installed
+		return nil
+	})
+	return updated, err
+}
+
+// A protocol-1 fixture gets one destructive attempt after this anchored
+// marker is durably installed under the replay lock.
+func markVolumeFixtureReplayAttempt(ctx context.Context, path string, opt ReplayOptions, expected report.CleanupJournal, entry report.Resource, parent os.FileInfo) (report.Resource, error) {
+	if !journalfile.VolumeFixtureFencedKind(entry.VolumeFixtureKind) || entry.VolumeFixtureDeleteProtocol != 1 || entry.VolumeFixtureDeleteAttempted || entry.VolumeFixturePending {
+		return entry, fmt.Errorf("Volume fixture has no fresh replay delete attempt")
+	}
+	err := withAnchoredJournalLock(ctx, path, parent, func() error {
+		journal, legacy, err := readReplayJournal(path)
+		if err != nil {
+			return err
+		}
+		currentOpt := opt
+		if legacy || validateJournalIdentity(journal, &currentOpt) != nil || journal.Version != expected.Version || journal.JournalPath != path || journal.RunID != expected.RunID || journal.ExecutionID != expected.ExecutionID || journal.RegionRole != expected.RegionRole || journal.Region != expected.Region || journal.Surface != expected.Surface || journal.EcctlBin != expected.EcctlBin || !reflect.DeepEqual(journal.VolumeFixtureBinding, expected.VolumeFixtureBinding) || journal.VolumeFixtureBucket != expected.VolumeFixtureBucket {
+			return fmt.Errorf("Volume fixture replay journal binding changed")
+		}
+		if err := journalfile.ValidateVolumeFixtureTeardown(entry, journal); err != nil {
+			return err
+		}
+		if err := journalfile.VolumeFixtureCleanupReady(path, journal, entry, opt.Config.Env); err != nil {
+			return err
+		}
+		index := -1
+		for i, candidate := range journal.Entries {
+			if candidate != entry {
+				continue
+			}
+			if index >= 0 {
+				return fmt.Errorf("Volume fixture replay entry is ambiguous")
+			}
+			index = i
+		}
+		if index < 0 {
+			return fmt.Errorf("Volume fixture replay entry changed")
+		}
+		originalBody, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		journal.Entries[index].VolumeFixtureDeleteAttempted = true
+		body, err := json.MarshalIndent(journal, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := checkReplayParent(path, parent); err != nil {
+			return err
+		}
+		markedBody := append(body, '\n')
+		if err := writeVolumeFixtureReplayAttemptJournal(path, markedBody); err != nil {
+			if installed, readErr := os.ReadFile(path); readErr == nil && bytes.Equal(installed, markedBody) {
+				return errors.Join(err, journalfile.RestoreUninvokedMarker(path, markedBody, originalBody))
+			}
+			return err
+		}
+		installed, legacy, err := readReplayJournal(path)
+		if err != nil || legacy || !reflect.DeepEqual(installed, journal) {
+			return fmt.Errorf("Volume fixture replay delete attempt was not installed exactly")
+		}
+		return nil
+	})
+	if err != nil {
+		return entry, err
+	}
+	entry.VolumeFixtureDeleteAttempted = true
+	return entry, nil
+}
+
+func markVolumeDeleteReplayAttempt(ctx context.Context, path string, opt ReplayOptions, expected report.CleanupJournal, entry report.Resource, parent os.FileInfo) (report.Resource, error) {
+	if !journalfile.IsNativeVolumeDelete(entry.Teardown) || entry.VolumeDeleteAttempted {
+		return entry, fmt.Errorf("Volume has no fresh replay delete attempt")
+	}
+	err := withAnchoredJournalLock(ctx, path, parent, func() error {
+		journal, legacy, err := readReplayJournal(path)
+		if err != nil {
+			return err
+		}
+		currentOpt := opt
+		if legacy || validateJournalIdentity(journal, &currentOpt) != nil || journal.Version != expected.Version || journal.JournalPath != path || journal.RunID != expected.RunID || journal.ExecutionID != expected.ExecutionID || journal.RegionRole != expected.RegionRole || journal.Region != expected.Region || journal.Surface != expected.Surface || journal.EcctlBin != expected.EcctlBin || !reflect.DeepEqual(journal.VolumeScopeBindings, expected.VolumeScopeBindings) || !reflect.DeepEqual(journal.VolumeTransferHistory, expected.VolumeTransferHistory) {
+			return fmt.Errorf("Volume replay journal binding changed")
+		}
+		index := -1
+		for i, candidate := range journal.Entries {
+			if candidate.Teardown != entry.Teardown {
+				continue
+			}
+			if candidate != entry || index >= 0 {
+				return fmt.Errorf("Volume replay entry changed or became ambiguous")
+			}
+			index = i
+		}
+		if index < 0 {
+			return fmt.Errorf("Volume replay entry disappeared")
+		}
+		originalBody, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		journal.Entries[index].VolumeDeleteAttempted = true
+		body, err := json.MarshalIndent(journal, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := checkReplayParent(path, parent); err != nil {
+			return err
+		}
+		markedBody := append(body, '\n')
+		if err := journalfile.WriteDurable(path, markedBody); err != nil {
+			if installed, readErr := os.ReadFile(path); readErr == nil && bytes.Equal(installed, markedBody) {
+				return errors.Join(err, journalfile.RestoreUninvokedMarker(path, markedBody, originalBody))
+			}
+			return err
+		}
+		installed, legacy, err := readReplayJournal(path)
+		if err != nil || legacy || !reflect.DeepEqual(installed, journal) {
+			return fmt.Errorf("Volume replay delete attempt was not installed exactly")
+		}
+		return nil
+	})
+	if err != nil {
+		return entry, err
+	}
+	entry.VolumeDeleteAttempted = true
+	return entry, nil
+}
+
+// Restore only a marker committed by this replay when its subprocess did not
+// start or the provider definitively rejected it without mutation.
+func restoreUnstartedVolumeDeleteReplayAttempt(ctx context.Context, path string, opt ReplayOptions, expected report.CleanupJournal, entry report.Resource, parent os.FileInfo) (report.Resource, error) {
+	if !journalfile.IsNativeVolumeDelete(entry.Teardown) || !entry.VolumeDeleteAttempted {
+		return entry, fmt.Errorf("Volume has no newly marked replay delete attempt")
+	}
+	err := withAnchoredJournalLock(ctx, path, parent, func() error {
+		journal, legacy, err := readReplayJournal(path)
+		if err != nil {
+			return err
+		}
+		currentOpt := opt
+		if legacy || validateJournalIdentity(journal, &currentOpt) != nil || journal.Version != expected.Version || journal.JournalPath != path || journal.RunID != expected.RunID || journal.ExecutionID != expected.ExecutionID || journal.RegionRole != expected.RegionRole || journal.Region != expected.Region || journal.Surface != expected.Surface || journal.EcctlBin != expected.EcctlBin || !reflect.DeepEqual(journal.VolumeScopeBindings, expected.VolumeScopeBindings) || !reflect.DeepEqual(journal.VolumeTransferHistory, expected.VolumeTransferHistory) {
+			return fmt.Errorf("Volume replay journal binding changed before marker restoration")
+		}
+		index := -1
+		for i, candidate := range journal.Entries {
+			if candidate.Teardown != entry.Teardown {
+				continue
+			}
+			if candidate != entry || index >= 0 {
+				return fmt.Errorf("Volume replay entry changed or became ambiguous before marker restoration")
+			}
+			index = i
+		}
+		if index < 0 {
+			return fmt.Errorf("Volume replay entry disappeared before marker restoration")
+		}
+		journal.Entries[index].VolumeDeleteAttempted = false
+		body, err := json.MarshalIndent(journal, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := checkReplayParent(path, parent); err != nil {
+			return err
+		}
+		if err := journalfile.WriteDurable(path, append(body, '\n')); err != nil {
+			if barrierErr := journalfile.ReaffirmDurable(path, append(body, '\n')); barrierErr != nil {
+				return errors.Join(err, barrierErr)
+			}
+		}
+		installed, legacy, err := readReplayJournal(path)
+		if err != nil || legacy || !reflect.DeepEqual(installed, journal) {
+			return fmt.Errorf("unused Volume replay marker was not restored exactly")
+		}
+		return nil
+	})
+	if err != nil {
+		return entry, err
+	}
+	entry.VolumeDeleteAttempted = false
+	return entry, nil
+}
+
+// The caller has just installed this exact marker and its subprocess failed
+// before Start. Historical markers never enter this restoration path.
+func restoreUnstartedVolumeFixtureReplayAttempt(ctx context.Context, path string, opt ReplayOptions, expected report.CleanupJournal, entry report.Resource, parent os.FileInfo) (report.Resource, error) {
+	if !journalfile.VolumeFixtureFencedKind(entry.VolumeFixtureKind) || entry.VolumeFixtureDeleteProtocol != 1 || !entry.VolumeFixtureDeleteAttempted || entry.VolumeFixturePending {
+		return entry, fmt.Errorf("Volume fixture has no newly marked replay delete attempt")
+	}
+	err := withAnchoredJournalLock(ctx, path, parent, func() error {
+		journal, legacy, err := readReplayJournal(path)
+		if err != nil {
+			return err
+		}
+		currentOpt := opt
+		if legacy || validateJournalIdentity(journal, &currentOpt) != nil || journal.Version != expected.Version || journal.JournalPath != path || journal.RunID != expected.RunID || journal.ExecutionID != expected.ExecutionID || journal.RegionRole != expected.RegionRole || journal.Region != expected.Region || journal.Surface != expected.Surface || journal.EcctlBin != expected.EcctlBin || !reflect.DeepEqual(journal.VolumeFixtureBinding, expected.VolumeFixtureBinding) || journal.VolumeFixtureBucket != expected.VolumeFixtureBucket {
+			return fmt.Errorf("Volume fixture replay journal binding changed")
+		}
+		if err := journalfile.ValidateVolumeFixtureTeardown(entry, journal); err != nil {
+			return err
+		}
+		index := -1
+		for i, candidate := range journal.Entries {
+			if candidate != entry {
+				continue
+			}
+			if index >= 0 {
+				return fmt.Errorf("Volume fixture replay entry is ambiguous")
+			}
+			index = i
+		}
+		if index < 0 {
+			return fmt.Errorf("Volume fixture replay entry changed")
+		}
+		journal.Entries[index].VolumeFixtureDeleteAttempted = false
+		body, err := json.MarshalIndent(journal, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := checkReplayParent(path, parent); err != nil {
+			return err
+		}
+		if err := writeVolumeFixtureReplayRestoreJournal(path, append(body, '\n')); err != nil {
+			return err
+		}
+		installed, legacy, err := readReplayJournal(path)
+		if err != nil || legacy || !reflect.DeepEqual(installed, journal) {
+			return fmt.Errorf("Volume fixture unused replay marker was not restored exactly")
+		}
+		return nil
+	})
+	if err != nil {
+		return entry, err
+	}
+	entry.VolumeFixtureDeleteAttempted = false
+	return entry, nil
 }
 
 // The replay lock is held. The original snapshot rules out a duplicate of a
@@ -450,6 +1226,18 @@ func markTeamReplayAttempt(ctx context.Context, path string, opt ReplayOptions, 
 		if err := validateJournalIdentity(journal, &currentOpt); err != nil {
 			return err
 		}
+		if outstanding, err := journalfile.OutstandingVolumeChild(path, journal, opt.Config.Env); err != nil {
+			return err
+		} else if outstanding {
+			return fmt.Errorf("Team replay must wait for its Volume child")
+		}
+		if entry.VolumeTeamBound {
+			for name, id := range journal.VolumeTeamCreateIDs {
+				if id == "" {
+					return fmt.Errorf("Volume Team replay must wait for pending registration %s", name)
+				}
+			}
+		}
 		index := -1
 		for i, candidate := range journal.Entries {
 			if candidate == entry {
@@ -528,6 +1316,13 @@ func consumeReplayJournalEntry(ctx context.Context, path string, opt ReplayOptio
 				return fmt.Errorf("settled Quota reservation changed before consumption")
 			}
 		}
+		if completed.TeamCreateConfirmed {
+			if outstanding, err := journalfile.OutstandingVolumeChild(path, journal, opt.Config.Env); err != nil {
+				return err
+			} else if outstanding {
+				return fmt.Errorf("Team replay must wait for its Volume child before consumption")
+			}
+		}
 		index := -1
 		for i := len(journal.Entries) - 1; i >= 0; i-- {
 			if journal.Entries[i] == completed {
@@ -536,10 +1331,26 @@ func consumeReplayJournalEntry(ctx context.Context, path string, opt ReplayOptio
 			}
 		}
 		if index < 0 {
-			if quotaDelete {
-				return fmt.Errorf("settled Quota reservation disappeared")
+			if quotaDelete || journalfile.IsNativeVolumeDelete(completed.Teardown) {
+				return fmt.Errorf("settled protected finalizer disappeared")
 			}
 			return nil
+		}
+		if journalfile.IsNativeVolumeDelete(completed.Teardown) {
+			if legacy {
+				return fmt.Errorf("owned Volume finalizer requires a versioned journal")
+			}
+			intent, err := journalfile.VolumeDeleteBinding(path, journal, opt.Config.Env, completed.Teardown)
+			if err != nil {
+				return err
+			}
+			if err := journalfile.RetireVolumeFinalizer(&journal, intent, journal.Entries[index]); err != nil {
+				return err
+			}
+			if err := checkReplayParent(path, parent); err != nil {
+				return err
+			}
+			return rewriteReplayJournal(path, journal, journal.Entries, false)
 		}
 		pending := append([]report.Resource(nil), journal.Entries...)
 		pending = append(pending[:index], pending[index+1:]...)
@@ -547,6 +1358,52 @@ func consumeReplayJournalEntry(ctx context.Context, path string, opt ReplayOptio
 			return err
 		}
 		return rewriteReplayJournal(path, journal, pending, legacy)
+	})
+}
+
+func consumeVerifiedAbsentVolumeFixtureBucket(ctx context.Context, path string, opt ReplayOptions, expected report.CleanupJournal, entry report.Resource, parent os.FileInfo) error {
+	if entry.VolumeFixtureKind != "bucket" || entry.VolumeFixturePending {
+		return fmt.Errorf("Volume fixture bucket is not settled")
+	}
+	return withAnchoredJournalLock(ctx, path, parent, func() error {
+		journal, legacy, err := readReplayJournal(path)
+		if err != nil {
+			return err
+		}
+		currentOpt := opt
+		if legacy || validateJournalIdentity(journal, &currentOpt) != nil || journal.Version != expected.Version || journal.JournalPath != path || journal.RunID != expected.RunID || journal.ExecutionID != expected.ExecutionID || journal.RegionRole != expected.RegionRole || journal.Region != expected.Region || journal.Surface != expected.Surface || journal.EcctlBin != expected.EcctlBin || !reflect.DeepEqual(journal.VolumeFixtureBinding, expected.VolumeFixtureBinding) || journal.VolumeFixtureBucket != expected.VolumeFixtureBucket {
+			return fmt.Errorf("Volume fixture bucket journal binding changed before absence settlement")
+		}
+		if err := journalfile.VolumeFixtureCleanupReady(path, journal, entry, opt.Config.Env); err != nil {
+			return err
+		}
+		index := -1
+		for i, candidate := range journal.Entries {
+			if candidate.Teardown != entry.Teardown {
+				continue
+			}
+			if candidate != entry || index >= 0 {
+				return fmt.Errorf("Volume fixture bucket finalizer changed or became ambiguous")
+			}
+			index = i
+		}
+		if index < 0 {
+			return fmt.Errorf("Volume fixture bucket finalizer disappeared")
+		}
+		pending := append([]report.Resource(nil), journal.Entries...)
+		pending = append(pending[:index], pending[index+1:]...)
+		if err := checkReplayParent(path, parent); err != nil {
+			return err
+		}
+		if err := rewriteReplayJournal(path, journal, pending, false); err != nil {
+			return err
+		}
+		journal.Entries = pending
+		installed, legacy, err := readReplayJournal(path)
+		if err != nil || legacy || !reflect.DeepEqual(installed, journal) {
+			return fmt.Errorf("absent Volume fixture bucket finalizer was not retired exactly")
+		}
+		return nil
 	})
 }
 
@@ -575,6 +1432,16 @@ func validateJournalIdentity(journal report.CleanupJournal, opt *ReplayOptions) 
 	if opt.Config.Region != "" && journal.Region != "" && opt.Config.Region != journal.Region {
 		return fmt.Errorf("cleanup journal region %q does not match %q", journal.Region, opt.Config.Region)
 	}
+	if opt.Config.Bin != "" && filepath.IsAbs(journal.EcctlBin) && !filepath.IsAbs(opt.Config.Bin) {
+		found, err := exec.LookPath(opt.Config.Bin)
+		if err != nil {
+			return fmt.Errorf("resolve cleanup replay binary: %w", err)
+		}
+		opt.Config.Bin, err = filepath.Abs(found)
+		if err != nil {
+			return err
+		}
+	}
 	if opt.Config.Bin != "" && journal.EcctlBin != "" && opt.Config.Bin != journal.EcctlBin {
 		return fmt.Errorf("cleanup journal binary %q does not match %q", journal.EcctlBin, opt.Config.Bin)
 	}
@@ -586,6 +1453,13 @@ func validateJournalIdentity(journal report.CleanupJournal, opt *ReplayOptions) 
 	}
 	if opt.Config.Bin == "" {
 		opt.Config.Bin = "ecctl"
+	}
+	if journal.EcctlBinSHA256 != "" {
+		actual, err := journalfile.ExecutableSHA256(opt.Config.Bin)
+		if err != nil || actual != journal.EcctlBinSHA256 {
+			return fmt.Errorf("cleanup journal executable digest changed: %v", err)
+		}
+		opt.Config.ExpectedBinSHA256 = journal.EcctlBinSHA256
 	}
 	return nil
 }

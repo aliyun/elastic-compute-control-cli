@@ -36,6 +36,60 @@ provision:
       security_group: id
     teardown: ecctl ecs sg delete {{.security_group}}
 
+  # OSS Volumes store metadata for existing storage. Keep every dependency
+  # execution-scoped so its cleanup follows the protected Volume case cleanup.
+  - id: volume_oss_bucket
+    resource: oss/bucket
+    lifetime: execution
+    run: >-
+      ecctl call oss PutBucket --request '{"Bucket":"{{.oss_bucket_name}}","ACL":"private"}'
+      --region cn-hangzhou --output=json
+    teardown: ecctl call oss DeleteBucket --request '{"Bucket":"{{.oss_bucket_name}}"}' --region cn-hangzhou --output=json
+
+  - id: volume_oss_bucket_info
+    resource: oss/bucket
+    mode: lookup
+    lifetime: execution
+    needs: [volume_oss_bucket]
+    run: ecctl call oss GetBucketInfo --request '{"Bucket":"{{.oss_bucket_name}}"}' --region cn-hangzhou --output=json
+    at: $.response.Bucket
+    capture:
+      volume_bucket_name: Name
+      volume_bucket_owner_id: Owner.ID
+      volume_bucket_location: Location
+      volume_bucket_endpoint: ExtranetEndpoint
+
+  - id: volume_ram_role
+    resource: ram/role
+    lifetime: execution
+    needs: [volume_oss_bucket_info]
+    run: >
+      ecctl call ram CreateRole --region cn-hangzhou
+      --request '{"RoleName":"{{.oss_bucket_name}}-role","Description":"ecctl E2E Volume {{.oss_bucket_name}}","AssumeRolePolicyDocument":"{\"Version\":\"1\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":[\"fc.aliyuncs.com\"]},\"Action\":\"sts:AssumeRole\"}]}"}' --output=json
+    at: $.response.Role
+    capture:
+      volume_role_arn: Arn
+      volume_role_name: RoleName
+    teardown: ecctl call ram DeleteRole --region cn-hangzhou --request '{"RoleName":"{{.oss_bucket_name}}-role"}' --output=json
+
+  - id: volume_ram_policy
+    resource: ram/policy
+    lifetime: execution
+    needs: [volume_ram_role]
+    run: >
+      ecctl call ram CreatePolicy --region cn-hangzhou
+      --request '{"PolicyName":"{{.oss_bucket_name}}-read","Description":"ecctl E2E Volume {{.oss_bucket_name}}","PolicyDocument":"{\"Version\":\"1\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"oss:ListObjects\"],\"Resource\":[\"acs:oss:*:*:{{.oss_bucket_name}}\"]},{\"Effect\":\"Allow\",\"Action\":[\"oss:GetObject\"],\"Resource\":[\"acs:oss:*:*:{{.oss_bucket_name}}/*\"]}]}"}' --output=json
+    teardown: ecctl call ram DeletePolicy --region cn-hangzhou --request '{"PolicyName":"{{.oss_bucket_name}}-read"}' --output=json
+
+  - id: volume_ram_attachment
+    resource: ram/role-policy
+    lifetime: execution
+    needs: [volume_ram_role, volume_ram_policy]
+    run: >
+      ecctl call ram AttachPolicyToRole --region cn-hangzhou
+      --request '{"RoleName":"{{.volume_role_name}}","PolicyName":"{{.oss_bucket_name}}-read","PolicyType":"Custom"}' --output=json
+    teardown: ecctl call ram DetachPolicyFromRole --region cn-hangzhou --request '{"RoleName":"{{.oss_bucket_name}}-role","PolicyName":"{{.oss_bucket_name}}-read","PolicyType":"Custom"}' --output=json
+
   - id: image
     resource: ecs/image
     mode: lookup

@@ -24,6 +24,15 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/vars"
 )
 
+func canonicalTeamExecutable(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
+}
+
 func TestRunTeamTextProfileRegistersCleanup(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake CLI launcher uses a shell script")
@@ -147,7 +156,7 @@ func TestRunTeamTextProfileRegistersCleanup(t *testing.T) {
 					t.Fatal(err)
 				}
 				var metadata report.CleanupJournal
-				if err := json.Unmarshal(encoded, &metadata); err != nil || metadata.EcctlBin != bin || metadata.Region != "cn-hangzhou" {
+				if err := json.Unmarshal(encoded, &metadata); err != nil || metadata.EcctlBin != canonicalTeamExecutable(t, bin) || metadata.Region != "cn-hangzhou" {
 					t.Fatalf("cleanup journal target differs: %s %v", encoded, err)
 				}
 				if keep {
@@ -358,7 +367,7 @@ func TestRunTeamReservationClaimsJournalBeforeCreate(t *testing.T) {
 				}
 				data, command := makeInput()
 				st := scenario.Step{Name: "create", Run: command, Teardown: "ecctl sandbox team delete {{.team_id}} --timeout 5m"}
-				intent, err := reserveTeamCreate(command, data, cfg, first, st)
+				intent, err := reserveTeamCreate(command, data, cfg, first, st, cfg.Env)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -400,7 +409,7 @@ func TestRunTeamReservationClaimsJournalBeforeCreate(t *testing.T) {
 				data, command = makeInput()
 				st.Run = command
 				if changed == "same" {
-					if _, err := reserveTeamCreate(command, data, cfg, second, st); err != nil {
+					if _, err := reserveTeamCreate(command, data, cfg, second, st, cfg.Env); err != nil {
 						t.Errorf("compatible reservation rejected: %v", err)
 					}
 				} else {
@@ -779,7 +788,7 @@ exit 1
 	if err := json.Unmarshal(data, &metadata); err != nil {
 		t.Fatal(err)
 	}
-	if metadata.RunID != "test" || metadata.ExecutionID != "team-execution" || metadata.Surface != "public" || metadata.Region != "cn-hangzhou" || metadata.EcctlBin != fake {
+	if metadata.RunID != "test" || metadata.ExecutionID != "team-execution" || metadata.Surface != "public" || metadata.Region != "cn-hangzhou" || metadata.EcctlBin != canonicalTeamExecutable(t, fake) {
 		t.Fatalf("cleanup journal lost run/binary/surface/region binding: %+v", metadata)
 	}
 }
@@ -931,7 +940,7 @@ func TestQuotaTeamReservationFailureReconcilesJournalAndFencesAllocation(t *test
 					return errors.New("journal sync result uncertain")
 				}
 			}
-			intent, err := reserveTeamCreate(cmd, data, cfg, cl, st, binding)
+			intent, err := reserveTeamCreate(cmd, data, cfg, cl, st, cfg.Env, binding)
 			if tc.failIntent || tc.failJournalAfterWrite {
 				if err == nil || intent != nil {
 					t.Fatalf("failed reservation reported success: intent=%+v err=%v", intent, err)
@@ -1064,7 +1073,7 @@ echo '{"error":{"message":"unexpected command"}}'; exit 1
 			if err := json.Unmarshal(intentBody, &intent); err != nil {
 				t.Fatal(err)
 			}
-			if intent["run_id"] != "owned-run" || intent["execution_id"] != "owned-execution" || intent["region"] != "cn-hangzhou" || intent["surface"] != "public" || intent["ecctl_bin"] != fake || intent["created_at"] == nil {
+			if intent["run_id"] != "owned-run" || intent["execution_id"] != "owned-execution" || intent["region"] != "cn-hangzhou" || intent["surface"] != "public" || intent["ecctl_bin"] != canonicalTeamExecutable(t, fake) || intent["created_at"] == nil {
 				t.Fatalf("intent binding missing: %s", intentBody)
 			}
 			name, _ := intent["name"].(string)
@@ -1097,7 +1106,7 @@ echo '{"error":{"message":"unexpected command"}}'; exit 1
 				if err := json.Unmarshal(body, &metadata); err != nil {
 					t.Fatal(err)
 				}
-				if metadata.RunID != "owned-run" || metadata.ExecutionID != "owned-execution" || metadata.Region != "cn-hangzhou" || metadata.Surface != "public" || metadata.EcctlBin != fake {
+				if metadata.RunID != "owned-run" || metadata.ExecutionID != "owned-execution" || metadata.Region != "cn-hangzhou" || metadata.Surface != "public" || metadata.EcctlBin != canonicalTeamExecutable(t, fake) {
 					t.Fatalf("recovered journal target changed: %s", body)
 				}
 			} else if entries := readJournalEntries(t, journal); len(entries) != 0 {
@@ -1187,7 +1196,7 @@ func TestRunTeamCreateFailsBeforeLaunchWithoutSafeRecoveryReservation(t *testing
 			}
 			if mode == "reused-intent" {
 				cmd := `ecctl sandbox team create --name ` + data["team_name"].(string) + ` --description "` + data["team_owner"].(string) + `"`
-				if _, err := reserveTeamCreate(cmd, data, cfg, cl, st); err != nil {
+				if _, err := reserveTeamCreate(cmd, data, cfg, cl, st, cfg.Env); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -1562,7 +1571,7 @@ echo 'unexpected command'; exit 1
 					t.Fatal(err)
 				}
 				var intent teamCreateIntent
-				if err := json.Unmarshal(encoded, &intent); err != nil || intent.Region != "cn-hangzhou" || intent.EcctlBin != fake || intent.ExecutionID != "owned-execution" {
+				if err := json.Unmarshal(encoded, &intent); err != nil || intent.Region != "cn-hangzhou" || intent.EcctlBin != canonicalTeamExecutable(t, fake) || intent.ExecutionID != "owned-execution" {
 					t.Fatalf("intent target mismatch: %s %v", encoded, err)
 				}
 				if _, err := os.Stat(journal); err != nil {

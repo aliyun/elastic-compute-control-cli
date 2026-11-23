@@ -306,3 +306,8 @@ non_sweepable:
   - resource: sandbox/quota
     reason: provider-limitation
     review_after: "2026-12-23"
+  # Volumes cannot be tagged or selected by a run tag. Only the captured ID
+  # may be deleted by this case's teardown or run-specific cleanup journal.
+  - resource: sandbox/volume
+    reason: provider-limitation
+    review_after: "2026-12-29"

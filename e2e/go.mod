@@ -1,6 +1,6 @@
 module github.com/aliyun/elastic-compute-control-cli/e2e
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/PaesslerAG/gval v1.2.4
@@ -16,6 +16,6 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/rogpeppe/go-internal v1.16.0 // indirect
 	github.com/shopspring/decimal v1.3.1 // indirect
-	github.com/spf13/pflag v1.0.9 // indirect
-	golang.org/x/sys v0.37.0 // indirect
+	github.com/spf13/pflag v1.0.9
+	golang.org/x/sys v0.47.0
 )

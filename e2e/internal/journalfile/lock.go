@@ -65,8 +65,47 @@ func WithExistingCleanupLock(ctx context.Context, path string, update func() err
 // It uses a separate file so the runner can still take its replay and journal
 // transaction locks while the lease is held.
 func AcquireRunLease(path string) (func() error, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	return acquireRunLease(path, true)
+}
+
+// AcquireExistingRunLease lets crash replay exclude a still-active runner
+// without creating a replacement for a lost journal parent.
+func AcquireExistingRunLease(path string) (func() error, error) {
+	return acquireRunLease(path, false)
+}
+
+// existingParentIdentity captures a directory's identity while its handle is
+// open. In particular, Windows os.Stat can defer file-ID lookup until SameFile,
+// after the pathname has already been replaced.
+func existingParentIdentity(parent string) (os.FileInfo, error) {
+	dir, err := os.Open(parent)
+	if err != nil {
 		return nil, err
+	}
+	defer dir.Close()
+	info, err := dir.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%s is not a directory", parent)
+	}
+	return info, nil
+}
+
+func acquireRunLease(path string, createParent bool) (func() error, error) {
+	parent := filepath.Dir(path)
+	var original os.FileInfo
+	if createParent {
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			return nil, err
+		}
+	} else {
+		var err error
+		original, err = existingParentIdentity(parent)
+		if err != nil {
+			return nil, fmt.Errorf("existing cleanup journal parent %s is unavailable: %w", parent, err)
+		}
 	}
 	lock := flock.New(path + ".run.lock")
 	locked, err := lock.TryLock()
@@ -77,6 +116,14 @@ func AcquireRunLease(path string) (func() error, error) {
 	if !locked {
 		_ = lock.Close()
 		return nil, fmt.Errorf("cleanup journal %s is in use by another run", path)
+	}
+	if !createParent {
+		current, statErr := existingParentIdentity(parent)
+		if statErr != nil || !os.SameFile(original, current) {
+			_ = lock.Unlock()
+			_ = lock.Close()
+			return nil, fmt.Errorf("existing cleanup journal parent %s changed during run lease", parent)
+		}
 	}
 	return func() error {
 		unlockErr := lock.Unlock()
@@ -99,12 +146,9 @@ func withLock(ctx context.Context, path, lockPath string, shared, createParent b
 			return err
 		}
 	} else {
-		original, err = os.Stat(parent)
+		original, err = existingParentIdentity(parent)
 		if err != nil {
 			return fmt.Errorf("existing cleanup journal parent %s: %w", parent, err)
-		}
-		if !original.IsDir() {
-			return fmt.Errorf("existing cleanup journal parent %s is not a directory", parent)
 		}
 	}
 	lock := flock.New(lockPath)
@@ -133,7 +177,7 @@ func withLock(ctx context.Context, path, lockPath string, shared, createParent b
 		if createParent {
 			return nil
 		}
-		current, statErr := os.Stat(parent)
+		current, statErr := existingParentIdentity(parent)
 		if statErr != nil {
 			return fmt.Errorf("existing cleanup journal parent %s changed: %w", parent, statErr)
 		}

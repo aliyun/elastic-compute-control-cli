@@ -1,10 +1,12 @@
 package aliyun
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -21,6 +23,7 @@ import (
 
 	ecconfig "github.com/aliyun/elastic-compute-control-cli/pkg/config"
 	ecerrors "github.com/aliyun/elastic-compute-control-cli/pkg/errors"
+	"github.com/aliyun/elastic-compute-control-cli/pkg/i18n"
 	"github.com/aliyun/elastic-compute-control-cli/pkg/telemetry"
 )
 
@@ -161,6 +164,11 @@ func (c *OpenAPICaller) acquireCredentialLease(ctx context.Context) (*credential
 		if err := validateCredentialLifetime(ctx, operationAcquirer, snapshot); err != nil {
 			return nil, err
 		}
+		if c.isFCSandboxVolume() {
+			if snapshot == nil || snapshot.AccessKeyID == "" || snapshot.AccessKeySecret == "" || snapshot.BearerToken != "" || strings.EqualFold(snapshot.Type, credentialModeBearerToken) || operationProfile.AuthType != "" && !strings.EqualFold(operationProfile.AuthType, "AK") {
+				return nil, ecerrors.Client("VolumeRequiresSignedCredential", i18n.NewLocalizer("en").Message("VolumeRequiresSignedCredential"))
+			}
+		}
 		credentialKey = credentialIdentityCacheKey(operationProfile, snapshot)
 		var identityGuard *operationIdentityGuard
 		if operationProfile.ExpectedIdentityHash != "" || operationProfile.PinCredentialIdentity && credentialAcquirerIsRenewable(operationAcquirer) {
@@ -255,13 +263,80 @@ func newDarabonbaExecutorWithRenewal(profile resolvedOpenAPIProfile, snapshot *c
 // after Dara has emitted its DEBUG headers. Bearer material is injected only
 // here, and redirects are never followed for any credential-bearing request.
 type credentialFinalHTTPClient struct {
-	bearerHeader string
-	bearerToken  string
-	delegate     dara.HttpClient
-	capture      *telemetryRequestIDCapture
+	bearerHeader     string
+	bearerToken      string
+	delegate         dara.HttpClient
+	capture          *telemetryRequestIDCapture
+	strictProofJSON  bool
+	proofBodyInvalid bool
+}
+
+// Preserve the SDK's error while denying cleanup proof from a body whose raw
+// representation was not unambiguous JSON.
+type unverifiedProviderBodyError struct{ cause error }
+
+func (e *unverifiedProviderBodyError) Error() string { return e.cause.Error() }
+func (e *unverifiedProviderBodyError) Unwrap() error { return e.cause }
+
+type prefixedResponseBody struct {
+	io.Reader
+	io.Closer
+}
+
+type failedProofBodyReader struct{ err error }
+
+func (r failedProofBodyReader) Read([]byte) (int, error) { return 0, r.err }
+
+func strictProviderProofOperation(req *openAPIRequest) bool {
+	if req == nil {
+		return false
+	}
+	switch {
+	case strings.EqualFold(req.Product, "FCSandbox") && req.Version == "2026-05-09":
+		switch req.ApiName {
+		case "GetVolume", "ListVolumes", "CreateVolume", "DeleteVolume", "GetTeam", "CreateTeam", "DeleteTeam":
+			return true
+		}
+	case strings.EqualFold(req.Product, "ram") && req.Version == "2015-05-01":
+		switch req.ApiName {
+		case "GetRole", "CreateRole", "DeleteRole", "GetPolicy", "DeletePolicy", "CreatePolicy", "AttachPolicyToRole", "DetachPolicyFromRole", "ListPoliciesForRole":
+			return true
+		}
+	}
+	return false
+}
+
+func protectedProofMutation(req *openAPIRequest) bool {
+	if !strictProviderProofOperation(req) {
+		return false
+	}
+	switch req.ApiName {
+	case "CreateVolume", "DeleteVolume", "CreateTeam", "DeleteTeam", "CreateRole", "DeleteRole", "CreatePolicy", "DeletePolicy", "AttachPolicyToRole", "DetachPolicyFromRole":
+		return true
+	}
+	return false
+}
+
+// A structured provider throttle proves that the RAM request was rejected
+// before mutation. Text-only throttling diagnostics cannot make that promise.
+func verifiedRAMMutationThrottle(req *openAPIRequest, err error) bool {
+	if !protectedProofMutation(req) || !strings.EqualFold(req.Product, "ram") {
+		return false
+	}
+	code, _, requestID := callerCloudErrorFields(err)
+	if code != "Throttling" && !strings.HasPrefix(code, "Throttling.") {
+		return false
+	}
+	for _, status := range [...]int{400, 429, 503} {
+		if volumeStructuredErrorProof(err, status, code, code, requestID) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *credentialFinalHTTPClient) Call(request *http.Request, transport *http.Transport) (*http.Response, error) {
+	c.proofBodyInvalid = false
 	if c.capture != nil {
 		c.capture.responseObserved = false
 		c.capture.headerRequestID = ""
@@ -281,6 +356,28 @@ func (c *credentialFinalHTTPClient) Call(request *http.Request, transport *http.
 			},
 		}
 		response, err = client.Do(request)
+	}
+	if err == nil && c.strictProofJSON && response != nil && response.Body != nil {
+		const maxProofBody = 8 << 20
+		body, readErr := io.ReadAll(io.LimitReader(response.Body, maxProofBody+1))
+		if len(body) > maxProofBody {
+			c.proofBodyInvalid = true
+			response.Body = &prefixedResponseBody{Reader: io.MultiReader(bytes.NewReader(body), response.Body), Closer: response.Body}
+		} else {
+			closeErr := response.Body.Close()
+			c.proofBodyInvalid = readErr != nil || closeErr != nil || len(body) == 0
+			if !c.proofBodyInvalid {
+				_, parseErr := decodeStrictJSON(body)
+				c.proofBodyInvalid = parseErr != nil
+			}
+			if readErr != nil || closeErr != nil {
+				response.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), failedProofBodyReader{err: errors.Join(readErr, closeErr)}))
+			} else {
+				response.Body = io.NopCloser(bytes.NewReader(body))
+			}
+		}
+	} else if c.strictProofJSON {
+		c.proofBodyInvalid = true
 	}
 	if c.capture != nil {
 		c.capture.responseObserved = response != nil
@@ -309,12 +406,14 @@ func (e *darabonbaExecutor) ExecuteOpenAPI(ctx context.Context, req *openAPIRequ
 	if capture != nil && capture.request != req {
 		capture = nil
 	}
-	e.client.HttpClient = &credentialFinalHTTPClient{
-		bearerHeader: e.bearerTokenHeaderKey,
-		bearerToken:  e.bearerToken,
-		delegate:     originalHTTPClient,
-		capture:      capture,
+	proofTransport := &credentialFinalHTTPClient{
+		bearerHeader:    e.bearerTokenHeaderKey,
+		bearerToken:     e.bearerToken,
+		delegate:        originalHTTPClient,
+		capture:         capture,
+		strictProofJSON: strictProviderProofOperation(req),
 	}
+	e.client.HttpClient = proofTransport
 	originalEndpoint := e.client.Endpoint
 	originalRegionID := e.client.RegionId
 	originalProductID := e.client.ProductId
@@ -372,9 +471,50 @@ func (e *darabonbaExecutor) ExecuteOpenAPI(ctx context.Context, req *openAPIRequ
 	}
 	response, err := e.client.CallApiWithCtx(ctx, params, openReq, &dara.RuntimeOptions{})
 	if err != nil {
+		if proofTransport.proofBodyInvalid {
+			return nil, &unverifiedProviderBodyError{cause: err}
+		}
 		return nil, err
 	}
-	return normalizeDarabonbaResponse(response)
+	if proofTransport.proofBodyInvalid {
+		return nil, fmt.Errorf("cloud proof response has ambiguous JSON structure")
+	}
+	var statusCode int64
+	if strictProviderProofOperation(req) {
+		switch value := response["statusCode"].(type) {
+		case int:
+			statusCode = int64(value)
+		case int64:
+			statusCode = value
+		case json.Number:
+			switch value.String() {
+			case "200":
+				statusCode = http.StatusOK
+			case "201":
+				statusCode = http.StatusCreated
+			case "202":
+				statusCode = http.StatusAccepted
+			}
+		}
+		volumeCreateStatus := strings.EqualFold(req.Product, "FCSandbox") && req.ApiName == "CreateVolume" &&
+			(statusCode == http.StatusCreated || statusCode == http.StatusAccepted)
+		if statusCode != http.StatusOK && !volumeCreateStatus {
+			return nil, fmt.Errorf("cloud proof response has an unexpected HTTP status")
+		}
+	}
+	normalized, err := normalizeDarabonbaResponseForOperation(response, strings.EqualFold(req.Product, "FCSandbox") &&
+		(req.ApiName == "CreateVolume" || req.ApiName == "GetVolume" || req.ApiName == "ListVolumes"), strictProviderProofOperation(req))
+	if err != nil {
+		return nil, err
+	}
+	if strings.EqualFold(req.Product, "FCSandbox") && req.ApiName == "CreateVolume" &&
+		(statusCode == http.StatusCreated || statusCode == http.StatusAccepted) {
+		accepted, ok := volumeCreateAcceptance(req, normalized)
+		if !ok || !accepted.AllocationConfirmed {
+			return nil, ecerrors.Service("InvalidVolumeResponse", i18n.NewLocalizer("en").Message("InvalidVolumeResponse"), false)
+		}
+	}
+	return normalized, nil
 }
 
 func (c *OpenAPICaller) Call(ctx context.Context, operation string, request map[string]any) (map[string]any, error) {
@@ -402,6 +542,11 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 	}
 	if c.isFCSandboxTemplateCache() {
 		if err := c.validateTemplateCacheRequest(req); err != nil {
+			return nil, err
+		}
+	}
+	if c.isFCSandboxVolume() {
+		if err := c.validateVolumeRequest(req); err != nil {
 			return nil, err
 		}
 	}
@@ -434,6 +579,9 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 				options = append(options, ecerrors.WithRawCause(code, message))
 			}
 			if req.ApiName == "DescribeTemplateCache" && templateCacheAbsenceCode(code) {
+				if volumeStructuredErrorProof(originalErr, 404, code, "TemplateCacheNotFound", requestID) {
+					options = append(options, ecerrors.WithVerifiedProviderResponse())
+				}
 				return nil, ecerrors.NotFound("NotFound", cloudNotFoundMessage(request, code), options...)
 			}
 			if isDependencyViolation(originalErr) {
@@ -442,31 +590,106 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 			retryable := isThrottling(originalErr) || (isReadOperation(operation) && isTransientNetworkError(originalErr))
 			return nil, ecerrors.Service("CloudAPIError", message, retryable, options...)
 		}
-		code, _, _ := callerCloudErrorFields(originalErr)
+		code, message, requestID := callerCloudErrorFields(originalErr)
 		notFound := isCloudNotFound(originalErr)
+		guardedAbsence := false
+		verifiedAbsence := false
 		if c.isFCSandboxTeam() {
 			notFound = req.ApiName == "GetTeam" && teamAbsenceCode(code)
+			guardedAbsence = req.ApiName == "GetTeam"
+			verifiedAbsence = req.ApiName == "GetTeam" && volumeStructuredErrorProofWithEnvelope(originalErr, 404, code, "TeamNotFound", requestID, volume404ErrorEnvelopeProof)
 		}
 		if c.isFCSandboxQuota() {
 			notFound = req.ApiName == "DescribeQuota" && quotaAbsenceCode(code)
 		}
+		if c.isFCSandboxVolume() {
+			guardedAbsence = req.ApiName == "GetVolume"
+			notFound = req.ApiName == "GetVolume" && volumeStructuredTransportAbsence(originalErr, code, requestID)
+			verifiedAbsence = notFound
+		}
+		if strings.EqualFold(c.Product, "ram") {
+			switch req.ApiName {
+			case "GetRole", "DeleteRole", "GetPolicy", "DeletePolicy":
+				guardedAbsence = true
+				verifiedAbsence = ramFixtureStructuredAbsence(originalErr, req.ApiName, code, requestID)
+				notFound = notFound || verifiedAbsence
+			}
+		}
 		if c.isFCTemplate() {
 			notFound = req.ApiName == "GetTemplate" && templateAbsenceCode(code)
 		}
-		if notFound {
-			return nil, ecerrors.NotFound("NotFound", cloudNotFoundMessage(request, code), cloudErrorOptions(err)...)
+		options := cloudErrorOptions(err)
+		if c.isFCSandboxVolume() {
+			options = volumeDiagnosticOptions(code, message, requestID, false)
 		}
-		if isDependencyViolation(originalErr) {
-			return nil, ecerrors.Service("DependencyViolation", callerCloudErrorMessage(err), false, cloudErrorOptions(err)...)
+		if protectedProofMutation(req) {
+			// A mutation needs operation-specific rejection or absence proof.
+			options = cloudErrorOptionsWithVerified(err, false)
+			if c.isFCSandboxVolume() {
+				options = volumeDiagnosticOptions(code, message, requestID, false)
+			}
+		}
+		if guardedAbsence {
+			options = cloudErrorOptionsWithVerified(err, verifiedAbsence)
+			if c.isFCSandboxVolume() {
+				options = volumeDiagnosticOptions(code, message, requestID, verifiedAbsence)
+			}
+		}
+		if notFound {
+			return nil, ecerrors.NotFound("NotFound", cloudNotFoundMessage(request, code), options...)
+		}
+		structuredCreateConflict := c.isFCSandboxVolume() && req.ApiName == "CreateVolume" && volumeStructuredCreateConflict(originalErr, code, requestID)
+		structuredDeleteRejection := c.isFCSandboxVolume() && req.ApiName == "DeleteVolume" && (volumeStructuredErrorProof(originalErr, 403, code, "Forbidden", requestID) || volumeStructuredErrorProof(originalErr, 403, code, "NoPermission", requestID))
+		teamCreateStatus := 0
+		if c.isFCSandboxTeam() && req.ApiName == "CreateTeam" {
+			teamCreateStatus = teamCreateRejectionStatus(code)
+		}
+		structuredTeamCreateRejection := teamCreateStatus != 0 && volumeStructuredErrorProof(originalErr, teamCreateStatus, code, code, requestID)
+		structuredRAMFixtureRejection := strings.EqualFold(c.Product, "ram") && (req.ApiName == "CreatePolicy" || req.ApiName == "CreateRole" || req.ApiName == "AttachPolicyToRole") && (volumeStructuredErrorProof(originalErr, 403, code, "Forbidden", requestID) || volumeStructuredErrorProof(originalErr, 403, code, "NoPermission", requestID) || volumeStructuredErrorProof(originalErr, 400, code, "InvalidParameter", requestID))
+		if isDependencyViolation(originalErr) && !structuredCreateConflict && !structuredDeleteRejection && !structuredTeamCreateRejection && !structuredRAMFixtureRejection {
+			if c.isFCSandboxVolume() {
+				return nil, ecerrors.Service("DependencyViolation", sanitizeTemplateCacheDiagnostic(message), false, options...)
+			}
+			return nil, ecerrors.Service("DependencyViolation", callerCloudErrorMessage(err), false, options...)
 		}
 		retryable := isThrottling(originalErr) || (isReadOperation(operation) && isTransientNetworkError(originalErr))
-		return nil, ecerrors.Service("CloudAPIError", callerCloudErrorMessage(err), retryable, cloudErrorOptions(err)...)
+		if protectedProofMutation(req) && !verifiedRAMMutationThrottle(req, originalErr) {
+			retryable = false
+		}
+		if c.isFCSandboxVolume() && req.ApiName == "CreateVolume" {
+			// A generic typed 404 is diagnostic. Only the exact CreateVolume
+			// conflict response can prove that this invocation allocated nothing.
+			options = cloudErrorOptionsWithVerified(err, structuredCreateConflict)
+			options = volumeDiagnosticOptions(code, message, requestID, structuredCreateConflict)
+			retryable = false
+		} else if structuredDeleteRejection || structuredTeamCreateRejection || structuredRAMFixtureRejection {
+			options = cloudErrorOptionsWithVerified(err, true)
+			if c.isFCSandboxVolume() {
+				options = volumeDiagnosticOptions(code, message, requestID, true)
+			}
+			retryable = false
+		}
+		if c.isFCSandboxVolume() {
+			return nil, ecerrors.Service("CloudAPIError", sanitizeTemplateCacheDiagnostic(message), retryable, options...)
+		}
+		return nil, ecerrors.Service("CloudAPIError", callerCloudErrorMessage(err), retryable, options...)
 	}
 	if c.isFCSandboxTemplateCache() {
 		resp = scrubTemplateCacheResponse(resp, req.ApiName)
 	}
+	if c.isFCSandboxVolume() {
+		resp = scrubVolumeResponse(resp)
+	}
 	if c.Resource != "" {
 		if err := c.resourceResponseError(req, resp); err != nil {
+			if c.isFCSandboxVolume() && req.ApiName == "CreateVolume" {
+				var app *ecerrors.AppError
+				if errors.As(err, &app) && app.Payload().Code == "InvalidVolumeResponse" {
+					if accepted, ok := volumeCreateAcceptance(req, resp); ok {
+						err = ecerrors.WithDetails(err, ecerrors.WithAcceptedVolume(accepted))
+					}
+				}
+			}
 			return nil, err
 		}
 	}
@@ -479,7 +702,7 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		}
 		c.templateMu.Unlock()
 	}
-	if c.isFCSandboxTeam() || c.isFCSandboxTemplateCache() || c.isFCSandboxQuota() {
+	if c.isFCSandboxTeam() || c.isFCSandboxTemplateCache() || c.isFCSandboxQuota() || c.isFCSandboxVolume() {
 		// Hooks and probes retain successful request IDs in later errors.
 		// Normalize at the provider boundary before any consumer can retain it.
 		if requestID, ok := resp["requestId"].(string); ok {
@@ -487,7 +710,7 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 			for key, value := range resp {
 				normalized[key] = value
 			}
-			if c.isFCSandboxTemplateCache() {
+			if c.isFCSandboxTemplateCache() || c.isFCSandboxVolume() {
 				normalized["requestId"] = sanitizeTemplateCacheRequestID(requestID)
 			} else {
 				normalized["requestId"] = callerSanitizeCloudError(errors.New(requestID))
@@ -546,6 +769,10 @@ func (c *OpenAPICaller) executeOpenAPIRequest(ctx context.Context, operation str
 	if attempts <= 0 {
 		attempts = defaultThrottleMaxAttempts
 	}
+	// A later reply cannot settle an uncertain earlier mutation attempt.
+	if protectedProofMutation(req) && !strings.EqualFold(req.Product, "ram") {
+		attempts = 1
+	}
 	base := c.retryBaseInterval
 	if base <= 0 {
 		base = defaultThrottleBaseInterval
@@ -588,6 +815,9 @@ func (c *OpenAPICaller) executeOpenAPIRequest(ctx context.Context, operation str
 			// Validate the same normalized cache state returned to CallRaw.
 			resp = scrubTemplateCacheResponse(resp, req.ApiName)
 		}
+		if err == nil && c.isFCSandboxVolume() {
+			resp = scrubVolumeResponse(resp)
+		}
 		spanErr := err
 		if c.isFCTemplate() {
 			c.rememberTemplateSecrets(resp, false)
@@ -600,7 +830,7 @@ func (c *OpenAPICaller) executeOpenAPIRequest(ctx context.Context, operation str
 		if c.isFCTemplate() {
 			requestID = validTelemetryRequestID(c.scrubTemplateRequestID(requestID))
 		}
-		if c.isFCSandboxTemplateCache() {
+		if c.isFCSandboxTemplateCache() || c.isFCSandboxVolume() {
 			// CallRaw scrubs the provider response after this span ends.
 			requestID = sanitizeTemplateCacheRequestID(requestID)
 		}
@@ -612,6 +842,9 @@ func (c *OpenAPICaller) executeOpenAPIRequest(ctx context.Context, operation str
 			return resp, nil
 		}
 		retryable := isThrottling(err) || (isReadOperation(operation) && isTransientNetworkError(err))
+		if protectedProofMutation(req) && !verifiedRAMMutationThrottle(req, err) {
+			retryable = false
+		}
 		if !retryable {
 			return nil, err
 		}
@@ -1011,7 +1244,12 @@ func coerceOpenAPIBodyValue(value any, parameter *OpenAPIParameter) any {
 		return value
 	}
 	var decoded any
-	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	decoder.UseNumber()
+	if err := decoder.Decode(&decoded); err != nil {
+		return value
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
 		return value
 	}
 	return decoded
@@ -1203,11 +1441,15 @@ func setTagParams(out map[string]string, key string, tags []string) error {
 }
 
 func decodeOpenAPIResponse(raw string) (map[string]any, error) {
+	return decodeOpenAPIResponseWithNumbers(raw, false)
+}
+
+func decodeOpenAPIResponseWithNumbers(raw string, preserveNumbers bool) (map[string]any, error) {
 	if raw == "" {
 		return map[string]any{}, nil
 	}
-	var decoded any
-	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+	decoded, err := decodeStrictJSONWithNumbers([]byte(raw), preserveNumbers)
+	if err != nil {
 		return nil, ecerrors.Service("CloudAPIError", "Alibaba Cloud API returned non-JSON response", false)
 	}
 	switch typed := decoded.(type) {
@@ -1224,6 +1466,14 @@ func decodeOpenAPIResponse(raw string) (map[string]any, error) {
 }
 
 func normalizeDarabonbaResponse(response map[string]any) (map[string]any, error) {
+	return normalizeDarabonbaResponseForRequest(response, false)
+}
+
+func normalizeDarabonbaResponseForRequest(response map[string]any, preserveNumbers bool) (map[string]any, error) {
+	return normalizeDarabonbaResponseForOperation(response, preserveNumbers, true)
+}
+
+func normalizeDarabonbaResponseForOperation(response map[string]any, preserveNumbers, strictProof bool) (map[string]any, error) {
 	if response == nil {
 		return map[string]any{}, nil
 	}
@@ -1237,7 +1487,10 @@ func normalizeDarabonbaResponse(response map[string]any) (map[string]any, error)
 				topLevelArrayResponseMarker: true,
 			}, nil
 		case string:
-			return decodeOpenAPIResponse(typed)
+			if strictProof {
+				return decodeOpenAPIResponseWithNumbers(typed, preserveNumbers)
+			}
+			return decodeOrdinaryOpenAPIResponse(typed, preserveNumbers)
 		case nil:
 			return map[string]any{}, nil
 		default:
@@ -1245,6 +1498,31 @@ func normalizeDarabonbaResponse(response map[string]any) (map[string]any, error)
 		}
 	}
 	return response, nil
+}
+
+func decodeOrdinaryOpenAPIResponse(raw string, preserveNumbers bool) (map[string]any, error) {
+	if raw == "" {
+		return map[string]any{}, nil
+	}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	if preserveNumbers {
+		decoder.UseNumber()
+	}
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		return nil, ecerrors.Service("CloudAPIError", "Alibaba Cloud API returned non-JSON response", false)
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return nil, ecerrors.Service("CloudAPIError", "Alibaba Cloud API returned non-JSON response", false)
+	}
+	switch typed := decoded.(type) {
+	case map[string]any:
+		return typed, nil
+	case []any:
+		return map[string]any{"items": typed, topLevelArrayResponseMarker: true}, nil
+	default:
+		return nil, ecerrors.Service("CloudAPIError", "Alibaba Cloud API returned unsupported JSON response", false)
+	}
 }
 
 func stringPointerMap(values map[string]string) map[string]*string {
@@ -1383,11 +1661,44 @@ func callerCloudErrorFields(err error) (code, message, requestID string) {
 }
 
 func cloudErrorOptions(err error) []ecerrors.Option {
+	var unverified *unverifiedProviderBodyError
+	if errors.As(err, &unverified) {
+		return cloudErrorOptionsWithVerified(err, false)
+	}
+	code, _, _ := callerCloudErrorFields(err)
+	var responseErr dara.ResponseError
+	var teaErr *tea.SDKError
+	var daraErr *dara.SDKError
+	verified := errors.As(err, &responseErr) && responseErr.GetStatusCode() != nil && *responseErr.GetStatusCode() == 404 ||
+		errors.As(err, &teaErr) && teaErr.StatusCode != nil && *teaErr.StatusCode == 404 ||
+		errors.As(err, &daraErr) && daraErr.StatusCode != nil && *daraErr.StatusCode == 404
+	return cloudErrorOptionsWithVerified(err, verified && code != "")
+}
+
+func cloudErrorOptionsWithVerified(err error, verified bool) []ecerrors.Option {
 	code, message, requestID := callerCloudErrorFields(err)
-	options := make([]ecerrors.Option, 0, 2)
+	options := make([]ecerrors.Option, 0, 3)
+	if verified {
+		options = append(options, ecerrors.WithVerifiedProviderResponse())
+	}
 	if requestID != "" {
 		options = append(options, ecerrors.WithRequestID(requestID))
 	}
+	if code != "" || message != "" {
+		options = append(options, ecerrors.WithRawCause(code, message))
+	}
+	return options
+}
+
+func volumeDiagnosticOptions(code, message, requestID string, verified bool) []ecerrors.Option {
+	options := make([]ecerrors.Option, 0, 3)
+	if verified {
+		options = append(options, ecerrors.WithVerifiedProviderResponse())
+	}
+	if clean := sanitizeTemplateCacheRequestID(requestID); clean != "" {
+		options = append(options, ecerrors.WithRequestID(clean))
+	}
+	code, message = sanitizeTemplateCacheDiagnostic(code), sanitizeTemplateCacheDiagnostic(message)
 	if code != "" || message != "" {
 		options = append(options, ecerrors.WithRawCause(code, message))
 	}

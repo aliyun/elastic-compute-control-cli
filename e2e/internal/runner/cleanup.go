@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,10 @@ const cleanupTimeoutPadding = time.Minute
 
 var deleteClaimRejected = func(string) {}
 var writeTeamRegistrationJournal = writeRunnerJournal
+var writeVolumeFixtureConsumptionJournal = writeRunnerJournalRoot
+var writeVolumeFixtureRestoreJournal = writeRunnerJournalRoot
+var writeVolumeFixtureReservationJournal = writeRunnerJournal
+var ensureVolumeFixtureRecoveryDirectory = journalfile.EnsureRecoveryDirectory
 
 var (
 	cleanupTimeout     = 10 * time.Minute
@@ -48,14 +53,34 @@ type cleanupItem struct {
 	deferred                  bool
 	cacheCreatePending        bool
 	teamCreateConfirmed       bool
+	volumeTeamBound           bool
+	volumeTeamBinding         *report.QuotaCredentialBinding
 	quotaBound                bool
 	teamRegistrationFailed    bool
 	quotaReserved             bool
 	quotaUpdatePending        bool
 	quotaReservationUnstarted bool
 	teamReplayAttempted       bool
+	teamAttemptFresh          bool
 	ownedTeamID               string
 	templateBinding           *journalfile.TemplateCreateIntent
+	// Team provenance is durable in the journal; this records only a
+	// successful transfer of this Volume during the active run.
+	volumeTransferTeam                string
+	volumeDeleteAttempted             bool
+	volumeFixtureKind                 string
+	volumeFixturePending              bool
+	volumeFixtureDispatchProtocol     int
+	volumeFixtureDispatched           bool
+	volumeFixtureCreateRequestID      string
+	volumeFixtureCreateResponseSHA256 string
+	volumeFixtureCreateValidated      bool
+	volumeFixtureRoleID               string
+	volumeFixturePolicyCreateDate     string
+	volumeFixtureBucketCreationDate   string
+	volumeFixtureDeleteProtocol       int
+	volumeFixtureDeleteAttempted      bool
+	teamCreateIntent                  *teamCreateIntent
 }
 
 // cleanup is the two-level teardown registry. Case scopes run when
@@ -63,31 +88,41 @@ type cleanupItem struct {
 // executes on a fresh background context so it completes even when the run's
 // context was cancelled (CI cancel / timeout).
 type cleanup struct {
-	mu                        sync.Mutex
-	session                   *Session
-	keep                      bool
-	journal                   string
-	requestedJournal          string
-	journalPaths              map[string]string
-	journalParents            map[string]os.FileInfo
-	execCfg                   map[string]execpkg.Config
-	runCommand                func(context.Context, execpkg.Config, string) execpkg.Result
-	operations                *operationRuntime
-	logf                      func(string, ...any)
-	manifest                  []report.Resource
-	journalMeta               report.CleanupJournal
-	nativeJournals            map[string]report.CleanupJournal
-	ownedTemplates            []*cleanupItem
-	ownedTeams                []*cleanupItem
-	registeredItems           []*cleanupItem
-	quotaReservations         []*cleanupItem
-	quotaBinding              *report.QuotaCredentialBinding
-	unresolvedQuotaTeamCreate bool
-	allocationFence           string
-	quotaLifecycleRequired    bool
-	deferredScopes            [][]*cleanupItem
-	deleteClaims              map[string]bool
-	teamCreatesPending        int
+	mu                            sync.Mutex
+	session                       *Session
+	keep                          bool
+	journal                       string
+	requestedJournal              string
+	journalPaths                  map[string]string
+	journalParents                map[string]os.FileInfo
+	journalEstablished            map[string]bool
+	execCfg                       map[string]execpkg.Config
+	runCommand                    func(context.Context, execpkg.Config, string) execpkg.Result
+	operations                    *operationRuntime
+	logf                          func(string, ...any)
+	manifest                      []report.Resource
+	journalMeta                   report.CleanupJournal
+	nativeJournals                map[string]report.CleanupJournal
+	ownedTemplates                []*cleanupItem
+	ownedTeams                    []*cleanupItem
+	registeredItems               []*cleanupItem
+	quotaReservations             []*cleanupItem
+	quotaBinding                  *report.QuotaCredentialBinding
+	volumeFixtureBinding          *report.QuotaCredentialBinding
+	volumeFixtureBucket           string
+	volumeTeamRetirementUncertain bool
+	// Direct reservation unit tests use a fake Team without provisioned OSS/RAM.
+	// Runtime cleanup registries leave this false, so every create is checked.
+	testSyntheticVolumeReservation bool
+	unresolvedQuotaTeamCreate      bool
+	allocationFence                string
+	quotaLifecycleRequired         bool
+	deferredScopes                 [][]*cleanupItem
+	deleteClaims                   map[string]bool
+	teamCreatesPending             int
+	// Only package tests can install a synthetic exclusive mutation scope.
+	// Production runs have no such scope and refuse name-based fixture writes.
+	fixtureMutationScope func(phase, kind, bucket string, cfg execpkg.Config) bool
 }
 
 // A reservation remains active until its exact journal child is durably
@@ -151,6 +186,14 @@ func (c *cleanup) checkDurablePendingQuotaUpdate(ctx context.Context) error {
 		if legacy || journal.Version != template.Version || journal.RunID != template.RunID || journal.ExecutionID != template.ExecutionID || journal.RegionRole != template.RegionRole || journal.Region != template.Region || journal.Surface != template.Surface || journal.EcctlBin != template.EcctlBin {
 			return fmt.Errorf("existing cleanup journal does not match run, execution, role, region, surface and binary")
 		}
+		// Only primary Volume ownership carries a pinned executable digest.
+		volumeJournal := journal.VolumeFixtureBinding != nil || journal.VolumeFixtureBucket != "" || len(journal.VolumeTeamCreateIDs) != 0 || len(journal.VolumeTeamCreators) != 0
+		for _, entry := range journal.Entries {
+			volumeJournal = volumeJournal || entry.VolumeFixtureKind != "" || entry.VolumeFixturePending || entry.VolumeTeamBound
+		}
+		if volumeJournal && (template.EcctlBinSHA256 == "" || journal.EcctlBinSHA256 != template.EcctlBinSHA256) {
+			return fmt.Errorf("existing Volume cleanup journal binary digest is missing or changed")
+		}
 		// A fresh ordinary run cannot safely inherit a completed Quota run's
 		// credential binding. Refuse it before any provider allocation.
 		if journal.QuotaBinding != nil && !reflect.DeepEqual(journal.QuotaBinding, binding) {
@@ -169,6 +212,29 @@ func (c *cleanup) isQuotaUpdatePending(item *cleanupItem) bool {
 func newCleanup(cfg map[string]execpkg.Config, operations *operationRuntime, keep bool, journal string, meta report.CleanupJournal, logf func(string, ...any)) *cleanup {
 	meta.Version = 2
 	return &cleanup{keep: keep, journal: journal, requestedJournal: journal, execCfg: cfg, runCommand: execpkg.Run, operations: operations, logf: logf, journalMeta: meta}
+}
+
+func (c *cleanup) fixtureMutationAllowed(phase, kind, bucket string, item *cleanupItem, cfg execpkg.Config) bool {
+	c.mu.Lock()
+	scope, binding, currentBucket := c.fixtureMutationScope, c.volumeFixtureBinding, c.volumeFixtureBucket
+	c.mu.Unlock()
+	if binding == nil || currentBucket != bucket || item == nil || item.volumeFixtureKind != kind ||
+		(phase != "create" && phase != "delete") || !journalfile.VolumeFixtureFencedKind(kind) ||
+		cfg.Bin != c.execCfg["primary"].Bin || cfg.Region != "cn-hangzhou" ||
+		cfg.Profile != binding.Profile || cfg.ExpectedIdentity == nil || *cfg.ExpectedIdentity != binding.Identity {
+		return false
+	}
+	journal, err := c.currentVolumeFixtureJournal(item)
+	if err != nil {
+		return false
+	}
+	c.mu.Lock()
+	_, entry, _ := c.journalValues(item)
+	c.mu.Unlock()
+	if journalfile.VolumeFixtureMutationAllowed(phase, journal, entry, cfg) {
+		return true
+	}
+	return scope != nil && scope(phase, kind, bucket, cfg)
 }
 
 // withDeleteClaim serializes one owned target across concurrent case steps and
@@ -263,6 +329,15 @@ func (c *cleanup) rememberJournalParentLocked(path string, parent os.FileInfo) {
 	}
 }
 
+// A parent directory can be observed before this role has ever owned a
+// journal. Keep actual file provenance separate from the parent inode.
+func (c *cleanup) rememberEstablishedJournalLocked(path string) {
+	if c.journalEstablished == nil {
+		c.journalEstablished = make(map[string]bool)
+	}
+	c.journalEstablished[path] = true
+}
+
 // Region identity is the minimum proof of separation available to cleanup.
 // A different binary or environment may still address the same account, so
 // equal or unknown regions conservatively share Team ownership fences.
@@ -294,6 +369,10 @@ func (c *cleanup) pushPendingCacheCreate(scope *[]*cleanupItem, name, cmd, role 
 }
 
 func (c *cleanup) pushItem(scope *[]*cleanupItem, name, cmd, role string, lockKeys []string, cacheCreatePending, teamCreateConfirmed, quotaBound bool, binding ...*journalfile.TemplateCreateIntent) (*cleanupItem, error) {
+	return c.pushItemWithFixture(scope, name, cmd, role, lockKeys, cacheCreatePending, teamCreateConfirmed, quotaBound, nil, "", nil, binding...)
+}
+
+func (c *cleanup) pushItemWithFixture(scope *[]*cleanupItem, name, cmd, role string, lockKeys []string, cacheCreatePending, teamCreateConfirmed, quotaBound bool, teamBinding *report.QuotaCredentialBinding, fixtureKind string, teamIntent *teamCreateIntent, binding ...*journalfile.TemplateCreateIntent) (*cleanupItem, error) {
 	if strings.TrimSpace(cmd) == "" {
 		return nil, fmt.Errorf("cleanup finalizer is empty")
 	}
@@ -311,11 +390,33 @@ func (c *cleanup) pushItem(scope *[]*cleanupItem, name, cmd, role string, lockKe
 	if quotaUpdateCandidate(scenario.Step{}, cmd) || quotaDeleteCandidate(cmd) {
 		return nil, fmt.Errorf("Quota mutation cannot be registered as an ordinary finalizer")
 	}
+	volumeDelete, err := classifyVolumeFinalizer(cmd)
+	if err != nil {
+		return nil, err
+	}
+	if volumeDelete && (len(binding) == 0 || binding[0] == nil || binding[0].Resource != "volume") {
+		return nil, fmt.Errorf("native Volume finalizer requires exact retained creation ownership")
+	}
+	if len(binding) > 0 && binding[0] != nil && binding[0].Resource == "volume" && !volumeDelete {
+		return nil, fmt.Errorf("bound native finalizer requires its resource delete")
+	}
 	teamID, teamErr := journalfile.TeamDeleteTarget(cmd)
 	if teamCreateConfirmed && teamErr != nil {
 		return nil, fmt.Errorf("confirmed Team creation requires a validated Team finalizer: %w", teamErr)
 	}
-	it := &cleanupItem{scope: name, cmd: cmd, role: role, lockKeys: keys, cacheCreatePending: cacheCreatePending, teamCreateConfirmed: teamCreateConfirmed, quotaBound: quotaBound}
+	if teamBinding != nil && !teamCreateConfirmed {
+		return nil, fmt.Errorf("Volume Team credential binding requires confirmed creation")
+	}
+	if teamBinding != nil && (teamIntent == nil || !reflect.DeepEqual(teamIntent.VolumeBinding, teamBinding)) || teamIntent != nil && !teamCreateConfirmed {
+		return nil, fmt.Errorf("Volume Team finalizer lost its exact create intent")
+	}
+	it := &cleanupItem{scope: name, cmd: cmd, role: role, lockKeys: keys, cacheCreatePending: cacheCreatePending, teamCreateConfirmed: teamCreateConfirmed, quotaBound: quotaBound, volumeTeamBound: teamBinding != nil, volumeTeamBinding: teamBinding, volumeFixtureKind: fixtureKind, volumeFixturePending: fixtureKind != "", teamCreateIntent: teamIntent}
+	if fixtureKind != "" {
+		it.volumeFixtureDispatchProtocol = 1
+	}
+	if journalfile.VolumeFixtureFencedKind(fixtureKind) {
+		it.volumeFixtureDeleteProtocol = 1
+	}
 	if teamCreateConfirmed {
 		it.ownedTeamID = teamID
 	}
@@ -356,7 +457,7 @@ func (c *cleanup) pushItem(scope *[]*cleanupItem, name, cmd, role string, lockKe
 			return nil, fmt.Errorf("ordinary Team finalizer conflicts with durable Team ownership")
 		}
 	}
-	if cacheCreatePending {
+	if cacheCreatePending || it.volumeFixturePending {
 		// The cache create has not launched. A failed journal reservation must
 		// not leave an in-memory delete eligible for case cleanup.
 		if err := c.appendJournalItemLocked(it); err != nil {
@@ -376,7 +477,7 @@ func (c *cleanup) pushItem(scope *[]*cleanupItem, name, cmd, role string, lockKe
 	c.manifest = append(c.manifest, report.Resource{
 		Scope: name, Teardown: cmd, RegionRole: role, Region: cfg.Region, ExecutionID: c.journalMeta.ExecutionID,
 	})
-	if !cacheCreatePending {
+	if !cacheCreatePending && !it.volumeFixturePending {
 		err = c.appendJournalItemLocked(it)
 		if err != nil && teamCreateConfirmed {
 			it.teamRegistrationFailed = true
@@ -501,11 +602,28 @@ func (c *cleanup) appendJournalItemLocked(item *cleanupItem) error {
 		if parentErr != nil {
 			return parentErr
 		}
-		journal, _, err := readRunnerJournal(path)
-		if os.IsNotExist(err) {
+		if item.volumeFixtureKind != "" {
+			if err := ensureVolumeFixtureRecoveryDirectory(path); err != nil {
+				return fmt.Errorf("durable Volume fixture journal directory: %w", err)
+			}
+			current, err := c.checkedJournalParentLocked(path)
+			if err != nil {
+				return err
+			}
+			if !os.SameFile(parent, current) {
+				return fmt.Errorf("Volume fixture journal parent changed during durability barrier")
+			}
+		}
+		journal, _, existingBody, err := readRunnerJournalSnapshot(path)
+		journalMissing := os.IsNotExist(err)
+		if journalMissing {
 			journal = template
 		} else if err != nil {
 			return err
+		}
+		var originalBody []byte
+		if item.volumeFixturePending && !journalMissing {
+			originalBody = existingBody
 		}
 		if err := mergeJournalMetadata(&journal, template); err != nil {
 			return err
@@ -513,23 +631,81 @@ func (c *cleanup) appendJournalItemLocked(item *cleanupItem) error {
 		if item.teamCreateConfirmed && journal.JournalPath != path {
 			return fmt.Errorf("confirmed Team requires its anchored cleanup journal")
 		}
-		if !isReplayableTeardown(item.cmd) {
+		if item.volumeTeamBound {
+			if !reflect.DeepEqual(journal.VolumeFixtureBinding, item.volumeTeamBinding) {
+				return fmt.Errorf("Volume Team creator differs from fixture credential binding")
+			}
+			if journal.VolumeTeamCreators == nil {
+				journal.VolumeTeamCreators = make(map[string]*report.QuotaCredentialBinding)
+			}
+			if prior, exists := journal.VolumeTeamCreators[item.ownedTeamID]; exists && !reflect.DeepEqual(prior, item.volumeTeamBinding) {
+				return fmt.Errorf("Volume Team creator credential binding changed")
+			}
+			journal.VolumeTeamCreators[item.ownedTeamID] = item.volumeTeamBinding
+		}
+		if item.volumeFixtureKind != "" {
+			if err := journalfile.CheckVolumeFixtureParents(item.volumeFixtureKind, journal); err != nil {
+				return err
+			}
+		}
+		if item.volumeFixturePending && journalMissing {
+			// Establish a base journal so a failed first reservation can restore
+			// exact prelaunch bytes without removing an unanchored file.
+			if err := writeRunnerJournal(path, journal); err != nil {
+				if barrierErr := reaffirmRunnerJournal(path, journal); barrierErr != nil {
+					return errors.Join(err, barrierErr)
+				}
+			}
+			originalBody, err = runnerJournalBytes(journal)
+			if err != nil {
+				return err
+			}
+		}
+		if item.volumeFixtureKind == "" && !isReplayableTeardown(item.cmd) {
 			return writeRunnerJournal(path, journal)
 		}
 		journal.Entries = append(journal.Entries, entry)
 		if item.teamCreateConfirmed {
-			return writeTeamRegistrationJournal(path, journal)
+			if item.volumeTeamBound {
+				if err := settleVolumeTeamRegistration(&journal, item.teamCreateIntent, item.ownedTeamID, path); err != nil {
+					return err
+				}
+			}
+			if err := writeTeamRegistrationJournal(path, journal); err != nil {
+				return err
+			}
+			if item.volumeTeamBound {
+				installed, legacy, err := readRunnerJournal(path)
+				if err != nil || legacy || !reflect.DeepEqual(installed, journal) {
+					return fmt.Errorf("Volume Team registration was not installed exactly")
+				}
+			}
+			return nil
+		}
+		if item.volumeFixturePending {
+			body, err := runnerJournalBytes(journal)
+			if err != nil {
+				return err
+			}
+			if err := writeVolumeFixtureReservationJournal(path, journal); err != nil {
+				if installed, readErr := os.ReadFile(path); readErr == nil && bytes.Equal(installed, body) {
+					return errors.Join(err, journalfile.RestoreUninvokedMarker(path, body, originalBody))
+				}
+				return err
+			}
+			return nil
 		}
 		return writeRunnerJournal(path, journal)
 	})
 	if err == nil {
 		c.rememberJournalParentLocked(path, parent)
+		c.rememberEstablishedJournalLocked(path)
 	}
 	return err
 }
 
 func (c *cleanup) removeJournalItemLocked(item *cleanupItem) error {
-	if c.journal == "" || !isReplayableTeardown(item.cmd) {
+	if c.journal == "" || item.volumeFixtureKind == "" && !isReplayableTeardown(item.cmd) {
 		return nil
 	}
 	if _, err := c.checkedJournalPath(item.role); err != nil {
@@ -537,8 +713,25 @@ func (c *cleanup) removeJournalItemLocked(item *cleanupItem) error {
 	}
 	template, entry, path := c.journalValues(item)
 	return journalfile.WithExistingParentLock(context.Background(), path, func() error {
-		journal, _, err := readRunnerJournal(path)
+		var root *os.Root
+		var err error
+		if item.volumeFixtureKind != "" {
+			root, err = c.openLockedJournalRoot(path)
+			if err != nil {
+				return err
+			}
+			defer root.Close()
+		}
+		var journal report.CleanupJournal
+		if root != nil {
+			journal, _, err = readRunnerJournalRoot(root, path)
+		} else {
+			journal, _, err = readRunnerJournal(path)
+		}
 		if os.IsNotExist(err) {
+			if item.volumeFixtureKind != "" {
+				return fmt.Errorf("Volume fixture journal disappeared before consumption")
+			}
 			return nil
 		}
 		if err != nil {
@@ -549,15 +742,28 @@ func (c *cleanup) removeJournalItemLocked(item *cleanupItem) error {
 		}
 		index := -1
 		for i := len(journal.Entries) - 1; i >= 0; i-- {
-			if journalEntriesMatch(journal.Entries[i], entry) {
+			if item.volumeFixtureKind != "" && journal.Entries[i] == entry || item.volumeFixtureKind == "" && journalEntriesMatch(journal.Entries[i], entry) {
 				index = i
 				break
 			}
 		}
 		if index < 0 {
+			if item.volumeFixtureKind != "" {
+				return fmt.Errorf("Volume fixture finalizer changed before consumption")
+			}
 			return nil
 		}
 		journal.Entries = append(journal.Entries[:index], journal.Entries[index+1:]...)
+		if item.volumeFixtureKind != "" {
+			if err := writeVolumeFixtureConsumptionJournal(root, path, journal); err != nil {
+				return err
+			}
+			installed, legacy, err := readRunnerJournalRoot(root, path)
+			if err != nil || legacy || !reflect.DeepEqual(installed, journal) {
+				return fmt.Errorf("Volume fixture consumption was not installed exactly: %v", err)
+			}
+			return journalRootMatchesPath(root, path)
+		}
 		return writeRunnerJournal(path, journal)
 	})
 }
@@ -570,13 +776,27 @@ func (c *cleanup) journalValues(item *cleanupItem) (report.CleanupJournal, repor
 	journal.EcctlBin = cfg.Bin
 	if item.role == "primary" {
 		journal.QuotaBinding = c.quotaBinding
+		journal.VolumeFixtureBinding = c.volumeFixtureBinding
+		journal.VolumeFixtureBucket = c.volumeFixtureBucket
+	}
+	if journal.VolumeFixtureBinding != nil {
+		journal.JournalPath = cleanupJournalPath(c.journal, item.role)
+		if c.journalPaths != nil {
+			journal.JournalPath = c.journalPaths[item.role]
+		}
 	}
 	journal.Entries = make([]report.Resource, 0)
 	entry := report.Resource{
 		Scope: item.scope, Teardown: item.cmd, RegionRole: item.role,
 		Region: cfg.Region, ExecutionID: c.journalMeta.ExecutionID, CacheCreatePending: item.cacheCreatePending,
 		TeamCreateConfirmed: item.teamCreateConfirmed, QuotaBound: item.quotaBound, QuotaReserved: item.quotaReserved,
-		QuotaUpdatePending: item.quotaUpdatePending, TeamReplayAttempted: item.teamReplayAttempted,
+		VolumeTeamBound:       item.volumeTeamBound,
+		VolumeDeleteAttempted: item.volumeDeleteAttempted,
+		QuotaUpdatePending:    item.quotaUpdatePending, TeamReplayAttempted: item.teamReplayAttempted,
+		VolumeFixtureKind: item.volumeFixtureKind, VolumeFixturePending: item.volumeFixturePending, VolumeFixtureDispatchProtocol: item.volumeFixtureDispatchProtocol, VolumeFixtureDispatched: item.volumeFixtureDispatched,
+		VolumeFixtureCreateRequestID: item.volumeFixtureCreateRequestID, VolumeFixtureCreateResponseSHA256: item.volumeFixtureCreateResponseSHA256, VolumeFixtureCreateValidated: item.volumeFixtureCreateValidated, VolumeFixtureRoleID: item.volumeFixtureRoleID,
+		VolumeFixturePolicyCreateDate: item.volumeFixturePolicyCreateDate, VolumeFixtureBucketCreationDate: item.volumeFixtureBucketCreationDate,
+		VolumeFixtureDeleteProtocol: item.volumeFixtureDeleteProtocol, VolumeFixtureDeleteAttempted: item.volumeFixtureDeleteAttempted,
 	}
 	path := cleanupJournalPath(c.journal, item.role)
 	if c.journalPaths != nil {
@@ -586,18 +806,80 @@ func (c *cleanup) journalValues(item *cleanupItem) (report.CleanupJournal, repor
 }
 
 func readRunnerJournal(path string) (report.CleanupJournal, bool, error) {
-	data, err := os.ReadFile(path)
+	journal, legacy, _, err := readRunnerJournalSnapshot(path)
+	return journal, legacy, err
+}
+
+// The bytes returned here are the same opened, validated bytes used for the
+// journal decision. Reservation rollback may restore only this snapshot.
+func readRunnerJournalSnapshot(path string) (report.CleanupJournal, bool, []byte, error) {
+	root, err := os.OpenRoot(filepath.Dir(path))
 	if err != nil {
-		return report.CleanupJournal{}, false, err
+		return report.CleanupJournal{}, false, nil, err
 	}
+	defer root.Close()
+	return readRunnerJournalRootSnapshot(root, path)
+}
+
+func (c *cleanup) openLockedJournalRoot(path string) (*os.Root, error) {
+	parent, err := c.checkedJournalParentLocked(path)
+	if err != nil {
+		return nil, err
+	}
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	anchored, err := root.Stat(".")
+	if err != nil || !os.SameFile(parent, anchored) {
+		root.Close()
+		return nil, fmt.Errorf("cleanup journal parent changed before rooted transition: %v", err)
+	}
+	return root, nil
+}
+
+func (c *cleanup) openRememberedJournalRoot(path string) (*os.Root, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.openLockedJournalRoot(path)
+}
+
+// Take the remembered inode before acquiring a journal lock. Callers must
+// compare it again within the lock and before a provider create is launched.
+
+func readRunnerJournalRoot(root *os.Root, path string) (report.CleanupJournal, bool, error) {
+	journal, legacy, _, err := readRunnerJournalRootSnapshot(root, path)
+	return journal, legacy, err
+}
+
+func readRunnerJournalRootSnapshot(root *os.Root, path string) (report.CleanupJournal, bool, []byte, error) {
+	file, err := root.Open(filepath.Base(path))
+	if err != nil {
+		return report.CleanupJournal{}, false, nil, err
+	}
+	data, private, readErr := journalfile.ReadRecoveryFileRoot(root, file, filepath.Base(path))
+	if err := errors.Join(readErr, file.Close()); err != nil {
+		return report.CleanupJournal{}, false, nil, err
+	}
+	journal, legacy, err := decodeRunnerJournal(path, data, private)
+	if err != nil {
+		return report.CleanupJournal{}, false, nil, err
+	}
+	return journal, legacy, data, nil
+}
+
+func decodeRunnerJournal(path string, data []byte, private bool) (report.CleanupJournal, bool, error) {
 	var journal report.CleanupJournal
 	legacy := strings.HasPrefix(strings.TrimSpace(string(data)), "[")
 	if legacy {
-		if err := json.Unmarshal(data, &journal.Entries); err != nil {
+		if err := execpkg.UnmarshalStrictJSON(data, &journal.Entries); err != nil {
 			return report.CleanupJournal{}, false, fmt.Errorf("cleanup journal %s: %w", path, err)
 		}
-	} else if err := json.Unmarshal(data, &journal); err != nil {
+	} else if err := execpkg.UnmarshalStrictJSON(data, &journal); err != nil {
 		return report.CleanupJournal{}, false, fmt.Errorf("cleanup journal %s: %w", path, err)
+	}
+	if !legacy && journalfile.ProtectedRecoveryJournal(journal) && !private {
+		return report.CleanupJournal{}, false, fmt.Errorf("protected cleanup journal is not a private regular file")
 	}
 	if err := journalfile.CheckJournalPath(path, journal); err != nil {
 		return report.CleanupJournal{}, false, err
@@ -611,6 +893,23 @@ func mergeJournalMetadata(journal *report.CleanupJournal, desired report.Cleanup
 			return fmt.Errorf("cleanup journal Quota credential binding changed")
 		}
 		journal.QuotaBinding = desired.QuotaBinding
+	}
+	if desired.VolumeFixtureBinding != nil {
+		if journal.VolumeFixtureBinding != nil && !reflect.DeepEqual(journal.VolumeFixtureBinding, desired.VolumeFixtureBinding) {
+			return fmt.Errorf("cleanup journal Volume fixture credential binding changed")
+		}
+		journal.VolumeFixtureBinding = desired.VolumeFixtureBinding
+		if journal.VolumeFixtureBucket != "" && journal.VolumeFixtureBucket != desired.VolumeFixtureBucket {
+			return fmt.Errorf("cleanup journal Volume fixture bucket changed")
+		}
+		journal.VolumeFixtureBucket = desired.VolumeFixtureBucket
+		if desired.JournalPath == "" {
+			return fmt.Errorf("Volume fixture journal anchor is missing")
+		}
+		if journal.JournalPath != "" && journal.JournalPath != desired.JournalPath {
+			return fmt.Errorf("Volume fixture journal anchor changed")
+		}
+		journal.JournalPath = desired.JournalPath
 	}
 	for _, field := range []struct {
 		name    string
@@ -638,7 +937,7 @@ func mergeJournalMetadata(journal *report.CleanupJournal, desired report.Cleanup
 }
 
 func journalEntriesMatch(left, right report.Resource) bool {
-	if left.Scope != right.Scope || left.Teardown != right.Teardown || left.CacheCreatePending != right.CacheCreatePending || left.QuotaUpdatePending != right.QuotaUpdatePending {
+	if left.Scope != right.Scope || left.Teardown != right.Teardown || left.CacheCreatePending != right.CacheCreatePending || left.QuotaUpdatePending != right.QuotaUpdatePending || left.VolumeFixtureKind != right.VolumeFixtureKind || left.VolumeFixturePending != right.VolumeFixturePending || left.VolumeFixtureDispatchProtocol != right.VolumeFixtureDispatchProtocol || left.VolumeFixtureDispatched != right.VolumeFixtureDispatched || left.VolumeFixtureCreateRequestID != right.VolumeFixtureCreateRequestID || left.VolumeFixtureCreateResponseSHA256 != right.VolumeFixtureCreateResponseSHA256 || left.VolumeFixtureCreateValidated != right.VolumeFixtureCreateValidated || left.VolumeFixtureRoleID != right.VolumeFixtureRoleID || left.VolumeFixturePolicyCreateDate != right.VolumeFixturePolicyCreateDate || left.VolumeFixtureBucketCreationDate != right.VolumeFixtureBucketCreationDate || left.VolumeFixtureDeleteProtocol != right.VolumeFixtureDeleteProtocol || left.VolumeFixtureDeleteAttempted != right.VolumeFixtureDeleteAttempted || left.VolumeTeamBound != right.VolumeTeamBound {
 		return false
 	}
 	for _, values := range [][2]string{
@@ -654,11 +953,35 @@ func journalEntriesMatch(left, right report.Resource) bool {
 }
 
 func writeRunnerJournal(path string, journal report.CleanupJournal) error {
-	data, err := json.MarshalIndent(journal, "", "  ")
+	data, err := runnerJournalBytes(journal)
 	if err != nil {
 		return err
 	}
-	return journalfile.WriteDurable(path, append(data, '\n'))
+	return journalfile.WriteDurable(path, data)
+}
+
+func writeRunnerJournalRoot(root *os.Root, path string, journal report.CleanupJournal) error {
+	data, err := runnerJournalBytes(journal)
+	if err != nil {
+		return err
+	}
+	return journalfile.WriteDurableRoot(root, filepath.Base(path), data)
+}
+
+func runnerJournalBytes(journal report.CleanupJournal) ([]byte, error) {
+	data, err := json.MarshalIndent(journal, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
+}
+
+func reaffirmRunnerJournal(path string, journal report.CleanupJournal) error {
+	data, err := runnerJournalBytes(journal)
+	if err != nil {
+		return err
+	}
+	return journalfile.ReaffirmDurable(path, data)
 }
 
 // isReplayableTeardown keeps crash-recovery journals within the repository's
@@ -688,7 +1011,7 @@ func (c *cleanup) runCaseCleanup(scope []*cleanupItem) []string {
 }
 
 // Retry only unattempted case cleanup after all allocation steps have settled.
-// Each retained scope keeps its original LIFO dependency order and all guards.
+// Each retained scope keeps its dependency order and all guards.
 func (c *cleanup) runDeferredCleanup() []string {
 	c.mu.Lock()
 	scopes := c.deferredScopes
@@ -701,22 +1024,84 @@ func (c *cleanup) runDeferredCleanup() []string {
 			item.deferred = false
 		}
 		c.mu.Unlock()
-		failures = append(failures, c.run(scope)...)
+	}
+	// A parent registered before its child may be first in this queue. Only
+	// an untouched Team/Volume child dependency waits for a later scope; an
+	// attempted delete or any other failure must remain a hard failure.
+	maxPasses := len(scopes) + 1
+	for pass := 0; len(scopes) > 0 && pass < maxPasses; pass++ {
+		pending := make([][]*cleanupItem, 0, len(scopes))
+		progress := false
+		for _, scope := range scopes {
+			before := c.completedCleanupItems(scope)
+			var waiting bool
+			scopeFailures := c.runCleanup(scope, false, &waiting)
+			failures = append(failures, scopeFailures...)
+			if c.completedCleanupItems(scope) > before {
+				progress = true
+			}
+			if waiting && len(scopeFailures) == 0 {
+				pending = append(pending, scope)
+			}
+		}
+		if len(pending) == 0 {
+			return failures
+		}
+		if !progress {
+			for _, scope := range pending {
+				failures = append(failures, deferredChildFailure(scope))
+			}
+			return failures
+		}
+		scopes = pending
+	}
+	for _, scope := range scopes {
+		failures = append(failures, deferredChildFailure(scope))
 	}
 	return failures
 }
 
-func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
+func deferredChildFailure(scope []*cleanupItem) string {
+	for _, item := range scope {
+		if !item.done {
+			return fmt.Sprintf("cleanup coordination: %s: %v", report.Scrub(item.cmd), ErrTeamVolumeChildPending)
+		}
+	}
+	return fmt.Sprintf("cleanup coordination: %v", ErrTeamVolumeChildPending)
+}
+
+func (c *cleanup) completedCleanupItems(scope []*cleanupItem) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var completed int
+	for _, item := range scope {
+		if item.done {
+			completed++
+		}
+	}
+	return completed
+}
+
+func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool, pendingWait ...*bool) []string {
 	var failures []string
+	volumeChildFailed := false
 	if c.keep {
 		return nil
 	}
-	for i := len(scope) - 1; i >= 0; i-- {
-		it := scope[i]
+	// A Volume can be transferred to a Team registered after the Volume. Its
+	// retained delete must run before either Team's finalizer.
+	ordered := volumeFirstCleanupOrder(scope)
+	for i, it := range ordered {
 		cacheDelete := journalfile.IsTemplateCacheDelete(it.cmd)
+		volumeDelete, volumeErr := classifyVolumeFinalizer(it.cmd)
 		quotaDelete := quotaDeleteCandidate(it.cmd)
 		teamDelete := ownedTeamDeleteCandidate(it.cmd)
-		orderedChildDelete := cacheDelete || quotaDelete
+		boundVolume := it.templateBinding != nil && it.templateBinding.Resource == "volume"
+		volumeChildDelete := volumeDelete || boundVolume
+		orderedChildDelete := cacheDelete || quotaDelete || volumeDelete || volumeErr != nil || boundVolume || it.volumeFixtureKind != ""
+		if volumeChildFailed && (teamDelete || it.volumeFixtureKind != "") {
+			continue
+		}
 		c.mu.Lock()
 		if it.done {
 			c.mu.Unlock()
@@ -724,8 +1109,11 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 		}
 		if it.running || it.deferred {
 			c.mu.Unlock()
-			if orderedChildDelete {
+			if orderedChildDelete && !volumeChildDelete {
 				break
+			}
+			if volumeChildDelete {
+				volumeChildFailed = true
 			}
 			continue
 		}
@@ -746,6 +1134,15 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 			preflightCtx, cancelPreflight := context.WithTimeout(context.Background(), min(cleanupTimeout, 30*time.Second))
 			defer cancelPreflight()
 			runGuard := func() error {
+				if volumeErr != nil {
+					return volumeErr
+				}
+				if volumeDelete && !boundVolume {
+					return fmt.Errorf("native Volume finalizer requires exact retained creation ownership")
+				}
+				if boundVolume && !volumeDelete {
+					return fmt.Errorf("bound native finalizer requires its resource delete")
+				}
 				before := func() error {
 					if unstartedQuota && pendingQuota {
 						if err := c.retireUnstartedQuotaUpdate(it); err != nil {
@@ -759,6 +1156,41 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 					teamDeleteBeforeReplayLock()
 				}
 				return c.withTemplateCleanupGuardBefore(preflightCtx, it.role, true, before, func(bound execpkg.Config) error {
+					volumeTeamAlreadyAbsent := false
+					var volumeTeamPath string
+					var volumeTeamJournal report.CleanupJournal
+					var volumeTeamEntry report.Resource
+					bucketPresence := journalfile.VolumeFixtureBucketUnknown
+					if it.volumeFixtureKind != "" {
+						c.mu.Lock()
+						uncertainRetirement := c.volumeTeamRetirementUncertain
+						c.mu.Unlock()
+						if uncertainRetirement {
+							return fmt.Errorf("Volume Team never-started retirement is uncertain")
+						}
+						if it.volumeFixturePending {
+							return fmt.Errorf("Volume fixture creation outcome is uncertain")
+						}
+						meta, entry, path := c.journalValues(it)
+						journal, legacy, err := readRunnerJournal(path)
+						if err != nil || legacy || !reflect.DeepEqual(journal.VolumeFixtureBinding, meta.VolumeFixtureBinding) || journal.VolumeFixtureBucket != meta.VolumeFixtureBucket || journal.JournalPath != path {
+							return fmt.Errorf("Volume fixture journal ownership changed")
+						}
+						bound, err = journalfile.ProbeQuotaBinding(preflightCtx, journal.VolumeFixtureBinding, bound)
+						if err != nil {
+							return err
+						}
+						if err := journalfile.VolumeFixtureCleanupReady(path, journal, entry, c.execCfg[it.role].Env); err != nil {
+							return err
+						}
+						bucketPresence, err = journalfile.VolumeFixtureBucketEmpty(preflightCtx, bound, journal.VolumeFixtureBucket, c.runCommand)
+						if err != nil {
+							return err
+						}
+						if it.volumeFixtureKind != "bucket" && bucketPresence != journalfile.VolumeFixtureBucketVerifiedAbsent {
+							return fmt.Errorf("Volume fixture RAM teardown requires verified bucket absence")
+						}
+					}
 					if unstartedQuota {
 						return nil
 					}
@@ -776,6 +1208,28 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 						if owned != nil && owned != it {
 							return fmt.Errorf("owned Team finalizer changed before cleanup")
 						}
+						if it.volumeTeamBound {
+							_, _, path := c.journalValues(it)
+							journal, legacy, err := readRunnerJournal(path)
+							if err != nil || legacy {
+								return fmt.Errorf("Volume Team creator journal is unavailable: %v", err)
+							}
+							var found bool
+							bound, found, err = journalfile.VolumeTeamCreatorConfig(preflightCtx, journal, c.execCfg[it.role], it.ownedTeamID)
+							if err != nil || !found {
+								return fmt.Errorf("Volume Team creator credential is unavailable: %v", err)
+							}
+							volumeTeamPath, volumeTeamJournal, volumeTeamEntry, err = c.volumeTeamChildContext(it)
+							if err != nil {
+								return err
+							}
+							childCtx, cancelChildren := context.WithTimeout(context.Background(), cleanupCommandTimeout(it.cmd))
+							volumeTeamAlreadyAbsent, err = journalfile.PrepareVolumeTeamChildren(childCtx, volumeTeamPath, volumeTeamJournal, volumeTeamEntry, bound, c.runCommand)
+							cancelChildren()
+							if err != nil {
+								return err
+							}
+						}
 					}
 					if quotaDelete {
 						if err := c.verifyOwnedQuotaDelete(scope, nil, it.cmd, it.role); err != nil {
@@ -787,8 +1241,33 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 					if err != nil {
 						return err
 					}
-					if it.templateBinding != nil && !native {
-						return fmt.Errorf("bound native Template finalizer requires a native delete")
+					volumeNative, err := classifyVolumeFinalizer(command)
+					if err != nil {
+						return err
+					}
+					if volumeNative && (it.templateBinding == nil || it.templateBinding.Resource != "volume") {
+						return fmt.Errorf("native Volume finalizer requires exact retained creation ownership")
+					}
+					if it.templateBinding != nil && (it.templateBinding.Resource == "volume" && !volumeNative || it.templateBinding.Resource == "" && !native) {
+						return fmt.Errorf("bound native finalizer requires its resource delete")
+					}
+					if volumeNative && it.templateBinding != nil && it.templateBinding.Resource == "volume" {
+						args, splitErr := shlex.Split(command)
+						if splitErr != nil || len(args) < 5 {
+							return fmt.Errorf("invalid owned Volume delete grammar")
+						}
+						meta, _, requested := c.journalValues(it)
+						meta, path, err := c.requiredTemplateJournal(it.role, meta, requested)
+						if err != nil {
+							return err
+						}
+						if err := journalfile.CheckTemplateDeleteOwnership(path, meta, c.execCfg[it.role].Env, *it.templateBinding, command); err != nil {
+							return err
+						}
+						intent := templateCreateIntent{TemplateCreateIntent: *it.templateBinding}
+						if command != intent.deleteCommand(args[4]) {
+							return fmt.Errorf("Volume finalizer differs from retained exact delete")
+						}
 					}
 					if native {
 						if it.templateBinding == nil || c.journal == "" {
@@ -821,17 +1300,243 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 							return err
 						}
 						bound = binding.BoundConfig(c.execCfg[it.role])
+						bound.Region, bound.Profile = binding.Region, binding.Profile
+					}
+					if volumeNative {
+						command += " --output=json --agent-envelope=false"
+					}
+					if it.volumeFixtureKind == "bucket" && bucketPresence == journalfile.VolumeFixtureBucketVerifiedAbsent {
+						res = execpkg.Result{Exit: 0}
+						return c.retireAbsentVolumeFixture(it)
+					}
+					fencedFixture := journalfile.VolumeFixtureFencedKind(it.volumeFixtureKind)
+					fixtureReadOnly := fencedFixture && (it.volumeFixtureDeleteAttempted || it.volumeFixtureDeleteProtocol != 1)
+					freshFixtureAttempt := false
+					freshVolumeAttempt := false
+					if fencedFixture && !fixtureReadOnly {
+						meta, entry, _ := c.journalValues(it)
+						if !c.fixtureMutationAllowed("delete", it.volumeFixtureKind, meta.VolumeFixtureBucket, it, bound) {
+							return fmt.Errorf("Volume fixture name mutation requires a provider-bound target or an exclusive mutation scope")
+						}
+						switch it.volumeFixtureKind {
+						case "role":
+							var roleRead execpkg.Result
+							roleRead, err = journalfile.VolumeFixtureRoleMatches(preflightCtx, bound, entry, meta, c.runCommand)
+							if err != nil && roleRead.Err == nil && roleRead.Started && roleRead.Exit == exitNotFound {
+								if _, absentErr := journalfile.VolumeFixtureRoleAbsent(preflightCtx, bound, entry, meta, c.runCommand); absentErr == nil {
+									res = execpkg.Result{Exit: 0}
+									return c.retireAbsentVolumeFixture(it)
+								} else {
+									err = absentErr
+								}
+							}
+						case "policy":
+							var policyRead execpkg.Result
+							policyRead, err = journalfile.VolumeFixturePolicyMatches(preflightCtx, bound, entry, meta, c.runCommand)
+							if err != nil && policyRead.Err == nil && policyRead.Started && policyRead.Exit == exitNotFound {
+								if _, absentErr := journalfile.VolumeFixturePolicyAbsent(preflightCtx, bound, entry, meta, func(context.Context, execpkg.Config, string) execpkg.Result { return policyRead }); absentErr == nil {
+									res = execpkg.Result{Exit: 0}
+									return c.retireAbsentVolumeFixture(it)
+								} else {
+									err = absentErr
+								}
+							}
+						case "bucket":
+							_, err = journalfile.VolumeFixtureBucketMatches(preflightCtx, bound, entry, meta, c.runCommand)
+						case "attachment":
+							var current report.CleanupJournal
+							current, err = c.currentVolumeFixtureJournal(it)
+							if err == nil {
+								var role, policy report.Resource
+								role, policy, err = journalfile.VolumeFixtureRAMParents(current)
+								if err == nil {
+									var roleRead execpkg.Result
+									roleRead, err = journalfile.VolumeFixtureRoleMatches(preflightCtx, bound, role, current, c.runCommand)
+									if err != nil && roleRead.Err == nil && roleRead.Started && roleRead.Exit == exitNotFound {
+										if _, absentErr := journalfile.VolumeFixtureRoleAbsent(preflightCtx, bound, role, current, func(context.Context, execpkg.Config, string) execpkg.Result { return roleRead }); absentErr == nil {
+											res = execpkg.Result{Exit: 0}
+											return c.retireAbsentVolumeFixture(it)
+										} else {
+											err = absentErr
+										}
+									}
+								}
+								if err == nil {
+									var policyRead execpkg.Result
+									policyRead, err = journalfile.VolumeFixturePolicyMatches(preflightCtx, bound, policy, current, c.runCommand)
+									if err != nil && policyRead.Err == nil && policyRead.Started && policyRead.Exit == exitNotFound {
+										if _, absentErr := journalfile.VolumeFixturePolicyAbsent(preflightCtx, bound, policy, current, func(context.Context, execpkg.Config, string) execpkg.Result { return policyRead }); absentErr == nil {
+											res = execpkg.Result{Exit: 0}
+											return c.retireAbsentVolumeFixture(it)
+										} else {
+											err = absentErr
+										}
+									}
+								}
+							}
+						}
+						if err != nil {
+							return err
+						}
+						if err := c.markVolumeFixtureDeleteAttempt(it); err != nil {
+							return err
+						}
+						freshFixtureAttempt = true
 					}
 					itemTimeout = cleanupCommandTimeout(command)
 					commandCtx, cancel := context.WithTimeout(context.Background(), itemTimeout)
-					res = c.runCommand(commandCtx, bound, command)
-					// A refused guard/lock or a failure to start is not an attempt.
-					// Keep those finalizers eligible for the later cleanup pass.
+					volumeReadOnly := false
+					if volumeNative {
+						request, parseErr := journalfile.ParseVolumeDeleteRequest(it.cmd)
+						if parseErr != nil {
+							cancel()
+							return parseErr
+						}
+						teams, scopeErr := c.ownedVolumeDeleteScopes(it)
+						if scopeErr != nil {
+							cancel()
+							return scopeErr
+						}
+						current, absent, probeErr := journalfile.ProbeVolumeScopes(commandCtx, bound, request.ID, it.templateBinding.Name, it.templateBinding.Region, it.templateBinding.Profile, teams, c.runCommand)
+						if probeErr != nil {
+							cancel()
+							return probeErr
+						}
+						if absent {
+							if err := c.requireTerminalVolumeAbsence(it); err != nil {
+								cancel()
+								return err
+							}
+							volumeReadOnly = true
+							res = execpkg.Result{Started: true, Exit: 0, JSON: map[string]any{"deleted": true}}
+						} else {
+							if it.volumeDeleteAttempted {
+								waitCtx, cancelWait := context.WithTimeout(commandCtx, 45*time.Second)
+								terminal := journalfile.WaitVolumeAbsent(waitCtx, bound, request.ID, it.templateBinding.Name, it.templateBinding.Region, it.templateBinding.Profile, teams, c.runCommand)
+								cancelWait()
+								if !terminal {
+									cancel()
+									return fmt.Errorf("Volume delete was already attempted and remains present")
+								}
+								if err := c.requireTerminalVolumeAbsence(it); err != nil {
+									cancel()
+									return err
+								}
+								volumeReadOnly = true
+								res = execpkg.Result{Started: true, Exit: 0, JSON: map[string]any{"deleted": true}}
+							} else {
+								command += " --team-id " + teamCommandArgument(current)
+								if err := preflightCtx.Err(); err != nil {
+									cancel()
+									return err
+								}
+								if err := c.markOwnedVolumeDeleteAttempt(it); err != nil {
+									cancel()
+									return err
+								}
+								freshVolumeAttempt = true
+							}
+						}
+					}
+					if fixtureReadOnly {
+						meta, entry, _ := c.journalValues(it)
+						switch it.volumeFixtureKind {
+						case "role":
+							res, err = journalfile.VolumeFixtureRoleAbsent(commandCtx, bound, entry, meta, c.runCommand)
+						case "bucket":
+							res, err = journalfile.VolumeFixtureBucketAbsent(commandCtx, bound, entry, meta, c.runCommand)
+						case "policy":
+							res, err = journalfile.VolumeFixturePolicyAbsent(commandCtx, bound, entry, meta, c.runCommand)
+						case "attachment":
+							var current report.CleanupJournal
+							current, err = c.currentVolumeFixtureJournal(it)
+							if err == nil {
+								res, err = journalfile.VolumeFixtureAttachmentAbsent(commandCtx, bound, entry, current, c.runCommand)
+							}
+						}
+						if err != nil {
+							cancel()
+							return err
+						}
+					} else if volumeTeamAlreadyAbsent {
+						res = execpkg.Result{Started: true, Exit: exitNotFound, JSON: map[string]any{"deleted": true}}
+					} else if !volumeReadOnly {
+						if it.volumeTeamBound && teamDelete {
+							if err := journalfile.ReserveVolumeTeamDelete(commandCtx, volumeTeamPath, volumeTeamJournal, volumeTeamEntry, bound); err != nil {
+								cancel()
+								return err
+							}
+						}
+						res = c.runCommand(commandCtx, bound, command)
+						if it.volumeTeamBound && teamDelete && journalfile.IsVolumeTeamChildConflict(res) {
+							if err := journalfile.RecordVolumeTeamConflict(commandCtx, volumeTeamPath, volumeTeamJournal, volumeTeamEntry, bound, res); err != nil {
+								cancel()
+								return err
+							}
+							retry, err := journalfile.RetryVolumeTeamDeleteAfterConflict(commandCtx, volumeTeamPath, volumeTeamJournal, volumeTeamEntry, bound, c.runCommand)
+							if err != nil {
+								cancel()
+								return err
+							}
+							res = retry
+						}
+					}
+					if freshVolumeAttempt && !res.Started && res.Exit == -1 && res.Err != nil {
+						cancel()
+						if err := c.restoreUnstartedOwnedVolumeDeleteAttempt(it); err != nil {
+							return fmt.Errorf("restore unused Volume delete marker: %w", err)
+						}
+						return fmt.Errorf("Volume delete did not start: %w", res.Err)
+					}
+					if freshVolumeAttempt && journalfile.VolumeDefinitiveDeleteRejection(res) {
+						if err := c.restoreRejectedOwnedVolumeDeleteAttempt(commandCtx, it, bound); err != nil {
+							cancel()
+							return fmt.Errorf("retain rejected Volume delete marker: %w", err)
+						}
+						cancel()
+						return fmt.Errorf("Volume delete was definitively rejected; retry is available")
+					}
+					if freshFixtureAttempt && !res.Started && res.Err != nil && res.Exit == -1 {
+						cancel()
+						if err := c.restoreUnstartedVolumeFixtureDeleteAttempt(it); err != nil {
+							return fmt.Errorf("restore unused Volume fixture delete marker: %w", err)
+						}
+						return fmt.Errorf("Volume fixture delete did not start: %w", res.Err)
+					}
+					if freshFixtureAttempt && it.volumeFixtureKind == "attachment" {
+						current, readErr := c.currentVolumeFixtureJournal(it)
+						if readErr != nil {
+							cancel()
+							return readErr
+						}
+						_, entry, _ := c.journalValues(it)
+						res, err = journalfile.VolumeFixtureAttachmentAbsent(commandCtx, bound, entry, current, c.runCommand)
+						if err != nil {
+							cancel()
+							return err
+						}
+					}
+					if freshFixtureAttempt && it.volumeFixtureKind != "attachment" {
+						meta, entry, _ := c.journalValues(it)
+						if err := journalfile.VolumeFixtureDeleteConfirmed(entry, meta, bound, res); err != nil {
+							cancel()
+							return err
+						}
+						proofCtx, cancelProof := context.WithTimeout(context.Background(), 30*time.Second)
+						res, err = journalfile.VolumeFixtureTerminalAbsent(proofCtx, bound, entry, meta, c.runCommand)
+						cancelProof()
+						if err != nil {
+							cancel()
+							return err
+						}
+					}
+					// A refused guard/lock or a provably unstarted subprocess
+					// makes no remote attempt; uncertain markers stay fenced.
 					c.mu.Lock()
-					it.done = res.Err == nil && res.Exit >= 0 && !quotaDelete && !it.teamCreateConfirmed
+					it.done = res.Err == nil && res.Exit >= 0 && !quotaDelete && !it.teamCreateConfirmed && !volumeDelete && !fencedFixture
 					c.mu.Unlock()
 					for attempt, delay := range cleanupRetryDelays {
-						if res.Exit == 0 || res.Exit == exitNotFound || !cleanupRetryable(res) {
+						if fencedFixture || volumeNative || it.volumeTeamBound && teamDelete || res.Exit == 0 || res.Exit == exitNotFound || !cleanupRetryable(res) {
 							break
 						}
 						c.logf("cleanup retry %d/%d after transient resource status: %s", attempt+1, len(cleanupRetryDelays), it.cmd)
@@ -852,18 +1557,34 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 									return err
 								}
 							}
-							if quotaDelete || teamDelete && it.quotaBound {
+							if quotaDelete || teamDelete && (it.quotaBound || it.volumeTeamBound) {
 								// The outer cleanup fence is still held. A retry launches a
 								// fresh credential provider, so check the original binding
 								// again without recursively acquiring that fence.
-								c.mu.Lock()
-								binding := c.quotaBinding
-								c.mu.Unlock()
-								if binding == nil {
-									cancel()
-									return fmt.Errorf("protected Quota retry lacks its original credential binding")
+								var verified execpkg.Config
+								var err error
+								if it.volumeTeamBound {
+									_, _, path := c.journalValues(it)
+									journal, legacy, readErr := readRunnerJournal(path)
+									if readErr != nil || legacy {
+										cancel()
+										return fmt.Errorf("Volume Team retry journal is unavailable: %v", readErr)
+									}
+									var found bool
+									verified, found, err = journalfile.VolumeTeamCreatorConfig(commandCtx, journal, c.execCfg[it.role], it.ownedTeamID)
+									if !found && err == nil {
+										err = fmt.Errorf("Volume Team retry lost its creator binding")
+									}
+								} else {
+									c.mu.Lock()
+									binding := c.quotaBinding
+									c.mu.Unlock()
+									if binding == nil {
+										cancel()
+										return fmt.Errorf("protected Quota retry lacks its original credential binding")
+									}
+									verified, err = journalfile.ProbeQuotaBinding(commandCtx, binding, c.execCfg[it.role])
 								}
-								verified, err := journalfile.ProbeQuotaBinding(commandCtx, binding, c.execCfg[it.role])
 								if err != nil {
 									cancel()
 									return err
@@ -877,20 +1598,55 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 						}
 					}
 					timedOut = commandCtx.Err() == context.DeadlineExceeded
+					if volumeDelete && it.templateBinding != nil && it.templateBinding.Resource == "volume" {
+						request, parseErr := journalfile.ParseVolumeDeleteRequest(it.cmd)
+						teams, scopeErr := c.ownedVolumeDeleteScopes(it)
+						probeCtx, cancelProbe := context.WithTimeout(context.Background(), 45*time.Second)
+						absent := parseErr == nil && scopeErr == nil && journalfile.WaitVolumeAbsent(probeCtx, bound, request.ID, it.templateBinding.Name, it.templateBinding.Region, it.templateBinding.Profile, teams, c.runCommand)
+						cancelProbe()
+						if !absent {
+							cancel()
+							return fmt.Errorf("owned Volume absence is unproven after cleanup delete")
+						}
+						if res.Exit != 0 {
+							res.Exit = exitNotFound
+						}
+					}
+					var teamReadback execpkg.Result
+					if teamDelete && it.volumeTeamBound && (res.Exit == 0 || res.Exit == exitNotFound) {
+						proofCtx, cancelProof := context.WithTimeout(context.Background(), 30*time.Second)
+						teamReadback, err = c.ownedTeamAbsence(proofCtx, it)
+						cancelProof()
+						if err != nil {
+							cancel()
+							return fmt.Errorf("owned Volume Team absence is unproven: %w", err)
+						}
+					}
 					cancel()
 					if res.Exit == 0 || res.Exit == exitNotFound {
 						if quotaDelete {
 							journalErr = c.consumeOwnedQuotaDelete(scope, it.cmd, it.role)
 						} else if it.teamCreateConfirmed {
-							journalErr = c.consumeOwnedTeamDelete(it)
+							if it.volumeTeamBound {
+								journalErr = c.consumeOwnedTeamDelete(it, res, teamReadback)
+							} else {
+								journalErr = c.consumeOwnedTeamDelete(it, res)
+							}
+						} else if volumeDelete {
+							journalErr = c.consumeOwnedVolumeDelete(it)
 						} else {
 							journalErr = c.completeJournalItem(journalItem)
+							if journalErr == nil && fencedFixture {
+								c.mu.Lock()
+								it.done = true
+								c.mu.Unlock()
+							}
 						}
 					}
 					return nil
 				}, it.cmd)
 			}
-			if quotaDelete || teamDelete {
+			if quotaDelete || teamDelete || volumeDelete {
 				claim := it.cmd
 				if teamDelete {
 					claim = ownedTeamClaimKey(it.cmd, c.execCfg[it.role].Region)
@@ -907,10 +1663,23 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 			coordinationErr = guardErr
 		}
 		if coordinationErr != nil {
-			if deferPending && !res.Started && (errors.Is(coordinationErr, journalfile.ErrTemplateCreatePending) || errors.Is(coordinationErr, journalfile.ErrTemplateCacheCreatePending) || errors.Is(coordinationErr, journalfile.ErrQuotaUpdatePending) || errors.Is(coordinationErr, ErrTeamCreatePending) || errors.Is(coordinationErr, ErrTeamRegistrationPending) || errors.Is(coordinationErr, context.DeadlineExceeded)) {
-				// Defer remaining ancestors with this child, even if another
-				// allocation settles before the next item could be checked.
-				remaining := append([]*cleanupItem(nil), scope[:i+1]...)
+			if !deferPending && len(pendingWait) == 1 && pendingWait[0] != nil && !res.Started && errors.Is(coordinationErr, ErrTeamVolumeChildPending) {
+				*pendingWait[0] = true
+				continue
+			}
+			if deferPending && !res.Started && (errors.Is(coordinationErr, journalfile.ErrTemplateCreatePending) || errors.Is(coordinationErr, journalfile.ErrTemplateCacheCreatePending) || errors.Is(coordinationErr, journalfile.ErrQuotaUpdatePending) || errors.Is(coordinationErr, ErrTeamCreatePending) || errors.Is(coordinationErr, ErrTeamRegistrationPending) || errors.Is(coordinationErr, ErrTeamVolumeChildPending) || errors.Is(coordinationErr, context.DeadlineExceeded)) {
+				// Store the unvisited subset in registration order. The deferred
+				// pass applies Volume-first reverse order again when it retries.
+				pending := make(map[*cleanupItem]bool, len(ordered)-i)
+				for _, item := range ordered[i:] {
+					pending[item] = true
+				}
+				remaining := make([]*cleanupItem, 0, len(pending))
+				for _, item := range scope {
+					if pending[item] {
+						remaining = append(remaining, item)
+					}
+				}
 				c.mu.Lock()
 				for _, item := range remaining {
 					item.deferred = true
@@ -927,8 +1696,14 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 			c.logf("cleanup failed: %s", failure)
 			failures = append(failures, failure)
 			if orderedChildDelete {
-				// The remaining entries may be this cache's Template and Team.
-				break
+				c.mu.Lock()
+				it.done = false
+				c.mu.Unlock()
+				if !volumeChildDelete {
+					// The remaining entries may be this cache's Template and Team.
+					break
+				}
+				volumeChildFailed = true
 			}
 			continue
 		}
@@ -960,10 +1735,35 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool) []string {
 			c.mu.Lock()
 			it.done = false
 			c.mu.Unlock()
-			break
+			if !volumeChildDelete {
+				break
+			}
+			volumeChildFailed = true
 		}
 	}
 	return failures
+}
+
+func volumeFirstCleanupOrder(scope []*cleanupItem) []*cleanupItem {
+	volumes := make([]*cleanupItem, 0, len(scope))
+	others := make([]*cleanupItem, 0, len(scope))
+	buckets := make([]*cleanupItem, 0, 1)
+	ramFixtures := make([]*cleanupItem, 0, 3)
+	for i := len(scope) - 1; i >= 0; i-- {
+		item := scope[i]
+		volume, err := classifyVolumeFinalizer(item.cmd)
+		switch {
+		case volume || err != nil || item.templateBinding != nil && item.templateBinding.Resource == "volume":
+			volumes = append(volumes, item)
+		case item.volumeFixtureKind == "bucket":
+			buckets = append(buckets, item)
+		case item.volumeFixtureKind == "attachment" || item.volumeFixtureKind == "policy" || item.volumeFixtureKind == "role":
+			ramFixtures = append(ramFixtures, item)
+		default:
+			others = append(others, item)
+		}
+	}
+	return append(append(append(volumes, others...), buckets...), ramFixtures...)
 }
 
 func (c *cleanup) completeJournalItem(item *cleanupItem) error {

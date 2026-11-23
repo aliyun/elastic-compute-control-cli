@@ -1,15 +1,66 @@
 package runner
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/sweeper"
 )
+
+func TestCleanupJournalReplaysDottedKeypairName(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake uses a bash script")
+	}
+	dir := canonicalCleanupTestDir(t)
+	journalPath := filepath.Join(dir, "cleanup-journal.json")
+	logPath := filepath.Join(dir, "calls.log")
+	fake := filepath.Join(dir, "ecctl")
+	if err := os.WriteFile(fake, []byte("#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$FAKE_LOG\"\nprintf '{\"deleted\":true}\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_LOG", logPath)
+	cfg := execpkg.Config{Bin: fake, Region: "cn-hangzhou"}
+	registry := newCleanup(
+		map[string]execpkg.Config{"primary": cfg}, nil, true, journalPath,
+		report.CleanupJournal{RunID: "run-1", ExecutionID: "execution-1", Surface: "public"},
+		func(string, ...any) {},
+	)
+	var scope []*cleanupItem
+	const teardown = "ecctl ecs keypair delete ops.key"
+	const call = "ecs keypair delete ops.key --region cn-hangzhou"
+	if err := registry.push(&scope, "ecs/keypair", teardown, "primary", nil); err != nil {
+		t.Fatal(err)
+	}
+	if entries := readJournalEntries(t, journalPath); len(entries) != 1 || entries[0].Teardown != teardown {
+		t.Fatalf("keypair finalizer was not retained exactly: %+v", entries)
+	}
+	result, err := sweeper.ReplayJournal(context.Background(), journalPath, cfg)
+	if err != nil || result == nil || result.Errors != 0 || result.Deleted != 1 {
+		t.Fatalf("replay dotted keypair: result=%+v err=%v", result, err)
+	}
+	calls, err := os.ReadFile(logPath)
+	if err != nil || strings.TrimSpace(string(calls)) != call {
+		t.Fatalf("replayed command changed the keypair name: calls=%q err=%v", calls, err)
+	}
+	if entries := readJournalEntries(t, journalPath); len(entries) != 0 {
+		t.Fatalf("successful replay retained keypair finalizer: %+v", entries)
+	}
+	result, err = sweeper.ReplayJournal(context.Background(), journalPath, cfg)
+	if err != nil || result == nil || result.Errors != 0 || result.Deleted != 0 {
+		t.Fatalf("second replay: result=%+v err=%v", result, err)
+	}
+	calls, err = os.ReadFile(logPath)
+	if err != nil || strings.TrimSpace(string(calls)) != call {
+		t.Fatalf("retired keypair was replayed twice: calls=%q err=%v", calls, err)
+	}
+}
 
 func TestCleanupJournalPreservesDuplicatePendingEntries(t *testing.T) {
 	journalPath := filepath.Join(t.TempDir(), "cleanup-journal.json")

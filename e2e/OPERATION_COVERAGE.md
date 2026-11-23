@@ -18,6 +18,15 @@ The public capability-filtered spec-to-case gate has zero gaps. A case being
 present is not live evidence: every new or changed operation remains `offline`
 until the exact case fingerprint passes against Alibaba Cloud.
 
+The `sandbox/volume` resource has one authored public lifecycle case covering
+`create`, `get`, `list`, and `delete` under one run-owned Team. Two Volumes
+exercise token pagination. OSS/RAM fixtures use execution-scoped names,
+durable reservations, pinned identity, and named target checks before
+name-based cleanup. Each Volume finalizer requires an exact provider-verified
+`VolumeNotFound` read under the original Team. All four registry entries
+remain `offline/not-run` pending authorized live validation. Their fingerprint is the SHA-256 of
+`cases/sandbox/volume-lifecycle.yaml`.
+
 ## Gap closure and prerequisite model
 
 | Resource | Former gaps | Why list/get-only coverage was insufficient | Case and cleanup model |

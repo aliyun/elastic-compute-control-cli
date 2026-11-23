@@ -29,6 +29,55 @@ type ossUtilRunnerResult struct {
 	err    error
 }
 
+func TestOSSUtilCallerRejectsCrossProcessIdentityBeforeTargetTransport(t *testing.T) {
+	pin, err := json.Marshal(expectedCredentialIdentity{Version: 1, AccountID: "1234567890123456", Type: "RAMUser", UserID: "user-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseEnv := ossUtilTestGetenv(t)
+	getenv := func(name string) string {
+		if name == expectedCredentialIdentityEnv {
+			return string(pin)
+		}
+		return baseEnv(name)
+	}
+	runner := &fakeOSSUtilRunner{results: []ossUtilRunnerResult{
+		{stdout: []byte("2.3.0")},
+		{stdout: []byte("ListObjects help")},
+	}}
+	caller, err := newOSSUtilCaller("prod", writeOSSUtilTestConfig(t), ecconfig.ResolvedRegion{Value: "cn-hangzhou", Source: ecconfig.RegionSourceExplicit}, getenv, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller.resolveRuntime = func(func(string) string) (string, error) { return "/test/ossutil", nil }
+	old := resolveCredentialSnapshotIdentity
+	defer func() { resolveCredentialSnapshotIdentity = old }()
+	resolveCredentialSnapshotIdentity = func(context.Context, resolvedOpenAPIProfile, *credentialSnapshot, string) (telemetry.Identity, error) {
+		return canonicalIdentity(map[string]any{"AccountId": "1234567890123456", "IdentityType": "RAMUser", "UserId": "user-b"})
+	}
+	_, err = caller.Call(context.Background(), "ListObjects", map[string]any{"Bucket": "owned-bucket", "MaxKeys": 1})
+	if appErrorCode(err) != "CredentialIdentityChanged" || len(runner.calls) != 2 {
+		t.Fatalf("mismatched OSS principal reached target transport: error=%v calls=%+v", err, runner.calls)
+	}
+}
+
+func TestOSSUtilCallerRejectsMalformedCrossProcessIdentity(t *testing.T) {
+	config := writeOSSUtilTestConfig(t)
+	baseEnv := ossUtilTestGetenv(t)
+	for _, raw := range []string{`{`, `{"version":1,"AccountId":"1234567890123456","IdentityType":"Account","SecurityToken":"secret"}`} {
+		getenv := func(name string) string {
+			if name == expectedCredentialIdentityEnv {
+				return raw
+			}
+			return baseEnv(name)
+		}
+		caller, err := newOSSUtilCaller("prod", config, ecconfig.ResolvedRegion{Value: "cn-hangzhou", Source: ecconfig.RegionSourceExplicit}, getenv, &fakeOSSUtilRunner{})
+		if caller != nil || appErrorCode(err) != "CredentialIdentityChanged" || strings.Contains(fmt.Sprint(err), "secret") {
+			t.Fatalf("invalid OSS expectation was accepted or echoed: caller=%v error=%v", caller, err)
+		}
+	}
+}
+
 func TestOSSUtilCommandEnvRefreshesDynamicCredential(t *testing.T) {
 	provider := &rotatingCredentialsProvider{}
 	caller := &OSSUtilCaller{
@@ -1039,6 +1088,24 @@ func TestOSSUtilCallerClassifiesBucketErrors(t *testing.T) {
 				t.Fatalf("not-found message = %q", appErr.Payload().Message)
 			}
 		})
+	}
+}
+
+func TestOSSUtilListObjectsPreservesProviderBucketAbsence(t *testing.T) {
+	runner := &fakeOSSUtilRunner{results: []ossUtilRunnerResult{
+		{stdout: []byte("2.3.0")},
+		{stdout: []byte("ListObjects help")},
+		{stderr: []byte("Error Code: NoSuchBucket\nError Message: The specified bucket does not exist.\nRequest ID: req-absent"), err: errors.New("exit status 1")},
+	}}
+	caller := newTestOSSUtilCaller(t, runner, "cn-hangzhou")
+	_, err := caller.Call(context.Background(), "ListObjects", map[string]any{"Bucket": "absent-bucket", "MaxKeys": 1})
+	var appErr *ecerrors.AppError
+	if !errors.As(err, &appErr) || appErr.ExitCode() != 4 {
+		t.Fatalf("ListObjects absence error = %v", err)
+	}
+	actions := appErr.Actions()
+	if len(actions) != 1 || actions[0].ActionName != "ListObjects" || actions[0].Code != "NoSuchBucket" || actions[0].ProviderVerified {
+		t.Fatalf("ossutil diagnostic action must remain unverified: %+v", actions)
 	}
 }
 

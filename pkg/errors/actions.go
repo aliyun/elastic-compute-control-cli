@@ -9,7 +9,7 @@ func WithActions(source error, actions []Action) error {
 	var appErr *AppError
 	if stderrors.As(source, &appErr) {
 		cloned := *appErr
-		cloned.actions = append([]Action(nil), actions...)
+		cloned.actions = cloneActions(actions)
 		return &cloned
 	}
 	return Service("CloudAPIError", source.Error(), false, WithActionsOption(actions...))
@@ -17,7 +17,7 @@ func WithActions(source error, actions []Action) error {
 
 func WithActionsOption(actions ...Action) Option {
 	return func(err *AppError) {
-		err.actions = append([]Action(nil), actions...)
+		err.actions = cloneActions(actions)
 	}
 }
 
@@ -25,7 +25,19 @@ func (e *AppError) Actions() []Action {
 	if e == nil {
 		return nil
 	}
-	return append([]Action(nil), e.actions...)
+	return cloneActions(e.actions)
+}
+
+func cloneActions(actions []Action) []Action {
+	cloned := append([]Action(nil), actions...)
+	for index := range cloned {
+		if cloned[index].Target == nil {
+			continue
+		}
+		target := *cloned[index].Target
+		cloned[index].Target = &target
+	}
+	return cloned
 }
 
 func ActionFromError(actionName string, err error) Action {
@@ -38,6 +50,7 @@ func ActionFromError(actionName string, err error) Action {
 		action.RequestID = appErr.requestID
 		action.Code = firstNonEmpty(appErr.rawCode, appErr.payload.Code)
 		action.Message = firstNonEmpty(appErr.rawMessage, appErr.payload.Message)
+		action.ProviderVerified = appErr.verifiedProviderResponse
 		return action
 	}
 	code, message, requestID := ParseCloudError(err.Error())

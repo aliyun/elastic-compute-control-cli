@@ -30,6 +30,7 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/coverage"
 	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/fixtureconfig"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalfile"
 	paramspkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/params"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/prereqcheck"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/regionselect"
@@ -183,6 +184,17 @@ func runCmd() *cobra.Command {
 			if len(suites) == 0 {
 				return &exitError{code: exitNoCases, msg: "no cases selected"}
 			}
+			runBinSHA256 := ""
+			if !dryRun {
+				ecctlBin, err = runner.CanonicalEcctlBin(ecctlBin)
+				if err != nil {
+					return err
+				}
+				runBinSHA256, err = journalfile.ExecutableSHA256(ecctlBin)
+				if err != nil {
+					return err
+				}
+			}
 			ctx, cancel := signalContext()
 			defer cancel()
 			primaryRegion := ""
@@ -192,13 +204,13 @@ func runCmd() *cobra.Command {
 			var unavailablePrerequisiteSuites []prerequisiteSkippedSuite
 			prerequisiteResult := prereqcheck.Result{Profiles: regionProfiles}
 			if len(suites) > 0 && !dryRun {
-				if err := validateSelectedBinary(ctx, ecctlBin, surface, stackFile, suites, validateBinary); err != nil {
+				if err := validateSelectedBinary(ctx, ecctlBin, surface, stackFile, suites, validateBinary, runBinSHA256); err != nil {
 					return err
 				}
 				required := probedPrerequisites(suites)
 				if len(required) > 0 {
 					prerequisiteResult, err = prereqcheck.Check(ctx, prereqcheck.Options{
-						Profiles: regionProfiles, Required: required, PrimaryRegion: primaryRegion, EcctlBin: ecctlBin,
+						Profiles: regionProfiles, Required: required, PrimaryRegion: primaryRegion, EcctlBin: ecctlBin, EcctlBinSHA256: runBinSHA256,
 					})
 					if err != nil {
 						return fmt.Errorf("check E2E prerequisites: %w", err)
@@ -208,6 +220,9 @@ func runCmd() *cobra.Command {
 						logf("warning: region %s prerequisite %s unavailable: %s", warning.Region, warning.Prerequisite, warning.Reason)
 					}
 					suites, unavailablePrerequisiteSuites = partitionUnavailablePrerequisiteSuites(suites, regionProfiles, primaryRegion)
+					if err := volumeFixtureSelectionError(unavailablePrerequisiteSuites, directVolumeSelection(args, unavailablePrerequisiteSuites)); err != nil {
+						return err
+					}
 					for _, skipped := range unavailablePrerequisiteSuites {
 						logf("warning: skipping %s: %s", skipped.Suite.Path, skipped.Reason)
 					}
@@ -228,11 +243,14 @@ func runCmd() *cobra.Command {
 					}
 				}
 				executionUnits, err = runplan.Build(runplan.Request{
-					Suites: suites, Profiles: regionProfiles, PrimaryRegion: primaryRegion,
+					Suites: suites, Profiles: regionProfiles, PrimaryRegion: primaryRegion, OfflinePreview: dryRun,
 					StackPrerequisites: stackPrerequisites, OptionalStackPrerequisites: optionalStackPrerequisites,
 				})
 				if err != nil {
 					return fmt.Errorf("plan E2E executions: %w", err)
+				}
+				if err := pinSandboxAssignments(executionUnits); err != nil {
+					return err
 				}
 			}
 
@@ -243,12 +261,24 @@ func runCmd() *cobra.Command {
 			if len(unavailablePrerequisiteSuites) > 0 {
 				executions = append(executions, unavailablePrerequisiteExecution(unavailablePrerequisiteSuites))
 			}
+			selectionErr := keywordPrerequisiteSelectionError(keyword, executionUnits, unavailablePrerequisiteSuites)
+			if selectionErr != nil {
+				executions = append(executions, report.Execution{ID: "selection", Error: selectionErr.Error(), Cases: []report.Case{{Name: "(selection)", Resource: "selection", Status: report.StatusFail, Error: selectionErr.Error()}}})
+			}
 			session := runner.NewSession()
 			defer session.Close()
-			var firstExecutionErr error
+			firstExecutionErr := selectionErr
 			for _, unit := range executionUnits {
 				if ctx.Err() != nil {
 					break
+				}
+				if len(unit.Assignments) == 0 {
+					selectionErr := fmt.Errorf("sandbox E2E requires a configured cn-hangzhou region for %s", unit.ID)
+					executions = append(executions, report.Execution{ID: unit.ID, Signature: unit.Signature, Error: selectionErr.Error(), Cases: []report.Case{{Name: "(region selection)", Resource: "sandbox", Status: report.StatusFail, Error: selectionErr.Error()}}})
+					if firstExecutionErr == nil {
+						firstExecutionErr = selectionErr
+					}
+					continue
 				}
 				attempts := make([]report.ExecutionAttempt, 0, len(unit.Assignments))
 				var finalUnitRun *report.Run
@@ -286,6 +316,7 @@ func runCmd() *cobra.Command {
 						Surface:            surface,
 						Parallel:           parallel,
 						EcctlBin:           ecctlBin,
+						EcctlBinSHA256:     runBinSHA256,
 						StepTimeout:        stepTimeout,
 						Keep:               keep,
 						DryRun:             dryRun,
@@ -395,8 +426,37 @@ func runCmd() *cobra.Command {
 	return cmd
 }
 
-func validateSelectedBinary(ctx context.Context, ecctlBin, selectedSurface, stackFile string, suites []*scenario.Suite, validateParsers bool) error {
-	caps, err := surfacepkg.LoadFromBinary(ctx, ecctlBin)
+// The Volume fixture uses Hangzhou. Other regional Sandbox suites retain
+// their planned assignments, including when no Hangzhou profile is present.
+func pinSandboxAssignments(units []runplan.ExecutionUnit) error {
+	for i := range units {
+		volume := false
+		for _, suite := range units[i].Suites {
+			if runplan.SuiteUsesVolumeFixture(suite) {
+				volume = true
+				break
+			}
+		}
+		if !volume {
+			continue
+		}
+		matching := make([]runplan.Assignment, 0, len(units[i].Assignments))
+		for _, assignment := range units[i].Assignments {
+			if assignment.Regions[runplan.PrimaryRole].ID == "cn-hangzhou" {
+				matching = append(matching, assignment)
+			}
+		}
+		units[i].Assignments = matching
+	}
+	return nil
+}
+
+func validateSelectedBinary(ctx context.Context, ecctlBin, selectedSurface, stackFile string, suites []*scenario.Suite, validateParsers bool, expectedSHA256 ...string) error {
+	cfg := execpkg.Config{Bin: ecctlBin}
+	if len(expectedSHA256) > 0 {
+		cfg.ExpectedBinSHA256 = expectedSHA256[0]
+	}
+	caps, err := surfacepkg.LoadFromConfig(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("load %s capabilities from %s: %w", selectedSurface, ecctlBin, err)
 	}
@@ -421,7 +481,7 @@ func validateSelectedBinary(ctx context.Context, ecctlBin, selectedSurface, stac
 		return fmt.Errorf("selected binary cannot run %s cases: %s %s: %s", selectedSurface, issues[0].Path, issues[0].Code, issues[0].Message)
 	}
 	if validateParsers {
-		if issues := surfacepkg.ValidateCommandParsers(ctx, ecctlBin, surfaceSuites); len(issues) > 0 {
+		if issues := surfacepkg.ValidateCommandParsersWithConfig(ctx, cfg, surfaceSuites); len(issues) > 0 {
 			return fmt.Errorf("selected binary cannot parse %s cases: %s %s: %s", selectedSurface, issues[0].Path, issues[0].Code, issues[0].Message)
 		}
 	}
@@ -431,6 +491,33 @@ func validateSelectedBinary(ctx context.Context, ecctlBin, selectedSurface, stac
 type prerequisiteSkippedSuite struct {
 	Suite  *scenario.Suite
 	Reason string
+}
+
+func volumeFixtureSelectionError(skipped []prerequisiteSkippedSuite, explicit bool) error {
+	if !explicit {
+		return nil
+	}
+	for _, item := range skipped {
+		if item.Suite.Resource == "sandbox/volume" {
+			return fmt.Errorf("Volume fixture mutation scope is unavailable for explicit live selection")
+		}
+	}
+	return nil
+}
+
+func directVolumeSelection(targets []string, skipped []prerequisiteSkippedSuite) bool {
+	for _, item := range skipped {
+		if item.Suite.Resource != "sandbox/volume" {
+			continue
+		}
+		for _, target := range targets {
+			path, _, _ := strings.Cut(target, "::")
+			if filepath.Clean(path) == filepath.Clean(item.Suite.Path) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func probedPrerequisites(suites []*scenario.Suite) map[string]bool {
@@ -500,6 +587,13 @@ func unavailablePrerequisiteExecution(suites []prerequisiteSkippedSuite) report.
 		})
 	}
 	return execution
+}
+
+func keywordPrerequisiteSelectionError(keyword string, units []runplan.ExecutionUnit, skipped []prerequisiteSkippedSuite) error {
+	if keyword != "" && len(units) == 0 && len(skipped) > 0 {
+		return &exitError{code: exitNoCases, msg: "no runnable cases selected: prerequisites unavailable"}
+	}
+	return nil
 }
 
 func resolveRunnerRegions(unit runplan.ExecutionUnit, assignment runplan.Assignment) (map[string]runner.Region, map[string]string, error) {
@@ -796,7 +890,120 @@ func sweepCmd() *cobra.Command {
 	f.DurationVar(&ttl, "ttl", 0, "delete resources older than this (ttl mode); 0 deletes all matched")
 	f.BoolVar(&dryRun, "dry-run", false, "list what would be deleted without deleting")
 	f.IntVar(&concurrency, "concurrency", 20, "parallel deletes within a resource kind")
-	cmd.AddCommand(sweepCheckCmd(), sweepReplayCmd(), sweepReconcileTemplateCacheCmd())
+	cmd.AddCommand(sweepCheckCmd(), sweepReplayCmd(), sweepReconcileTemplateCacheCmd(), sweepReconcileVolumeTeamCmd(), sweepReconcileVolumeCmd(), sweepReconcileVolumeFixtureCmd())
+	return cmd
+}
+
+func sweepReconcileVolumeTeamCmd() *cobra.Command {
+	var region, journalBin, surface, runID, name, profile, journalSHA, journalBinSHA, probeBin, probeBinSHA string
+	cmd := &cobra.Command{
+		Use:   "reconcile-volume-team JOURNAL",
+		Short: "Verify one pending Volume Team create before journal replay",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var err error
+			journalBin, err = runner.CanonicalEcctlBin(journalBin)
+			if err != nil {
+				return err
+			}
+			probeBin, err = runner.CanonicalEcctlBin(probeBin)
+			if err != nil {
+				return err
+			}
+			ctx, cancel := signalContext()
+			defer cancel()
+			result, err := runner.ReconcilePendingVolumeTeam(ctx, args[0], runner.VolumeTeamReconcileOptions{
+				Config: execpkg.Config{Bin: journalBin, Region: region}, RunID: runID, Surface: surface,
+				Name: name, Profile: profile, JournalSHA256: journalSHA, JournalBinSHA256: journalBinSHA,
+				ProbeBin: probeBin, ProbeBinSHA256: probeBinSHA,
+			})
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&region, "region", "", "expected Alibaba Cloud region")
+	f.StringVar(&journalBin, "ecctl-bin", "", "original journal ecctl binary")
+	f.StringVar(&surface, "surface", "", "expected command surface: public|full")
+	f.StringVar(&runID, "run-id", "", "expected run id")
+	f.StringVar(&name, "team-name", "", "reserved Volume Team nonce name")
+	f.StringVar(&profile, "profile", "", "expected Team creator profile")
+	f.StringVar(&journalSHA, "journal-sha256", "", "current pending journal SHA-256")
+	f.StringVar(&journalBinSHA, "ecctl-sha256", "", "original journal binary SHA-256")
+	f.StringVar(&probeBin, "probe-ecctl-bin", "", "ecctl binary for read-only Team list")
+	f.StringVar(&probeBinSHA, "probe-ecctl-sha256", "", "probe binary SHA-256")
+	return cmd
+}
+
+func sweepReconcileVolumeCmd() *cobra.Command {
+	var region, journalBin, surface, runID, name, profile, journalSHA, journalBinSHA, probeBin, probeBinSHA string
+	cmd := &cobra.Command{
+		Use:   "reconcile-volume JOURNAL",
+		Short: "Verify one pending Volume create before journal replay",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var err error
+			journalBin, err = runner.CanonicalEcctlBin(journalBin)
+			if err != nil {
+				return err
+			}
+			probeBin, err = runner.CanonicalEcctlBin(probeBin)
+			if err != nil {
+				return err
+			}
+			ctx, cancel := signalContext()
+			defer cancel()
+			result, err := runner.ReconcilePendingVolume(ctx, args[0], runner.VolumeReconcileOptions{
+				Config: execpkg.Config{Bin: journalBin, Region: region}, RunID: runID, Surface: surface,
+				Name: name, Profile: profile, JournalSHA256: journalSHA, JournalBinSHA256: journalBinSHA,
+				ProbeBin: probeBin, ProbeBinSHA256: probeBinSHA,
+			})
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&region, "region", "", "expected Alibaba Cloud region")
+	f.StringVar(&journalBin, "ecctl-bin", "", "original journal ecctl binary")
+	f.StringVar(&surface, "surface", "", "expected command surface: public|full")
+	f.StringVar(&runID, "run-id", "", "expected run id")
+	f.StringVar(&name, "volume-name", "", "reserved Volume nonce name")
+	f.StringVar(&profile, "profile", "", "expected Volume creator profile")
+	f.StringVar(&journalSHA, "journal-sha256", "", "current pending journal SHA-256")
+	f.StringVar(&journalBinSHA, "ecctl-sha256", "", "original journal binary SHA-256")
+	f.StringVar(&probeBin, "probe-ecctl-bin", "", "ecctl binary for read-only Volume list and get")
+	f.StringVar(&probeBinSHA, "probe-ecctl-sha256", "", "probe binary SHA-256")
+	return cmd
+}
+
+func sweepReconcileVolumeFixtureCmd() *cobra.Command {
+	var runID, surface, region, bucket, kind, journalSHA string
+	cmd := &cobra.Command{
+		Use: "reconcile-volume-fixture JOURNAL", Short: "Retire a proven pre-dispatch fixture or settle a role or policy from its create receipt",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := signalContext()
+			defer cancel()
+			result, err := runner.ReconcilePendingVolumeFixture(ctx, args[0], runner.VolumeFixtureReconcileOptions{
+				RunID: runID, Surface: surface, Region: region, Bucket: bucket, Kind: kind, JournalSHA256: journalSHA,
+			})
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&runID, "run-id", "", "expected run id")
+	f.StringVar(&surface, "surface", "", "expected command surface: public|full")
+	f.StringVar(&region, "region", "", "expected Alibaba Cloud region")
+	f.StringVar(&bucket, "bucket", "", "original Volume fixture bucket")
+	f.StringVar(&kind, "kind", "", "pending fixture kind: role|policy")
+	f.StringVar(&journalSHA, "journal-sha256", "", "current pending journal SHA-256")
 	return cmd
 }
 

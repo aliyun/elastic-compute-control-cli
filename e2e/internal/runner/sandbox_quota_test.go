@@ -44,7 +44,7 @@ func TestSandboxQuotaCaseReservesTeamAndReadsAfterDelete(t *testing.T) {
 	dir := canonicalCleanupTestDir(t)
 	cfg := execpkg.Config{Bin: filepath.Join(dir, "must-not-launch"), Region: "cn-hangzhou"}
 	cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, nil, true, filepath.Join(dir, "journal.json"), report.CleanupJournal{RunID: "quota-run", ExecutionID: "quota-execution", Surface: "public"}, func(string, ...any) {})
-	intent, err := reserveTeamCreate(command, data, cfg, cl, create)
+	intent, err := reserveTeamCreate(command, data, cfg, cl, create, cfg.Env)
 	if err != nil {
 		t.Fatalf("quota Team create cannot reserve recovery before cloud call: %v", err)
 	}
@@ -312,7 +312,7 @@ esac
 	if protectedCreates != 1 {
 		t.Fatalf("protected Team create ran %d times; calls:\n%s", protectedCreates, calls)
 	}
-	const teamDelete = "sandbox team delete team-owned --timeout 5m --region cn-hangzhou --profile quota-test"
+	const teamDelete = "sandbox team delete team-owned --timeout 5m --region cn-hangzhou --profile quota-test --no-color=true"
 	teamDeletes := 0
 	for _, call := range strings.Split(strings.TrimSpace(string(calls)), "\n") {
 		if strings.Contains(call, "sandbox team delete ") {

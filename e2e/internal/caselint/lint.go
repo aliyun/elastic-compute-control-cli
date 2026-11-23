@@ -17,8 +17,10 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/coverage"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/fixtureconfig"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalcmd"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalfile"
 	paramspkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/params"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/vars"
 )
 
 type Options struct {
@@ -306,6 +308,18 @@ func loadStackContract(path string) (stackContract, error) {
 func checkStackRequirements(rep *Report, path string, stack stackContract, policy *paramspkg.Policy) {
 	defined := map[string]bool{"run_name": true, "run_id": true, "resource_prefix": true, "oss_export_prefix": true, "oss_bucket_name": true, "work_dir": true, "time": true, "region": true, "regions": true, "zone": true, "global": true, "params": true, "prerequisites": true, "stack": true}
 	for _, step := range stack.Provision {
+		for _, command := range []string{step.Run, step.Teardown} {
+			volumeAction, volumeErr := journalcmd.VolumeCommandAction(command)
+			mutatesVolume := false
+			switch volumeAction {
+			case "", "get", "show", "describe", "list", "ls":
+			default:
+				mutatesVolume = true
+			}
+			if journalcmd.RawVolumeMutationCandidate(command) || volumeErr != nil || mutatesVolume {
+				rep.add(path, step.ID, "unsupported_volume_stack_mutation", "Volume shared-stack mutations are unsupported; use an owned case lifecycle")
+			}
+		}
 		declaredParams := make(map[string]bool, len(step.RequiresParams))
 		for _, key := range step.RequiresParams {
 			declaredParams[key] = true
@@ -477,6 +491,12 @@ func checkSuite(rep *Report, suite *scenario.Suite, inputsDir string, resources 
 		}
 	}
 	defined := map[string]bool{}
+	quotaLifecycle := false
+	for _, step := range suite.Steps {
+		info := parseCommand(step.Run)
+		resource, verb := commandResourceVerb(info.Positionals, nil)
+		quotaLifecycle = quotaLifecycle || info.Valid && resource == "sandbox/quota" && verb == "update"
+	}
 	for _, st := range suite.Steps {
 		stepDefined := defined
 		effectiveNeeds := append([]string(nil), suite.Needs...)
@@ -492,7 +512,7 @@ func checkSuite(rep *Report, suite *scenario.Suite, inputsDir string, resources 
 			}
 		}
 		effectiveNeeds = append(effectiveNeeds, st.Needs...)
-		if suite.Resource == "sandbox/team" || suite.Resource == "sandbox/template-cache" || suite.Resource == "sandbox/quota" {
+		if suite.Resource == "sandbox/team" || suite.Resource == "sandbox/template-cache" || suite.Resource == "sandbox/quota" || suite.Resource == "sandbox/volume" || quotaLifecycle {
 			stepDefined["team_name"] = true
 			stepDefined["team_owner"] = true
 		}
@@ -513,6 +533,7 @@ func checkSuite(rep *Report, suite *scenario.Suite, inputsDir string, resources 
 			regionPrerequisites[role] = declared
 		}
 		info := checkCommandShape(rep, suite, st, resources)
+		resource, verb := commandResourceVerb(info.Positionals, resources)
 		checkTemplateRefs(rep, suite.Path, st.Name, "run", st.Run, inputs, stepDefined, declaredGlobal, global, declaredParams, parameterPolicy, stackCaptures, regionPrerequisites)
 		if st.Local != nil {
 			checkTemplateRefs(rep, suite.Path, st.Name, "local.source", st.Local.Source, inputs, stepDefined, declaredGlobal, global, declaredParams, parameterPolicy, stackCaptures, regionPrerequisites)
@@ -521,12 +542,14 @@ func checkSuite(rep *Report, suite *scenario.Suite, inputsDir string, resources 
 		for _, lock := range st.Locks {
 			checkTemplateRefs(rep, suite.Path, st.Name, "lock", lock, inputs, stepDefined, declaredGlobal, global, declaredParams, parameterPolicy, stackCaptures, regionPrerequisites)
 		}
-		resource, verb := commandResourceVerb(info.Positionals, resources)
-		if info.Valid && !info.Call && verb == "create" {
-			checkCreateTags(rep, suite.Path, st.Name, st.Run)
+		if info.Valid && !info.Call && (verb == "create" || resource == "sandbox/volume" && verb == "new") {
+			checkCreateTags(rep, suite.Path, st.Name, resource, st.Run)
 			if strings.TrimSpace(st.Teardown) == "" && !allowsFixtureOwnedCreate(suite, resource) {
 				rep.add(suite.Path, st.Name, "missing_teardown", "create command requires teardown")
 			}
+		}
+		if resource == "sandbox/volume" && (verb == "create" || verb == "new") {
+			stepDefined["volume_name"] = true
 		}
 		for _, pm := range st.Expect {
 			for _, text := range matcherStrings(pm.Matcher) {
@@ -539,6 +562,11 @@ func checkSuite(rep *Report, suite *scenario.Suite, inputsDir string, resources 
 		teardownDefined := cloneSet(stepDefined)
 		for name := range st.Capture {
 			teardownDefined[name] = true
+		}
+		if info.Valid && !info.Call && resource == "sandbox/team" && verb == "create" {
+			// Protected Team creation supplies the verified ID before rendering
+			// its teardown, including after lost-response recovery.
+			teardownDefined["team_id"] = true
 		}
 		checkTemplateRefs(rep, suite.Path, st.Name, "teardown", st.Teardown, inputs, teardownDefined, declaredGlobal, global, declaredParams, parameterPolicy, stackCaptures, regionPrerequisites)
 		if suite.Execution != scenario.ExecutionDAG {
@@ -724,14 +752,13 @@ func checkPrerequisiteRef(rep *Report, path, step, field string, refPath []strin
 	}
 }
 
-func checkCreateTags(rep *Report, path, step, run string) {
-	info := parseCommand(run)
-	resource, _ := commandResourceVerb(info.Positionals, nil)
+func checkCreateTags(rep *Report, path, step, resource, run string) {
 	// These resources do not expose E2E tag fields in their APIs. They are
 	// still cleaned through the case journal and declared non-sweepable, so
 	// requiring sweep tags here would reject valid, untaggable resources.
 	if resource == "rg/role" ||
 		resource == "rg/policy" ||
+		resource == "rg/version" ||
 		resource == "rg/service-linked-role" ||
 		resource == "tag/associated-resource-rule" ||
 		resource == "tag/policy" ||
@@ -754,6 +781,7 @@ func checkCreateTags(rep *Report, path, step, run string) {
 		resource == "sandbox/template" ||
 		resource == "sandbox/template-cache" ||
 		resource == "sandbox/quota" ||
+		resource == "sandbox/volume" ||
 		resource == "sandbox/sandbox" ||
 		resource == "lingjun/net-test" ||
 		resource == "lingjun/node-group" {
@@ -788,6 +816,27 @@ func checkCommandShape(rep *Report, suite *scenario.Suite, st scenario.Step, res
 	if journalcmd.RawQuotaMutationCandidate(st.Run) {
 		rep.add(suite.Path, st.Name, "unsupported_raw_quota_mutation", "raw FCSandbox Quota mutation is unsupported in E2E cases")
 		return commandInfo{}
+	}
+	if journalcmd.RawVolumeMutationCandidate(st.Run) {
+		rep.add(suite.Path, st.Name, "unsupported_raw_volume_mutation", "raw FCSandbox Volume mutation is unsupported in E2E cases")
+		return commandInfo{}
+	}
+	volumeAction, volumeErr := journalcmd.VolumeCommandAction(st.Run)
+	if volumeErr != nil {
+		rep.add(suite.Path, st.Name, "invalid_command_shape", volumeErr.Error())
+		return commandInfo{}
+	}
+	if volumeAction != "" {
+		if volumeAction == "delete" || volumeAction == "rm" || volumeAction == "remove" {
+			if request, err := journalfile.ParseVolumeDeleteRequest(st.Run); err == nil && request.NoWait {
+				rep.add(suite.Path, st.Name, "unsupported_volume_no_wait_delete", "owned Volume delete must wait for scoped absence")
+			}
+		}
+		info := commandInfo{Positionals: []string{"sandbox", "volume", volumeAction}, Valid: true}
+		if len(resources) > 0 && !resources["sandbox/volume"] {
+			rep.add(suite.Path, st.Name, "invalid_command_shape", "command resource sandbox/volume is not declared in coverage registry")
+		}
+		return info
 	}
 	info := parseCommand(st.Run)
 	if !info.Valid {
@@ -908,7 +957,7 @@ func commandResourceVerb(pos []string, resources map[string]bool) (resource, ver
 }
 
 func templateRefs(text string) ([]templateRef, error) {
-	t, err := template.New("lint").Parse(text)
+	t, err := template.New("lint").Funcs(template.FuncMap{"argv": vars.ShellQuote}).Parse(text)
 	if err != nil {
 		return nil, err
 	}

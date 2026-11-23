@@ -1,13 +1,16 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
@@ -25,6 +28,10 @@ type templateCreateIntent struct {
 	path, journal, command string
 	cfg                    execpkg.Config
 	sourceEnv              []string
+	volumeWaitAfterReceipt bool
+	reservationParent      os.FileInfo
+	reservationSidecar     os.FileInfo
+	savedBody              []byte
 }
 
 var writeTemplateCreateIntent = journalfile.WriteExclusiveDurable
@@ -48,7 +55,7 @@ func templateCreateFlags() *pflag.FlagSet {
 // Operation-specific parsers still enforce the actual native command grammar.
 func commandPathFlags() *pflag.FlagSet {
 	flags := templateCreateFlags()
-	for _, name := range []string{"step", "build-id", "cursor", "limit", "next-token", "filter", "alias", "disk-size-mb", "fields", "description", "resource-group", "plan", "request", "api-param", "aliyun-arg", "status", "policy-name", "policy-type", "fallback-default-version", "cluster", "instance-name", "cpu-cores", "memory-gb"} {
+	for _, name := range []string{"step", "build-id", "cursor", "limit", "next-token", "filter", "alias", "disk-size-mb", "fields", "description", "resource-group", "plan", "request", "api-param", "aliyun-arg", "status", "policy-name", "policy-type", "fallback-default-version", "cluster", "instance-name", "cpu-cores", "memory-gb", "duration"} {
 		if flags.Lookup(name) == nil {
 			flags.String(name, "", "")
 		}
@@ -425,6 +432,9 @@ func reserveTemplateCreate(ctx context.Context, command string, cfg execpkg.Conf
 			if err := journalfile.CheckTemplateCreateIdentity(journal, required, sourceEnv, identity); err != nil {
 				return err
 			}
+			if err := journalfile.CheckTemplateChildTeamBinding(journal, existing, cleanupCfg, team, intent.TemplateCreateIntent); err != nil {
+				return err
+			}
 			if err := writeTemplateCreateIntent(intent.path, append(body, '\n')); err != nil {
 				return err
 			}
@@ -494,6 +504,9 @@ func quotedTemplateCommand(args []string) string {
 }
 
 func (intent *templateCreateIntent) deleteCommand(id string) string {
+	if intent.Resource == "volume" {
+		return quotedTemplateCommand([]string{"ecctl", "sandbox", "volume", "delete", id, "--region", intent.Region, "--profile", intent.Profile})
+	}
 	args := []string{"ecctl", "sandbox", "template", "delete", id, "--openapi", "--region", intent.Region, "--team-id", intent.TeamID}
 	if intent.Profile != "" {
 		args = append(args, "--profile", intent.Profile)
@@ -501,12 +514,185 @@ func (intent *templateCreateIntent) deleteCommand(id string) string {
 	return quotedTemplateCommand(args)
 }
 
+func (intent *templateCreateIntent) checkVolumeReservation(root *os.Root) error {
+	parent, parentErr := root.Stat(".")
+	sidecar, sidecarErr := root.Lstat(filepath.Base(intent.path))
+	if parentErr != nil || sidecarErr != nil || intent.reservationParent == nil || intent.reservationSidecar == nil || !os.SameFile(parent, intent.reservationParent) || !os.SameFile(sidecar, intent.reservationSidecar) || !sidecar.Mode().IsRegular() {
+		return fmt.Errorf("Volume create intent lost its reserved parent or sidecar")
+	}
+	previous, err := root.ReadFile(filepath.Base(intent.path))
+	if err != nil || !bytes.Equal(previous, intent.savedBody) {
+		return fmt.Errorf("Volume create intent changed before provider launch or result write: %v", err)
+	}
+	journalInfo, err := root.Lstat(filepath.Base(intent.journal))
+	if err != nil || !journalInfo.Mode().IsRegular() {
+		return fmt.Errorf("Volume create journal is unavailable: %v", err)
+	}
+	journalBody, err := root.ReadFile(filepath.Base(intent.journal))
+	if err != nil {
+		return err
+	}
+	var journal report.CleanupJournal
+	if err := execpkg.UnmarshalStrictJSON(journalBody, &journal); err != nil {
+		return err
+	}
+	if journal.Version != 2 || journal.JournalPath != intent.journal || journal.NativeJournalPath != intent.journal || journal.RunID != intent.RunID || journal.ExecutionID != intent.ExecutionID || journal.RegionRole != intent.RegionRole || journal.Region != intent.Region || journal.Surface != intent.Surface || journal.EcctlBin != intent.EcctlBin {
+		return fmt.Errorf("Volume create journal binding changed before provider launch or result write")
+	}
+	count := 0
+	for _, reference := range journal.NativeIntentPaths {
+		if reference == intent.path {
+			count++
+		}
+	}
+	if count != 1 || journalfile.CheckVolumeTeamCreatorSource(journal, intent.TeamID, intent.TemplateCreateIntent) != nil {
+		return fmt.Errorf("Volume create lost its unique durable sidecar reference")
+	}
+	if err := journalfile.CheckQuotaUpdatePending(journal); err != nil {
+		return err
+	}
+	var saved journalfile.TemplateCreateIntent
+	if err := execpkg.UnmarshalStrictJSON(intent.savedBody, &saved); err != nil {
+		return fmt.Errorf("Volume create reservation bytes are invalid: %w", err)
+	}
+	if saved.Version != intent.Version || saved.Resource != intent.Resource || saved.RunID != intent.RunID || saved.ExecutionID != intent.ExecutionID || saved.RegionRole != intent.RegionRole || saved.Region != intent.Region || saved.Surface != intent.Surface || saved.EcctlBin != intent.EcctlBin || saved.TeamID != intent.TeamID || saved.Name != intent.Name || saved.Profile != intent.Profile || saved.CaseScope != intent.CaseScope || saved.Identity != intent.Identity || !saved.CreatedAt.Equal(intent.CreatedAt) || !reflect.DeepEqual(saved.Selectors, intent.Selectors) || !reflect.DeepEqual(saved.ConfigPaths, intent.ConfigPaths) {
+		return fmt.Errorf("Volume create reservation identity changed before result write")
+	}
+	observedAdvance := saved.State == "journaled" && intent.State == "journaled" && !saved.VolumeObserved && intent.VolumeObserved && len(saved.Deletes) == 1 && reflect.DeepEqual(saved.Deletes, intent.Deletes)
+	if saved.AcceptedVolumeID != "" && (intent.State != "pending" && intent.State != "journaled" || saved.State == "journaled" && (intent.State != "journaled" || !reflect.DeepEqual(saved.Deletes, intent.Deletes)) || saved.AcceptedVolumeID != intent.AcceptedVolumeID || saved.CreateRequestID != intent.CreateRequestID || !reflect.DeepEqual(saved.Exit, intent.Exit) || !reflect.DeepEqual(saved.Started, intent.Started) || saved.StdoutSHA256 != intent.StdoutSHA256 || saved.StderrSHA256 != intent.StderrSHA256 || saved.VolumeObserved != intent.VolumeObserved && !observedAdvance) {
+		return fmt.Errorf("Volume accepted receipt changed before finalizer write")
+	}
+	var ownershipErr error
+	if saved.State == "pending" {
+		finalizer := ""
+		if intent.State == "journaled" {
+			if len(intent.Deletes) != 1 {
+				return fmt.Errorf("Volume receipt lacks one exact finalizer")
+			}
+			finalizer = intent.Deletes[0]
+		} else if len(intent.Deletes) != 0 {
+			return fmt.Errorf("Volume receipt has an early finalizer")
+		}
+		ownershipErr = journalfile.CheckVolumeReceiptTransition(intent.journal, journal, intent.sourceEnv, intent.Identity, intent.path, intent.savedBody, finalizer)
+	} else {
+		ownershipErr = journalfile.CheckTemplateCreateIdentity(intent.journal, journal, intent.sourceEnv, intent.Identity)
+	}
+	if ownershipErr != nil {
+		return fmt.Errorf("Volume launch shared ownership is unresolved: %w", ownershipErr)
+	}
+	parents := 0
+	for _, entry := range journal.Entries {
+		if !journalfile.IsTeamDeleteCandidate(entry.Teardown) {
+			continue
+		}
+		teamID, err := journalfile.TeamDeleteCandidateTargetForRegion(entry.Teardown, intent.Region)
+		if err != nil {
+			return fmt.Errorf("Volume launch Team target is ambiguous: %w", err)
+		}
+		if teamID != intent.TeamID {
+			continue
+		}
+		if !entry.TeamCreateConfirmed || entry.TeamReplayAttempted || entry.RegionRole != intent.RegionRole || entry.Region != intent.Region || entry.ExecutionID != intent.ExecutionID {
+			return fmt.Errorf("Volume launch Team parent is no longer active")
+		}
+		parents++
+	}
+	if parents != 1 {
+		return fmt.Errorf("Volume launch requires one active Team parent")
+	}
+	currentParent, err := journalParentIdentity(intent.journal)
+	if err != nil || !os.SameFile(currentParent, intent.reservationParent) {
+		return fmt.Errorf("Volume create journal parent changed before provider launch or result write")
+	}
+	return nil
+}
+
+func (intent *templateCreateIntent) withVolumeLaunchFence(ctx context.Context, invoke func()) error {
+	if intent == nil || intent.Resource != "volume" || invoke == nil {
+		return fmt.Errorf("Volume launch lacks an active reservation")
+	}
+	err := journalfile.WithExistingReplayLock(ctx, intent.journal, func() error {
+		return journalfile.WithExistingParentLock(ctx, intent.journal, func() error {
+			root, err := os.OpenRoot(filepath.Dir(intent.journal))
+			if err != nil {
+				return err
+			}
+			defer root.Close()
+			if err := intent.checkVolumeReservation(root); err != nil {
+				return err
+			}
+			name := filepath.Base(intent.path)
+			pending, err := json.MarshalIndent(intent.TemplateCreateIntent, "", "  ")
+			if err != nil {
+				return err
+			}
+			pending = append(pending, '\n')
+			unstarted := append([]byte(nil), intent.savedBody...)
+			writeErr := journalfile.WriteDurableRoot(root, name, pending)
+			installed, readErr := root.ReadFile(name)
+			if writeErr != nil || readErr != nil || !bytes.Equal(installed, pending) {
+				if writeErr == nil {
+					writeErr = fmt.Errorf("Volume launch fence was not installed exactly")
+				}
+				if readErr == nil && bytes.Equal(installed, pending) {
+					if restoreErr := journalfile.RestoreUninvokedMarkerRoot(root, name, pending, unstarted); restoreErr != nil {
+						return errors.Join(writeErr, fmt.Errorf("retain unused Volume launch fence: %w", restoreErr))
+					}
+				} else if readErr != nil || !bytes.Equal(installed, unstarted) {
+					return errors.Join(writeErr, fmt.Errorf("Volume launch fence changed before provider call: %v", readErr))
+				}
+				return fmt.Errorf("install Volume launch fence: %w", writeErr)
+			}
+			sidecar, statErr := root.Lstat(name)
+			parent, parentErr := journalParentIdentity(intent.journal)
+			if statErr != nil || parentErr != nil || !sidecar.Mode().IsRegular() || !os.SameFile(parent, intent.reservationParent) {
+				return errors.Join(fmt.Errorf("Volume launch fence lost its reserved parent"), journalfile.RestoreUninvokedMarkerRoot(root, name, pending, unstarted))
+			}
+			intent.reservationSidecar = sidecar
+			intent.savedBody = pending
+			invoke()
+			return nil
+		})
+	})
+	return err
+}
+
 func (intent *templateCreateIntent) save() error {
+	return intent.saveWithContext(context.Background())
+}
+
+func (intent *templateCreateIntent) saveWithContext(ctx context.Context) error {
 	body, err := json.MarshalIndent(intent.TemplateCreateIntent, "", "  ")
 	if err != nil {
 		return err
 	}
-	return journalfile.WithExistingParentLock(context.Background(), intent.journal, func() error { return journalfile.WriteDurable(intent.path, append(body, '\n')) })
+	body = append(body, '\n')
+	return journalfile.WithExistingParentLock(ctx, intent.journal, func() error {
+		if intent.Resource == "volume" {
+			root, openErr := os.OpenRoot(filepath.Dir(intent.journal))
+			if openErr != nil {
+				return openErr
+			}
+			defer root.Close()
+			if err := intent.checkVolumeReservation(root); err != nil {
+				return err
+			}
+			name := filepath.Base(intent.path)
+			if err := journalfile.WriteDurableRoot(root, name, body); err != nil {
+				return err
+			}
+			installed, readErr := root.ReadFile(name)
+			sidecar, statErr := root.Lstat(name)
+			parent, parentErr := journalParentIdentity(intent.journal)
+			if readErr != nil || statErr != nil || parentErr != nil || !os.SameFile(parent, intent.reservationParent) || !bytes.Equal(installed, body) || !sidecar.Mode().IsRegular() {
+				return fmt.Errorf("Volume create intent result was not installed in its reserved parent")
+			}
+			intent.reservationSidecar = sidecar
+			intent.savedBody = append([]byte(nil), body...)
+			return nil
+		}
+		return journalfile.WriteDurable(intent.path, body)
+	})
 }
 
 func finishTemplateCreate(res execpkg.Result, cl *cleanup, scope *[]*cleanupItem, data map[string]any, lockKeys []string, timeout time.Duration, intent *templateCreateIntent) error {
@@ -674,10 +860,17 @@ func templateOwnedCleanupTeam(journal report.CleanupJournal, command string) (st
 
 // The in-memory journal template deliberately has no entries. Ownership of a
 // retained Team must be decided from the durable journal under the replay lock.
-func readGuardJournal(path string, expected report.CleanupJournal) (report.CleanupJournal, error) {
-	current, legacy, err := readRunnerJournal(path)
+func readGuardJournal(path string, expected report.CleanupJournal, roots ...*os.Root) (report.CleanupJournal, error) {
+	var current report.CleanupJournal
+	var legacy bool
+	var err error
+	if len(roots) != 0 {
+		current, legacy, err = readRunnerJournalRoot(roots[0], path)
+	} else {
+		current, legacy, err = readRunnerJournal(path)
+	}
 	if os.IsNotExist(err) {
-		if expected.QuotaBinding != nil || expected.NativeJournalPath != "" {
+		if expected.QuotaBinding != nil || expected.VolumeFixtureBinding != nil || expected.NativeJournalPath != "" {
 			return current, fmt.Errorf("protected cleanup journal is missing")
 		}
 		return expected, nil
@@ -686,13 +879,13 @@ func readGuardJournal(path string, expected report.CleanupJournal) (report.Clean
 		return current, err
 	}
 	if legacy {
-		if expected.QuotaBinding != nil || expected.NativeJournalPath != "" {
+		if expected.QuotaBinding != nil || expected.VolumeFixtureBinding != nil || expected.NativeJournalPath != "" {
 			return current, fmt.Errorf("protected cleanup requires a version 2 journal")
 		}
 		expected.Entries = current.Entries
 		return expected, nil
 	}
-	if current.Version != expected.Version || current.RunID != expected.RunID || current.ExecutionID != expected.ExecutionID || current.RegionRole != expected.RegionRole || current.Region != expected.Region || current.Surface != expected.Surface || current.EcctlBin != expected.EcctlBin || !reflect.DeepEqual(current.QuotaBinding, expected.QuotaBinding) || current.QuotaBinding != nil && current.JournalPath != path {
+	if current.Version != expected.Version || current.RunID != expected.RunID || current.ExecutionID != expected.ExecutionID || current.RegionRole != expected.RegionRole || current.Region != expected.Region || current.Surface != expected.Surface || current.EcctlBin != expected.EcctlBin || !reflect.DeepEqual(current.QuotaBinding, expected.QuotaBinding) || !reflect.DeepEqual(current.VolumeFixtureBinding, expected.VolumeFixtureBinding) || current.VolumeFixtureBucket != expected.VolumeFixtureBucket || (current.QuotaBinding != nil || current.VolumeFixtureBinding != nil) && current.JournalPath != path {
 		return current, fmt.Errorf("protected cleanup journal binding changed")
 	}
 	if expected.JournalPath != "" && current.JournalPath != expected.JournalPath {
@@ -702,8 +895,20 @@ func readGuardJournal(path string, expected report.CleanupJournal) (report.Clean
 }
 
 func (c *cleanup) withTemplateCleanupGuardBefore(ctx context.Context, role string, existingParent bool, before func() error, run func(execpkg.Config) error, command ...string) error {
+	return c.withTemplateCleanupGuardMode(ctx, role, existingParent, before, run, command...)
+}
+
+func (c *cleanup) withTemplateCleanupGuardMode(ctx context.Context, role string, existingParent bool, before func() error, run func(execpkg.Config) error, command ...string) error {
 	if role == "" {
 		role = "primary"
+	}
+	volumeDelete := false
+	if len(command) > 0 {
+		var err error
+		volumeDelete, err = classifyVolumeFinalizer(command[0])
+		if err != nil {
+			return err
+		}
 	}
 	if c.journal == "" {
 		return run(c.execCfg[role])
@@ -740,7 +945,12 @@ func (c *cleanup) withTemplateCleanupGuardBefore(ctx context.Context, role strin
 		if err != nil {
 			return err
 		}
-		current, err := readGuardJournal(canonical, meta)
+		root, err := c.openLockedJournalRoot(canonical)
+		if err != nil {
+			return err
+		}
+		defer root.Close()
+		current, err := readGuardJournal(canonical, meta, root)
 		if err != nil {
 			return err
 		}
@@ -762,16 +972,39 @@ func (c *cleanup) withTemplateCleanupGuardBefore(ctx context.Context, role strin
 				return err
 			}
 			if repaired {
-				current, err = readGuardJournal(canonical, meta)
+				current, err = readGuardJournal(canonical, meta, root)
 				if err != nil {
 					return err
 				}
+			}
+		}
+		if len(command) > 0 && len(current.NativeIntentPaths) > 0 && journalfile.IsTeamDeleteCandidate(command[0]) {
+			if err := journalfile.CheckNativeCleanupDependencies(canonical, meta, c.execCfg[role].Env, command[0], root); err != nil {
+				return err
 			}
 		}
 		bound := c.execCfg[role]
 		nativeDelete := false
 		if len(command) > 0 {
 			_, nativeDelete, _ = parseNativeTemplateDelete(command[0])
+			if nativeDelete {
+				retained := ""
+				for _, entry := range current.Entries {
+					if entry.RegionRole != role || !nativeTemplateDeletesEquivalent(entry.Teardown, command[0], c.execCfg[role]) {
+						continue
+					}
+					if retained != "" {
+						return fmt.Errorf("authored native Template cleanup has ambiguous retained finalizers")
+					}
+					retained = entry.Teardown
+				}
+				if retained == "" {
+					return fmt.Errorf("authored native Template cleanup lacks its exact retained finalizer")
+				}
+				if err := journalfile.CheckNativeCleanupDependencies(canonical, meta, c.execCfg[role].Env, retained, root); err != nil {
+					return err
+				}
+			}
 		}
 		if len(command) > 0 && quotaOwnedCleanupCommand(current, command[0]) {
 			if current.QuotaBinding == nil {
@@ -781,11 +1014,19 @@ func (c *cleanup) withTemplateCleanupGuardBefore(ctx context.Context, role strin
 				return err
 			}
 			bound, err = journalfile.PrepareQuotaCleanup(ctx, canonical, current, c.execCfg[role])
-		} else if len(command) > 0 && (journalfile.IsTemplateCacheDelete(command[0]) || nativeDelete) {
+		} else if len(command) > 0 && (journalfile.IsTemplateCacheDelete(command[0]) || nativeDelete || volumeDelete) {
 			bound = templateBound
 		} else if len(command) > 0 {
 			if teamID, owned := templateOwnedCleanupTeam(current, command[0]); owned {
 				bound, _, err = journalfile.TemplateTeamCleanupBinding(canonical, current, c.execCfg[role], teamID)
+				if err == nil {
+					var creatorBound bool
+					var creatorConfig execpkg.Config
+					creatorConfig, creatorBound, err = journalfile.VolumeTeamCreatorConfig(ctx, current, c.execCfg[role], teamID)
+					if creatorBound {
+						bound = creatorConfig
+					}
+				}
 			}
 		}
 		if err != nil {
@@ -846,6 +1087,11 @@ func commandAction(command string) ([]string, error) {
 				flag = flags.Lookup("version")
 			}
 			if flag == nil {
+				if inline && strings.HasPrefix(key, "--") {
+					// The product parser validates operation-specific inline options.
+					// Their value cannot hide another command-path token.
+					continue
+				}
 				return nil, fmt.Errorf("cannot classify ecctl command flag before action")
 			}
 			if !inline && flag.NoOptDefVal == "" {
@@ -862,7 +1108,7 @@ func commandAction(command string) ([]string, error) {
 		}
 		if len(pos) >= 2 {
 			switch arg {
-			case "create", "new", "get", "show", "describe", "list", "ls", "update", "delete", "rm", "remove":
+			case "create", "new", "get", "show", "describe", "list", "ls", "update", "delete", "rm", "remove", "snapshot", "fork", "pause", "resume", "kill", "connect", "refresh", "logs", "metrics", "publish", "unpublish", "build-status", "build-logs", "tag-assign", "tag-list", "tag-delete":
 				// Resource-parent nouns may precede the action. Stop at the
 				// action so its IDs and flag values cannot become verbs.
 				return pos, nil

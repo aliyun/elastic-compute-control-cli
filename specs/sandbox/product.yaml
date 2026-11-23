@@ -8,10 +8,11 @@ resources:
   - template-cache
   - team
   - quota
+  - volume
 expose_default_resource: true
 description:
-  en: Manage E2B sandboxes and templates, and native FC OpenAPI templates, template caches, teams, and quotas.
-  zh-CN: 管理 E2B 沙箱及模板，以及原生 FC OpenAPI 模板、模板缓存、团队和配额。
+  en: Manage E2B sandboxes and templates, and native FC OpenAPI templates, template caches, teams, quotas, and volumes.
+  zh-CN: 管理 E2B 沙箱及模板，以及原生 FC OpenAPI 模板、模板缓存、团队、配额和存储卷。
 examples:
   - ecctl sandbox list --filter state=running
   - ecctl sbx template create --name python --from-image python:3.12

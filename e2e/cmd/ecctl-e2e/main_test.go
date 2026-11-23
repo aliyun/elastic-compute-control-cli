@@ -14,12 +14,172 @@ import (
 
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/coverage"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/fixtureconfig"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalfile"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/prereqcheck"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/runner"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/runplan"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 )
+
+func TestVolumeTeamReconcileCommandRefusesActiveRunBeforeProbe(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "journal.json")
+	original := []byte("retained journal sentinel\n")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	release, err := journalfile.AcquireRunLease(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = release() }()
+	probe, marker := filepath.Join(dir, "probe"), filepath.Join(dir, "probe-started")
+	if err := os.WriteFile(probe, []byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relativeProbe, err := filepath.Rel(cwd, probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := sweepReconcileVolumeTeamCmd()
+	cmd.SetArgs([]string{path, "--region", "cn-hangzhou", "--ecctl-bin", relativeProbe, "--surface", "public", "--run-id", "run", "--team-name", "ecctl-t-0123456789abcdef01234567", "--profile", "owner", "--journal-sha256", strings.Repeat("a", 64), "--ecctl-sha256", strings.Repeat("b", 64), "--probe-ecctl-bin", relativeProbe, "--probe-ecctl-sha256", strings.Repeat("c", 64)})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "in use by another run") {
+		t.Fatalf("active run reached Team reconciliation: %v", err)
+	}
+	if body, err := os.ReadFile(path); err != nil || !bytes.Equal(body, original) {
+		t.Fatalf("active run journal changed: %q %v", body, err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("active run reached Team probe: %v", err)
+	}
+	volume := sweepReconcileVolumeCmd()
+	volume.SetArgs([]string{path, "--region", "cn-hangzhou", "--ecctl-bin", relativeProbe, "--surface", "public", "--run-id", "run", "--volume-name", "ecctl-p-0123456789abcdef01234567", "--profile", "owner", "--journal-sha256", strings.Repeat("a", 64), "--ecctl-sha256", strings.Repeat("b", 64), "--probe-ecctl-bin", relativeProbe, "--probe-ecctl-sha256", strings.Repeat("c", 64)})
+	volume.SetOut(&bytes.Buffer{})
+	volume.SetErr(&bytes.Buffer{})
+	if err := volume.Execute(); err == nil || !strings.Contains(err.Error(), "in use by another run") {
+		t.Fatalf("active run reached Volume reconciliation: %v", err)
+	}
+}
+
+func TestSandboxAssignmentsSelectOnlyHangzhou(t *testing.T) {
+	profiles := []fixtureconfig.RegionProfile{{ID: "cn-zhangjiakou"}, {ID: "cn-hangzhou"}}
+	assignments := []runplan.Assignment{
+		{Regions: map[string]fixtureconfig.RegionProfile{runplan.PrimaryRole: profiles[0]}},
+		{Regions: map[string]fixtureconfig.RegionProfile{runplan.PrimaryRole: profiles[1]}},
+	}
+	units := []runplan.ExecutionUnit{
+		{Suites: []*scenario.Suite{{Resource: "sandbox/volume"}}, Assignments: append([]runplan.Assignment(nil), assignments...)},
+		{Suites: []*scenario.Suite{{Resource: "ecs/instance"}}, Assignments: append([]runplan.Assignment(nil), assignments...)},
+	}
+	if err := pinSandboxAssignments(units); err != nil {
+		t.Fatal(err)
+	}
+	if len(units[0].Assignments) != 1 || units[0].Assignments[0].Regions[runplan.PrimaryRole].ID != "cn-hangzhou" || len(units[1].Assignments) != 2 {
+		t.Fatalf("pinned assignments = %#v", units)
+	}
+	units[0].Assignments = assignments[:1]
+	if err := pinSandboxAssignments(units); err != nil || len(units[0].Assignments) != 0 || len(units[1].Assignments) != 2 {
+		t.Fatalf("missing Hangzhou did not fence only the sandbox unit: %v %+v", err, units)
+	}
+}
+
+func TestSandboxAssignmentsPinMixedCoverageAndVolumeCommand(t *testing.T) {
+	profiles := []fixtureconfig.RegionProfile{{ID: "cn-zhangjiakou"}, {ID: "cn-hangzhou"}}
+	assignments := []runplan.Assignment{
+		{Regions: map[string]fixtureconfig.RegionProfile{runplan.PrimaryRole: profiles[0]}},
+		{Regions: map[string]fixtureconfig.RegionProfile{runplan.PrimaryRole: profiles[1]}},
+	}
+	for _, suite := range []*scenario.Suite{
+		{Resource: "ecs/instance", Covers: []string{"sandbox/volume"}},
+		{Resource: "ecs/instance", Steps: []scenario.Step{{Run: "ecctl sandbox volume list --team-id team-1 --output=json"}}},
+	} {
+		units := []runplan.ExecutionUnit{{Suites: []*scenario.Suite{suite}, Assignments: append([]runplan.Assignment(nil), assignments...)}}
+		if err := pinSandboxAssignments(units); err != nil {
+			t.Fatal(err)
+		}
+		if len(units[0].Assignments) != 1 || units[0].Assignments[0].Regions[runplan.PrimaryRole].ID != "cn-hangzhou" {
+			t.Fatalf("mixed suite was not pinned to Hangzhou: %+v", units)
+		}
+		units[0].Assignments = assignments[:1]
+		if err := pinSandboxAssignments(units); err != nil || len(units[0].Assignments) != 0 {
+			t.Fatalf("mixed suite retained a non-Hangzhou assignment: %v %+v", err, suite)
+		}
+	}
+}
+
+func TestGlobalSandboxAndOtherProductKeepExplicitRegion(t *testing.T) {
+	assignment := runplan.Assignment{Regions: map[string]fixtureconfig.RegionProfile{runplan.PrimaryRole: {ID: "cn-zhangjiakou"}}}
+	units := []runplan.ExecutionUnit{
+		{Suites: []*scenario.Suite{{Resource: "sandbox/sandbox"}}, Assignments: []runplan.Assignment{assignment}},
+		{Suites: []*scenario.Suite{{Resource: "sandbox/template", Steps: []scenario.Step{{Run: "ecctl sandbox template create --name e2b-template"}}}}, Assignments: []runplan.Assignment{assignment}},
+		{Suites: []*scenario.Suite{{Resource: "sandbox/volume"}}, Assignments: []runplan.Assignment{assignment}},
+		{Suites: []*scenario.Suite{{Resource: "ecs/instance"}}, Assignments: []runplan.Assignment{assignment}},
+	}
+	if err := pinSandboxAssignments(units); err != nil {
+		t.Fatal(err)
+	}
+	if len(units[0].Assignments) != 1 || len(units[1].Assignments) != 1 || len(units[2].Assignments) != 0 || len(units[3].Assignments) != 1 {
+		t.Fatalf("regional selection changed unrelated units: %+v", units)
+	}
+}
+
+func TestGlobalAndRegionalSandboxBuildSeparateExecutionUnits(t *testing.T) {
+	profiles := []fixtureconfig.RegionProfile{{ID: "cn-zhangjiakou"}}
+	units, err := runplan.Build(runplan.Request{Suites: []*scenario.Suite{
+		{Path: "global.yaml", Resource: "sandbox/sandbox"},
+		{Path: "volume.yaml", Resource: "sandbox/volume"},
+		{Path: "ecs.yaml", Resource: "ecs/instance"},
+	}, Profiles: profiles})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pinSandboxAssignments(units); err != nil {
+		t.Fatal(err)
+	}
+	if len(units) != 3 || len(units[0].Assignments) != 1 || len(units[1].Assignments) != 0 || len(units[2].Assignments) != 1 {
+		t.Fatalf("global, regional and ECS units were mixed: %+v", units)
+	}
+}
+
+func TestMixedVolumeAndECSAssignmentsKeepECSFallback(t *testing.T) {
+	volume, err := scenario.Load(filepath.Join("..", "..", "cases", "sandbox", "volume-lifecycle.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keypair, err := scenario.Load(filepath.Join("..", "..", "cases", "ecs", "keypair-lifecycle.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	suites := []*scenario.Suite{volume, keypair}
+	stackPrerequisites, err := runner.StackPrerequisitesBySuite(filepath.Join("..", "..", "fixtures", "stack.yaml"), suites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := []fixtureconfig.RegionProfile{
+		{ID: "cn-zhangjiakou"},
+		{ID: "cn-hangzhou", Prerequisites: map[string]map[string]any{"volume.fixture_ownership": {}}},
+	}
+	units, err := runplan.Build(runplan.Request{Suites: suites, Profiles: profiles, StackPrerequisites: stackPrerequisites})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pinSandboxAssignments(units); err != nil {
+		t.Fatal(err)
+	}
+	if len(units) != 2 || len(units[0].Suites) != 1 || units[0].Suites[0].Resource != "sandbox/volume" || len(units[0].Assignments) != 1 || units[0].Assignments[0].Regions[runplan.PrimaryRole].ID != "cn-hangzhou" {
+		t.Fatalf("sandbox assignments = %#v", units)
+	}
+	if len(units[1].Suites) != 1 || units[1].Suites[0].Resource != "ecs/keypair" || len(units[1].Assignments) != 2 || units[1].Assignments[0].Regions[runplan.PrimaryRole].ID != "cn-zhangjiakou" || units[1].Assignments[1].Regions[runplan.PrimaryRole].ID != "cn-hangzhou" {
+		t.Fatalf("ECS fallback assignments changed = %#v", units[1])
+	}
+}
 
 func TestBuiltInQuotaGetsOwnExecutionWithSharedStackCase(t *testing.T) {
 	quota, err := scenario.Load("../../internal/runner/testdata/quota-lifecycle.yaml")
@@ -877,7 +1037,7 @@ fi
 	if readErr != nil && !os.IsNotExist(readErr) {
 		t.Fatal(readErr)
 	}
-	if calls := strings.TrimSpace(string(data)); calls != "capabilities --output json" {
+	if calls := strings.TrimSpace(string(data)); calls != "capabilities --output json --no-color=true" {
 		t.Fatalf("unexpected cloud or case calls before planning failure: %q", calls)
 	}
 }

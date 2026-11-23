@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
+	"strings"
 	"text/template"
 )
 
@@ -15,7 +16,7 @@ var renderErrorLocation = regexp.MustCompile(`^template: v(:[0-9]+(?::[0-9]+)?):
 // Render expands tmpl against data. data is a flat map whose values may be
 // nested maps (e.g. data["stack"] = map[string]any{...}).
 func Render(tmpl string, data map[string]any) (string, error) {
-	t, err := template.New("v").Option("missingkey=error").Parse(tmpl)
+	t, err := template.New("v").Funcs(template.FuncMap{"argv": ShellQuote}).Option("missingkey=error").Parse(tmpl)
 	if err != nil {
 		return "", safeRenderError("parse", err)
 	}
@@ -24,6 +25,11 @@ func Render(tmpl string, data map[string]any) (string, error) {
 		return "", safeRenderError("evaluation", err)
 	}
 	return b.String(), nil
+}
+
+// ShellQuote carries one captured value through the runner's shlex parser.
+func ShellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 // Template errors include action text and values. Retain only the numeric

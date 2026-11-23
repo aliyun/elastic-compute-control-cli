@@ -9,6 +9,15 @@ func TestValidateDelete(t *testing.T) {
 		valid   bool
 	}{
 		{name: "first class delete", command: "ecctl ecs instance delete i-1 --force", valid: true},
+		{name: "keypair name with dot", command: "ecctl ecs keypair delete ops.key", valid: true},
+		{name: "addon name with dot", command: "ecctl ack addon delete addon.v1 --cluster cluster-1", valid: true},
+		{name: "ordinary delete after option is not a command", command: "ecctl ecs instance update --name delete", valid: false},
+		{name: "exact native Volume delete", command: "ecctl sandbox volume delete vol-owned --region cn-hangzhou --profile owner", valid: true},
+		{name: "Volume ID with dot", command: "ecctl sandbox volume delete vol.owned --region cn-hangzhou --profile owner", valid: false},
+		{name: "Volume delete with stale Team", command: "ecctl sandbox volume delete vol-owned --team-id team-old --region cn-hangzhou --profile owner", valid: false},
+		{name: "Volume delete with root flags", command: "ecctl --region cn-hangzhou sandbox volume delete vol-owned --profile owner", valid: false},
+		{name: "Volume delete alias", command: "ecctl sbx volume rm vol-owned --region cn-hangzhou --profile owner", valid: false},
+		{name: "unrelated Template profile named volume", command: "ecctl sandbox template delete tpl-1 --profile volume", valid: true},
 		{name: "ordinary Team root flags", command: "ecctl --region cn-hangzhou sandbox team delete team-owned --lang en", valid: true},
 		{name: "ordinary Team interspersed flags", command: "ecctl sandbox --lang=en team --region=cn-hangzhou rm team-owned", valid: true},
 		{name: "ordinary Team unknown root flag", command: "ecctl --future-flag x sandbox team delete team-owned", valid: false},
