@@ -155,3 +155,5 @@ Start with the [resource spec guide](https://aliyun.github.io/elastic-compute-co
 
 See the [Go coverage guide](docs/testing/coverage.md) for the independent 95%
 statement and 85% branch-outcome gates, local reports, and measurement scope.
+
+<!-- Automated draft PR delivery acceptance. -->
