@@ -573,3 +573,31 @@ func TestFCSandboxVolumeUpdateDeferred(t *testing.T) {
 		t.Fatalf("deferred Volume update reached provider: code=%d stdout=%s stderr=%s operation=%s", code, stdout, stderr, fake.operation)
 	}
 }
+
+func TestIssue128HumanMachineJSON(t *testing.T) {
+	t.Setenv("ECCTL_DISPLAY_MODE", "Human")
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("ECCTL_DISABLE_TELEMETRY", "1")
+	t.Setenv("ECCTL_DISABLE_UPDATE_CHECK", "1")
+	for _, noColor := range []bool{false, true} {
+		fake := &fakeAPICaller{response: map[string]any{
+			"code": "200", "requestId": "req-create",
+			"volume": map[string]any{"volumeID": "vol-1", "volumeName": "workspace", "teamID": "team-1", "status": "CREATING"},
+		}}
+		factory := func(string, string, spec.ResourceSpec, string, func(string) string) (engine.Caller, error) {
+			return fake, nil
+		}
+		args := []string{"--output=json", "--agent-envelope=false", "--region", "cn-hangzhou", "sbx", "--lang", "en",
+			"volume", "create", "--name", "workspace", "--team-id", "team-1", "--no-wait"}
+		if noColor {
+			args = append(args, "--no-color=true")
+		}
+		stdout, stderr, code := runCLIWith(factory, args...)
+		if code != 0 || fake.operation != "CreateVolume" {
+			t.Fatalf("real CLI did not execute the inert CreateVolume: --no-color=%v exit=%d stderr=%q stdout=%q", noColor, code, stderr, stdout)
+		}
+		if json.Valid([]byte(stdout)) != noColor || strings.Contains(stdout, "\x1b[") == noColor {
+			t.Errorf("real CLI output disagrees with --no-color=%v: %q", noColor, stdout)
+		}
+	}
+}

@@ -1413,18 +1413,36 @@ func TestOwnedVolumeReadRejectsSelectorConfigPrincipalAndSourceConflicts(t *test
 }
 
 func TestVolumeTwoOwnedCreatesKeepDistinctDurableTargets(t *testing.T) {
-	cfg, cl, dir, scope := volumeRecoveryFixture(t)
+	t.Setenv("ECCTL_DISPLAY_MODE", "Human")
+	cfg, cl, dir, scope := volumeRecoveryFixture(t, func(script string) string { return issue128HumanOutput(script, "volume create") })
 	t.Setenv("FAKE_VOLUME_MODE", "success-two")
 	step := scenario.Step{Name: "create", Run: "ecctl sandbox volume create --name authored --team-id team-1 --output=json", Teardown: "ecctl sandbox volume delete {{.volume_id}} --output=json"}
 	for i := 0; i < 2; i++ {
 		data := map[string]any{}
-		if result, ok := runStep(context.Background(), Options{volumeLifecycle: true, Logf: func(string, ...any) {}}, cfg, cl, scope, data, step, time.Second); !ok {
+		if result, ok := runStep(context.Background(), Options{volumeLifecycle: true, Logf: func(string, ...any) {}}, cfg, cl, scope, data, step, time.Second); !ok || !json.Valid([]byte(result.Stdout)) || !strings.Contains(result.Command, " --no-color=true") {
 			t.Fatalf("owned Volume %d: %+v", i+1, result)
 		}
 	}
 	entries := readJournalEntries(t, cl.journal)
 	if len(entries) != 3 || entries[1].Teardown != "'ecctl' 'sandbox' 'volume' 'delete' 'vol-owned' '--region' 'cn-hangzhou' '--profile' 'account-a'" || entries[2].Teardown != "'ecctl' 'sandbox' 'volume' 'delete' 'vol-owned-2' '--region' 'cn-hangzhou' '--profile' 'account-a'" {
 		t.Fatalf("two owned Volumes did not retain distinct delete targets: %+v", entries)
+	}
+
+	receipts, err := filepath.Glob(cl.journal + ".template-create-*.json")
+	if err != nil || len(receipts) != 2 {
+		t.Fatalf("expected two persisted create receipts: paths=%q err=%v", receipts, err)
+	}
+	accepted := map[string]bool{}
+	for _, path := range receipts {
+		var receipt journalfile.TemplateCreateIntent
+		body, err := os.ReadFile(path)
+		if err != nil || json.Unmarshal(body, &receipt) != nil || receipt.State != "journaled" || receipt.StdoutSHA256 == "" {
+			t.Fatalf("Volume create receipt did not retain its output evidence: %q err=%v receipt=%+v", path, err, receipt)
+		}
+		accepted[receipt.AcceptedVolumeID] = true
+	}
+	if !accepted["vol-owned"] || !accepted["vol-owned-2"] {
+		t.Fatalf("durable Volume finalizers do not have their invocation-linked IDs: %+v", accepted)
 	}
 	if err := journalfile.CheckTemplateCreateIntents(cl.journal, report.CleanupJournal{}, cfg.Env); err != nil {
 		t.Fatalf("second reservation broke native ledger: %v", err)

@@ -6,6 +6,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,13 +17,22 @@ import (
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
 )
 
-func volumeTeamChildrenFixture(t *testing.T) (string, report.CleanupJournal, report.Resource, execpkg.Config) {
+func volumeTeamChildrenFixture(t *testing.T, bin ...string) (string, report.CleanupJournal, report.Resource, execpkg.Config) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "cleanup.json")
 	name, id := "ecctl-t-0123456789abcdef01234567", "team-owned"
 	binding := &report.QuotaCredentialBinding{Profile: "fixture", Identity: execpkg.IdentityPin{Version: 1, AccountID: "1234567890123456", Type: "RAMUser", UserID: "user-a"}}
 	entry := report.Resource{Scope: "case", Teardown: "ecctl sandbox team delete " + id + " --timeout 5m --output=json", RegionRole: "primary", Region: "cn-hangzhou", ExecutionID: "execution", TeamCreateConfirmed: true, VolumeTeamBound: true}
 	journal := report.CleanupJournal{Version: 2, JournalPath: path, RunID: "run", ExecutionID: "execution", RegionRole: "primary", Region: entry.Region, Surface: "public", EcctlBin: "/inert/ecctl", EcctlBinSHA256: strings.Repeat("a", 64), VolumeFixtureBinding: binding, VolumeTeamCreators: map[string]*report.QuotaCredentialBinding{id: binding}, VolumeTeamCreateIDs: map[string]string{name: id}, Entries: []report.Resource{entry}}
+
+	if len(bin) != 0 && bin[0] != "" {
+		journal.EcctlBin = bin[0]
+		digest, err := ExecutableSHA256(bin[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		journal.EcctlBinSHA256 = digest
+	}
 	receipt := volumeTeamReceipt{Version: 1, RunID: journal.RunID, ExecutionID: journal.ExecutionID, Region: journal.Region, Surface: journal.Surface, EcctlBin: journal.EcctlBin, Name: name, Description: "ecctl E2E Team owner=" + name[8:], Input: []string{"ecctl", "sandbox", "team", "create"}, CaseScope: "case", Teardown: "ecctl sandbox team delete intent-validation --timeout 5m --output=json", AcceptedID: id, Dispatched: true, DispatchProtocol: 1, VolumeBinding: binding, CreatedAt: time.Now().Add(-time.Minute).UTC()}
 	body, err := json.Marshal(receipt)
 	if err != nil {
@@ -45,10 +57,29 @@ func mockVolumeTeamPresent(t *testing.T, path string, journal report.CleanupJour
 }
 
 func TestVolumeTeamChildrenPersistExactTargetBeforeDelete(t *testing.T) {
-	path, journal, entry, cfg := volumeTeamChildrenFixture(t)
+	var bin string
+	if runtime.GOOS != "windows" {
+		t.Setenv("ECCTL_DISPLAY_MODE", "Human")
+		bin = filepath.Join(t.TempDir(), "ecctl")
+		const script = `#!/bin/sh
+[ "$ECCTL_DISPLAY_MODE" = Human ] || exit 81
+for flag in "$@"; do
+    if [ "$flag" = --no-color=true ]; then
+        printf '%s\n' "$ISSUE128_RESPONSE"
+        exit "$ISSUE128_EXIT"
+    fi
+done
+printf '\033[32m%s\033[0m\n' "$ISSUE128_RESPONSE"
+exit "$ISSUE128_EXIT"
+`
+		if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path, journal, entry, cfg := volumeTeamChildrenFixture(t, bin)
 	created := time.Now().Add(-30 * time.Second).UTC().Format(time.RFC3339)
 	deleteCalls := 0
-	run := func(_ context.Context, _ execpkg.Config, command string) execpkg.Result {
+	mock := func(command string) execpkg.Result {
 		switch {
 		case strings.Contains(command, "team get"):
 			return mockVolumeTeamPresent(t, path, journal)
@@ -72,6 +103,23 @@ func TestVolumeTeamChildrenPersistExactTargetBeforeDelete(t *testing.T) {
 		}
 		t.Fatalf("unexpected command %q", command)
 		return execpkg.Result{}
+	}
+
+	run := func(ctx context.Context, bound execpkg.Config, command string) execpkg.Result {
+		reply := mock(command)
+		if bin == "" {
+			return reply
+		}
+		body, err := json.Marshal(reply.JSON)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bound.Env = append(bound.Env, "ISSUE128_RESPONSE="+string(body), "ISSUE128_EXIT="+strconv.Itoa(reply.Exit))
+		res := execpkg.Run(ctx, bound, command)
+		if !slices.Contains(res.Argv, "--no-color=true") || !json.Valid([]byte(res.Stdout)) || res.Exit != reply.Exit {
+			t.Errorf("child proof lost its machine output: argv=%q exit=%d want=%d stdout=%q err=%v", res.Argv, res.Exit, reply.Exit, res.Stdout, res.Err)
+		}
+		return res
 	}
 	absent, err := PrepareVolumeTeamChildren(context.Background(), path, journal, entry, cfg, run)
 	if err != nil || absent || deleteCalls != 1 {

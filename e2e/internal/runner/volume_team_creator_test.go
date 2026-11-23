@@ -495,6 +495,7 @@ echo '{}'
 }
 
 func TestVolumeTeamCreatorSurvivesInterruptionBeforeFirstVolume(t *testing.T) {
+	t.Setenv("ECCTL_DISPLAY_MODE", "Human")
 	for _, mode := range []string{"normal", "replay"} {
 		t.Run(mode, func(t *testing.T) {
 			cfg, cl, dir := nativeCleanupFixture(t, false)
@@ -545,7 +546,7 @@ fi`
 			if updated == string(body) {
 				t.Fatal("fake Team provider insertion point missing")
 			}
-			if err := os.WriteFile(cfg.Bin, []byte(updated), 0o755); err != nil {
+			if err := os.WriteFile(cfg.Bin, []byte(issue128HumanOutput(updated, "team create", "team list", "template list")), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			digest, err := journalfile.ExecutableSHA256(cfg.Bin)
@@ -578,12 +579,16 @@ fi`
 			t.Setenv("FAKE_TEAM_OWNER", data["team_owner"].(string))
 			step := scenario.Step{Name: "create Team before first Volume", Run: `ecctl sandbox team create --name ` + data["team_name"].(string) + ` --description "` + data["team_owner"].(string) + `" --plan eco --output=json`, Teardown: `ecctl sandbox team delete {{.team_id}} --timeout 5m --output=json`}
 			result, ok := runStep(context.Background(), Options{volumeLifecycle: true, quotaLifecycleKnown: true, Logf: func(string, ...any) {}}, cfg, cl, &scope, data, step, time.Second)
-			if !ok || result.Status != report.StatusPass || len(scope) != 2 {
+			if !ok || result.Status != report.StatusPass || len(scope) != 2 || !json.Valid([]byte(result.Stdout)) || !strings.Contains(result.Command, " --no-color=true") {
 				t.Fatalf("Team creation was not retained before first Volume: result=%+v scope=%+v", result, scope)
 			}
 			journal, _, err := readRunnerJournal(cl.journal)
 			if err != nil || len(journal.Entries) != 2 || !journal.Entries[1].VolumeTeamBound || journal.VolumeTeamCreators["team-1"] == nil || journal.VolumeTeamCreators["team-1"].Profile != "account-a" {
 				t.Fatalf("Team creator was not durable before first Volume: journal=%+v err=%v", journal, err)
+			}
+
+			if err := journalfile.CheckVolumeTeamCreationLink(journal, "team-1", &journal.Entries[1]); err != nil {
+				t.Fatalf("durable Team finalizer was not linked to the accepted create: %v", err)
 			}
 			// The process ends here, before it can create or journal a Volume.
 			if err := os.WriteFile(filepath.Join(dir, "current"), []byte("account-b"), 0o600); err != nil {
