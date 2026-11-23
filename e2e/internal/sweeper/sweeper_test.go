@@ -37,41 +37,71 @@ func canonicalJournalDir(t *testing.T, path string) string {
 	return dir
 }
 
-func TestSettleVolumeTransferReplayObservationKeepsExpectedSnapshot(t *testing.T) {
-	dir := canonicalJournalTestDir(t)
-	path := filepath.Join(dir, "cleanup.json")
-	name := "ecctl-p-0123456789abcdef01234567"
-	entry := report.Resource{Scope: "case", Teardown: "ecctl sandbox team delete team-destination --timeout 5m --output=json", TeamCreateConfirmed: true, VolumeTransferIntent: name, VolumeTransferPending: true}
-	expected := report.CleanupJournal{
-		Version: 2, JournalPath: path, RunID: "run", ExecutionID: "execution", RegionRole: "primary", Region: "cn-hangzhou", Surface: "public", EcctlBin: "/bin/ecctl",
-		Entries: []report.Resource{entry}, VolumeTeamBindings: map[string]string{"team-destination": name},
-		VolumeTransferHistory: map[string]map[string]bool{name: {"team-destination": true}},
-	}
-	body, err := json.Marshal(expected)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	parent, err := os.Stat(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	binding := journalfile.TemplateCreateIntent{Resource: "volume", Name: name}
-	updated, err := settleVolumeTransferReplayObservation(context.Background(), path, expected, binding, "team-destination", "AVAILABLE", parent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !expected.VolumeTransferHistory[name]["team-destination"] || !expected.Entries[0].VolumeTransferPending {
-		t.Fatal("replay mutated its expected pre-write snapshot")
-	}
-	if updated.VolumeTransferHistory[name]["team-destination"] || updated.Entries[0].VolumeTransferPending {
-		t.Fatal("replay did not settle the transfer")
-	}
-	installed, legacy, err := readReplayJournal(path)
-	if err != nil || legacy || !reflect.DeepEqual(installed, updated) {
-		t.Fatalf("transfer observation was not durably installed: %v %+v", err, installed)
+func TestVolumeReplayAttemptChecksCurrentTransferBinding(t *testing.T) {
+	const name = "ecctl-p-0123456789abcdef01234567"
+	for _, tc := range []struct {
+		name        string
+		linkedOwner string
+		retain      bool
+	}{
+		{name: "bound Volume", linkedOwner: name, retain: true},
+		{name: "independent Volume", linkedOwner: "ecctl-p-89abcdef0123456701234567"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := canonicalJournalTestDir(t)
+			path := filepath.Join(dir, "cleanup.json")
+			entry := report.Resource{
+				Scope: "case", Teardown: "ecctl sandbox volume delete vol-owned --region cn-hangzhou --profile owner",
+				RegionRole: "primary", Region: "cn-hangzhou", ExecutionID: "execution",
+			}
+			team := report.Resource{
+				Scope: "case", Teardown: "ecctl sandbox team delete team-owned --timeout 5m --output=json",
+				RegionRole: "primary", Region: "cn-hangzhou", ExecutionID: "execution", TeamCreateConfirmed: true,
+			}
+			expected := report.CleanupJournal{
+				Version: 2, JournalPath: path, RunID: "run", ExecutionID: "execution", RegionRole: "primary",
+				Region: "cn-hangzhou", Surface: "public", EcctlBin: filepath.Join(dir, "ecctl"), Entries: []report.Resource{team, entry},
+			}
+			binding := journalfile.TemplateCreateIntent{
+				Resource: "volume", Name: name, TeamID: "team-owned", RunID: expected.RunID, ExecutionID: expected.ExecutionID,
+			}
+			latest := expected
+			latest.VolumeTeamBindings = map[string]string{"team-destination": tc.linkedOwner}
+			if !tc.retain {
+				latest.VolumeScopeBindings = map[string][]string{tc.linkedOwner: {"team-destination"}}
+				latest.VolumeTransferHistory = map[string]map[string]bool{tc.linkedOwner: {"team-destination": false}}
+			}
+			body, err := json.Marshal(latest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := journalfile.WriteDurable(path, body); err != nil {
+				t.Fatal(err)
+			}
+			parent, err := os.Stat(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			opt := ReplayOptions{Config: execpkg.Config{Bin: expected.EcctlBin, Region: expected.Region}, RunID: expected.RunID, Surface: expected.Surface}
+			marked, err := markVolumeDeleteReplayAttempt(context.Background(), path, opt, expected, binding, entry, parent)
+			if tc.retain {
+				if !errors.Is(err, errHistoricalVolumeTransfer) || marked != entry {
+					t.Fatalf("new transfer binding did not fence the attempt: entry=%+v err=%v", marked, err)
+				}
+				if installed, err := os.ReadFile(path); err != nil || string(installed) != string(body) {
+					t.Fatalf("retaining the Volume changed the journal: %v", err)
+				}
+				return
+			}
+			if err != nil || !marked.VolumeDeleteAttempted {
+				t.Fatalf("unrelated transfer blocked the Volume attempt: entry=%+v err=%v", marked, err)
+			}
+			latest.Entries = []report.Resource{team, marked}
+			installed, legacy, err := readReplayJournal(path)
+			if err != nil || legacy || !reflect.DeepEqual(installed, latest) {
+				t.Fatalf("attempt did not preserve the independently retained history: journal=%+v err=%v", installed, err)
+			}
+		})
 	}
 }
 
