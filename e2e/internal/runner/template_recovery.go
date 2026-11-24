@@ -1026,6 +1026,12 @@ func (c *cleanup) withTemplateCleanupGuardMode(ctx context.Context, role string,
 					if creatorBound {
 						bound = creatorConfig
 					}
+					if err == nil && !creatorBound {
+						creatorConfig, creatorBound, err = journalfile.OwnedTeamCreatorConfig(ctx, current, c.execCfg[role], teamID)
+						if creatorBound {
+							bound = creatorConfig
+						}
+					}
 				}
 			}
 		}

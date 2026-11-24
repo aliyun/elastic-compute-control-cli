@@ -182,7 +182,7 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 	if len(suites) == 0 {
 		return setupErr(fmt.Errorf("no cases selected"))
 	}
-	volumeSelected, volumeTeamOwned := false, false
+	volumeSelected, volumeTeamOwned, ownedProviderTemplateTeam := false, false, false
 	for _, suite := range suites {
 		if suite.Resource == "sandbox/volume" {
 			volumeSelected = true
@@ -192,21 +192,22 @@ func Run(ctx context.Context, opt Options) (*report.Run, error) {
 				}
 			}
 		}
+		if suite.CleanupProviderTemplates {
+			for _, step := range suite.Steps {
+				if step.Local == nil && isTeamCreate(step.Run) {
+					ownedProviderTemplateTeam = true
+				}
+			}
+		}
 	}
 	binSHA256 := ""
-	if opt.CleanupJournal != "" && !opt.DryRun {
-		for _, suite := range suites {
-			if suite.Resource != "sandbox/volume" {
-				continue
-			}
-			binSHA256, err = journalfile.ExecutableSHA256(opt.EcctlBin)
-			if err != nil {
-				return setupErr(fmt.Errorf("pin Volume fixture executable: %w", err))
-			}
-			if opt.EcctlBinSHA256 != "" && opt.EcctlBinSHA256 != binSHA256 {
-				return setupErr(fmt.Errorf("Volume fixture executable changed after run selection"))
-			}
-			break
+	if opt.CleanupJournal != "" && !opt.DryRun && (volumeSelected || ownedProviderTemplateTeam) {
+		binSHA256, err = journalfile.ExecutableSHA256(opt.EcctlBin)
+		if err != nil {
+			return setupErr(fmt.Errorf("pin cleanup executable: %w", err))
+		}
+		if opt.EcctlBinSHA256 != "" && opt.EcctlBinSHA256 != binSHA256 {
+			return setupErr(fmt.Errorf("cleanup executable changed after run selection"))
 		}
 	}
 	if opt.Session != nil {
@@ -1554,7 +1555,8 @@ func runCase(
 	data := vars.Clone(base)
 	data["run_name"] = opt.RunName + "-" + caseSlug(s.Resource)
 	data["inputs"] = inputs
-	if s.Resource == "sandbox/team" || s.Resource == "sandbox/template-cache" || s.Resource == "sandbox/quota" || s.Resource == "sandbox/volume" {
+	data["team_provider_template_cleanup"] = s.CleanupProviderTemplates
+	if s.Resource == "sandbox/team" || s.Resource == "sandbox/template-cache" || s.Resource == "sandbox/quota" || s.Resource == "sandbox/volume" || s.Resource == "sandbox/api-key" {
 		if err := teamOwnership(data); err != nil {
 			cr.Status, cr.Error = report.StatusError, err.Error()
 			return cr
@@ -1621,10 +1623,14 @@ func runSequentialCase(
 		}
 		// A Volume lifecycle owns one Team; Quota may rotate its nonce for a
 		// second protected Team without changing a captured Team ID.
-		if ((opt.quotaLifecycle && s.Resource == "sandbox/quota") || s.Resource == "sandbox/volume") && isTeamCreate(st.Run) {
+		if ((opt.quotaLifecycle && s.Resource == "sandbox/quota") || s.Resource == "sandbox/volume" || s.Resource == "sandbox/api-key") && isTeamCreate(st.Run) {
 			if teamCreates > 0 {
-				if s.Resource == "sandbox/volume" {
-					cr.Steps = append(cr.Steps, report.Step{Name: st.Name, Status: report.StatusError, Error: "Volume lifecycle permits one owned Team"})
+				if s.Resource == "sandbox/volume" || s.Resource == "sandbox/api-key" {
+					message := "Volume lifecycle permits one owned Team"
+					if s.Resource == "sandbox/api-key" {
+						message = "API key lifecycle permits one owned Team"
+					}
+					cr.Steps = append(cr.Steps, report.Step{Name: st.Name, Status: report.StatusError, Error: message})
 					cr.Status = report.StatusFail
 					break
 				}
@@ -2089,6 +2095,16 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 						return sr, false
 					}
 				}
+				// An opt-in plain Team retains its own run credential so cleanup
+				// and replay can rebuild the pinned identity from the sidecar.
+				var ownerBinding *report.QuotaCredentialBinding
+				if providerTemplates, _ := data["team_provider_template_cleanup"].(bool); providerTemplates && quotaBinding == nil && volumeBinding == nil {
+					ownerBinding, execCfg, err = captureQuotaCredentialBinding(ctx, execCfg, timeout)
+					if err != nil {
+						sr.Status, sr.Error = report.StatusError, err.Error()
+						return sr, false
+					}
+				}
 				cl.mu.Lock()
 				for _, existing := range *scope {
 					if !existing.done && !existing.teamCreateConfirmed && ownedTeamDeleteCandidate(existing.cmd) {
@@ -2104,7 +2120,7 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 					cl.teamCreatesPending--
 					cl.mu.Unlock()
 				}()
-				teamIntent, err = reserveTeamCreate(cmd, data, execCfg, cl, st, sourceEnv, quotaBinding, volumeBinding)
+				teamIntent, err = reserveTeamCreate(cmd, data, execCfg, cl, st, sourceEnv, quotaBinding, volumeBinding, ownerBinding)
 				if err != nil {
 					sr.Status, sr.Error = report.StatusError, err.Error()
 					return sr, false
@@ -2256,14 +2272,18 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 							return err
 						}
 						ownedTeamDelete = teamItem != nil
-						if teamItem != nil && teamItem.volumeTeamBound {
-							volumeTeamPath, volumeTeamJournal, volumeTeamEntry, err = cl.volumeTeamChildContext(teamItem)
-							if err != nil {
-								return err
+						if teamItem != nil && teamItem.ownedTeamChildCleanup() {
+							childPath, childJournal, childEntry, childErr := cl.volumeTeamChildContext(teamItem)
+							if childErr != nil {
+								return childErr
 							}
-							volumeTeamAlreadyAbsent, err = journalfile.PrepareVolumeTeamChildren(sctx, volumeTeamPath, volumeTeamJournal, volumeTeamEntry, bound, cl.runCommand)
-							if err != nil {
-								return err
+							absent, prepErr := journalfile.PrepareVolumeTeamChildren(sctx, childPath, childJournal, childEntry, bound, cl.runCommand)
+							if prepErr != nil && !errors.Is(prepErr, journalfile.ErrOwnedTeamChildNoIntent) {
+								return prepErr
+							}
+							if prepErr == nil {
+								volumeTeamPath, volumeTeamJournal, volumeTeamEntry = childPath, childJournal, childEntry
+								volumeTeamAlreadyAbsent = absent
 							}
 						}
 					}
@@ -2307,14 +2327,14 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 						if volumeTeamAlreadyAbsent {
 							res = execpkg.Result{Started: true, Exit: 0, JSON: map[string]any{"deleted": true}}
 						} else {
-							if teamItem != nil && teamItem.volumeTeamBound {
+							if teamItem != nil && volumeTeamPath != "" {
 								if err := journalfile.ReserveVolumeTeamDelete(sctx, volumeTeamPath, volumeTeamJournal, volumeTeamEntry, bound); err != nil {
 									return err
 								}
 							}
 							invoked = true
 							res = cl.runCommand(sctx, bound, cmd)
-							if teamItem != nil && teamItem.volumeTeamBound && journalfile.IsVolumeTeamChildConflict(res) {
+							if teamItem != nil && volumeTeamPath != "" && journalfile.IsVolumeTeamChildConflict(res) {
 								if err := journalfile.RecordVolumeTeamConflict(sctx, volumeTeamPath, volumeTeamJournal, volumeTeamEntry, bound, res); err != nil {
 									return err
 								}

@@ -18,6 +18,7 @@ API 产品为 `FCSandbox`，版本 `2026-05-09`，协议 ROA。
 | `sandbox template-cache` / `sbx template-cache` | FCSandbox ROA，Aliyun profile AK/STS | 必须解析目标地域；缓存状态、团队作用域与分页见 [Template Cache](template-cache.md) |
 | `sandbox quota` / `sbx quota` | FCSandbox ROA，Aliyun profile AK/STS | 必须解析目标地域；团队配额、单位与 token 分页见 [Quota](quota.md) |
 | `sandbox volume` / `sbx volume` | FCSandbox ROA，Aliyun profile AK/STS | 必须解析目标地域；团队卷配置与挂载关系见 [Volume](volume.md) |
+| `sandbox api-key` / `sbx apikey` | FCSandbox ROA，Aliyun profile AK/STS | 必须解析目标地域；访问密钥管理、脱敏与重置见 [API Key](api-key.md) |
 
 `E2B_API_URL`、`E2B_DOMAIN`、`ECCTL_SANDBOX_BACKEND` 和沙箱 CA 设置
 继续控制 E2B sandbox/template；不影响 Team 的 OpenAPI 目标。

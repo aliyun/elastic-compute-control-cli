@@ -1288,6 +1288,158 @@ func TestProtectedTeamTimeoutBeforeIDRunsAutomaticCleanup(t *testing.T) {
 	}
 }
 
+func TestProviderTemplateCleanupFlagPersistsOnTeamFinalizer(t *testing.T) {
+	dir := canonicalCleanupTestDir(t)
+	bin := filepath.Join(dir, "ecctl")
+	configureQuotaProbeFixture(t, dir, bin)
+	cfg := execpkg.Config{Bin: bin, Region: "cn-hangzhou"}
+	path := filepath.Join(dir, "journal.json")
+	cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, newOperationRuntime(1), false, path,
+		report.CleanupJournal{RunID: "run", ExecutionID: "execution", Surface: "public"}, func(string, ...any) {})
+	data := map[string]any{"run_name": "owned-team", "team_provider_template_cleanup": true}
+	if err := teamOwnership(data); err != nil {
+		t.Fatal(err)
+	}
+	suite, err := scenario.Load("testdata/quota-lifecycle.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := suite.Steps[0]
+	create.Teardown = "ecctl sandbox team delete --timeout 1m {{.team_id}}"
+	cl.runCommand = func(_ context.Context, _ execpkg.Config, command string) execpkg.Result {
+		if isTeamCreate(command) {
+			return execpkg.Result{Command: command, Started: true, Exit: 0, JSON: map[string]any{"team": map[string]any{"id": "team-owned", "status": "active"}}}
+		}
+		return execpkg.Result{Command: command, Started: true, Exit: 0, JSON: map[string]any{"deleted": true}}
+	}
+	var scope []*cleanupItem
+	if step, ok := runStep(context.Background(), Options{}, cfg, cl, &scope, data, create, time.Second); !ok {
+		t.Fatalf("protected Team create failed: %+v", step)
+	}
+	entries := quotaJournal(t, path).Entries
+	if len(entries) != 1 || !entries[0].TeamCreateConfirmed || !entries[0].TeamProviderTemplateCleanup {
+		t.Fatalf("provider Template cleanup flag was not journaled on the Team finalizer: %+v", entries)
+	}
+	if len(scope) != 1 || !scope[0].ownedTeamChildCleanup() {
+		t.Fatalf("flagged Team finalizer did not activate provider Template cleanup: %+v", scope)
+	}
+	intent := scope[0].teamCreateIntent
+	if intent == nil || intent.OwnerBinding == nil || intent.OwnerBinding.Profile != "quota-test" || intent.OwnerBinding.Identity.UserID != "quota-user" {
+		t.Fatalf("opt-in plain Team did not retain its run credential binding: %+v", intent)
+	}
+	sidecar, err := os.ReadFile(path + ".team-create-" + strings.TrimPrefix(data["team_name"].(string), "ecctl-t-") + ".json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recorded teamCreateIntent
+	if err := json.Unmarshal(sidecar, &recorded); err != nil {
+		t.Fatal(err)
+	}
+	if recorded.OwnerBinding == nil || !reflect.DeepEqual(recorded.OwnerBinding, intent.OwnerBinding) {
+		t.Fatalf("create intent sidecar lost the retained owner binding: %+v", recorded.OwnerBinding)
+	}
+}
+
+func TestProviderTemplateCleanupRequiresRetainedOwnerBinding(t *testing.T) {
+	dir := canonicalCleanupTestDir(t)
+	cfg := execpkg.Config{Bin: filepath.Join(dir, "must-not-launch"), Region: "cn-hangzhou"}
+	path := filepath.Join(dir, "journal.json")
+	cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, newOperationRuntime(1), false, path,
+		report.CleanupJournal{RunID: "run", ExecutionID: "execution", Surface: "public"}, func(string, ...any) {})
+	data := map[string]any{"run_name": "owned-team", "team_provider_template_cleanup": true}
+	if err := teamOwnership(data); err != nil {
+		t.Fatal(err)
+	}
+	command := `ecctl sandbox team create --name ` + data["team_name"].(string) + ` --description "` + data["team_owner"].(string) + `"`
+	st := scenario.Step{Name: "create", Run: command, Teardown: "ecctl sandbox team delete {{.team_id}} --timeout 5m"}
+	if _, err := reserveTeamCreate(command, data, cfg, cl, st, cfg.Env); err == nil || !strings.Contains(err.Error(), "provider Template cleanup requires a retained Team credential binding") {
+		t.Fatalf("opt-in plain Team without an owner binding must fail at reservation, got %v", err)
+	}
+	identity := execpkg.IdentityPin{Version: 1, AccountID: "1234567890123456", Type: "RAMUser", UserID: "quota-user"}
+	owner := &report.QuotaCredentialBinding{Profile: "quota-test", Mode: "AK", Identity: identity}
+	if _, err := reserveTeamCreate(command, data, cfg, cl, st, cfg.Env, nil, nil, owner); err == nil || !strings.Contains(err.Error(), "owned Team create did not retain its verified credential") {
+		t.Fatalf("unverified owner binding must fail at reservation, got %v", err)
+	}
+	volumeData := map[string]any{"run_name": "owned-team"}
+	if err := teamOwnership(volumeData); err != nil {
+		t.Fatal(err)
+	}
+	volumeCommand := `ecctl sandbox team create --name ` + volumeData["team_name"].(string) + ` --description "` + volumeData["team_owner"].(string) + `"`
+	if _, err := reserveTeamCreate(volumeCommand, volumeData, cfg, cl, st, cfg.Env, nil, nil, owner); err == nil || !strings.Contains(err.Error(), "owned Team credential binding requires an opt-in plain Team") {
+		t.Fatalf("owner binding without opt-in must fail at reservation, got %v", err)
+	}
+}
+
+func TestProviderTemplateCleanupTeardownRebuildsRunIdentity(t *testing.T) {
+	dir := canonicalCleanupTestDir(t)
+	bin := filepath.Join(dir, "ecctl")
+	configureQuotaProbeFixture(t, dir, bin)
+	digest, err := journalfile.ExecutableSHA256(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := execpkg.Config{Bin: bin, ExpectedBinSHA256: digest, Region: "cn-hangzhou"}
+	path := filepath.Join(dir, "journal.json")
+	cl := newCleanup(map[string]execpkg.Config{"primary": cfg}, newOperationRuntime(1), false, path,
+		report.CleanupJournal{RunID: "run", ExecutionID: "execution", Surface: "public", EcctlBinSHA256: digest}, func(string, ...any) {})
+	data := map[string]any{"run_name": "owned-team", "team_provider_template_cleanup": true}
+	if err := teamOwnership(data); err != nil {
+		t.Fatal(err)
+	}
+	suite, err := scenario.Load("testdata/quota-lifecycle.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := suite.Steps[0]
+	create.Teardown = "ecctl sandbox team delete --timeout 1m {{.team_id}}"
+	cl.runCommand = func(_ context.Context, _ execpkg.Config, command string) execpkg.Result {
+		if isTeamCreate(command) {
+			return execpkg.Result{Command: command, Started: true, Exit: 0, JSON: map[string]any{"team": map[string]any{"id": "team-owned", "status": "active"}}}
+		}
+		return execpkg.Result{Command: command, Started: true, Exit: 0, JSON: map[string]any{"deleted": true}}
+	}
+	var scope []*cleanupItem
+	if step, ok := runStep(context.Background(), Options{}, cfg, cl, &scope, data, create, time.Second); !ok {
+		t.Fatalf("protected Team create failed: %+v", step)
+	}
+	teamName, teamOwner := data["team_name"].(string), data["team_owner"].(string)
+	created := time.Now().UTC().Format(time.RFC3339)
+	templateDeletes, teamDeletes := 0, 0
+	mock := func(exit int, payload map[string]any) execpkg.Result {
+		return execpkg.Result{Started: true, Exit: exit, JSON: payload, VerifiedBinSHA256: digest}
+	}
+	cl.runCommand = func(_ context.Context, bound execpkg.Config, command string) execpkg.Result {
+		if bound.ExpectedIdentity == nil || bound.Profile != "quota-test" || bound.ExpectedIdentity.UserID != "quota-user" {
+			t.Fatalf("provider cleanup command lost its pinned identity: %q bound=%+v", command, bound)
+		}
+		switch {
+		case strings.Contains(command, "team get"):
+			return mock(0, map[string]any{"team": map[string]any{"id": "team-owned", "name": teamName, "description": teamOwner, "created_time": created}})
+		case strings.Contains(command, "template list"):
+			if templateDeletes == 0 {
+				return mock(0, map[string]any{"templates": []any{map[string]any{"id": "tpl-child", "name": "base", "team_id": "team-owned", "team_name": teamName, "created_time": created}}, "pagination": map[string]any{"has_more": false}})
+			}
+			return mock(0, map[string]any{"templates": []any{}, "pagination": map[string]any{"has_more": false}})
+		case strings.Contains(command, "template get"):
+			if templateDeletes == 0 {
+				return mock(0, map[string]any{"template": map[string]any{"id": "tpl-child", "name": "base", "team_id": "team-owned", "team_name": teamName, "created_time": created}})
+			}
+			return mock(4, map[string]any{"error": map[string]any{"kind": "not_found", "code": "NotFound"}, "actions": []any{map[string]any{"action_name": "GetTemplate", "code": "TemplateNotFound", "request_id": "req-1"}}})
+		case strings.Contains(command, "template delete"):
+			templateDeletes++
+			return mock(0, map[string]any{"deleted": true, "template": map[string]any{"id": "tpl-child"}})
+		case strings.Contains(command, "team delete"):
+			teamDeletes++
+			return mock(0, map[string]any{"deleted": true})
+		}
+		t.Fatalf("unexpected cleanup command %q", command)
+		return execpkg.Result{}
+	}
+	if failures := cl.runCleanup(scope, false); len(failures) != 0 || templateDeletes != 1 || teamDeletes != 1 {
+		t.Fatalf("opt-in Team teardown did not self-close: failures=%v templates=%d teams=%d", failures, templateDeletes, teamDeletes)
+	}
+}
+
 func TestReaderTeamTeardownChecksCoLocatedRoleOwnership(t *testing.T) {
 	for _, tc := range []struct {
 		name, secondaryRegion, teardown string

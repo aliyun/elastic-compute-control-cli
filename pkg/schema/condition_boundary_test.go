@@ -14,7 +14,7 @@ func TestConditionDescriptionsRejectUnsupportedExpressions(t *testing.T) {
 		`has($matching_prefix(input.ids))`, `has($matching_prefix(context.ids,"i-"))`,
 		`!has($except($matching_prefix(input.ids,"i-"),input.old))`, `has($except(input.ids))`, `has($except(input.ids,input.old))`,
 		`has($except($matching_prefix(input.ids),input.old))`, `has($except($matching_prefix(context.ids,"i-"),input.old))`,
-		"input.ids && unknown", "context.id == 'value'",
+		"input.ids && unknown",
 	} {
 		if text, ok := describeAPICondition(spec.ResourceSpec{}, spec.Operation{}, expression, "en"); ok || text != "" {
 			t.Fatalf("unsupported %q described as %q", expression, text)
@@ -36,6 +36,23 @@ func TestConditionDescriptionsPreservePrefixAndNegationMeaning(t *testing.T) {
 	}
 	if _, ok := inputPathName("input.bad(name)"); ok {
 		t.Fatal("function syntax accepted as input path")
+	}
+}
+
+func TestConditionDescriptionsDescribeContextFieldComparisons(t *testing.T) {
+	for _, tc := range []struct {
+		expression, lang, want string
+	}{
+		{"context.current_api_key.status == active", "en", "When `current_api_key` field `status` from the preceding step equals `active`."},
+		{"context.current_api_key.status != active", "en", "When `current_api_key` field `status` from the preceding step does not equal `active`."},
+		{"context.current_api_key.status == active", "zh-CN", "前序步骤 `current_api_key` 的 `status` 字段等于 `active` 时"},
+		{"context.current_api_key.status != active", "zh-CN", "前序步骤 `current_api_key` 的 `status` 字段不等于 `active` 时"},
+		{"context.final == \"present\"", "en", "When `final` from the preceding step equals `present`."},
+	} {
+		text, ok := describeAPICondition(spec.ResourceSpec{}, spec.Operation{}, tc.expression, tc.lang)
+		if !ok || text != tc.want {
+			t.Fatalf("condition %q (%s) = %q, %t; want %q", tc.expression, tc.lang, text, ok, tc.want)
+		}
 	}
 }
 

@@ -9,6 +9,8 @@ func TestValidateDelete(t *testing.T) {
 		valid   bool
 	}{
 		{name: "first class delete", command: "ecctl ecs instance delete i-1 --force", valid: true},
+		{name: "api-key first class delete", command: "ecctl sandbox api-key delete key-1 --timeout 5m --output=json", valid: true},
+		{name: "api-key alias delete", command: "ecctl sbx apikey delete key-1 --region cn-hangzhou --output=json", valid: true},
 		{name: "keypair name with dot", command: "ecctl ecs keypair delete ops.key", valid: true},
 		{name: "addon name with dot", command: "ecctl ack addon delete addon.v1 --cluster cluster-1", valid: true},
 		{name: "ordinary delete after option is not a command", command: "ecctl ecs instance update --name delete", valid: false},

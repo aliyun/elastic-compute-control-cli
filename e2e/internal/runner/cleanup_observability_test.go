@@ -65,6 +65,7 @@ func TestCleanupRetryableOnlyForTransientResourceStatus(t *testing.T) {
 		"security group dependency": {Exit: 2, Stdout: `{"actions":[{"code":"403, There is still instance(s) in the specified security group."}],"error":{"code":"CloudAPIError"}}`},
 		"vpc dependency":            {Exit: 2, Stdout: `{"actions":[{"code":"400, Specified object has dependent resources"}],"error":{"code":"DependencyViolation"}}`},
 		"charge-type token pending": {Exit: 2, Stdout: `{"actions":[{"code":"403, The last token request is processing."}],"error":{"code":"CloudAPIError"}}`},
+		"team api-key window":       {Exit: 2, Stdout: `{"actions":[{"code":"Conflict.TeamHasApiKeys"}],"error":{"code":"CloudAPIError"}}`},
 	} {
 		if !cleanupRetryable(transient) {
 			t.Fatalf("temporary %s must be retried", name)

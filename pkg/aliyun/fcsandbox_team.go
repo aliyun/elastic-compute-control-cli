@@ -51,6 +51,9 @@ func (c *OpenAPICaller) resourceResponseError(req *openAPIRequest, response map[
 	if c.isFCSandboxVolume() {
 		return c.fcVolumeResponseError(req, response)
 	}
+	if c.isFCSandboxAPIKey() {
+		return c.fcApiKeyResponseError(req, response)
+	}
 	if !c.isFCSandboxTeam() {
 		return openAPIBusinessError(response)
 	}
