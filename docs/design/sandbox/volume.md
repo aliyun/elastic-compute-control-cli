@@ -89,9 +89,14 @@ from execution-scoped fixtures. It verifies token pagination and exact
 Volume finalizer. In the dedicated test account, cleanup uses the recorded
 profile, Hangzhou region, and run-assigned OSS Bucket and RAM fixture names.
 Uncertain outcomes retain the journal.
-Volume has no tag-based sweep contract. All four case operations remain
-offline until an authorized live run verifies this path. Team transfer through
-`UpdateVolume` is deferred from this first release.
+Volume has no tag-based sweep contract. The four case operations (`create`,
+`get`, `list`, and `delete`) are `live-pass` in `e2e/coverage.yaml`, recorded
+on 2026-11-20 with reason `live-verified`. The record is bound to the matching
+public case fingerprint, the SHA-256 of
+`e2e/cases/sandbox/volume-lifecycle.yaml`
+(`sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451`);
+a case change requires live re-verification under the new fingerprint. Team
+transfer through `UpdateVolume` is deferred from this first release.
 Offline unit tests cover request construction, nested JSON, business errors,
 wait states, no-wait, scope, and token pagination.
 
