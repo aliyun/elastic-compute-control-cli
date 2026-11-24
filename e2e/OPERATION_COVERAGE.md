@@ -23,7 +23,7 @@ The `sandbox/volume` resource has one authored public lifecycle case covering
 exercise token pagination. OSS/RAM fixtures use execution-scoped names,
 durable reservations, pinned identity, and named target checks before
 name-based cleanup. Each Volume finalizer requires an exact provider-verified
-`VolumeNotFound` read under the original Team. All four registry entries
+`VolumeNotFound` read under the original Team. All four registry entries are
 `live-pass`, recorded on 2026-11-20 with reason `live-verified`. The record is
 bound to the matching public case fingerprint, the SHA-256 of
 `cases/sandbox/volume-lifecycle.yaml`
