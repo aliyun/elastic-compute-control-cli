@@ -224,39 +224,49 @@ func TestAPIShapedInputLocalizedDiagnostics(t *testing.T) {
 		path           string
 		english        string
 		chinese        string
+		englishMessage string
+		chineseMessage string
 		genericControl bool
 	}{
 		{
-			name:    "wrong-read-only-type",
-			flag:    "--oss-volume-config",
-			value:   `{"readOnly":"true"}`,
-			path:    "oss-volume-config.readOnly",
-			english: "does not match the API JSON schema",
-			chinese: "不符合 API JSON 结构",
+			name:           "wrong-read-only-type",
+			flag:           "--oss-volume-config",
+			value:          `{"readOnly":"true"}`,
+			path:           "oss-volume-config.readOnly",
+			english:        "does not match the API JSON schema",
+			chinese:        "不符合 API JSON 结构",
+			englishMessage: "--oss-volume-config.readOnly does not match the API JSON schema",
+			chineseMessage: "--oss-volume-config.readOnly 的值不符合 API JSON 结构",
 		},
 		{
-			name:    "unknown-nested-member",
-			flag:    "--mount-config",
-			value:   `{"vpcConfig":{"vpcID":"vpc-fixture"}}`,
-			path:    "mount-config.vpcConfig.vpcID",
-			english: "unsupported API JSON member",
-			chinese: "不支持 API JSON 成员",
+			name:           "unknown-nested-member",
+			flag:           "--mount-config",
+			value:          `{"vpcConfig":{"vpcID":"vpc-fixture"}}`,
+			path:           "mount-config.vpcConfig.vpcID",
+			english:        "unsupported API JSON member",
+			chinese:        "不支持 API JSON 成员",
+			englishMessage: "unsupported API JSON member --mount-config.vpcConfig.vpcID",
+			chineseMessage: "不支持 API JSON 成员 --mount-config.vpcConfig.vpcID",
 		},
 		{
-			name:    "duplicate-inline-member",
-			flag:    "--oss-volume-config",
-			value:   `{"readOnly":true,"readOnly":false}`,
-			path:    "oss-volume-config",
-			english: "one unambiguous JSON object",
-			chinese: "单个无歧义的 JSON 对象",
+			name:           "duplicate-inline-member",
+			flag:           "--oss-volume-config",
+			value:          `{"readOnly":true,"readOnly":false}`,
+			path:           "oss-volume-config",
+			english:        "one unambiguous JSON object",
+			chinese:        "单个无歧义的 JSON 对象",
+			englishMessage: "--oss-volume-config must be one unambiguous JSON object",
+			chineseMessage: "--oss-volume-config 必须是单个无歧义的 JSON 对象",
 		},
 		{
-			name:    "duplicate-file-member",
-			flag:    "--mount-config",
-			value:   "@" + duplicateFile,
-			path:    "mount-config",
-			english: "one unambiguous JSON object",
-			chinese: "单个无歧义的 JSON 对象",
+			name:           "duplicate-file-member",
+			flag:           "--mount-config",
+			value:          "@" + duplicateFile,
+			path:           "mount-config",
+			english:        "one unambiguous JSON object",
+			chinese:        "单个无歧义的 JSON 对象",
+			englishMessage: "--mount-config must be one unambiguous JSON object",
+			chineseMessage: "--mount-config 必须是单个无歧义的 JSON 对象",
 		},
 		{
 			name:           "generic-invalid-parameter",
@@ -268,9 +278,9 @@ func TestAPIShapedInputLocalizedDiagnostics(t *testing.T) {
 			genericControl: true,
 		},
 	} {
-		for _, locale := range []struct{ lang, reason string }{
-			{"en", tc.english},
-			{"zh-CN", tc.chinese},
+		for _, locale := range []struct{ lang, reason, message string }{
+			{"en", tc.english, tc.englishMessage},
+			{"zh-CN", tc.chinese, tc.chineseMessage},
 		} {
 			t.Run(tc.name+"/"+locale.lang, func(t *testing.T) {
 				fake := &callOnlyAPICaller{}
@@ -313,9 +323,10 @@ func TestAPIShapedInputLocalizedDiagnostics(t *testing.T) {
 					}
 					return
 				}
-				if got.Field != tc.path || !strings.Contains(got.Message, "--"+tc.path) || !strings.Contains(got.Message, locale.reason) {
-					t.Errorf("localized API JSON diagnostic: got field=%q message=%q, want field=%q and message containing %q and %q",
-						got.Field, got.Message, tc.path, "--"+tc.path, locale.reason)
+				if got.Field != tc.path || got.Message != locale.message ||
+					!strings.Contains(got.Message, "--"+tc.path) || !strings.Contains(got.Message, locale.reason) {
+					t.Errorf("localized API JSON diagnostic: got field=%q message=%q, want field=%q message=%q containing %q and %q",
+						got.Field, got.Message, tc.path, locale.message, "--"+tc.path, locale.reason)
 				}
 			})
 		}
