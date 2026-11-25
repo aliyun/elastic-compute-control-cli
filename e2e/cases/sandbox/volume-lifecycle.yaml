@@ -167,7 +167,7 @@ steps:
       status: {eq: active}
     capture:
       destination_team_id: id
-    teardown: ecctl sandbox team delete {{.destination_team_id}} --timeout 5m --output=json
+    teardown: ecctl sandbox team delete {{.team_id}} --timeout 5m --output=json
 
   - name: create transfer Volume
     run: >

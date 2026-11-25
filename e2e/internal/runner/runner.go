@@ -1619,12 +1619,13 @@ func runSequentialCase(
 			cr.Status = report.StatusFail
 			break
 		}
-		// A Volume lifecycle owns one Team; Quota may rotate its nonce for a
-		// second protected Team without changing a captured Team ID.
+		// Quota and Volume lifecycles rotate the ownership nonce before each
+		// additional protected Team without changing a captured Team ID; a
+		// Volume transfer owns at most two Teams.
 		if ((opt.quotaLifecycle && s.Resource == "sandbox/quota") || s.Resource == "sandbox/volume") && isTeamCreate(st.Run) {
 			if teamCreates > 0 {
-				if s.Resource == "sandbox/volume" {
-					cr.Steps = append(cr.Steps, report.Step{Name: st.Name, Status: report.StatusError, Error: "Volume lifecycle permits one owned Team"})
+				if s.Resource == "sandbox/volume" && teamCreates > 1 {
+					cr.Steps = append(cr.Steps, report.Step{Name: st.Name, Status: report.StatusError, Error: "Volume lifecycle permits at most two owned Teams"})
 					cr.Status = report.StatusFail
 					break
 				}
