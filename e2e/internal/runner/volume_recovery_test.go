@@ -226,16 +226,22 @@ fi
 // that a successful Volume Team create leaves before a Volume child starts.
 func settleVolumeTeamFixture(t *testing.T, cl *cleanup, journal *report.CleanupJournal, binding *report.QuotaCredentialBinding) {
 	t.Helper()
-	const name = "ecctl-t-0123456789abcdef01234567"
-	const teamID = "team-1"
+	settleVolumeTeamFixtureFor(t, cl, journal, binding, "ecctl-t-0123456789abcdef01234567", "team-1", 0)
+}
+
+func settleVolumeTeamFixtureFor(t *testing.T, cl *cleanup, journal *report.CleanupJournal, binding *report.QuotaCredentialBinding, name, teamID string, entryIndex int) {
+	t.Helper()
 	path := cl.journal
 	parent, err := os.Stat(filepath.Dir(path))
 	if err != nil {
 		t.Fatal(err)
 	}
 	description := "ecctl E2E Team owner=" + name[8:]
-	intent := &teamCreateIntent{Version: 1, RunID: journal.RunID, ExecutionID: journal.ExecutionID, Region: journal.Region, Surface: journal.Surface, EcctlBin: journal.EcctlBin, Name: name, Description: description, Input: []string{"ecctl", "sandbox", "team", "create", "--name", name, "--description", description, "--region", journal.Region, "--output=json"}, CaseScope: journal.Entries[0].Scope, Teardown: "ecctl sandbox team delete intent-validation --timeout 5m --output=json", VolumeBinding: binding, DispatchProtocol: 1, CreatedAt: time.Now().UTC(), path: path + ".team-create-" + name[8:] + ".json", journalPath: path, parent: parent}
-	journal.VolumeTeamCreateIDs = map[string]string{name: ""}
+	intent := &teamCreateIntent{Version: 1, RunID: journal.RunID, ExecutionID: journal.ExecutionID, Region: journal.Region, Surface: journal.Surface, EcctlBin: journal.EcctlBin, Name: name, Description: description, Input: []string{"ecctl", "sandbox", "team", "create", "--name", name, "--description", description, "--region", journal.Region, "--output=json"}, CaseScope: journal.Entries[entryIndex].Scope, Teardown: "ecctl sandbox team delete intent-validation --timeout 5m --output=json", VolumeBinding: binding, DispatchProtocol: 1, CreatedAt: time.Now().UTC(), path: path + ".team-create-" + name[8:] + ".json", journalPath: path, parent: parent}
+	if journal.VolumeTeamCreateIDs == nil {
+		journal.VolumeTeamCreateIDs = map[string]string{}
+	}
+	journal.VolumeTeamCreateIDs[name] = ""
 	if err := writeRunnerJournal(path, *journal); err != nil {
 		t.Fatal(err)
 	}
@@ -253,8 +259,11 @@ func settleVolumeTeamFixture(t *testing.T, cl *cleanup, journal *report.CleanupJ
 	if err := recordVolumeTeamCreateID(cl, intent, teamID, result); err != nil {
 		t.Fatal(err)
 	}
-	journal.VolumeTeamCreators = map[string]*report.QuotaCredentialBinding{teamID: binding}
-	journal.Entries[0].VolumeTeamBound = true
+	if journal.VolumeTeamCreators == nil {
+		journal.VolumeTeamCreators = map[string]*report.QuotaCredentialBinding{}
+	}
+	journal.VolumeTeamCreators[teamID] = binding
+	journal.Entries[entryIndex].VolumeTeamBound = true
 	if err := settleVolumeTeamRegistration(journal, intent, teamID, path); err != nil {
 		t.Fatal(err)
 	}

@@ -66,6 +66,94 @@ func TestReserveVolumeTransferRequiresOwnedBinding(t *testing.T) {
 	}
 }
 
+// A --no-wait create commits its journaled and observed transitions to the
+// durable sidecar after the cleanup snapshot was taken, so update admission
+// must read the durable creation binding rather than the stale in-memory copy.
+func TestVolumeUpdateAdmitsDurableNoWaitCreateBinding(t *testing.T) {
+	cfg, cl, dir, scope := volumeRecoveryFixture(t, func(script string) string {
+		return strings.Replace(script,
+			`printf '{"volume":{"id":"%s","team_id":"%s","status":"AVAILABLE"}}\n' "$id" "$team"; exit 0`,
+			`printf '{"volume":{"id":"%s","team_id":"%s","status":"AVAILABLE"},"actions":[{"action_name":"UpdateVolume","request_id":"req-update","provider_verified":true}]}\n' "$id" "$team"; exit 0`, 1)
+	})
+	native, aliyun := filepath.Join(dir, "native.json"), filepath.Join(dir, "aliyun.json")
+	t.Setenv("HOME", dir)
+	t.Setenv("ECCTL_CONFIG_PATH", native)
+	t.Setenv("ECCTL_ALIYUN_CONFIG_PATH", aliyun)
+	t.Setenv("ECCTL_PROFILE", "account-a")
+	if err := os.WriteFile(aliyun, []byte(`{"profiles":[{"name":"account-a","mode":"AK","access_key_id":"fake-a","access_key_secret":"fake-secret"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	binding, _, err := captureQuotaCredentialBinding(context.Background(), cfg, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bucket := "ecctl-e2e-20261104t120000-123456abcdef"
+	cl.volumeFixtureBinding, cl.volumeFixtureBucket = binding, bucket
+	journal, _, err := readRunnerJournal(cl.journal)
+	if err != nil || len(journal.Entries) != 1 {
+		t.Fatalf("Volume Team fixture is unavailable: %v %+v", err, journal)
+	}
+	journal.VolumeFixtureBinding, journal.VolumeFixtureBucket = binding, bucket
+	settleVolumeTeamFixture(t, cl, &journal, binding)
+	if _, err := cl.pushItem(scope, "case", "ecctl sandbox team delete team-2 --timeout 5m --output=json", "primary", nil, false, true, false); err != nil {
+		t.Fatal(err)
+	}
+	journal, _, err = readRunnerJournal(cl.journal)
+	if err != nil || len(journal.Entries) != 2 {
+		t.Fatalf("destination Team finalizer is unavailable: %v %+v", err, journal)
+	}
+	settleVolumeTeamFixtureFor(t, cl, &journal, binding, "ecctl-t-89abcdef0123456789abcdef", "team-2", 1)
+	oss, mount, err := appendSyntheticVolumeBacking(&journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRunnerJournal(cl.journal, journal); err != nil {
+		t.Fatal(err)
+	}
+	opt := Options{volumeLifecycle: true, Logf: func(string, ...any) {}}
+	create := scenario.Step{Name: "create", Run: "ecctl sandbox volume create --name authored --team-id team-1 --oss-volume-config '" + oss + "' --mount-config '" + mount + "' --no-wait --output=json", Teardown: "ecctl sandbox volume delete {{.volume_id}} --output=json"}
+	if result, ok := runStep(context.Background(), opt, cfg, cl, scope, map[string]any{}, create, time.Second); !ok {
+		t.Fatalf("accepted no-wait create failed: %+v", result)
+	}
+	var owned *cleanupItem
+	for _, item := range cl.ownedTemplates {
+		if item.templateBinding != nil && item.templateBinding.Resource == "volume" {
+			owned = item
+		}
+	}
+	if owned == nil {
+		t.Fatal("retained Volume finalizer is missing")
+	}
+	if owned.templateBinding.State == "journaled" && owned.templateBinding.VolumeObserved {
+		t.Fatal("test no longer exercises the stale in-memory snapshot")
+	}
+	update := scenario.Step{Name: "update", Run: "ecctl sandbox volume update vol-owned --team-id team-2 --output=json"}
+	result, ok := runStep(context.Background(), opt, cfg, cl, scope, map[string]any{}, update, time.Second)
+	if !ok {
+		t.Fatalf("update admission rejected the durable journaled create: %+v", result)
+	}
+	calls, _ := os.ReadFile(filepath.Join(dir, "calls"))
+	if !strings.Contains(string(calls), "volume-update:vol-owned") {
+		t.Fatalf("update never reached the provider: %s", calls)
+	}
+	installed, _, err := readRunnerJournal(cl.journal)
+	if err != nil || len(installed.VolumeScopeBindings) != 0 || len(installed.VolumeTransferHistory) != 0 || len(installed.VolumeTeamBindings) != 0 {
+		t.Fatalf("confirmed transfer retained pending markers: %v %+v", err, installed)
+	}
+	paths, err := filepath.Glob(cl.journal + ".template-create-*.json")
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("Volume sidecar is unavailable: %v %v", err, paths)
+	}
+	var intent journalfile.TemplateCreateIntent
+	body, err := os.ReadFile(paths[0])
+	if err != nil || json.Unmarshal(body, &intent) != nil || intent.TeamID != "team-2" || intent.AcceptedVolumeID != "vol-owned" {
+		t.Fatalf("transfer did not reanchor the durable creation binding: %v %+v", err, intent)
+	}
+	if owned.templateBinding.TeamID != "team-2" || owned.volumeTransferTeam != "team-2" {
+		t.Fatalf("retained finalizer lost its destination anchor: %+v", owned.templateBinding)
+	}
+}
+
 func TestRewriteVolumeIntentTeamRoot(t *testing.T) {
 	dir := t.TempDir()
 	journal := filepath.Join(dir, "cleanup.json")

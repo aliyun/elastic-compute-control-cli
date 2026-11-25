@@ -165,6 +165,7 @@ func ReanchorVolumeTransfer(meta *report.CleanupJournal, intent *TemplateCreateI
 	delete(meta.VolumeTeamBindings, dest)
 	delete(meta.VolumeScopeBindings, intent.Name)
 	delete(meta.VolumeTransferHistory, intent.Name)
+	pruneEmptyVolumeTransferMarkers(meta)
 	meta.Entries[index].VolumeTransferIntent = ""
 	meta.Entries[index].VolumeTransferPending = false
 	teams, err := VolumePossibleTeams(*meta, *intent)
@@ -205,7 +206,23 @@ func RestoreUnstartedVolumeTransfer(meta *report.CleanupJournal, intent Template
 	delete(meta.VolumeTeamBindings, dest)
 	delete(meta.VolumeScopeBindings, intent.Name)
 	delete(meta.VolumeTransferHistory, intent.Name)
+	pruneEmptyVolumeTransferMarkers(meta)
 	meta.Entries[index].VolumeTransferIntent = ""
 	meta.Entries[index].VolumeTransferPending = false
 	return nil
+}
+
+// The transfer marker maps are omitempty, so a settlement that clears the last
+// key must nil the empty map to keep the installed journal byte-identical to
+// its decoded form.
+func pruneEmptyVolumeTransferMarkers(meta *report.CleanupJournal) {
+	if len(meta.VolumeTeamBindings) == 0 {
+		meta.VolumeTeamBindings = nil
+	}
+	if len(meta.VolumeScopeBindings) == 0 {
+		meta.VolumeScopeBindings = nil
+	}
+	if len(meta.VolumeTransferHistory) == 0 {
+		meta.VolumeTransferHistory = nil
+	}
 }

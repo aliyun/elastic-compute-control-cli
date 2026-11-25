@@ -13,6 +13,7 @@ import (
 
 	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/journalfile"
+	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/report"
 	"github.com/aliyun/elastic-compute-control-cli/e2e/internal/scenario"
 	"github.com/google/shlex"
 )
@@ -72,7 +73,56 @@ func reserveVolumeTransfer(ctx context.Context, command string, cfg execpkg.Conf
 	if found == nil {
 		return nil, fmt.Errorf("Volume update lacks an active run-owned creation binding")
 	}
-	binding := *found.templateBinding
+	meta, _, journal := cl.journalValues(&cleanupItem{role: "primary"})
+	if _, err := cl.checkedJournalPath("primary"); err != nil {
+		return nil, err
+	}
+	canonicalJournal, err := journalfile.ResolveJournalPath(journal)
+	if err != nil {
+		return nil, err
+	}
+	if cl.journal == "" || meta.RunID == "" || meta.ExecutionID == "" || cfg.Region == "" || cfg.Bin == "" ||
+		!scenario.Surface(meta.Surface).Valid() || meta.Region != cfg.Region || meta.EcctlBin != cfg.Bin {
+		return nil, fmt.Errorf("Volume update requires a cleanup journal bound to run, execution, region, surface and binary")
+	}
+	knownParent, err := cl.rememberedJournalParent(journal)
+	if err != nil || knownParent == nil {
+		return nil, fmt.Errorf("Volume update journal parent is unavailable: %v", err)
+	}
+	// The retained finalizer snapshot is taken before the create intent is
+	// journaled and observed, so admission reads the durable creation binding
+	// instead of the possibly stale in-memory copy.
+	var binding journalfile.TemplateCreateIntent
+	var durableJournal report.CleanupJournal
+	err = journalfile.WithExistingReplayLock(ctx, journal, func() error {
+		if err := checkJournalParentIdentity(journal, knownParent); err != nil {
+			return err
+		}
+		return journalfile.WithExistingParentLock(context.Background(), journal, func() error {
+			root, err := cl.openRememberedJournalRoot(journal)
+			if err != nil {
+				return err
+			}
+			defer root.Close()
+			current, legacy, err := readRunnerJournalRoot(root, journal)
+			if err != nil {
+				return err
+			}
+			if legacy || current.Version != 2 || current.RunID != meta.RunID || current.ExecutionID != meta.ExecutionID || current.RegionRole != meta.RegionRole || current.Region != meta.Region || current.Surface != meta.Surface || current.EcctlBin != meta.EcctlBin {
+				return fmt.Errorf("existing Volume update journal binding differs")
+			}
+			durable, err := journalfile.VolumeDeleteBinding(journal, current, cl.execCfg[found.role].Env, found.cmd)
+			if err != nil {
+				return fmt.Errorf("Volume update lacks a durable creation binding: %w", err)
+			}
+			binding = durable
+			durableJournal = current
+			return journalRootMatchesPath(root, journal)
+		})
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read Volume update creation binding: %w", err)
+	}
 	if binding.State != "journaled" || !binding.VolumeObserved || binding.AcceptedVolumeID != request.ID || len(binding.Deletes) != 1 {
 		return nil, fmt.Errorf("Volume update requires a journaled, observed creation binding")
 	}
@@ -85,17 +135,7 @@ func reserveVolumeTransfer(ctx context.Context, command string, cfg execpkg.Conf
 	if request.OutputSet && request.Output != "json" || request.AgentEnvelopeSet && request.AgentEnvelope {
 		return nil, fmt.Errorf("owned Volume update requires plain JSON output")
 	}
-	meta, _, journal := cl.journalValues(&cleanupItem{role: "primary"})
-	if _, err := cl.checkedJournalPath("primary"); err != nil {
-		return nil, err
-	}
-	canonicalJournal, err := journalfile.ResolveJournalPath(journal)
-	if err != nil {
-		return nil, err
-	}
-	if cl.journal == "" || meta.RunID == "" || meta.ExecutionID == "" || cfg.Region == "" || cfg.Bin == "" ||
-		!scenario.Surface(meta.Surface).Valid() || meta.Region != cfg.Region || meta.EcctlBin != cfg.Bin ||
-		binding.RunID != meta.RunID || binding.ExecutionID != meta.ExecutionID || binding.Region != meta.Region || binding.Surface != meta.Surface || binding.EcctlBin != meta.EcctlBin {
+	if binding.RunID != meta.RunID || binding.ExecutionID != meta.ExecutionID || binding.Region != meta.Region || binding.Surface != meta.Surface || binding.EcctlBin != meta.EcctlBin {
 		return nil, fmt.Errorf("Volume update requires a cleanup journal bound to run, execution, region, surface and binary")
 	}
 	if caseScopeValue == "" || strings.ContainsAny(caseScopeValue, "\r\n") || binding.CaseScope != caseScopeValue {
@@ -127,12 +167,8 @@ func reserveVolumeTransfer(ctx context.Context, command string, cfg execpkg.Conf
 	if err != nil {
 		return nil, err
 	}
-	if err := journalfile.CheckVolumeTransferTeamBinding(journal, meta, bound, request.TeamID, binding); err != nil {
+	if err := journalfile.CheckVolumeTransferTeamBinding(journal, durableJournal, bound, request.TeamID, binding); err != nil {
 		return nil, err
-	}
-	knownParent, err := cl.rememberedJournalParent(journal)
-	if err != nil || knownParent == nil {
-		return nil, fmt.Errorf("Volume update journal parent is unavailable: %v", err)
 	}
 	err = journalfile.WithExistingReplayLock(ctx, journal, func() error {
 		if err := checkJournalParentIdentity(journal, knownParent); err != nil {
@@ -156,6 +192,10 @@ func reserveVolumeTransfer(ctx context.Context, command string, cfg execpkg.Conf
 			}
 			if err := journalfile.CheckVolumeTransferTeamBinding(journal, current, bound, request.TeamID, binding); err != nil {
 				return err
+			}
+			durable, err := journalfile.VolumeDeleteBinding(journal, current, cl.execCfg[found.role].Env, found.cmd)
+			if err != nil || !reflect.DeepEqual(durable, binding) {
+				return fmt.Errorf("Volume update creation binding changed before reservation")
 			}
 			if err := journalfile.ReserveVolumeTransfer(&current, binding, request.TeamID); err != nil {
 				return err
