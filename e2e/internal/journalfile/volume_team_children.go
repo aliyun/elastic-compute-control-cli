@@ -576,7 +576,7 @@ func VolumeTeamChildrenReady(path string, meta report.CleanupJournal, entry repo
 }
 
 // ReserveVolumeTeamDelete durably bounds the Team mutation to one attempt and
-// one retry after a verified TeamHasTemplates result and a later empty list.
+// one retry after a verified dependency conflict and a later empty list.
 func ReserveVolumeTeamDelete(ctx context.Context, path string, meta report.CleanupJournal, entry report.Resource, cfg execpkg.Config) error {
 	receipt, teamID, err := teamChildrenReceipt(meta, entry, cfg)
 	if errors.Is(err, ErrOwnedTeamChildNoIntent) {
@@ -643,7 +643,7 @@ func RecordVolumeTeamConflict(ctx context.Context, path string, meta report.Clea
 	}
 	action, _ := actions[0].(map[string]any)
 	requestID, _ := action["request_id"].(string)
-	if failure["kind"] != "service" || failure["code"] != "CloudAPIError" || action["action_name"] != "DeleteTeam" || action["code"] != "Conflict.TeamHasTemplates" || !validVolumeProvenanceID(requestID) {
+	if failure["kind"] != "service" || failure["code"] != "CloudAPIError" || !volumeTeamDeleteDependency(entry, action) || !validVolumeProvenanceID(requestID) {
 		return fmt.Errorf("Volume Team conflict is not the observed child dependency")
 	}
 	body, err := json.Marshal(root)
@@ -687,7 +687,7 @@ func RetryVolumeTeamDeleteAfterConflict(ctx context.Context, path string, meta r
 		return execpkg.Result{}, err
 	}
 	result := run(ctx, cfg, entry.Teardown)
-	if IsVolumeTeamChildConflict(result) {
+	if IsVolumeTeamChildConflict(entry, result) {
 		if err := RecordVolumeTeamConflict(ctx, path, meta, entry, cfg, result); err != nil {
 			return result, err
 		}
@@ -695,7 +695,9 @@ func RetryVolumeTeamDeleteAfterConflict(ctx context.Context, path string, meta r
 	return result, nil
 }
 
-func volumeTeamChildConflict(result execpkg.Result) bool {
+// IsVolumeTeamChildConflict identifies a failed DeleteTeam result that needs a
+// durable conflict receipt before the single bounded retry.
+func IsVolumeTeamChildConflict(entry report.Resource, result execpkg.Result) bool {
 	root, ok := result.JSON.(map[string]any)
 	if !ok || result.Err != nil || !result.Started || result.Exit == 0 {
 		return false
@@ -705,9 +707,19 @@ func volumeTeamChildConflict(result execpkg.Result) bool {
 		return false
 	}
 	action, _ := actions[0].(map[string]any)
-	return action["action_name"] == "DeleteTeam" && action["code"] == "Conflict.TeamHasTemplates"
+	return volumeTeamDeleteDependency(entry, action)
 }
 
-// IsVolumeTeamChildConflict is used only to decide whether the exact failed
-// result needs a durable retry receipt. It never converts that result to pass.
-func IsVolumeTeamChildConflict(result execpkg.Result) bool { return volumeTeamChildConflict(result) }
+func volumeTeamDeleteDependency(entry report.Resource, action map[string]any) bool {
+	if action["action_name"] != "DeleteTeam" {
+		return false
+	}
+	switch action["code"] {
+	case "Conflict.TeamHasTemplates":
+		return true
+	case "Conflict.TeamHasApiKeys":
+		return entry.TeamProviderTemplateCleanup && !entry.VolumeTeamBound
+	default:
+		return false
+	}
+}

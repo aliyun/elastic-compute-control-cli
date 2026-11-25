@@ -2334,7 +2334,7 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 							}
 							invoked = true
 							res = cl.runCommand(sctx, bound, cmd)
-							if teamItem != nil && volumeTeamPath != "" && journalfile.IsVolumeTeamChildConflict(res) {
+							if teamItem != nil && volumeTeamPath != "" && journalfile.IsVolumeTeamChildConflict(volumeTeamEntry, res) {
 								if err := journalfile.RecordVolumeTeamConflict(sctx, volumeTeamPath, volumeTeamJournal, volumeTeamEntry, bound, res); err != nil {
 									return err
 								}

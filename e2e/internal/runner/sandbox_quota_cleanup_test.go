@@ -1370,7 +1370,7 @@ func TestProviderTemplateCleanupRequiresRetainedOwnerBinding(t *testing.T) {
 	}
 }
 
-func TestProviderTemplateCleanupTeardownRebuildsRunIdentity(t *testing.T) {
+func TestProviderTemplateCleanupRetriesTeamHasApiKeysWithPinnedIdentity(t *testing.T) {
 	dir := canonicalCleanupTestDir(t)
 	bin := filepath.Join(dir, "ecctl")
 	configureQuotaProbeFixture(t, dir, bin)
@@ -1404,7 +1404,7 @@ func TestProviderTemplateCleanupTeardownRebuildsRunIdentity(t *testing.T) {
 	}
 	teamName, teamOwner := data["team_name"].(string), data["team_owner"].(string)
 	created := time.Now().UTC().Format(time.RFC3339)
-	templateDeletes, teamDeletes := 0, 0
+	templateDeletes, teamDeletes, emptyTemplateLists := 0, 0, 0
 	mock := func(exit int, payload map[string]any) execpkg.Result {
 		return execpkg.Result{Started: true, Exit: exit, JSON: payload, VerifiedBinSHA256: digest}
 	}
@@ -1419,6 +1419,7 @@ func TestProviderTemplateCleanupTeardownRebuildsRunIdentity(t *testing.T) {
 			if templateDeletes == 0 {
 				return mock(0, map[string]any{"templates": []any{map[string]any{"id": "tpl-child", "name": "base", "team_id": "team-owned", "team_name": teamName, "created_time": created}}, "pagination": map[string]any{"has_more": false}})
 			}
+			emptyTemplateLists++
 			return mock(0, map[string]any{"templates": []any{}, "pagination": map[string]any{"has_more": false}})
 		case strings.Contains(command, "template get"):
 			if templateDeletes == 0 {
@@ -1430,13 +1431,27 @@ func TestProviderTemplateCleanupTeardownRebuildsRunIdentity(t *testing.T) {
 			return mock(0, map[string]any{"deleted": true, "template": map[string]any{"id": "tpl-child"}})
 		case strings.Contains(command, "team delete"):
 			teamDeletes++
+			if emptyTemplateLists != teamDeletes {
+				t.Fatalf("Team delete attempt %d lacks a fresh empty Template inventory", teamDeletes)
+			}
+			if teamDeletes == 1 {
+				return mock(2, map[string]any{
+					"error": map[string]any{"kind": "service", "code": "CloudAPIError"},
+					"actions": []any{map[string]any{
+						"action_name": "DeleteTeam", "code": "Conflict.TeamHasApiKeys", "request_id": "req-2",
+					}},
+				})
+			}
 			return mock(0, map[string]any{"deleted": true})
 		}
 		t.Fatalf("unexpected cleanup command %q", command)
 		return execpkg.Result{}
 	}
-	if failures := cl.runCleanup(scope, false); len(failures) != 0 || templateDeletes != 1 || teamDeletes != 1 {
+	if failures := cl.runCleanup(scope, false); len(failures) != 0 || templateDeletes != 1 || teamDeletes != 2 {
 		t.Fatalf("opt-in Team teardown did not self-close: failures=%v templates=%d teams=%d", failures, templateDeletes, teamDeletes)
+	}
+	if entries := quotaJournal(t, path).Entries; len(entries) != 0 {
+		t.Fatalf("opt-in Team teardown retained its finalizer: %+v", entries)
 	}
 }
 

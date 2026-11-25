@@ -1497,7 +1497,7 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool, pendingWai
 							}
 						}
 						res = c.runCommand(commandCtx, bound, command)
-						if volumeTeamPath != "" && teamDelete && journalfile.IsVolumeTeamChildConflict(res) {
+						if volumeTeamPath != "" && teamDelete && journalfile.IsVolumeTeamChildConflict(volumeTeamEntry, res) {
 							if err := journalfile.RecordVolumeTeamConflict(commandCtx, volumeTeamPath, volumeTeamJournal, volumeTeamEntry, bound, res); err != nil {
 								cancel()
 								return err

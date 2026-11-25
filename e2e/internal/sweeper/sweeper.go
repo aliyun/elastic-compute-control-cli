@@ -749,7 +749,7 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 				}
 			}
 			res = execpkg.Run(ctx, bound, deleteCommand)
-			if teamChildCleanupActive && journalfile.IsVolumeTeamChildConflict(res) {
+			if teamChildCleanupActive && journalfile.IsVolumeTeamChildConflict(entry, res) {
 				if err := journalfile.RecordVolumeTeamConflict(ctx, path, journal, entry, bound, res); err != nil {
 					return result, fmt.Errorf("record Volume Team conflict: %w", err)
 				}
