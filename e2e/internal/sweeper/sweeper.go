@@ -62,6 +62,8 @@ var writeVolumeFixtureReplayRestoreJournal = journalfile.WriteDurable
 // Injectable at the consumption barrier for post-rename failure tests.
 var writeReplayConsumptionJournal = journalfile.WriteDurable
 
+var errHistoricalVolumeTransfer = errors.New("historical Volume transfer requires separate reconciliation")
+
 // isTransientSweepFailure reports whether a failed delete is worth retrying:
 // dependency-still-releasing or throttling. Both clear on their own shortly.
 func isTransientSweepFailure(dr execpkg.Result) bool {
@@ -284,9 +286,7 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 	entries := journal.Entries
 	originalEntries := append([]report.Resource(nil), entries...)
 	result := &Result{}
-	// A transferred Volume can be older than its destination Team. Delete
-	// Volumes and Teams before the bucket, then retain RAM fixture dependencies
-	// until confirmed bucket removal is committed to the journal.
+	// Process Volume children before Teams and retire the bucket before its RAM dependencies.
 	order := make([]int, 0, len(entries))
 	for pass := 0; pass < 4; pass++ {
 		for i := len(entries) - 1; i >= 0; i-- {
@@ -307,6 +307,11 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 	}
 	consumed := make(map[int]bool)
 	volumeBlocked := false
+	retainHistoricalVolume := func(entry report.Resource) {
+		result.Errors++
+		result.Details = append(result.Details, fmt.Sprintf("journal %s: %v", entry.Scope, errHistoricalVolumeTransfer))
+		volumeBlocked = true
+	}
 	refresh := func(originalIndex, index int) error {
 		consumed[originalIndex] = true
 		current, _, err := readReplayJournal(path)
@@ -404,6 +409,25 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 		if err := checkReplayParent(path, parent); err != nil {
 			return result, err
 		}
+		volumeDelete := journalfile.IsNativeVolumeDelete(entry.Teardown)
+		var volumeBinding journalfile.TemplateCreateIntent
+		var volumeTeams []string
+		if volumeDelete {
+			var err error
+			volumeBinding, err = journalfile.VolumeDeleteBinding(path, journal, opt.Config.Env, entry.Teardown)
+			if err == nil && journalfile.HasHistoricalVolumeTransfer(journal, volumeBinding, entry) {
+				retainHistoricalVolume(entry)
+				continue
+			}
+			if err == nil {
+				volumeTeams, err = journalfile.VolumePossibleTeams(journal, volumeBinding)
+			}
+			if err != nil {
+				result.Errors++
+				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume scope binding is unavailable: %v", entry.Scope, err))
+				break
+			}
+		}
 		templateBound, err := journalfile.PrepareTemplateCleanup(ctx, path, journal, opt.Config)
 		if err != nil {
 			return result, err
@@ -468,7 +492,7 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 			if err := checkReplayParent(path, parent); err != nil {
 				return result, err
 			}
-		} else if journalfile.IsTemplateCacheDelete(entry.Teardown) || journalfile.IsNativeTemplateDelete(entry.Teardown) || journalfile.IsNativeVolumeDelete(entry.Teardown) {
+		} else if journalfile.IsTemplateCacheDelete(entry.Teardown) || journalfile.IsNativeTemplateDelete(entry.Teardown) || volumeDelete {
 			bound = templateBound
 		} else if journalfile.IsTeamDeleteCandidate(entry.Teardown) {
 			var teamID string
@@ -538,21 +562,9 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 			return result, err
 		}
 		deleteCommand := entry.Teardown
-		volumeDelete := journalfile.IsNativeVolumeDelete(entry.Teardown)
-		var volumeBinding journalfile.TemplateCreateIntent
-		var volumeTeams []string
 		volumeReadOnly := false
 		freshVolumeAttempt := false
 		if volumeDelete {
-			volumeBinding, err = journalfile.VolumeDeleteBinding(path, journal, opt.Config.Env, entry.Teardown)
-			if err == nil {
-				volumeTeams, err = journalfile.VolumePossibleTeams(journal, volumeBinding)
-			}
-			if err != nil {
-				result.Errors++
-				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume scope binding is unavailable: %v", entry.Scope, err))
-				break
-			}
 			bound = volumeBinding.BoundConfig(opt.Config)
 			bound.Region, bound.Profile = volumeBinding.Region, volumeBinding.Profile
 			if _, err := execpkg.ReadIdentity(ctx, bound, volumeBinding.Profile); err != nil {
@@ -566,7 +578,7 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume delete target is invalid: %v", entry.Scope, parseErr))
 				break
 			}
-			current, status, absent, probeErr := journalfile.ProbeVolumeScopesWithStatus(ctx, bound, request.ID, volumeBinding.Name, volumeBinding.Region, volumeBinding.Profile, volumeTeams, execpkg.Run)
+			_, status, absent, probeErr := journalfile.ProbeVolumeScopesWithStatus(ctx, bound, request.ID, volumeBinding.Name, volumeBinding.Region, volumeBinding.Profile, volumeTeams, execpkg.Run)
 			if probeErr != nil {
 				result.Errors++
 				result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume scope read is unavailable: %v", entry.Scope, probeErr))
@@ -594,26 +606,23 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 					volumeBlocked = true
 					continue
 				}
-				updated, observeErr := settleVolumeTransferReplayObservation(ctx, path, journal, volumeBinding, current, status, parent)
-				if observeErr != nil {
-					result.Errors++
-					result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume transfer observation is unavailable: %v", entry.Scope, observeErr))
-					break
-				}
-				journal, entries, entry = updated, updated.Entries, updated.Entries[i]
 				if entry.VolumeDeleteAttempted {
 					volumeReadOnly = true
 				} else {
 					if err := ctx.Err(); err != nil {
 						return result, err
 					}
-					entry, err = markVolumeDeleteReplayAttempt(ctx, path, opt, journal, entry, parent)
+					entry, err = markVolumeDeleteReplayAttempt(ctx, path, opt, journal, volumeBinding, entry, parent)
+					if errors.Is(err, errHistoricalVolumeTransfer) {
+						retainHistoricalVolume(entry)
+						continue
+					}
 					if err != nil {
 						return result, fmt.Errorf("record Volume delete attempt before replay: %w", err)
 					}
 					entries[i], journal.Entries[i] = entry, entry
 					freshVolumeAttempt = true
-					deleteCommand += " --team-id " + current
+					deleteCommand += " --team-id " + volumeBinding.TeamID
 				}
 			}
 			deleteCommand += " --output=json --agent-envelope=false"
@@ -746,8 +755,12 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 		}
 		if freshVolumeAttempt && !res.Started && res.Exit == -1 && res.Err != nil {
 			commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), replayJournalCommitTimeout)
-			restored, restoreErr := restoreUnstartedVolumeDeleteReplayAttempt(commitCtx, path, opt, journal, entry, parent)
+			restored, restoreErr := restoreUnstartedVolumeDeleteReplayAttempt(commitCtx, path, opt, journal, volumeBinding, entry, parent)
 			cancel()
+			if errors.Is(restoreErr, errHistoricalVolumeTransfer) {
+				retainHistoricalVolume(entry)
+				continue
+			}
 			if restoreErr != nil {
 				return result, fmt.Errorf("restore unused Volume replay marker: %w", restoreErr)
 			}
@@ -767,8 +780,12 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 				continue
 			}
 			commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), replayJournalCommitTimeout)
-			restored, restoreErr := restoreUnstartedVolumeDeleteReplayAttempt(commitCtx, path, opt, journal, entry, parent)
+			restored, restoreErr := restoreUnstartedVolumeDeleteReplayAttempt(commitCtx, path, opt, journal, volumeBinding, entry, parent)
 			cancel()
+			if errors.Is(restoreErr, errHistoricalVolumeTransfer) {
+				retainHistoricalVolume(entry)
+				continue
+			}
 			if restoreErr != nil {
 				return result, fmt.Errorf("restore rejected Volume replay marker: %w", restoreErr)
 			}
@@ -867,50 +884,6 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 	return result, nil
 }
 
-func settleVolumeTransferReplayObservation(ctx context.Context, path string, expected report.CleanupJournal, binding journalfile.TemplateCreateIntent, current, status string, parent os.FileInfo) (report.CleanupJournal, error) {
-	updated := expected
-	updated.Entries = append([]report.Resource(nil), expected.Entries...)
-	if expected.VolumeTransferHistory != nil {
-		updated.VolumeTransferHistory = make(map[string]map[string]bool, len(expected.VolumeTransferHistory))
-		for name, history := range expected.VolumeTransferHistory {
-			updated.VolumeTransferHistory[name] = make(map[string]bool, len(history))
-			for team, pending := range history {
-				updated.VolumeTransferHistory[name][team] = pending
-			}
-		}
-	}
-	changed, err := journalfile.ResolveVolumeTransferObservation(&updated, binding, current, status)
-	if err != nil || !changed {
-		return expected, err
-	}
-	err = withAnchoredJournalLock(ctx, path, parent, func() error {
-		journal, legacy, err := readReplayJournal(path)
-		if err != nil || legacy || !reflect.DeepEqual(journal, expected) {
-			return fmt.Errorf("Volume transfer replay journal changed: %v", err)
-		}
-		if _, err := journalfile.ResolveVolumeTransferObservation(&journal, binding, current, status); err != nil {
-			return err
-		}
-		body, err := json.MarshalIndent(journal, "", "  ")
-		if err != nil {
-			return err
-		}
-		if err := checkReplayParent(path, parent); err != nil {
-			return err
-		}
-		if err := journalfile.WriteDurable(path, append(body, '\n')); err != nil {
-			return err
-		}
-		installed, legacy, err := readReplayJournal(path)
-		if err != nil || legacy || !reflect.DeepEqual(installed, journal) {
-			return fmt.Errorf("Volume transfer replay observation was not installed exactly")
-		}
-		updated = installed
-		return nil
-	})
-	return updated, err
-}
-
 // A protocol-1 fixture gets one destructive attempt after this anchored
 // marker is durably installed under the replay lock.
 func markVolumeFixtureReplayAttempt(ctx context.Context, path string, opt ReplayOptions, expected report.CleanupJournal, entry report.Resource, parent os.FileInfo) (report.Resource, error) {
@@ -977,7 +950,7 @@ func markVolumeFixtureReplayAttempt(ctx context.Context, path string, opt Replay
 	return entry, nil
 }
 
-func markVolumeDeleteReplayAttempt(ctx context.Context, path string, opt ReplayOptions, expected report.CleanupJournal, entry report.Resource, parent os.FileInfo) (report.Resource, error) {
+func markVolumeDeleteReplayAttempt(ctx context.Context, path string, opt ReplayOptions, expected report.CleanupJournal, binding journalfile.TemplateCreateIntent, entry report.Resource, parent os.FileInfo) (report.Resource, error) {
 	if !journalfile.IsNativeVolumeDelete(entry.Teardown) || entry.VolumeDeleteAttempted {
 		return entry, fmt.Errorf("Volume has no fresh replay delete attempt")
 	}
@@ -987,8 +960,14 @@ func markVolumeDeleteReplayAttempt(ctx context.Context, path string, opt ReplayO
 			return err
 		}
 		currentOpt := opt
-		if legacy || validateJournalIdentity(journal, &currentOpt) != nil || journal.Version != expected.Version || journal.JournalPath != path || journal.RunID != expected.RunID || journal.ExecutionID != expected.ExecutionID || journal.RegionRole != expected.RegionRole || journal.Region != expected.Region || journal.Surface != expected.Surface || journal.EcctlBin != expected.EcctlBin || !reflect.DeepEqual(journal.VolumeScopeBindings, expected.VolumeScopeBindings) || !reflect.DeepEqual(journal.VolumeTransferHistory, expected.VolumeTransferHistory) {
+		if legacy || validateJournalIdentity(journal, &currentOpt) != nil || journal.Version != expected.Version || journal.JournalPath != path || journal.RunID != expected.RunID || journal.ExecutionID != expected.ExecutionID || journal.RegionRole != expected.RegionRole || journal.Region != expected.Region || journal.Surface != expected.Surface || journal.EcctlBin != expected.EcctlBin {
 			return fmt.Errorf("Volume replay journal binding changed")
+		}
+		if journalfile.HasHistoricalVolumeTransfer(journal, binding, entry) {
+			return errHistoricalVolumeTransfer
+		}
+		if _, err := journalfile.VolumePossibleTeams(journal, binding); err != nil {
+			return err
 		}
 		index := -1
 		for i, candidate := range journal.Entries {
@@ -1037,7 +1016,7 @@ func markVolumeDeleteReplayAttempt(ctx context.Context, path string, opt ReplayO
 
 // Restore only a marker committed by this replay when its subprocess did not
 // start or the provider definitively rejected it without mutation.
-func restoreUnstartedVolumeDeleteReplayAttempt(ctx context.Context, path string, opt ReplayOptions, expected report.CleanupJournal, entry report.Resource, parent os.FileInfo) (report.Resource, error) {
+func restoreUnstartedVolumeDeleteReplayAttempt(ctx context.Context, path string, opt ReplayOptions, expected report.CleanupJournal, binding journalfile.TemplateCreateIntent, entry report.Resource, parent os.FileInfo) (report.Resource, error) {
 	if !journalfile.IsNativeVolumeDelete(entry.Teardown) || !entry.VolumeDeleteAttempted {
 		return entry, fmt.Errorf("Volume has no newly marked replay delete attempt")
 	}
@@ -1047,8 +1026,11 @@ func restoreUnstartedVolumeDeleteReplayAttempt(ctx context.Context, path string,
 			return err
 		}
 		currentOpt := opt
-		if legacy || validateJournalIdentity(journal, &currentOpt) != nil || journal.Version != expected.Version || journal.JournalPath != path || journal.RunID != expected.RunID || journal.ExecutionID != expected.ExecutionID || journal.RegionRole != expected.RegionRole || journal.Region != expected.Region || journal.Surface != expected.Surface || journal.EcctlBin != expected.EcctlBin || !reflect.DeepEqual(journal.VolumeScopeBindings, expected.VolumeScopeBindings) || !reflect.DeepEqual(journal.VolumeTransferHistory, expected.VolumeTransferHistory) {
+		if legacy || validateJournalIdentity(journal, &currentOpt) != nil || journal.Version != expected.Version || journal.JournalPath != path || journal.RunID != expected.RunID || journal.ExecutionID != expected.ExecutionID || journal.RegionRole != expected.RegionRole || journal.Region != expected.Region || journal.Surface != expected.Surface || journal.EcctlBin != expected.EcctlBin {
 			return fmt.Errorf("Volume replay journal binding changed before marker restoration")
+		}
+		if journalfile.HasHistoricalVolumeTransfer(journal, binding, entry) {
+			return errHistoricalVolumeTransfer
 		}
 		index := -1
 		for i, candidate := range journal.Entries {
