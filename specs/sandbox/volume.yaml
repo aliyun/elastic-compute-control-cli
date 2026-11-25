@@ -10,7 +10,7 @@ examples:
   - ecctl sandbox volume create --name workspace --team-id <team-id> --oss-volume-config @oss.json --region cn-hangzhou
   - ecctl sandbox volume list --team-id <team-id> --region cn-hangzhou
   - ecctl sandbox volume get <volume-id> --team-id <team-id> --region cn-hangzhou
-  - ecctl sandbox volume update <volume-id> --team-id <destination-team-id> --region cn-hangzhou
+  - ecctl sandbox volume update <volume-id> --team-id <team-id> --oss-volume-config @oss.json --region cn-hangzhou
 
 identity:
   field: id
@@ -206,11 +206,14 @@ bindings:
     api: UpdateVolume
     request:
       volumeID: $.id
+      teamID: $.team_id
       body:
-        status: $.status
-        teamID: $.team_id
-    require_all: [{request: volumeID}]
-    require_any: [{request: body.status}, {request: body.teamID}]
+        ossVolumeConfig: {from: $.oss_volume_config}
+        agenticFSVolumeConfig: {from: $.agentic_fs_volume_config}
+        agenticBucketVolumeConfig: {from: $.agentic_bucket_volume_config}
+        mountConfig: {from: $.mount_config}
+    require_all: [{request: volumeID}, {request: teamID}]
+    require_any: [{request: body.ossVolumeConfig}, {request: body.agenticFSVolumeConfig}, {request: body.agenticBucketVolumeConfig}, {request: body.mountConfig}]
     id_from: $.volume.volumeID
     context_from: {updated_volume: $.volume, updated_team_id: $.volume.teamID}
     request_id_from: $.requestId
@@ -252,21 +255,24 @@ operations:
         when: input.no_wait
     examples: [ecctl sandbox volume create --name workspace --team-id <team-id> --oss-volume-config @oss.json --region cn-hangzhou]
   update:
-    description: {en: Update a native FC sandbox volume, zh-CN: 更新原生 FC 沙箱存储卷}
+    description: {en: Update a native FC sandbox volume configuration, zh-CN: 更新原生 FC 沙箱存储卷配置}
     help:
-      en: Update only accepts --status and --team-id. Setting --team-id transfers the volume to that Team; the CLI then reads it back with GetVolume in the destination Team scope. It does not update the volume name or storage backend configuration.
-      zh-CN: 更新仅接受 --status 和 --team-id。设置 --team-id 会将存储卷转移到该团队；CLI 随后在目的团队范围内用 GetVolume 读回。不会更新存储卷名称或存储后端配置。
+      en: Update replaces storage or mount configuration inside the volume's current Team. --team-id is required and names the Team that owns the volume; it is a request scope, not a transfer destination. Provide at least one of --oss-volume-config, --agentic-fs-volume-config, --agentic-bucket-volume-config or --mount-config. Update does not change the volume name, owning Team or status.
+      zh-CN: 更新在存储卷当前所属团队内替换存储或挂载配置。--team-id 必填，表示存储卷所属团队；它是请求作用域，不是转移目标。至少提供 --oss-volume-config、--agentic-fs-volume-config、--agentic-bucket-volume-config 或 --mount-config 之一。更新不会改变存储卷名称、所属团队或状态。
     input:
       fields:
         - id: {required: true, positional: true}
-        - status
-        - team_id
+        - team_id: {required: true}
+        - oss_volume_config
+        - agentic_fs_volume_config
+        - agentic_bucket_volume_config
+        - mount_config
     workflow:
       - binding: update_volume
       - probe: update_detail
         ids: [$input.id]
         not_found: error
-    examples: [ecctl sandbox volume update <volume-id> --team-id <destination-team-id> --region cn-hangzhou]
+    examples: [ecctl sandbox volume update <volume-id> --team-id <team-id> --oss-volume-config @oss.json --region cn-hangzhou]
   delete:
     description: {en: Delete a native FC sandbox volume configuration, zh-CN: 删除原生 FC 沙箱存储卷配置}
     help:

@@ -177,7 +177,15 @@ func (c *OpenAPICaller) validateVolumeRequest(req *openAPIRequest) error {
 	if team := req.QueryParams["teamID"]; team != "" && !validTeamIdentity(team) {
 		return invalid("team_id")
 	}
-	if req.ApiName == "CreateVolume" || req.ApiName == "UpdateVolume" {
+	if req.ApiName == "UpdateVolume" {
+		if req.QueryParams["teamID"] == "" {
+			return invalid("team_id")
+		}
+		if _, ok := req.BodyValue().(map[string]any); !ok {
+			return invalid("body")
+		}
+	}
+	if req.ApiName == "CreateVolume" {
 		body, ok := req.BodyValue().(map[string]any)
 		if !ok {
 			return invalid("body")
@@ -186,14 +194,6 @@ func (c *OpenAPICaller) validateVolumeRequest(req *openAPIRequest) error {
 			id, ok := team.(string)
 			if !ok || !validTeamIdentity(id) {
 				return invalid("team_id")
-			}
-		}
-		if req.ApiName == "UpdateVolume" {
-			if status, present := body["status"]; present {
-				text, ok := status.(string)
-				if !ok || strings.TrimSpace(text) == "" {
-					return invalid("status")
-				}
 			}
 		}
 	}
@@ -402,7 +402,7 @@ func (c *OpenAPICaller) fcVolumeResponseError(req *openAPIRequest, response map[
 	switch req.ApiName {
 	case "CreateVolume", "GetVolume", "UpdateVolume":
 		expectedID, expectedTeam, expectedName := req.PathParams["volumeID"], req.QueryParams["teamID"], ""
-		if req.ApiName == "CreateVolume" || req.ApiName == "UpdateVolume" {
+		if req.ApiName == "CreateVolume" {
 			body, ok := req.BodyValue().(map[string]any)
 			if !ok {
 				return invalid()
@@ -410,9 +410,7 @@ func (c *OpenAPICaller) fcVolumeResponseError(req *openAPIRequest, response map[
 			if team, ok := body["teamID"].(string); ok {
 				expectedTeam = team
 			}
-			if req.ApiName == "CreateVolume" {
-				expectedName, _ = body["volumeName"].(string)
-			}
+			expectedName, _ = body["volumeName"].(string)
 		}
 		if _, ok := validVolume(response["volume"], expectedID, expectedTeam, expectedName); !ok {
 			return invalid()

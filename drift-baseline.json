@@ -7120,8 +7120,6 @@
         "volumeID"
       ],
       "covered": [
-        "body.status",
-        "body.teamID",
         "volumeID"
       ]
     },

@@ -226,22 +226,16 @@ fi
 // that a successful Volume Team create leaves before a Volume child starts.
 func settleVolumeTeamFixture(t *testing.T, cl *cleanup, journal *report.CleanupJournal, binding *report.QuotaCredentialBinding) {
 	t.Helper()
-	settleVolumeTeamFixtureFor(t, cl, journal, binding, "ecctl-t-0123456789abcdef01234567", "team-1", 0)
-}
-
-func settleVolumeTeamFixtureFor(t *testing.T, cl *cleanup, journal *report.CleanupJournal, binding *report.QuotaCredentialBinding, name, teamID string, entryIndex int) {
-	t.Helper()
+	const name = "ecctl-t-0123456789abcdef01234567"
+	const teamID = "team-1"
 	path := cl.journal
 	parent, err := os.Stat(filepath.Dir(path))
 	if err != nil {
 		t.Fatal(err)
 	}
 	description := "ecctl E2E Team owner=" + name[8:]
-	intent := &teamCreateIntent{Version: 1, RunID: journal.RunID, ExecutionID: journal.ExecutionID, Region: journal.Region, Surface: journal.Surface, EcctlBin: journal.EcctlBin, Name: name, Description: description, Input: []string{"ecctl", "sandbox", "team", "create", "--name", name, "--description", description, "--region", journal.Region, "--output=json"}, CaseScope: journal.Entries[entryIndex].Scope, Teardown: "ecctl sandbox team delete intent-validation --timeout 5m --output=json", VolumeBinding: binding, DispatchProtocol: 1, CreatedAt: time.Now().UTC(), path: path + ".team-create-" + name[8:] + ".json", journalPath: path, parent: parent}
-	if journal.VolumeTeamCreateIDs == nil {
-		journal.VolumeTeamCreateIDs = map[string]string{}
-	}
-	journal.VolumeTeamCreateIDs[name] = ""
+	intent := &teamCreateIntent{Version: 1, RunID: journal.RunID, ExecutionID: journal.ExecutionID, Region: journal.Region, Surface: journal.Surface, EcctlBin: journal.EcctlBin, Name: name, Description: description, Input: []string{"ecctl", "sandbox", "team", "create", "--name", name, "--description", description, "--region", journal.Region, "--output=json"}, CaseScope: journal.Entries[0].Scope, Teardown: "ecctl sandbox team delete intent-validation --timeout 5m --output=json", VolumeBinding: binding, DispatchProtocol: 1, CreatedAt: time.Now().UTC(), path: path + ".team-create-" + name[8:] + ".json", journalPath: path, parent: parent}
+	journal.VolumeTeamCreateIDs = map[string]string{name: ""}
 	if err := writeRunnerJournal(path, *journal); err != nil {
 		t.Fatal(err)
 	}
@@ -259,11 +253,8 @@ func settleVolumeTeamFixtureFor(t *testing.T, cl *cleanup, journal *report.Clean
 	if err := recordVolumeTeamCreateID(cl, intent, teamID, result); err != nil {
 		t.Fatal(err)
 	}
-	if journal.VolumeTeamCreators == nil {
-		journal.VolumeTeamCreators = map[string]*report.QuotaCredentialBinding{}
-	}
-	journal.VolumeTeamCreators[teamID] = binding
-	journal.Entries[entryIndex].VolumeTeamBound = true
+	journal.VolumeTeamCreators = map[string]*report.QuotaCredentialBinding{teamID: binding}
+	journal.Entries[0].VolumeTeamBound = true
 	if err := settleVolumeTeamRegistration(journal, intent, teamID, path); err != nil {
 		t.Fatal(err)
 	}
@@ -775,6 +766,24 @@ func TestVolumeMutationsRejectForeignTargetsBeforeProvider(t *testing.T) {
 	}
 	if after := readJournalEntries(t, cl.journal); !reflect.DeepEqual(after, before) || (*scope)[1].done {
 		t.Errorf("rejected Volume mutation changed finalizer: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestVolumeUpdateAdmitsOwnedSameTeamConfiguration(t *testing.T) {
+	cfg, cl, dir, scope := volumeRecoveryFixture(t)
+	createOwnedVolumeForMutation(t, cfg, cl, scope)
+	before := readJournalEntries(t, cl.journal)
+	step := scenario.Step{Name: "owned update", Run: `ecctl sandbox volume update vol-owned --team-id team-1 --oss-volume-config '{"bucketName":"bucket","readOnly":false}' --output=json`}
+	result, ok := runStep(context.Background(), Options{volumeLifecycle: true, Logf: func(string, ...any) {}}, cfg, cl, scope, map[string]any{}, step, time.Second)
+	if !ok || result.Exit != 0 {
+		t.Fatalf("owned same-Team update was rejected: %+v", result)
+	}
+	calls, _ := os.ReadFile(filepath.Join(dir, "calls"))
+	if !strings.Contains(string(calls), "volume-update:vol-owned") {
+		t.Fatalf("owned update did not reach provider: %s", calls)
+	}
+	if after := readJournalEntries(t, cl.journal); !reflect.DeepEqual(after, before) || (*scope)[1].done {
+		t.Fatalf("owned update consumed or changed the finalizer: before=%+v after=%+v", before, after)
 	}
 }
 

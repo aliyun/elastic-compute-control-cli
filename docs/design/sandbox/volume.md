@@ -12,7 +12,7 @@ on the existing E2B route; `volume` is an explicit FC OpenAPI subresource.
 | `delete` | `DeleteVolume`, `DELETE /pop/2026-05-09/volumes/{volumeID}` | path `volumeID`, optional query `teamID` |
 | `get` | `GetVolume`, `GET /pop/2026-05-09/volumes/{volumeID}` | path `volumeID`, optional query `teamID` |
 | `list` | `ListVolumes`, `GET /pop/2026-05-09/volumes` | query filters and token pagination |
-| `update` | `UpdateVolume`, `PUT /pop/2026-05-09/volumes/{volumeID}` | path `volumeID`, JSON body `status` and `teamID` |
+| `update` | `UpdateVolume`, `PUT /pop/2026-05-09/volumes/{volumeID}` | path `volumeID`, required query `teamID` (current Team scope), JSON body with at least one storage or mount configuration |
 
 Create requires a `--name` because `volumeName` is unique within a Team.
 `--team-id` is optional in the published request schema, but specify it when
@@ -29,7 +29,7 @@ ecctl sandbox volume create --name workspace --team-id <team-id> \
 ecctl sandbox volume get <volume-id> --team-id <team-id> --region cn-hangzhou
 ecctl sandbox volume list --team-id <team-id> --name workspace --limit 100 --all --region cn-hangzhou
 ecctl sandbox volume delete <volume-id> --team-id <team-id> --region cn-hangzhou
-ecctl sandbox volume update <volume-id> --team-id <destination-team-id> --region cn-hangzhou
+ecctl sandbox volume update <volume-id> --team-id <team-id> --oss-volume-config @oss.json --region cn-hangzhou
 ```
 
 ## `ecctl sandbox volume create`
@@ -42,15 +42,37 @@ after CreateVolume was accepted, inspect the Volume before retrying create.
 
 ## `ecctl sandbox volume update`
 
-Update accepts only `--status` and `--team-id`; at least one is required. It
-does not update the volume name or storage backend configuration. Setting
-`--team-id` transfers the volume to that Team. After `UpdateVolume` is
-accepted, the CLI reads the volume back with `GetVolume` in the destination
-Team scope (the Team returned by `UpdateVolume` when `--team-id` is omitted)
-and returns that readback. A business `code` other than `"200"` fails the
-command; the readback preserves the sanitized `requestId` and the provider
-volume fields. A scoped readback does not prove the volume is absent from its
-previous Team.
+Update replaces storage or mount configuration inside the volume's current
+Team. `--team-id` is required and names the Team that owns the volume; it is
+sent as the query scope, not as a transfer destination. Provide at least one
+of `--oss-volume-config`, `--agentic-fs-volume-config`,
+`--agentic-bucket-volume-config`, or `--mount-config`; the CLI sends the
+supplied objects as the request body and does not send `status` or a body
+Team field. Update does not change the volume name, owning Team, or status.
+After `UpdateVolume` is accepted, the CLI reads the volume back with
+`GetVolume` in the Team scope returned by `UpdateVolume` and returns that
+readback. A business `code` other than `"200"` fails the command; the
+readback preserves the sanitized `requestId` and the provider volume fields.
+
+The observed service contract differs from the published `2026-05-09`
+metadata and documentation, which describe an optional body of `status` and
+`teamID` and a team transfer. Live probing against the Hangzhou endpoint
+showed that the body is required, the service rejects every body Team
+spelling (`teamID`, `teamId`, `team_id`) as an unknown field, and a query
+`teamID` scopes the request to the volume's current Team: a configuration
+body with the current Team in the query succeeds in place
+(requestId `01A211E3-23D0-5746-8B10-25651BB74A71`), while a different query
+Team returns `NotFound`. A maintainer-supplied production sample agrees
+(requestId `01A1D0BD-B98E-55FD-A6F0-3912C65BA096`: `teamID` outside the ROA
+body, body only `ossVolumeConfig`, HTTP 200, response Team unchanged). The
+service also recognizes a `juiceFSVolumeConfig` body that the pinned metadata
+does not declare, so the service is newer than the metadata pin. The CLI
+models the four configuration objects already declared for `CreateVolume`;
+it does not invent a `juiceFSVolumeConfig` input without a matching metadata
+declaration. Cross-team transfer through `UpdateVolume` is deferred from
+issue #90 pending service-side contract evidence; the maintainer approved
+this same-Team configuration contract on 2026-11-25. The drift baseline
+records the resulting coverage change for the `update_volume` binding.
 
 ## `ecctl sandbox volume delete`
 
@@ -97,29 +119,29 @@ configuration; the published API does not state that it deletes underlying
 OSS or AgenticFS data. This command neither modifies nor cleans that storage.
 
 The authored public E2E case `e2e/cases/sandbox/volume-lifecycle.yaml` uses
-two case-owned Teams, three Volumes, and a read-only OSS configuration derived
-from execution-scoped fixtures. It verifies token pagination and exact
+one case-owned Team, two Volumes, and an OSS configuration derived from
+execution-scoped fixtures. It verifies token pagination and exact
 `VolumeNotFound` readback under the original Team before retiring each
-Volume finalizer. A third Volume exercises `UpdateVolume` team transfer: the
-runner reserves the destination scope and a pending transfer marker before the
-provider call, observes the Volume in the destination Team under its original
-credential, then re-anchors the retained creation intent and cleanup finalizer
-to that destination Team so the single-Team absence and retirement primitives
-apply unchanged. In the dedicated test account, cleanup uses the recorded
+Volume finalizer. The first Volume also exercises `UpdateVolume` as a
+same-Team configuration replacement: the update flips the OSS `readOnly`
+flag while keeping the bucket, path, endpoint, and mount role, and a
+`GetVolume` readback in the same Team confirms the replacement before the
+existing delete steps retire the Volume. In the dedicated test account,
+cleanup uses the recorded
 profile, Hangzhou region, and run-assigned OSS Bucket and RAM fixture names.
 Uncertain outcomes retain the journal.
 Volume has no tag-based sweep contract. The five case operations (`create`,
 `get`, `list`, `update`, and `delete`) are tracked in `e2e/coverage.yaml`
 against the public case fingerprint, the SHA-256 of
 `e2e/cases/sandbox/volume-lifecycle.yaml`
-(`sha256:8bad342fb00bc230554b136bed3670f90613b6480f343d1c4b0c7d9821ce27f4`).
-Adding the transfer steps changed the case fingerprint, so all five operations
+(`sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2`).
+Adding the update steps changed the case fingerprint, so all five operations
 are `offline` with reason `case-changed` pending live re-verification under the
 new fingerprint; a case change requires live re-verification of every operation
 it covers. The repository admits exactly one lifecycle case per resource, so
-the transfer lives in the same lifecycle case rather than a separate file.
+the update lives in the same lifecycle case rather than a separate file.
 Offline unit tests cover request construction, nested JSON, business errors,
-wait states, no-wait, scope, token pagination, and the update transfer
+wait states, no-wait, scope, token pagination, and the same-Team update
 readback.
 
 Source: [official FCSandbox 2026-05-09 API metadata](https://api.aliyun.com/meta/v1/products/FCSandbox/versions/2026-05-09/api-docs.json),

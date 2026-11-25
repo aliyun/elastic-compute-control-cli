@@ -578,41 +578,53 @@ func (f *volumeUpdateCaller) Call(_ context.Context, operation string, request m
 	return f.response, nil
 }
 
-func TestFCSandboxVolumeUpdateTransfersAndReadsBack(t *testing.T) {
+func TestFCSandboxVolumeUpdateReplacesConfigAndReadsBack(t *testing.T) {
 	fake := &volumeUpdateCaller{response: map[string]any{"code": "200", "requestId": "req-update", "volume": map[string]any{
-		"volumeID": "vol-1", "volumeName": "workspace", "teamID": "team-2", "status": "AVAILABLE",
+		"volumeID": "vol-1", "volumeName": "workspace", "teamID": "team-1", "status": "AVAILABLE",
 	}}}
 	factory := func(string, string, spec.ResourceSpec, string, func(string) string) (engine.Caller, error) {
 		return fake, nil
 	}
-	stdout, stderr, code := runCLIWith(factory, "--lang", "en", "sandbox", "volume", "update", "vol-1", "--team-id", "team-2", "--region", "cn-hangzhou", "--output=json")
+	stdout, stderr, code := runCLIWith(factory, "--lang", "en", "sandbox", "volume", "update", "vol-1", "--team-id", "team-1",
+		"--oss-volume-config", `{"bucketName":"bucket","bucketPath":"/","endpoint":"https://oss.example","readOnly":false}`,
+		"--region", "cn-hangzhou", "--output=json")
 	if code != 0 || stderr != "" || len(fake.calls) != 2 {
 		t.Fatalf("Volume update: code=%d stdout=%s stderr=%s calls=%+v", code, stdout, stderr, fake.calls)
 	}
-	if fake.calls[0].operation != "UpdateVolume" || fake.calls[0].request["volumeID"] != "vol-1" || fake.calls[0].request["body.teamID"] != "team-2" {
+	if fake.calls[0].operation != "UpdateVolume" || fake.calls[0].request["volumeID"] != "vol-1" || fake.calls[0].request["teamID"] != "team-1" {
 		t.Fatalf("update request: %+v", fake.calls[0])
 	}
-	if fake.calls[1].operation != "GetVolume" || fake.calls[1].request["teamID"] != "team-2" {
-		t.Fatalf("readback lost destination scope: %+v", fake.calls[1])
+	if sent, _ := fake.calls[0].request["body.ossVolumeConfig"].(string); !strings.Contains(sent, `"readOnly":false`) {
+		t.Fatalf("update did not send the storage configuration body: %+v", fake.calls[0])
+	}
+	if fake.calls[1].operation != "GetVolume" || fake.calls[1].request["teamID"] != "team-1" {
+		t.Fatalf("readback lost the same-Team scope: %+v", fake.calls[1])
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
 		t.Fatalf("invalid JSON: %s: %v", stdout, err)
 	}
 	volume, _ := payload["volume"].(map[string]any)
-	if volume["team_id"] != "team-2" || volume["id"] != "vol-1" {
-		t.Fatalf("update output lost transferred volume: %s", stdout)
+	if volume["team_id"] != "team-1" || volume["id"] != "vol-1" {
+		t.Fatalf("update output lost the updated volume: %s", stdout)
 	}
 }
 
-func TestFCSandboxVolumeUpdateRequiresStatusOrTeam(t *testing.T) {
+func TestFCSandboxVolumeUpdateRequiresTeamScopeAndConfiguration(t *testing.T) {
 	fake := &volumeUpdateCaller{}
 	factory := func(string, string, spec.ResourceSpec, string, func(string) string) (engine.Caller, error) {
 		return fake, nil
 	}
-	stdout, stderr, code := runCLIWith(factory, "--lang", "en", "sandbox", "volume", "update", "vol-1", "--region", "cn-hangzhou", "--output=json")
-	if code == 0 || len(fake.calls) != 0 {
-		t.Fatalf("empty Volume update reached provider: code=%d stdout=%s stderr=%s calls=%+v", code, stdout, stderr, fake.calls)
+	for _, args := range [][]string{
+		{"--region", "cn-hangzhou", "--output=json"},
+		{"--team-id", "team-1", "--region", "cn-hangzhou", "--output=json"},
+		{"--oss-volume-config", `{"bucketName":"bucket"}`, "--region", "cn-hangzhou", "--output=json"},
+	} {
+		args = append([]string{"--lang", "en", "sandbox", "volume", "update", "vol-1"}, args...)
+		stdout, stderr, code := runCLIWith(factory, args...)
+		if code == 0 || len(fake.calls) != 0 {
+			t.Fatalf("incomplete Volume update reached provider: code=%d stdout=%s stderr=%s calls=%+v", code, stdout, stderr, fake.calls)
+		}
 	}
 }
 

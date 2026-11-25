@@ -1807,32 +1807,32 @@ resources:
         create:
           status: offline
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:0126c3520ede915a0c31064d0bf4039173f3fbaa4b95f09c4cfcc1ae7f18baff
-          time: "2026-11-25T14:26:16.094349981+08:00"
+          fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
+          time: "2026-11-25T17:30:41.744616599+08:00"
           reason: case-changed
         delete:
           status: offline
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:0126c3520ede915a0c31064d0bf4039173f3fbaa4b95f09c4cfcc1ae7f18baff
-          time: "2026-11-25T14:26:16.094349981+08:00"
+          fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
+          time: "2026-11-25T17:30:41.744616599+08:00"
           reason: case-changed
         get:
           status: offline
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:0126c3520ede915a0c31064d0bf4039173f3fbaa4b95f09c4cfcc1ae7f18baff
-          time: "2026-11-25T14:26:16.094349981+08:00"
+          fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
+          time: "2026-11-25T17:30:41.744616599+08:00"
           reason: case-changed
         list:
           status: offline
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:0126c3520ede915a0c31064d0bf4039173f3fbaa4b95f09c4cfcc1ae7f18baff
-          time: "2026-11-25T14:26:16.094349981+08:00"
+          fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
+          time: "2026-11-25T17:30:41.744616599+08:00"
           reason: case-changed
         update:
           status: offline
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:0126c3520ede915a0c31064d0bf4039173f3fbaa4b95f09c4cfcc1ae7f18baff
-          time: "2026-11-25T14:26:16.094349981+08:00"
+          fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
+          time: "2026-11-25T17:30:41.744616599+08:00"
           reason: case-changed
   tag:
     associated-resource-rule:

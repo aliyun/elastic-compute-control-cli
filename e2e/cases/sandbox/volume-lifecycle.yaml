@@ -113,6 +113,35 @@ steps:
       - 'len($.volumes[?(@.id == "{{.volume_id}}" && @.team_id == "{{.first_team_id}}")]) == 1'
       - 'len($.volumes[?(@.id == "{{.second_volume_id}}" && @.team_id == "{{.first_team_id}}")]) == 1'
 
+  - name: update first Volume storage configuration
+    run: >
+      ecctl sandbox volume update {{.volume_id}}
+      --team-id {{.first_team_id}}
+      --oss-volume-config '{"bucketName":"{{.stack.volume_bucket_name}}","bucketPath":"/","endpoint":"https://{{.stack.volume_bucket_endpoint}}","readOnly":false}'
+      --mount-config '{"role":"{{.stack.volume_role_arn}}"}'
+      --output=json
+    at: $.volume
+    expect:
+      id: {eq: "{{.volume_id}}"}
+      team_id: {eq: "{{.first_team_id}}"}
+      status: {eq: AVAILABLE}
+      oss_volume_config.readOnly: {eq: false}
+      $.actions[0].action_name: {eq: UpdateVolume}
+      $.actions[0].request_id: {type: string, min_len: 1}
+
+  - name: get updated Volume in the same Team
+    run: ecctl sandbox volume get {{.volume_id}} --team-id {{.first_team_id}} --output=json
+    at: $.volume
+    expect:
+      id: {eq: "{{.volume_id}}"}
+      team_id: {eq: "{{.first_team_id}}"}
+      status: {eq: AVAILABLE}
+      oss_volume_config.bucketName: {eq: "{{.stack.volume_bucket_name}}"}
+      oss_volume_config.bucketPath: {eq: /}
+      oss_volume_config.endpoint: {eq: "https://{{.stack.volume_bucket_endpoint}}"}
+      oss_volume_config.readOnly: {eq: false}
+      mount_config.role: {eq: "{{.stack.volume_role_arn}}"}
+
   - name: delete
     run: >
       ecctl sandbox volume delete {{.volume_id}}
@@ -157,100 +186,7 @@ steps:
       $.actions[0].request_id: {type: string, min_len: 1}
       $.actions[0].provider_verified: {eq: true}
 
-  - name: create destination owned Team
-    run: >
-      ecctl sandbox team create --name {{.team_name}}
-      --description "{{.team_owner}}" --plan eco --output=json
-    at: $.team
-    expect:
-      id: {type: string, min_len: 1, ne: "{{.first_team_id}}"}
-      status: {eq: active}
-    capture:
-      destination_team_id: id
-    teardown: ecctl sandbox team delete {{.team_id}} --timeout 5m --output=json
-
-  - name: create transfer Volume
-    run: >
-      ecctl sandbox volume create --name {{.resource_prefix}}-fc-volume-transfer
-      --team-id {{.first_team_id}}
-      --oss-volume-config '{"bucketName":"{{.stack.volume_bucket_name}}","bucketPath":"/","endpoint":"https://{{.stack.volume_bucket_endpoint}}","readOnly":true}'
-      --mount-config '{"role":"{{.stack.volume_role_arn}}"}'
-      --timeout 5m --no-wait --output=json
-    at: $.volume
-    expect:
-      id: {type: string, min_len: 1}
-      name: {eq: "{{.volume_name}}"}
-      team_id: {eq: "{{.first_team_id}}"}
-      status: {type: string, min_len: 1}
-    capture:
-      transfer_volume_id: id
-    teardown: ecctl sandbox volume delete {{.transfer_volume_id}} --timeout 5m --output=json
-
-  - name: get transfer Volume before transfer
-    run: ecctl sandbox volume get {{.transfer_volume_id}} --team-id {{.first_team_id}} --output=json
-    at: $.volume
-    expect:
-      id: {eq: "{{.transfer_volume_id}}"}
-      team_id: {eq: "{{.first_team_id}}"}
-      status: {eq: AVAILABLE}
-
-  - name: update transfer to destination Team
-    run: >
-      ecctl sandbox volume update {{.transfer_volume_id}}
-      --team-id {{.destination_team_id}} --output=json
-    at: $.volume
-    expect:
-      id: {eq: "{{.transfer_volume_id}}"}
-      team_id: {eq: "{{.destination_team_id}}"}
-      status: {eq: AVAILABLE}
-      $.actions[0].action_name: {eq: UpdateVolume}
-      $.actions[0].request_id: {type: string, min_len: 1}
-
-  - name: get after transfer in destination Team
-    run: ecctl sandbox volume get {{.transfer_volume_id}} --team-id {{.destination_team_id}} --output=json
-    at: $.volume
-    expect:
-      id: {eq: "{{.transfer_volume_id}}"}
-      team_id: {eq: "{{.destination_team_id}}"}
-      status: {eq: AVAILABLE}
-      oss_volume_config.bucketName: {eq: "{{.stack.volume_bucket_name}}"}
-      mount_config.role: {eq: "{{.stack.volume_role_arn}}"}
-
-  - name: transferred Volume is absent from source Team
-    run: ecctl sandbox volume get {{.transfer_volume_id}} --team-id {{.first_team_id}} --output=json
-    exit: 4
-    expect:
-      $.error.kind: {eq: not_found}
-      $.actions[0].action_name: {eq: GetVolume}
-      $.actions[0].code: {eq: VolumeNotFound}
-      $.actions[0].provider_verified: {eq: true}
-
-  - name: delete transferred Volume in destination Team
-    run: >
-      ecctl sandbox volume delete {{.transfer_volume_id}}
-      --team-id {{.destination_team_id}} --timeout 5m --output=json
-    expect:
-      $.absent_in_scope: {eq: true}
-      $.actions[0].action_name: {eq: DeleteVolume}
-      $.actions[0].request_id: {type: string, min_len: 1}
-    assert:
-      - 'len($.actions[?(@.action_name == "GetVolume" && @.code == "VolumeNotFound" && @.provider_verified == true)]) >= 1'
-
-  - name: deleted transfer Volume is absent from destination Team
-    run: ecctl sandbox volume get {{.transfer_volume_id}} --team-id {{.destination_team_id}} --output=json
-    exit: 4
-    expect:
-      $.error.kind: {eq: not_found}
-      $.actions[0].action_name: {eq: GetVolume}
-      $.actions[0].code: {eq: VolumeNotFound}
-      $.actions[0].provider_verified: {eq: true}
-
   - name: delete first owned Team
     run: ecctl sandbox team delete {{.first_team_id}} --timeout 5m --output=json
-    expect:
-      $.deleted: {eq: true}
-
-  - name: delete destination owned Team
-    run: ecctl sandbox team delete {{.destination_team_id}} --timeout 5m --output=json
     expect:
       $.deleted: {eq: true}

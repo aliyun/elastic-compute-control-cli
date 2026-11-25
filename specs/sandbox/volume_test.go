@@ -41,18 +41,44 @@ func TestVolumeSpecContract(t *testing.T) {
 		}
 	}
 	update := resource.Operations["update"]
-	updateBody, _ := resource.Bindings["update_volume"].Request["body"].(map[string]any)
-	if len(updateBody) != 2 || updateBody["status"] != "$.status" || updateBody["teamID"] != "$.team_id" {
-		t.Fatalf("UpdateVolume body must expose only status and teamID: %+v", updateBody)
+	updateBinding := resource.Bindings["update_volume"]
+	updateBody, _ := updateBinding.Request["body"].(map[string]any)
+	if len(updateBody) != 4 {
+		t.Fatalf("UpdateVolume body must expose only the four storage configurations: %+v", updateBody)
 	}
-	if resource.Bindings["update_volume"].Request["volumeID"] != "$.id" {
-		t.Fatal("UpdateVolume must keep the path identity")
+	for field, key := range map[string]string{
+		"oss_volume_config":            "ossVolumeConfig",
+		"agentic_fs_volume_config":     "agenticFSVolumeConfig",
+		"agentic_bucket_volume_config": "agenticBucketVolumeConfig",
+		"mount_config":                 "mountConfig",
+	} {
+		entry, ok := updateBody[key].(map[string]any)
+		if !ok || entry["from"] != "$."+field {
+			t.Fatalf("UpdateVolume body %s must map %s: %+v", key, field, updateBody[key])
+		}
+	}
+	if updateBinding.Request["volumeID"] != "$.id" || updateBinding.Request["teamID"] != "$.team_id" {
+		t.Fatalf("UpdateVolume must keep the path identity and the Team query scope: %+v", updateBinding.Request)
+	}
+	if len(updateBinding.RequireAll) != 2 || updateBinding.RequireAll[0].Request != "volumeID" || updateBinding.RequireAll[1].Request != "teamID" {
+		t.Fatalf("UpdateVolume must require the path identity and the Team query scope: %+v", updateBinding.RequireAll)
+	}
+	if len(updateBinding.RequireAny) != 4 {
+		t.Fatalf("UpdateVolume must require at least one storage configuration: %+v", updateBinding.RequireAny)
 	}
 	if resource.Probes["update_detail"].Request["teamID"] != "$context.updated_team_id" {
-		t.Fatal("UpdateVolume readback must use the destination Team scope")
+		t.Fatal("UpdateVolume readback must use the returned Team scope")
 	}
-	if len(update.Input.Fields) != 3 {
-		t.Fatalf("update input must expose only id, status and team_id: %+v", update.Input.Fields)
+	if len(update.Input.Fields) != 6 {
+		t.Fatalf("update input must expose id, the Team scope and the four configurations: %+v", update.Input.Fields)
+	}
+	for _, ref := range update.Input.Fields {
+		if ref.Name == "team_id" && !ref.Required {
+			t.Fatal("update must require the Team scope")
+		}
+		if ref.Name == "status" {
+			t.Fatal("update must not expose the provider status")
+		}
 	}
 	if resource.Probes["detail"].Request["volumeID"] != "$.id" || resource.Bindings["delete_volume"].Request["volumeID"] != "$.id" {
 		t.Fatal("Volume ID must be the path identity")

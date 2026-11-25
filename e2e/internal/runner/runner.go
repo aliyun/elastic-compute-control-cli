@@ -1619,13 +1619,12 @@ func runSequentialCase(
 			cr.Status = report.StatusFail
 			break
 		}
-		// Quota and Volume lifecycles rotate the ownership nonce before each
-		// additional protected Team without changing a captured Team ID; a
-		// Volume transfer owns at most two Teams.
+		// A Volume lifecycle owns one Team; Quota may rotate its nonce for a
+		// second protected Team without changing a captured Team ID.
 		if ((opt.quotaLifecycle && s.Resource == "sandbox/quota") || s.Resource == "sandbox/volume") && isTeamCreate(st.Run) {
 			if teamCreates > 0 {
-				if s.Resource == "sandbox/volume" && teamCreates > 1 {
-					cr.Steps = append(cr.Steps, report.Step{Name: st.Name, Status: report.StatusError, Error: "Volume lifecycle permits at most two owned Teams"})
+				if s.Resource == "sandbox/volume" {
+					cr.Steps = append(cr.Steps, report.Step{Name: st.Name, Status: report.StatusError, Error: "Volume lifecycle permits one owned Team"})
 					cr.Status = report.StatusFail
 					break
 				}
@@ -1968,7 +1967,6 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 	var teamIntent *teamCreateIntent
 	var templateIntent *templateCreateIntent
 	var volumeIntent *templateCreateIntent
-	var volumeTransfer *volumeTransferIntent
 	var cacheReservation *cleanupItem
 	var quotaReservation *cleanupItem
 	var ownedTeamDelete bool
@@ -2127,15 +2125,8 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 				}
 				cmd, execCfg = volumeIntent.command, volumeIntent.cfg
 				data["volume_name"] = volumeIntent.Name
-			} else if volumeUpdateCandidate(cmd) {
-				volumeTransfer, err = reserveVolumeTransfer(ctx, cmd, execCfg, cl, st, timeout, caseScope(data))
-				if err != nil {
-					sr.Status, sr.Error = report.StatusError, err.Error()
-					return sr, false
-				}
-				cmd, execCfg = volumeTransfer.command, volumeTransfer.cfg
 			}
-			if teamIntent == nil && templateIntent == nil && volumeIntent == nil && volumeTransfer == nil {
+			if teamIntent == nil && templateIntent == nil && volumeIntent == nil {
 				cmd, execCfg, cacheReservation, err = cl.reserveTemplateCacheCreate(ctx, scope, cmd, execCfg, data, st, lockKeys)
 				if err != nil {
 					sr.Status, sr.Error = report.StatusError, err.Error()
@@ -2148,6 +2139,11 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 				return sr, false
 			}
 			cmd, volumeDeleteItem, err = cl.bindOwnedVolumeDelete(*scope, cmd, "primary")
+			if err != nil {
+				sr.Status, sr.Error = report.StatusError, err.Error()
+				return sr, false
+			}
+			cmd, err = cl.bindOwnedVolumeUpdate(*scope, cmd)
 			if err != nil {
 				sr.Status, sr.Error = report.StatusError, err.Error()
 				return sr, false
@@ -2175,13 +2171,6 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 				sctx, cancel := context.WithTimeout(ctx, timeout)
 				invokeCommand := func(bound execpkg.Config) error {
 					freshVolumeAttempt := false
-					if volumeTransfer != nil {
-						return journalfile.WithExistingReplayLock(sctx, volumeTransfer.journal, func() error {
-							invoked = true
-							res = cl.runCommand(sctx, volumeTransfer.cfg, cmd)
-							return nil
-						})
-					}
 					if teamIntent != nil {
 						if err := checkJournalParentIdentity(teamIntent.journalPath, teamIntent.parent); err != nil {
 							return err
@@ -2425,7 +2414,7 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 					}
 				}
 				cancel()
-				if teamIntent != nil || templateIntent != nil || volumeIntent != nil || volumeTransfer != nil || cacheReservation != nil || quotaReservation != nil || res.Exit == 0 || !isTransientNetworkError(res) || attempt >= len(stepRetryDelays) {
+				if teamIntent != nil || templateIntent != nil || volumeIntent != nil || cacheReservation != nil || quotaReservation != nil || res.Exit == 0 || !isTransientNetworkError(res) || attempt >= len(stepRetryDelays) {
 					break
 				}
 				shown := report.Scrub(renderedCommand)
@@ -2616,20 +2605,6 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 				sr.Status, sr.Error = report.StatusFail, err.Error()
 				return sr, false
 			}
-		}
-	}
-	if volumeTransfer != nil {
-		if err := finishVolumeTransfer(ctx, res, cl, volumeTransfer, timeout); err != nil {
-			sr.Status = report.StatusFail
-			sr.Error = failureDetail(res)
-			if res.Err != nil {
-				sr.Error = res.Err.Error()
-			}
-			if sr.Error != "" {
-				sr.Error += "; "
-			}
-			sr.Error += err.Error()
-			return sr, false
 		}
 	}
 	teamID, validTeamID := teamCreateIdentity(res)
