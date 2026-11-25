@@ -7,8 +7,8 @@ summary:
   resources: 65
   operations: 307
   missing_cases: 0
-  passed: 283
-  not_passed: 24
+  passed: 288
+  not_passed: 19
 resources:
   ack:
     ack:
@@ -1805,35 +1805,35 @@ resources:
     volume:
       operations:
         create:
-          status: offline
+          status: live-pass
           case: cases/sandbox/volume-lifecycle.yaml
           fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
-          time: "2026-11-25T17:30:41.744616599+08:00"
-          reason: case-changed
+          time: "2026-11-25T18:12:12+08:00"
+          reason: live-verified
         delete:
-          status: offline
+          status: live-pass
           case: cases/sandbox/volume-lifecycle.yaml
           fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
-          time: "2026-11-25T17:30:41.744616599+08:00"
-          reason: case-changed
+          time: "2026-11-25T18:12:12+08:00"
+          reason: live-verified
         get:
-          status: offline
+          status: live-pass
           case: cases/sandbox/volume-lifecycle.yaml
           fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
-          time: "2026-11-25T17:30:41.744616599+08:00"
-          reason: case-changed
+          time: "2026-11-25T18:12:12+08:00"
+          reason: live-verified
         list:
-          status: offline
+          status: live-pass
           case: cases/sandbox/volume-lifecycle.yaml
           fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
-          time: "2026-11-25T17:30:41.744616599+08:00"
-          reason: case-changed
+          time: "2026-11-25T18:12:12+08:00"
+          reason: live-verified
         update:
-          status: offline
+          status: live-pass
           case: cases/sandbox/volume-lifecycle.yaml
           fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
-          time: "2026-11-25T17:30:41.744616599+08:00"
-          reason: case-changed
+          time: "2026-11-25T18:12:12+08:00"
+          reason: live-verified
   tag:
     associated-resource-rule:
       operations:
