@@ -97,21 +97,27 @@ configuration; the published API does not state that it deletes underlying
 OSS or AgenticFS data. This command neither modifies nor cleans that storage.
 
 The authored public E2E case `e2e/cases/sandbox/volume-lifecycle.yaml` uses
-one case-owned Team, two Volumes, and a read-only OSS configuration derived
+two case-owned Teams, three Volumes, and a read-only OSS configuration derived
 from execution-scoped fixtures. It verifies token pagination and exact
 `VolumeNotFound` readback under the original Team before retiring each
-Volume finalizer. In the dedicated test account, cleanup uses the recorded
+Volume finalizer. A third Volume exercises `UpdateVolume` team transfer: the
+runner reserves the destination scope and a pending transfer marker before the
+provider call, observes the Volume in the destination Team under its original
+credential, then re-anchors the retained creation intent and cleanup finalizer
+to that destination Team so the single-Team absence and retirement primitives
+apply unchanged. In the dedicated test account, cleanup uses the recorded
 profile, Hangzhou region, and run-assigned OSS Bucket and RAM fixture names.
 Uncertain outcomes retain the journal.
-Volume has no tag-based sweep contract. The four case operations (`create`,
-`get`, `list`, and `delete`) are `live-pass` in `e2e/coverage.yaml`, recorded
-on 2026-11-20 with reason `live-verified`. The record is bound to the matching
-public case fingerprint, the SHA-256 of
+Volume has no tag-based sweep contract. The five case operations (`create`,
+`get`, `list`, `update`, and `delete`) are tracked in `e2e/coverage.yaml`
+against the public case fingerprint, the SHA-256 of
 `e2e/cases/sandbox/volume-lifecycle.yaml`
-(`sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451`);
-a case change requires live re-verification under the new fingerprint. Team
-transfer through `UpdateVolume` is covered by a separate update case; the
-lifecycle case keeps both Volumes under their original Team.
+(`sha256:8bad342fb00bc230554b136bed3670f90613b6480f343d1c4b0c7d9821ce27f4`).
+Adding the transfer steps changed the case fingerprint, so all five operations
+are `offline` with reason `case-changed` pending live re-verification under the
+new fingerprint; a case change requires live re-verification of every operation
+it covers. The repository admits exactly one lifecycle case per resource, so
+the transfer lives in the same lifecycle case rather than a separate file.
 Offline unit tests cover request construction, nested JSON, business errors,
 wait states, no-wait, scope, token pagination, and the update transfer
 readback.

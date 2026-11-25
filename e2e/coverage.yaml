@@ -5,10 +5,10 @@ generated:
 summary:
   surface: public
   resources: 65
-  operations: 306
+  operations: 307
   missing_cases: 0
-  passed: 287
-  not_passed: 19
+  passed: 283
+  not_passed: 24
 resources:
   ack:
     ack:
@@ -1805,29 +1805,35 @@ resources:
     volume:
       operations:
         create:
-          status: live-pass
+          status: offline
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451
-          time: "2026-11-20T15:09:13.697319535+00:00"
-          reason: live-verified
+          fingerprint: sha256:8bad342fb00bc230554b136bed3670f90613b6480f343d1c4b0c7d9821ce27f4
+          time: "2026-11-25T03:25:00.000000000+00:00"
+          reason: case-changed
         delete:
-          status: live-pass
+          status: offline
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451
-          time: "2026-11-20T15:09:13.697319535+00:00"
-          reason: live-verified
+          fingerprint: sha256:8bad342fb00bc230554b136bed3670f90613b6480f343d1c4b0c7d9821ce27f4
+          time: "2026-11-25T03:25:00.000000000+00:00"
+          reason: case-changed
         get:
-          status: live-pass
+          status: offline
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451
-          time: "2026-11-20T15:09:13.697319535+00:00"
-          reason: live-verified
+          fingerprint: sha256:8bad342fb00bc230554b136bed3670f90613b6480f343d1c4b0c7d9821ce27f4
+          time: "2026-11-25T03:25:00.000000000+00:00"
+          reason: case-changed
         list:
-          status: live-pass
+          status: offline
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451
-          time: "2026-11-20T15:09:13.697319535+00:00"
-          reason: live-verified
+          fingerprint: sha256:8bad342fb00bc230554b136bed3670f90613b6480f343d1c4b0c7d9821ce27f4
+          time: "2026-11-25T03:25:00.000000000+00:00"
+          reason: case-changed
+        update:
+          status: offline
+          case: cases/sandbox/volume-lifecycle.yaml
+          fingerprint: sha256:8bad342fb00bc230554b136bed3670f90613b6480f343d1c4b0c7d9821ce27f4
+          time: "2026-11-25T03:25:00.000000000+00:00"
+          reason: case-changed
   tag:
     associated-resource-rule:
       operations:
