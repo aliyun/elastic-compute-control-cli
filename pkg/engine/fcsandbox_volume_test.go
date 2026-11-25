@@ -183,7 +183,7 @@ func TestVolumeRejectsExplicitEmptyTeamAndExactID(t *testing.T) {
 		{"update", map[string]any{"id": "vol-1", "team_id": ""}},
 		{"delete", map[string]any{"id": "vol-1", "team_id": ""}},
 		{"get", map[string]any{"id": ""}},
-		{"update", map[string]any{"id": "", "status": "AVAILABLE"}},
+		{"update", map[string]any{"id": "", "team_id": "team-1", "oss_volume_config": map[string]any{"bucketName": "bucket"}}},
 		{"delete", map[string]any{"id": ""}},
 	} {
 		t.Run(tc.action+"/"+fmt.Sprint(tc.input), func(t *testing.T) {
@@ -215,10 +215,56 @@ func TestVolumeListAllFollowsOpaqueToken(t *testing.T) {
 	}
 }
 
-func TestVolumeUpdateDeferred(t *testing.T) {
+func volumeTeamResponse(team, status, requestID string) map[string]any {
+	return map[string]any{"code": "200", "requestId": requestID, "volume": map[string]any{
+		"volumeID": "vol-1", "volumeName": "workspace", "teamID": team, "status": status,
+	}}
+}
+
+func TestVolumeUpdateReplacesConfigAndReadsBackSameTeam(t *testing.T) {
+	ossConfig := map[string]any{"bucketName": "bucket", "bucketPath": "/", "endpoint": "https://oss.example", "readOnly": false}
+	fake := &fakeCaller{responses: []map[string]any{volumeTeamResponse("team-1", "AVAILABLE", "req-update"), volumeTeamResponse("team-1", "AVAILABLE", "req-read")}}
+	result, err := NewExecutor(loadVolumeSpec(t), fake).Execute(context.Background(), Request{Action: "update", Input: map[string]any{"id": "vol-1", "team_id": "team-1", "oss_volume_config": ossConfig}})
+	if err != nil || result.Item["team_id"] != "team-1" || result.ID != "vol-1" || len(fake.calls) != 2 {
+		t.Fatalf("Volume config update: result=%+v err=%v calls=%+v", result, err, fake.calls)
+	}
+	if fake.calls[0].operation != "UpdateVolume" || fake.calls[0].request["volumeID"] != "vol-1" || fake.calls[0].request["teamID"] != "team-1" {
+		t.Fatalf("update request lost the path identity or Team query scope: %+v", fake.calls[0])
+	}
+	if sent, _ := fake.calls[0].request["body.ossVolumeConfig"].(string); sent != `{"bucketName":"bucket","bucketPath":"/","endpoint":"https://oss.example","readOnly":false}` {
+		t.Fatalf("update did not send the storage configuration body: %+v", fake.calls[0])
+	}
+	for _, key := range []string{"body.teamID", "body.status"} {
+		if _, sent := fake.calls[0].request[key]; sent {
+			t.Fatalf("update sent the unsupported body field %s: %+v", key, fake.calls[0])
+		}
+	}
+	if fake.calls[1].operation != "GetVolume" || fake.calls[1].request["volumeID"] != "vol-1" || fake.calls[1].request["teamID"] != "team-1" {
+		t.Fatalf("readback lost the same-Team scope: %+v", fake.calls[1])
+	}
+}
+
+func TestVolumeUpdateRequiresTeamScope(t *testing.T) {
+	fake := &fakeCaller{}
+	_, err := NewExecutor(loadVolumeSpec(t), fake).Execute(context.Background(), Request{Action: "update", Input: map[string]any{"id": "vol-1", "oss_volume_config": map[string]any{"bucketName": "bucket"}}})
+	if err == nil || len(fake.calls) != 0 {
+		t.Fatalf("update without the Team scope reached provider: err=%v calls=%+v", err, fake.calls)
+	}
+}
+
+func TestVolumeUpdateRequiresConfiguration(t *testing.T) {
 	fake := &fakeCaller{}
 	_, err := NewExecutor(loadVolumeSpec(t), fake).Execute(context.Background(), Request{Action: "update", Input: map[string]any{"id": "vol-1", "team_id": "team-1"}})
 	if err == nil || len(fake.calls) != 0 {
-		t.Fatalf("deferred update reached provider: err=%v calls=%+v", err, fake.calls)
+		t.Fatalf("update without a storage configuration reached provider: err=%v calls=%+v", err, fake.calls)
+	}
+}
+
+func TestVolumeUpdateBusinessErrorFails(t *testing.T) {
+	fake := &fakeCaller{errors: []error{ecerrors.Service("CloudAPIError", "denied", false, ecerrors.WithRequestID("req-update"))}}
+	result, err := NewExecutor(loadVolumeSpec(t), fake).Execute(context.Background(), Request{Action: "update", Input: map[string]any{"id": "vol-1", "team_id": "team-1", "oss_volume_config": map[string]any{"bucketName": "bucket"}}})
+	var app *ecerrors.AppError
+	if !errors.As(err, &app) || result.Item != nil || len(fake.calls) != 1 || fake.calls[0].operation != "UpdateVolume" {
+		t.Fatalf("business error became success: result=%+v err=%v calls=%+v", result, err, fake.calls)
 	}
 }

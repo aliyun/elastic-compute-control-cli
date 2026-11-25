@@ -5,9 +5,9 @@ generated:
 summary:
   surface: public
   resources: 65
-  operations: 306
+  operations: 307
   missing_cases: 0
-  passed: 287
+  passed: 288
   not_passed: 19
 resources:
   ack:
@@ -1807,26 +1807,32 @@ resources:
         create:
           status: live-pass
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451
-          time: "2026-11-20T15:09:13.697319535+00:00"
+          fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
+          time: "2026-11-25T18:12:12+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451
-          time: "2026-11-20T15:09:13.697319535+00:00"
+          fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
+          time: "2026-11-25T18:12:12+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451
-          time: "2026-11-20T15:09:13.697319535+00:00"
+          fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
+          time: "2026-11-25T18:12:12+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451
-          time: "2026-11-20T15:09:13.697319535+00:00"
+          fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
+          time: "2026-11-25T18:12:12+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/sandbox/volume-lifecycle.yaml
+          fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
+          time: "2026-11-25T18:12:12+08:00"
           reason: live-verified
   tag:
     associated-resource-rule:

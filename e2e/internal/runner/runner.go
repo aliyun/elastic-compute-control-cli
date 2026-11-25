@@ -2143,6 +2143,11 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 				sr.Status, sr.Error = report.StatusError, err.Error()
 				return sr, false
 			}
+			cmd, err = cl.bindOwnedVolumeUpdate(*scope, cmd)
+			if err != nil {
+				sr.Status, sr.Error = report.StatusError, err.Error()
+				return sr, false
+			}
 			cmd, execCfg, err = cl.bindOwnedNativeTemplate(ctx, cmd, "primary", execCfg, timeout)
 			if err != nil {
 				sr.Status, sr.Error = report.StatusError, err.Error()

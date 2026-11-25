@@ -7110,6 +7110,20 @@
       ]
     },
     {
+      "product": "sandbox",
+      "resource": "volume",
+      "binding": "update_volume",
+      "api": "UpdateVolume",
+      "parameters": [
+        "body.status",
+        "body.teamID",
+        "volumeID"
+      ],
+      "covered": [
+        "volumeID"
+      ]
+    },
+    {
       "product": "tag",
       "resource": "associated-resource-rule",
       "binding": "create_rule",

@@ -769,6 +769,24 @@ func TestVolumeMutationsRejectForeignTargetsBeforeProvider(t *testing.T) {
 	}
 }
 
+func TestVolumeUpdateAdmitsOwnedSameTeamConfiguration(t *testing.T) {
+	cfg, cl, dir, scope := volumeRecoveryFixture(t)
+	createOwnedVolumeForMutation(t, cfg, cl, scope)
+	before := readJournalEntries(t, cl.journal)
+	step := scenario.Step{Name: "owned update", Run: `ecctl sandbox volume update vol-owned --team-id team-1 --oss-volume-config '{"bucketName":"bucket","readOnly":false}' --output=json`}
+	result, ok := runStep(context.Background(), Options{volumeLifecycle: true, Logf: func(string, ...any) {}}, cfg, cl, scope, map[string]any{}, step, time.Second)
+	if !ok || result.Exit != 0 {
+		t.Fatalf("owned same-Team update was rejected: %+v", result)
+	}
+	calls, _ := os.ReadFile(filepath.Join(dir, "calls"))
+	if !strings.Contains(string(calls), "volume-update:vol-owned") {
+		t.Fatalf("owned update did not reach provider: %s", calls)
+	}
+	if after := readJournalEntries(t, cl.journal); !reflect.DeepEqual(after, before) || (*scope)[1].done {
+		t.Fatalf("owned update consumed or changed the finalizer: before=%+v after=%+v", before, after)
+	}
+}
+
 func TestVolumeDeleteRejectsChangedExecutionConfig(t *testing.T) {
 	cfg, cl, dir, scope := volumeRecoveryFixture(t)
 	createOwnedVolumeForMutation(t, cfg, cl, scope)

@@ -693,6 +693,75 @@ func (c *cleanup) bindOwnedVolumeDelete(scope []*cleanupItem, command, role stri
 	return quotedTemplateCommand(args), found, nil
 }
 
+// Bind an authored same-Team update to the exact protected Volume before it
+// can execute. The update replaces configuration in the owned Team scope and
+// never consumes or re-anchors the creation finalizer.
+func (c *cleanup) bindOwnedVolumeUpdate(scope []*cleanupItem, command string) (string, error) {
+	action, err := nativeVolumeMutationAction(command)
+	if err != nil {
+		return "", err
+	}
+	if action != "update" {
+		return command, nil
+	}
+	request, err := journalfile.ParseVolumeUpdateRequest(command)
+	if err != nil {
+		return "", err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var found *cleanupItem
+	for _, item := range scope {
+		if item.templateBinding == nil || item.templateBinding.Resource != "volume" {
+			continue
+		}
+		owned, parseErr := journalfile.ParseVolumeDeleteRequest(item.cmd)
+		if parseErr != nil {
+			return "", parseErr
+		}
+		if owned.ID != request.ID {
+			continue
+		}
+		if item.role != "primary" || item.done {
+			return "", fmt.Errorf("Volume update target is consumed or belongs to another cleanup role")
+		}
+		if found != nil {
+			return "", fmt.Errorf("ambiguous owned Volume update target")
+		}
+		found = item
+	}
+	if found == nil {
+		return "", fmt.Errorf("Volume update lacks an active run-owned finalizer")
+	}
+	binding := found.templateBinding
+	if request.TeamID != binding.TeamID {
+		return "", fmt.Errorf("Volume update requires the owned Team scope")
+	}
+	if request.RegionSet && request.Region != binding.Region || request.ProfileSet && request.Profile != binding.Profile {
+		return "", fmt.Errorf("owned Volume update changed region or profile")
+	}
+	if request.OutputSet && request.Output != "json" || request.AgentEnvelopeSet && request.AgentEnvelope {
+		return "", fmt.Errorf("owned Volume update requires plain JSON output")
+	}
+	args, err := shlex.Split(command)
+	if err != nil {
+		return "", err
+	}
+	if !request.RegionSet {
+		args = append(args, "--region", binding.Region)
+	}
+	if !request.ProfileSet {
+		args = append(args, "--profile", binding.Profile)
+	}
+	if !request.OutputSet {
+		args = append(args, "--output=json")
+	}
+	if !request.AgentEnvelopeSet {
+		args = append(args, "--agent-envelope=false")
+	}
+	return quotedTemplateCommand(args), nil
+}
+
 // The same classifier feeds case reservation, stack admission and offline lint.
 func nativeVolumeMutationAction(command string) (string, error) {
 	return journalcmd.VolumeMutationAction(command)
