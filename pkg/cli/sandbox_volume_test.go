@@ -207,6 +207,132 @@ func TestFCSandboxVolumeNestedInputUsesProviderSchema(t *testing.T) {
 	}
 }
 
+func TestAPIShapedInputLocalizedDiagnostics(t *testing.T) {
+	t.Setenv("ECCTL_DISABLE_TELEMETRY", "1")
+	t.Setenv("ECCTL_DISABLE_UPDATE_CHECK", "1")
+	t.Setenv("ECCTL_SPEC_DIR", "")
+
+	duplicateFile := filepath.Join(t.TempDir(), "duplicate.json")
+	if err := os.WriteFile(duplicateFile, []byte(`{"vpcConfig":{"vpcId":"vpc-a","vpcId":"vpc-b"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name           string
+		flag           string
+		value          string
+		path           string
+		english        string
+		chinese        string
+		englishMessage string
+		chineseMessage string
+		genericControl bool
+	}{
+		{
+			name:           "wrong-read-only-type",
+			flag:           "--oss-volume-config",
+			value:          `{"readOnly":"true"}`,
+			path:           "oss-volume-config.readOnly",
+			english:        "does not match the API JSON schema",
+			chinese:        "不符合 API JSON 结构",
+			englishMessage: "--oss-volume-config.readOnly does not match the API JSON schema",
+			chineseMessage: "--oss-volume-config.readOnly 的值不符合 API JSON 结构",
+		},
+		{
+			name:           "unknown-nested-member",
+			flag:           "--mount-config",
+			value:          `{"vpcConfig":{"vpcID":"vpc-fixture"}}`,
+			path:           "mount-config.vpcConfig.vpcID",
+			english:        "unsupported API JSON member",
+			chinese:        "不支持 API JSON 成员",
+			englishMessage: "unsupported API JSON member --mount-config.vpcConfig.vpcID",
+			chineseMessage: "不支持 API JSON 成员 --mount-config.vpcConfig.vpcID",
+		},
+		{
+			name:           "duplicate-inline-member",
+			flag:           "--oss-volume-config",
+			value:          `{"readOnly":true,"readOnly":false}`,
+			path:           "oss-volume-config",
+			english:        "one unambiguous JSON object",
+			chinese:        "单个无歧义的 JSON 对象",
+			englishMessage: "--oss-volume-config must be one unambiguous JSON object",
+			chineseMessage: "--oss-volume-config 必须是单个无歧义的 JSON 对象",
+		},
+		{
+			name:           "duplicate-file-member",
+			flag:           "--mount-config",
+			value:          "@" + duplicateFile,
+			path:           "mount-config",
+			english:        "one unambiguous JSON object",
+			chinese:        "单个无歧义的 JSON 对象",
+			englishMessage: "--mount-config must be one unambiguous JSON object",
+			chineseMessage: "--mount-config 必须是单个无歧义的 JSON 对象",
+		},
+		{
+			name:           "generic-invalid-parameter",
+			flag:           "--oss-volume-config",
+			value:          "",
+			path:           "oss-volume-config",
+			english:        "parameter is invalid",
+			chinese:        "参数无效",
+			genericControl: true,
+		},
+	} {
+		for _, locale := range []struct{ lang, reason, message string }{
+			{"en", tc.english, tc.englishMessage},
+			{"zh-CN", tc.chinese, tc.chineseMessage},
+		} {
+			t.Run(tc.name+"/"+locale.lang, func(t *testing.T) {
+				fake := &callOnlyAPICaller{}
+				factoryCalls := 0
+				factory := func(string, string, spec.ResourceSpec, string, func(string) string) (engine.Caller, error) {
+					factoryCalls++
+					return fake, nil
+				}
+				stdout, stderr, exit := runCLIWith(factory, "--lang", locale.lang, "--output=json",
+					"sandbox", "volume", "create", "--name", "workspace", "--team-id", "team-1",
+					"--region", "cn-hangzhou", tc.flag, tc.value)
+				t.Logf("exit=%d factory_calls=%d caller_calls=%d stdout=%s stderr=%q",
+					exit, factoryCalls, fake.calls, stdout, stderr)
+
+				if exit != 1 || factoryCalls != 0 || fake.calls != 0 {
+					t.Fatalf("CLI rejection contract: got exit=%d factory_calls=%d caller_calls=%d, want exit=1 and zero calls",
+						exit, factoryCalls, fake.calls)
+				}
+				var envelope struct {
+					Error struct {
+						Code      string `json:"code"`
+						Kind      string `json:"kind"`
+						Retryable *bool  `json:"retryable"`
+						Field     string `json:"field"`
+						Message   string `json:"message"`
+					} `json:"error"`
+				}
+				if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+					t.Fatalf("CLI rejection contract: decode JSON stdout: %v", err)
+				}
+				got := envelope.Error
+				if got.Code != "InvalidParameter" || got.Kind != "client" || got.Retryable == nil || *got.Retryable {
+					t.Fatalf("CLI rejection contract: expected InvalidParameter/client/retryable=false, got stdout=%s", stdout)
+				}
+
+				if tc.genericControl {
+					if got.Field != tc.path || got.Message != locale.reason {
+						t.Errorf("generic InvalidParameter control: got field=%q message=%q, want field=%q message=%q",
+							got.Field, got.Message, tc.path, locale.reason)
+					}
+					return
+				}
+				if got.Field != tc.path || got.Message != locale.message ||
+					!strings.Contains(got.Message, "--"+tc.path) || !strings.Contains(got.Message, locale.reason) {
+					t.Errorf("localized API JSON diagnostic: got field=%q message=%q, want field=%q message=%q containing %q and %q",
+						got.Field, got.Message, tc.path, locale.message, "--"+tc.path, locale.reason)
+				}
+			})
+		}
+	}
+}
+
 func TestFCSandboxVolumeRejectsExplicitNonpositiveMutationTimeout(t *testing.T) {
 	for _, action := range []string{"create", "delete"} {
 		for _, noWait := range []bool{false, true} {

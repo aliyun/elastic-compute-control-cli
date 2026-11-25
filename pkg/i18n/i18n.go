@@ -127,6 +127,9 @@ func buildLocalizer(tag string, specs map[string]map[string]string) *Localizer {
 		&i18n.Message{ID: "DependencyViolation", Other: "resource has dependencies"},
 		&i18n.Message{ID: "HiddenRetryTimeout", Other: "hidden state grace period timed out"},
 		&i18n.Message{ID: "InternalError", Other: "internal error"},
+		&i18n.Message{ID: "APIJSONSchemaMismatch", Other: "--{{.Path}} does not match the API JSON schema"},
+		&i18n.Message{ID: "APIJSONUnsupportedMember", Other: "unsupported API JSON member --{{.Path}}"},
+		&i18n.Message{ID: "APIJSONUnambiguousObjectRequired", Other: "--{{.Path}} must be one unambiguous JSON object"},
 		&i18n.Message{ID: "InvalidConfig", Other: "config is invalid"},
 		&i18n.Message{ID: "InvalidCount", Other: "count must be greater than zero"},
 		&i18n.Message{ID: "InvalidCredentials", Other: "credentials are invalid"},
@@ -437,6 +440,9 @@ func buildLocalizer(tag string, specs map[string]map[string]string) *Localizer {
 		&i18n.Message{ID: "DependencyViolation", Other: "资源存在依赖"},
 		&i18n.Message{ID: "HiddenRetryTimeout", Other: "隐藏状态宽限期超时"},
 		&i18n.Message{ID: "InternalError", Other: "内部错误"},
+		&i18n.Message{ID: "APIJSONSchemaMismatch", Other: "--{{.Path}} 的值不符合 API JSON 结构"},
+		&i18n.Message{ID: "APIJSONUnsupportedMember", Other: "不支持 API JSON 成员 --{{.Path}}"},
+		&i18n.Message{ID: "APIJSONUnambiguousObjectRequired", Other: "--{{.Path}} 必须是单个无歧义的 JSON 对象"},
 		&i18n.Message{ID: "InvalidConfig", Other: "配置无效"},
 		&i18n.Message{ID: "InvalidCount", Other: "数量必须大于 0"},
 		&i18n.Message{ID: "InvalidCredentials", Other: "凭证无效"},
@@ -851,6 +857,14 @@ func (l *Localizer) ErrorPayload(payload ecerrors.ErrorPayload, hasActions bool)
 	if payload.Code == "WaitFailed" && payload.CurrentState != "" && payload.Message == NewLocalizer("en").MessageData("VolumeInitialWaitFailed", map[string]any{"State": payload.CurrentState}) {
 		payload.Message = l.MessageData("VolumeInitialWaitFailed", map[string]any{"State": payload.CurrentState})
 		return payload
+	}
+	// API-shaped input errors carry a catalog message ID and a separate path.
+	if payload.Code == "InvalidParameter" && payload.Kind == string(ecerrors.CategoryClient) && payload.Field != "" {
+		switch payload.Message {
+		case "APIJSONSchemaMismatch", "APIJSONUnsupportedMember", "APIJSONUnambiguousObjectRequired":
+			payload.Message = l.MessageData(payload.Message, map[string]any{"Path": payload.Field})
+			return payload
+		}
 	}
 	if !l.ShouldLocalizeHelp() {
 		return payload
