@@ -167,7 +167,7 @@ func reserveVolumeTransfer(ctx context.Context, command string, cfg execpkg.Conf
 	if err != nil {
 		return nil, err
 	}
-	if err := journalfile.CheckVolumeTransferTeamBinding(journal, durableJournal, bound, request.TeamID, binding); err != nil {
+	if err := journalfile.CheckVolumeTransferTeamBinding(journal, durableJournal, cfg, request.TeamID, binding); err != nil {
 		return nil, err
 	}
 	err = journalfile.WithExistingReplayLock(ctx, journal, func() error {
@@ -190,7 +190,7 @@ func reserveVolumeTransfer(ctx context.Context, command string, cfg execpkg.Conf
 			if resolved, resolveErr := journalfile.ResolveJournalPath(journal); resolveErr != nil || resolved != canonicalJournal {
 				return fmt.Errorf("Volume update journal target changed before reservation")
 			}
-			if err := journalfile.CheckVolumeTransferTeamBinding(journal, current, bound, request.TeamID, binding); err != nil {
+			if err := journalfile.CheckVolumeTransferTeamBinding(journal, current, cfg, request.TeamID, binding); err != nil {
 				return err
 			}
 			durable, err := journalfile.VolumeDeleteBinding(journal, current, cl.execCfg[found.role].Env, found.cmd)

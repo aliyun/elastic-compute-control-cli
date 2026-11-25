@@ -70,6 +70,20 @@ func TestReserveVolumeTransferRequiresOwnedBinding(t *testing.T) {
 // durable sidecar after the cleanup snapshot was taken, so update admission
 // must read the durable creation binding rather than the stale in-memory copy.
 func TestVolumeUpdateAdmitsDurableNoWaitCreateBinding(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		explicitConfig bool
+	}{
+		{"explicit-config-path", true},
+		{"unset-config-path", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testVolumeUpdateAdmitsDurableNoWaitCreateBinding(t, tc.explicitConfig)
+		})
+	}
+}
+
+func testVolumeUpdateAdmitsDurableNoWaitCreateBinding(t *testing.T, explicitConfig bool) {
 	cfg, cl, dir, scope := volumeRecoveryFixture(t, func(script string) string {
 		return strings.Replace(script,
 			`printf '{"volume":{"id":"%s","team_id":"%s","status":"AVAILABLE"}}\n' "$id" "$team"; exit 0`,
@@ -77,7 +91,10 @@ func TestVolumeUpdateAdmitsDurableNoWaitCreateBinding(t *testing.T) {
 	})
 	native, aliyun := filepath.Join(dir, "native.json"), filepath.Join(dir, "aliyun.json")
 	t.Setenv("HOME", dir)
-	t.Setenv("ECCTL_CONFIG_PATH", native)
+	t.Setenv("ECCTL_CONFIG_PATH", "")
+	if explicitConfig {
+		t.Setenv("ECCTL_CONFIG_PATH", native)
+	}
 	t.Setenv("ECCTL_ALIYUN_CONFIG_PATH", aliyun)
 	t.Setenv("ECCTL_PROFILE", "account-a")
 	if err := os.WriteFile(aliyun, []byte(`{"profiles":[{"name":"account-a","mode":"AK","access_key_id":"fake-a","access_key_secret":"fake-secret"}]}`), 0o600); err != nil {
@@ -86,6 +103,13 @@ func TestVolumeUpdateAdmitsDurableNoWaitCreateBinding(t *testing.T) {
 	binding, _, err := captureQuotaCredentialBinding(context.Background(), cfg, time.Second)
 	if err != nil {
 		t.Fatal(err)
+	}
+	wantSelector := ""
+	if explicitConfig {
+		wantSelector = native
+	}
+	if binding.Selectors["ECCTL_CONFIG_PATH"] != wantSelector {
+		t.Fatalf("creator binding no longer exercises the intended config selector: %+v", binding.Selectors)
 	}
 	bucket := "ecctl-e2e-20261104t120000-123456abcdef"
 	cl.volumeFixtureBinding, cl.volumeFixtureBucket = binding, bucket
