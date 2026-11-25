@@ -44,26 +44,27 @@ const exitNotFound = 4
 
 // cleanupItem is one teardown command and whether it has already run.
 type cleanupItem struct {
-	scope                     string
-	cmd                       string
-	role                      string
-	lockKeys                  []string
-	done                      bool
-	running                   bool
-	deferred                  bool
-	cacheCreatePending        bool
-	teamCreateConfirmed       bool
-	volumeTeamBound           bool
-	volumeTeamBinding         *report.QuotaCredentialBinding
-	quotaBound                bool
-	teamRegistrationFailed    bool
-	quotaReserved             bool
-	quotaUpdatePending        bool
-	quotaReservationUnstarted bool
-	teamReplayAttempted       bool
-	teamAttemptFresh          bool
-	ownedTeamID               string
-	templateBinding           *journalfile.TemplateCreateIntent
+	scope                       string
+	cmd                         string
+	role                        string
+	lockKeys                    []string
+	done                        bool
+	running                     bool
+	deferred                    bool
+	cacheCreatePending          bool
+	teamCreateConfirmed         bool
+	teamProviderTemplateCleanup bool
+	volumeTeamBound             bool
+	volumeTeamBinding           *report.QuotaCredentialBinding
+	quotaBound                  bool
+	teamRegistrationFailed      bool
+	quotaReserved               bool
+	quotaUpdatePending          bool
+	quotaReservationUnstarted   bool
+	teamReplayAttempted         bool
+	teamAttemptFresh            bool
+	ownedTeamID                 string
+	templateBinding             *journalfile.TemplateCreateIntent
 	// Team provenance is durable in the journal; this records only a
 	// successful transfer of this Volume during the active run.
 	volumeTransferTeam                string
@@ -81,6 +82,13 @@ type cleanupItem struct {
 	volumeFixtureDeleteProtocol       int
 	volumeFixtureDeleteAttempted      bool
 	teamCreateIntent                  *teamCreateIntent
+}
+
+// ownedTeamChildCleanup reports whether a confirmed Team finalizer must clear
+// provider-default Templates before deletion. Volume Teams keep their pinned
+// fixture path; Quota Teams retain their separate credential-binding replay.
+func (it *cleanupItem) ownedTeamChildCleanup() bool {
+	return it.teamCreateConfirmed && (it.volumeTeamBound || it.teamProviderTemplateCleanup)
 }
 
 // cleanup is the two-level teardown registry. Case scopes run when
@@ -410,7 +418,7 @@ func (c *cleanup) pushItemWithFixture(scope *[]*cleanupItem, name, cmd, role str
 	if teamBinding != nil && (teamIntent == nil || !reflect.DeepEqual(teamIntent.VolumeBinding, teamBinding)) || teamIntent != nil && !teamCreateConfirmed {
 		return nil, fmt.Errorf("Volume Team finalizer lost its exact create intent")
 	}
-	it := &cleanupItem{scope: name, cmd: cmd, role: role, lockKeys: keys, cacheCreatePending: cacheCreatePending, teamCreateConfirmed: teamCreateConfirmed, quotaBound: quotaBound, volumeTeamBound: teamBinding != nil, volumeTeamBinding: teamBinding, volumeFixtureKind: fixtureKind, volumeFixturePending: fixtureKind != "", teamCreateIntent: teamIntent}
+	it := &cleanupItem{scope: name, cmd: cmd, role: role, lockKeys: keys, cacheCreatePending: cacheCreatePending, teamCreateConfirmed: teamCreateConfirmed, quotaBound: quotaBound, volumeTeamBound: teamBinding != nil, volumeTeamBinding: teamBinding, volumeFixtureKind: fixtureKind, volumeFixturePending: fixtureKind != "", teamCreateIntent: teamIntent, teamProviderTemplateCleanup: teamIntent != nil && teamIntent.TeamProviderTemplateCleanup}
 	if fixtureKind != "" {
 		it.volumeFixtureDispatchProtocol = 1
 	}
@@ -790,9 +798,10 @@ func (c *cleanup) journalValues(item *cleanupItem) (report.CleanupJournal, repor
 		Scope: item.scope, Teardown: item.cmd, RegionRole: item.role,
 		Region: cfg.Region, ExecutionID: c.journalMeta.ExecutionID, CacheCreatePending: item.cacheCreatePending,
 		TeamCreateConfirmed: item.teamCreateConfirmed, QuotaBound: item.quotaBound, QuotaReserved: item.quotaReserved,
-		VolumeTeamBound:       item.volumeTeamBound,
-		VolumeDeleteAttempted: item.volumeDeleteAttempted,
-		QuotaUpdatePending:    item.quotaUpdatePending, TeamReplayAttempted: item.teamReplayAttempted,
+		TeamProviderTemplateCleanup: item.teamProviderTemplateCleanup,
+		VolumeTeamBound:             item.volumeTeamBound,
+		VolumeDeleteAttempted:       item.volumeDeleteAttempted,
+		QuotaUpdatePending:          item.quotaUpdatePending, TeamReplayAttempted: item.teamReplayAttempted,
 		VolumeFixtureKind: item.volumeFixtureKind, VolumeFixturePending: item.volumeFixturePending, VolumeFixtureDispatchProtocol: item.volumeFixtureDispatchProtocol, VolumeFixtureDispatched: item.volumeFixtureDispatched,
 		VolumeFixtureCreateRequestID: item.volumeFixtureCreateRequestID, VolumeFixtureCreateResponseSHA256: item.volumeFixtureCreateResponseSHA256, VolumeFixtureCreateValidated: item.volumeFixtureCreateValidated, VolumeFixtureRoleID: item.volumeFixtureRoleID,
 		VolumeFixturePolicyCreateDate: item.volumeFixturePolicyCreateDate, VolumeFixtureBucketCreationDate: item.volumeFixtureBucketCreationDate,
@@ -1208,26 +1217,42 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool, pendingWai
 						if owned != nil && owned != it {
 							return fmt.Errorf("owned Team finalizer changed before cleanup")
 						}
-						if it.volumeTeamBound {
-							_, _, path := c.journalValues(it)
-							journal, legacy, err := readRunnerJournal(path)
-							if err != nil || legacy {
-								return fmt.Errorf("Volume Team creator journal is unavailable: %v", err)
+						if it.ownedTeamChildCleanup() {
+							if it.volumeTeamBound {
+								_, _, path := c.journalValues(it)
+								journal, legacy, err := readRunnerJournal(path)
+								if err != nil || legacy {
+									return fmt.Errorf("Volume Team creator journal is unavailable: %v", err)
+								}
+								var found bool
+								bound, found, err = journalfile.VolumeTeamCreatorConfig(preflightCtx, journal, c.execCfg[it.role], it.ownedTeamID)
+								if err != nil || !found {
+									return fmt.Errorf("Volume Team creator credential is unavailable: %v", err)
+								}
+							} else if !it.quotaBound {
+								_, _, path := c.journalValues(it)
+								journal, legacy, err := readRunnerJournal(path)
+								if err != nil || legacy {
+									return fmt.Errorf("owned Team creator journal is unavailable: %v", err)
+								}
+								bound, _, err = journalfile.OwnedTeamCreatorConfig(preflightCtx, journal, c.execCfg[it.role], it.ownedTeamID)
+								if err != nil {
+									return err
+								}
 							}
-							var found bool
-							bound, found, err = journalfile.VolumeTeamCreatorConfig(preflightCtx, journal, c.execCfg[it.role], it.ownedTeamID)
-							if err != nil || !found {
-								return fmt.Errorf("Volume Team creator credential is unavailable: %v", err)
-							}
-							volumeTeamPath, volumeTeamJournal, volumeTeamEntry, err = c.volumeTeamChildContext(it)
-							if err != nil {
-								return err
+							childPath, childJournal, childEntry, childErr := c.volumeTeamChildContext(it)
+							if childErr != nil {
+								return childErr
 							}
 							childCtx, cancelChildren := context.WithTimeout(context.Background(), cleanupCommandTimeout(it.cmd))
-							volumeTeamAlreadyAbsent, err = journalfile.PrepareVolumeTeamChildren(childCtx, volumeTeamPath, volumeTeamJournal, volumeTeamEntry, bound, c.runCommand)
+							absent, prepErr := journalfile.PrepareVolumeTeamChildren(childCtx, childPath, childJournal, childEntry, bound, c.runCommand)
 							cancelChildren()
-							if err != nil {
-								return err
+							if prepErr != nil && !errors.Is(prepErr, journalfile.ErrOwnedTeamChildNoIntent) {
+								return prepErr
+							}
+							if prepErr == nil {
+								volumeTeamPath, volumeTeamJournal, volumeTeamEntry = childPath, childJournal, childEntry
+								volumeTeamAlreadyAbsent = absent
 							}
 						}
 					}
@@ -1465,14 +1490,14 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool, pendingWai
 					} else if volumeTeamAlreadyAbsent {
 						res = execpkg.Result{Started: true, Exit: exitNotFound, JSON: map[string]any{"deleted": true}}
 					} else if !volumeReadOnly {
-						if it.volumeTeamBound && teamDelete {
+						if volumeTeamPath != "" && teamDelete {
 							if err := journalfile.ReserveVolumeTeamDelete(commandCtx, volumeTeamPath, volumeTeamJournal, volumeTeamEntry, bound); err != nil {
 								cancel()
 								return err
 							}
 						}
 						res = c.runCommand(commandCtx, bound, command)
-						if it.volumeTeamBound && teamDelete && journalfile.IsVolumeTeamChildConflict(res) {
+						if volumeTeamPath != "" && teamDelete && journalfile.IsVolumeTeamChildConflict(res) {
 							if err := journalfile.RecordVolumeTeamConflict(commandCtx, volumeTeamPath, volumeTeamJournal, volumeTeamEntry, bound, res); err != nil {
 								cancel()
 								return err
@@ -1540,7 +1565,7 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool, pendingWai
 					it.done = res.Err == nil && res.Exit >= 0 && !quotaDelete && !it.teamCreateConfirmed && !volumeDelete && !fencedFixture
 					c.mu.Unlock()
 					for attempt, delay := range cleanupRetryDelays {
-						if fencedFixture || volumeNative || it.volumeTeamBound && teamDelete || res.Exit == 0 || res.Exit == exitNotFound || !cleanupRetryable(res) {
+						if fencedFixture || volumeNative || volumeTeamPath != "" && teamDelete || res.Exit == 0 || res.Exit == exitNotFound || !cleanupRetryable(res) {
 							break
 						}
 						c.logf("cleanup retry %d/%d after transient resource status: %s", attempt+1, len(cleanupRetryDelays), it.cmd)
@@ -1561,7 +1586,7 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool, pendingWai
 									return err
 								}
 							}
-							if quotaDelete || teamDelete && (it.quotaBound || it.volumeTeamBound) {
+							if quotaDelete || teamDelete && (it.quotaBound || it.volumeTeamBound || it.teamProviderTemplateCleanup) {
 								// The outer cleanup fence is still held. A retry launches a
 								// fresh credential provider, so check the original binding
 								// again without recursively acquiring that fence.
@@ -1578,6 +1603,18 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool, pendingWai
 									verified, found, err = journalfile.VolumeTeamCreatorConfig(commandCtx, journal, c.execCfg[it.role], it.ownedTeamID)
 									if !found && err == nil {
 										err = fmt.Errorf("Volume Team retry lost its creator binding")
+									}
+								} else if teamDelete && !it.quotaBound {
+									_, _, path := c.journalValues(it)
+									journal, legacy, readErr := readRunnerJournal(path)
+									if readErr != nil || legacy {
+										cancel()
+										return fmt.Errorf("owned Team retry journal is unavailable: %v", readErr)
+									}
+									var found bool
+									verified, found, err = journalfile.OwnedTeamCreatorConfig(commandCtx, journal, c.execCfg[it.role], it.ownedTeamID)
+									if !found && err == nil {
+										verified = bound
 									}
 								} else {
 									c.mu.Lock()
@@ -1824,6 +1861,7 @@ func cleanupRetryable(res execpkg.Result) bool {
 		"depends on [networkinterface]",
 		"dependencyviolation",
 		"dependent resources",
+		"conflict.teamhasapikeys",
 	} {
 		if strings.Contains(text, marker) {
 			return true

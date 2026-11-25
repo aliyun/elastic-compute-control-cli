@@ -518,11 +518,20 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 			}
 			if found {
 				bound = creatorBound
+			} else {
+				ownedBound, ownedFound, ownedErr := journalfile.OwnedTeamCreatorConfig(ctx, journal, opt.Config, teamID)
+				if ownedErr != nil {
+					return result, ownedErr
+				}
+				if ownedFound {
+					bound = ownedBound
+				}
 			}
 		}
+		teamChildCleanupActive := entry.TeamCreateConfirmed && (entry.VolumeTeamBound || entry.TeamProviderTemplateCleanup) && journalfile.IsTeamDeleteCandidate(entry.Teardown) && journalfile.OwnedTeamChildCleanupApplicable(journal, entry, bound)
 		volumeTeamAlreadyAbsent := false
 		var volumeTeamID string
-		if entry.VolumeTeamBound && journalfile.IsTeamDeleteCandidate(entry.Teardown) {
+		if teamChildCleanupActive {
 			volumeTeamID, err = journalfile.TeamDeleteTarget(entry.Teardown)
 			if err != nil {
 				return result, err
@@ -732,7 +741,7 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 		} else if volumeReadOnly {
 			res = execpkg.Result{Started: true, Exit: 0, JSON: map[string]any{"deleted": true}}
 		} else {
-			if entry.VolumeTeamBound {
+			if teamChildCleanupActive {
 				if err := journalfile.ReserveVolumeTeamDelete(ctx, path, journal, entry, bound); err != nil {
 					result.Errors++
 					result.Details = append(result.Details, fmt.Sprintf("journal %s: Volume Team delete is fenced: %v", entry.Scope, err))
@@ -740,7 +749,7 @@ func replayJournalEntries(ctx context.Context, path string, opt ReplayOptions, j
 				}
 			}
 			res = execpkg.Run(ctx, bound, deleteCommand)
-			if entry.VolumeTeamBound && journalfile.IsVolumeTeamChildConflict(res) {
+			if teamChildCleanupActive && journalfile.IsVolumeTeamChildConflict(res) {
 				if err := journalfile.RecordVolumeTeamConflict(ctx, path, journal, entry, bound, res); err != nil {
 					return result, fmt.Errorf("record Volume Team conflict: %w", err)
 				}

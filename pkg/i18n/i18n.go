@@ -105,6 +105,8 @@ func buildLocalizer(tag string, specs map[string]map[string]string) *Localizer {
 		&i18n.Message{ID: "VolumeRequiresSignedCredential", Other: "FC volume requires signed AK or STS credentials"},
 		&i18n.Message{ID: "InvalidVolumeTimeout", Other: "FC volume create and delete require --timeout greater than zero"},
 		&i18n.Message{ID: "VolumeNotFound", Other: "volume not found"},
+		&i18n.Message{ID: "ApiKeyNotFound", Other: "API key not found"},
+		&i18n.Message{ID: "InvalidApiKeyResponse", Other: "the FC API Key API returned an invalid response"},
 		&i18n.Message{ID: "VolumeInitialWaitFailed", Other: "volume reached failure state {{.State}}"},
 		&i18n.Message{ID: "TeamReadOnly", Other: "the team is read-only and cannot be changed or deleted"},
 		&i18n.Message{ID: "TeamRenameNotAllowed", Other: "the team name cannot be changed"},
@@ -236,6 +238,8 @@ func buildLocalizer(tag string, specs map[string]map[string]string) *Localizer {
 		&i18n.Message{ID: "SchemaAPICallCondition.NotStartsWith", Other: "`{{.Flag}}` does not start with `{{.Prefix}}`"},
 		&i18n.Message{ID: "SchemaAPICallCondition.ContextAvailable", Other: "the preceding step produced `{{.Name}}`"},
 		&i18n.Message{ID: "SchemaAPICallCondition.ContextUnavailable", Other: "the preceding step did not produce `{{.Name}}`"},
+		&i18n.Message{ID: "SchemaAPICallCondition.ContextEquals", Other: "`{{.Name}}`{{if .Field}} field `{{.Field}}`{{end}} from the preceding step equals `{{.Value}}`"},
+		&i18n.Message{ID: "SchemaAPICallCondition.ContextNotEquals", Other: "`{{.Name}}`{{if .Field}} field `{{.Field}}`{{end}} from the preceding step does not equal `{{.Value}}`"},
 		&i18n.Message{ID: "SchemaAPICallCondition.ContainsPrefix", Other: "`{{.Flag}}` contains a value prefixed with `{{.Prefix}}`"},
 		&i18n.Message{ID: "SchemaAPICallCondition.NotContainsPrefix", Other: "`{{.Flag}}` does not contain a value prefixed with `{{.Prefix}}`"},
 		&i18n.Message{ID: "SchemaAPICallCondition.ContainsMatchingPrefix", Other: "`{{.Flag}}` contains a value starting with `{{.Prefix}}`"},
@@ -418,6 +422,8 @@ func buildLocalizer(tag string, specs map[string]map[string]string) *Localizer {
 		&i18n.Message{ID: "VolumeRequiresSignedCredential", Other: "FC 存储卷需要 AK 或 STS 签名凭据"},
 		&i18n.Message{ID: "InvalidVolumeTimeout", Other: "FC 存储卷创建和删除要求 --timeout 大于零"},
 		&i18n.Message{ID: "VolumeNotFound", Other: "未找到存储卷"},
+		&i18n.Message{ID: "ApiKeyNotFound", Other: "未找到访问密钥"},
+		&i18n.Message{ID: "InvalidApiKeyResponse", Other: "FC 访问密钥 API 返回了无效响应"},
 		&i18n.Message{ID: "VolumeInitialWaitFailed", Other: "存储卷进入失败状态 {{.State}}"},
 		&i18n.Message{ID: "TeamReadOnly", Other: "该团队为只读，不能修改或删除"},
 		&i18n.Message{ID: "TeamRenameNotAllowed", Other: "该团队不允许修改名称"},
@@ -549,6 +555,8 @@ func buildLocalizer(tag string, specs map[string]map[string]string) *Localizer {
 		&i18n.Message{ID: "SchemaAPICallCondition.NotStartsWith", Other: "`{{.Flag}}` 不以 `{{.Prefix}}` 开头"},
 		&i18n.Message{ID: "SchemaAPICallCondition.ContextAvailable", Other: "前序步骤已生成 `{{.Name}}`"},
 		&i18n.Message{ID: "SchemaAPICallCondition.ContextUnavailable", Other: "前序步骤未生成 `{{.Name}}`"},
+		&i18n.Message{ID: "SchemaAPICallCondition.ContextEquals", Other: "前序步骤 `{{.Name}}`{{if .Field}} 的 `{{.Field}}` 字段{{end}}等于 `{{.Value}}`"},
+		&i18n.Message{ID: "SchemaAPICallCondition.ContextNotEquals", Other: "前序步骤 `{{.Name}}`{{if .Field}} 的 `{{.Field}}` 字段{{end}}不等于 `{{.Value}}`"},
 		&i18n.Message{ID: "SchemaAPICallCondition.ContainsPrefix", Other: "`{{.Flag}}` 中包含以 `{{.Prefix}}` 为前缀的值"},
 		&i18n.Message{ID: "SchemaAPICallCondition.NotContainsPrefix", Other: "`{{.Flag}}` 中不包含以 `{{.Prefix}}` 为前缀的值"},
 		&i18n.Message{ID: "SchemaAPICallCondition.ContainsMatchingPrefix", Other: "`{{.Flag}}` 中包含以 `{{.Prefix}}` 开头的值"},
@@ -870,7 +878,7 @@ func (l *Localizer) ErrorPayload(payload ecerrors.ErrorPayload, hasActions bool)
 		return payload
 	}
 	// Preserve provider-specific messages that share a stable generic error code.
-	for _, id := range []string{"UnsupportedACSOperation", "InvalidSandboxResponse", "TeamNotFound", "QuotaNotFound", "TemplateCacheNotFound", "FCTemplateNotFound", "VolumeNotFound", "InvalidNativeFCTemplateResponse"} {
+	for _, id := range []string{"UnsupportedACSOperation", "InvalidSandboxResponse", "TeamNotFound", "QuotaNotFound", "TemplateCacheNotFound", "FCTemplateNotFound", "VolumeNotFound", "ApiKeyNotFound", "InvalidNativeFCTemplateResponse"} {
 		if payload.Message == NewLocalizer("en").Message(id) {
 			payload.Message = l.Message(id)
 			return payload

@@ -994,6 +994,27 @@ func hasLintCode(rep *Report, code string) bool {
 	return false
 }
 
+func TestCheckRejectsProviderTemplateCleanupInDAG(t *testing.T) {
+	root := t.TempDir()
+	cases := filepath.Join(root, "cases")
+	mustMkdir(t, cases)
+	mustWrite(t, filepath.Join(cases, "dag.yaml"), `
+resource: sandbox/api-key
+execution: dag
+cleanup_provider_templates: true
+steps:
+  - name: create
+    run: ecctl sandbox api-key list
+`)
+	report, err := Check(Options{CasesDir: cases, InputsDir: filepath.Join(root, "inputs")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasLintCode(report, "invalid_provider_template_cleanup") {
+		t.Fatalf("errors = %#v, want DAG provider-template cleanup rejection", report.Errors)
+	}
+}
+
 func mustMkdir(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {
