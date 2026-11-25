@@ -135,10 +135,13 @@ Volume has no tag-based sweep contract. The five case operations (`create`,
 against the public case fingerprint, the SHA-256 of
 `e2e/cases/sandbox/volume-lifecycle.yaml`
 (`sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2`).
-Adding the update steps changed the case fingerprint, so all five operations
-are `offline` with reason `case-changed` pending live re-verification under the
-new fingerprint; a case change requires live re-verification of every operation
-it covers. The repository admits exactly one lifecycle case per resource, so
+Adding the update steps changed the case fingerprint, which moved all five
+operations to `offline` with reason `case-changed`; a case change requires live
+re-verification of every operation it covers. Live round 5 on 2026-11-25
+re-verified all five operations under the new fingerprint (UpdateVolume
+requestId `01A2122F-ACEE-5111-847C-640B102544C9`), and `e2e/coverage.yaml` now
+records them as `live-pass` with reason `live-verified`.
+The repository admits exactly one lifecycle case per resource, so
 the update lives in the same lifecycle case rather than a separate file.
 Offline unit tests cover request construction, nested JSON, business errors,
 wait states, no-wait, scope, token pagination, and the same-Team update
