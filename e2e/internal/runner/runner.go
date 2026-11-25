@@ -2227,6 +2227,9 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 						if err := sctx.Err(); err != nil {
 							return err
 						}
+						if err := cl.persistOwnedVolumeObservation(volumeDeleteItem); err != nil {
+							return err
+						}
 						if err := cl.markOwnedVolumeDeleteAttempt(volumeDeleteItem); err != nil {
 							return err
 						}

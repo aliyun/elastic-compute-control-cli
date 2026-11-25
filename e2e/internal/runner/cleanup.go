@@ -1430,6 +1430,10 @@ func (c *cleanup) runCleanup(scope []*cleanupItem, deferPending bool, pendingWai
 									cancel()
 									return err
 								}
+								if err := c.persistOwnedVolumeObservation(it); err != nil {
+									cancel()
+									return err
+								}
 								if err := c.markOwnedVolumeDeleteAttempt(it); err != nil {
 									cancel()
 									return err
