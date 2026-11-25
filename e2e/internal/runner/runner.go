@@ -2239,7 +2239,11 @@ func runStepUnfenced(ctx context.Context, opt Options, execCfg execpkg.Config, c
 					volumeTeamAlreadyAbsent := false
 					if teamDelete {
 						var err error
-						teamItem, err = cl.prepareOwnedTeamDelete(*scope, cmd, "primary", nil)
+						var caseScopes []string
+						if opt.volumeLifecycle {
+							caseScopes = []string{caseScope(data)}
+						}
+						teamItem, err = cl.prepareOwnedTeamDelete(*scope, cmd, "primary", nil, caseScopes...)
 						if err != nil {
 							return err
 						}
