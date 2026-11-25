@@ -563,14 +563,56 @@ func TestFCSandboxVolumeInitialErrorUsesSelectedLanguage(t *testing.T) {
 	}
 }
 
-func TestFCSandboxVolumeUpdateDeferred(t *testing.T) {
-	fake := &fakeAPICaller{}
+type volumeUpdateCall struct {
+	operation string
+	request   map[string]any
+}
+
+type volumeUpdateCaller struct {
+	calls    []volumeUpdateCall
+	response map[string]any
+}
+
+func (f *volumeUpdateCaller) Call(_ context.Context, operation string, request map[string]any) (map[string]any, error) {
+	f.calls = append(f.calls, volumeUpdateCall{operation: operation, request: request})
+	return f.response, nil
+}
+
+func TestFCSandboxVolumeUpdateTransfersAndReadsBack(t *testing.T) {
+	fake := &volumeUpdateCaller{response: map[string]any{"code": "200", "requestId": "req-update", "volume": map[string]any{
+		"volumeID": "vol-1", "volumeName": "workspace", "teamID": "team-2", "status": "AVAILABLE",
+	}}}
 	factory := func(string, string, spec.ResourceSpec, string, func(string) string) (engine.Caller, error) {
 		return fake, nil
 	}
 	stdout, stderr, code := runCLIWith(factory, "--lang", "en", "sandbox", "volume", "update", "vol-1", "--team-id", "team-2", "--region", "cn-hangzhou", "--output=json")
-	if code == 0 || fake.operation != "" {
-		t.Fatalf("deferred Volume update reached provider: code=%d stdout=%s stderr=%s operation=%s", code, stdout, stderr, fake.operation)
+	if code != 0 || stderr != "" || len(fake.calls) != 2 {
+		t.Fatalf("Volume update: code=%d stdout=%s stderr=%s calls=%+v", code, stdout, stderr, fake.calls)
+	}
+	if fake.calls[0].operation != "UpdateVolume" || fake.calls[0].request["volumeID"] != "vol-1" || fake.calls[0].request["body.teamID"] != "team-2" {
+		t.Fatalf("update request: %+v", fake.calls[0])
+	}
+	if fake.calls[1].operation != "GetVolume" || fake.calls[1].request["teamID"] != "team-2" {
+		t.Fatalf("readback lost destination scope: %+v", fake.calls[1])
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("invalid JSON: %s: %v", stdout, err)
+	}
+	volume, _ := payload["volume"].(map[string]any)
+	if volume["team_id"] != "team-2" || volume["id"] != "vol-1" {
+		t.Fatalf("update output lost transferred volume: %s", stdout)
+	}
+}
+
+func TestFCSandboxVolumeUpdateRequiresStatusOrTeam(t *testing.T) {
+	fake := &volumeUpdateCaller{}
+	factory := func(string, string, spec.ResourceSpec, string, func(string) string) (engine.Caller, error) {
+		return fake, nil
+	}
+	stdout, stderr, code := runCLIWith(factory, "--lang", "en", "sandbox", "volume", "update", "vol-1", "--region", "cn-hangzhou", "--output=json")
+	if code == 0 || len(fake.calls) != 0 {
+		t.Fatalf("empty Volume update reached provider: code=%d stdout=%s stderr=%s calls=%+v", code, stdout, stderr, fake.calls)
 	}
 }
 

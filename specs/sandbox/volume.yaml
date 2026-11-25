@@ -10,6 +10,7 @@ examples:
   - ecctl sandbox volume create --name workspace --team-id <team-id> --oss-volume-config @oss.json --region cn-hangzhou
   - ecctl sandbox volume list --team-id <team-id> --region cn-hangzhou
   - ecctl sandbox volume get <volume-id> --team-id <team-id> --region cn-hangzhou
+  - ecctl sandbox volume update <volume-id> --team-id <destination-team-id> --region cn-hangzhou
 
 identity:
   field: id
@@ -142,6 +143,15 @@ probes:
       id: $.volumeID
       state: $.status
       fields: *volume_fields
+  update_detail:
+    api: GetVolume
+    request: {volumeID: $.id, teamID: $context.updated_team_id}
+    response:
+      item: $.volume
+      request_id: $.requestId
+      id: $.volumeID
+      state: $.status
+      fields: *volume_fields
   list:
     api: ListVolumes
     request: {volumeName: $.name, status: $.status, teamID: $.team_id, resourceGroupID: $.resource_group, userID: $.user_id, maxResults: $.limit, nextToken: $.next_token}
@@ -192,6 +202,18 @@ bindings:
     require_all: [{request: volumeID}]
     request_id_from: $.requestId
     wait: absent_after_delete
+  update_volume:
+    api: UpdateVolume
+    request:
+      volumeID: $.id
+      body:
+        status: $.status
+        teamID: $.team_id
+    require_all: [{request: volumeID}]
+    require_any: [{request: body.status}, {request: body.teamID}]
+    id_from: $.volume.volumeID
+    context_from: {updated_volume: $.volume, updated_team_id: $.volume.teamID}
+    request_id_from: $.requestId
 
 operations:
   create:
@@ -273,3 +295,19 @@ operations:
       - probe: list
         many: true
     examples: [ecctl sandbox volume list --team-id <team-id> --limit 100 --region cn-hangzhou]
+  update:
+    description: {en: Update a native FC sandbox volume, zh-CN: 更新原生 FC 沙箱存储卷}
+    help:
+      en: Update only accepts --status and --team-id. Setting --team-id transfers the volume to that Team; the CLI then reads it back with GetVolume in the destination Team scope. It does not update the volume name or storage backend configuration.
+      zh-CN: 更新仅接受 --status 和 --team-id。设置 --team-id 会将存储卷转移到该团队；CLI 随后在目的团队范围内用 GetVolume 读回。不会更新存储卷名称或存储后端配置。
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - status
+        - team_id
+    workflow:
+      - binding: update_volume
+      - probe: update_detail
+        ids: [$input.id]
+        not_found: error
+    examples: [ecctl sandbox volume update <volume-id> --team-id <destination-team-id> --region cn-hangzhou]

@@ -12,6 +12,7 @@ on the existing E2B route; `volume` is an explicit FC OpenAPI subresource.
 | `delete` | `DeleteVolume`, `DELETE /pop/2026-05-09/volumes/{volumeID}` | path `volumeID`, optional query `teamID` |
 | `get` | `GetVolume`, `GET /pop/2026-05-09/volumes/{volumeID}` | path `volumeID`, optional query `teamID` |
 | `list` | `ListVolumes`, `GET /pop/2026-05-09/volumes` | query filters and token pagination |
+| `update` | `UpdateVolume`, `PUT /pop/2026-05-09/volumes/{volumeID}` | path `volumeID`, JSON body `status` and `teamID` |
 
 Create requires a `--name` because `volumeName` is unique within a Team.
 `--team-id` is optional in the published request schema, but specify it when
@@ -28,6 +29,7 @@ ecctl sandbox volume create --name workspace --team-id <team-id> \
 ecctl sandbox volume get <volume-id> --team-id <team-id> --region cn-hangzhou
 ecctl sandbox volume list --team-id <team-id> --name workspace --limit 100 --all --region cn-hangzhou
 ecctl sandbox volume delete <volume-id> --team-id <team-id> --region cn-hangzhou
+ecctl sandbox volume update <volume-id> --team-id <destination-team-id> --region cn-hangzhou
 ```
 
 ## `ecctl sandbox volume create`
@@ -56,6 +58,18 @@ absence.
 storage and mount configuration objects, `created_at`, `updated_at`,
 `user_id`, `status`, and `status_reason` when supplied by the service.
 
+## `ecctl sandbox volume update`
+
+Update accepts only `--status` and `--team-id`; at least one is required. It
+does not update the volume name or storage backend configuration. Setting
+`--team-id` transfers the volume to that Team. After `UpdateVolume` is
+accepted, the CLI reads the volume back with `GetVolume` in the destination
+Team scope (the Team returned by `UpdateVolume` when `--team-id` is omitted)
+and returns that readback. A business `code` other than `"200"` fails the
+command; the readback preserves the sanitized `requestId` and the provider
+volume fields. A scoped readback does not prove the volume is absent from its
+previous Team.
+
 ## `ecctl sandbox volume list`
 
 `list` returns the same Volume fields. Filters map `--name`, `--status`,
@@ -66,7 +80,7 @@ token pages from the beginning, preserves filters, and rejects repeated
 tokens or Volume IDs. It does not provide a consistent snapshot of concurrent
 changes.
 
-All four operations require lower-case `code="200"` inside the response even
+All five operations require lower-case `code="200"` inside the response even
 when HTTP succeeds. Business errors preserve sanitized code, message, and
 request ID. Invalid success envelopes and malformed Volume or list objects
 fail instead of becoming successful empty results.
@@ -96,12 +110,15 @@ public case fingerprint, the SHA-256 of
 `e2e/cases/sandbox/volume-lifecycle.yaml`
 (`sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451`);
 a case change requires live re-verification under the new fingerprint. Team
-transfer through `UpdateVolume` is deferred from this first release.
+transfer through `UpdateVolume` is covered by a separate update case; the
+lifecycle case keeps both Volumes under their original Team.
 Offline unit tests cover request construction, nested JSON, business errors,
-wait states, no-wait, scope, and token pagination.
+wait states, no-wait, scope, token pagination, and the update transfer
+readback.
 
 Source: [official FCSandbox 2026-05-09 API metadata](https://api.aliyun.com/meta/v1/products/FCSandbox/versions/2026-05-09/api-docs.json),
 [CreateVolume](https://api.aliyun.com/document/FCSandbox/2026-05-09/CreateVolume),
 [GetVolume](https://api.aliyun.com/document/FCSandbox/2026-05-09/GetVolume),
 [ListVolumes](https://api.aliyun.com/document/FCSandbox/2026-05-09/ListVolumes), and
-[DeleteVolume](https://api.aliyun.com/document/FCSandbox/2026-05-09/DeleteVolume).
+[DeleteVolume](https://api.aliyun.com/document/FCSandbox/2026-05-09/DeleteVolume), and
+[UpdateVolume](https://api.aliyun.com/document/FCSandbox/2026-05-09/UpdateVolume).

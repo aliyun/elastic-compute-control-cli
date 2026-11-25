@@ -169,7 +169,7 @@ func (c *OpenAPICaller) validateVolumeRequest(req *openAPIRequest) error {
 	invalid := func(field string) error {
 		return ecerrors.Client("InvalidVolumeInput", i18n.NewLocalizer("en").Message("InvalidVolumeInput"), ecerrors.WithField(field))
 	}
-	if req.ApiName == "GetVolume" || req.ApiName == "DeleteVolume" {
+	if req.ApiName == "GetVolume" || req.ApiName == "DeleteVolume" || req.ApiName == "UpdateVolume" {
 		if id := req.PathParams["volumeID"]; !validTeamIdentity(id) {
 			return invalid("id")
 		}
@@ -177,7 +177,7 @@ func (c *OpenAPICaller) validateVolumeRequest(req *openAPIRequest) error {
 	if team := req.QueryParams["teamID"]; team != "" && !validTeamIdentity(team) {
 		return invalid("team_id")
 	}
-	if req.ApiName == "CreateVolume" {
+	if req.ApiName == "CreateVolume" || req.ApiName == "UpdateVolume" {
 		body, ok := req.BodyValue().(map[string]any)
 		if !ok {
 			return invalid("body")
@@ -186,6 +186,14 @@ func (c *OpenAPICaller) validateVolumeRequest(req *openAPIRequest) error {
 			id, ok := team.(string)
 			if !ok || !validTeamIdentity(id) {
 				return invalid("team_id")
+			}
+		}
+		if req.ApiName == "UpdateVolume" {
+			if status, present := body["status"]; present {
+				text, ok := status.(string)
+				if !ok || strings.TrimSpace(text) == "" {
+					return invalid("status")
+				}
 			}
 		}
 	}
@@ -392,9 +400,9 @@ func (c *OpenAPICaller) fcVolumeResponseError(req *openAPIRequest, response map[
 		return id, true
 	}
 	switch req.ApiName {
-	case "CreateVolume", "GetVolume":
+	case "CreateVolume", "GetVolume", "UpdateVolume":
 		expectedID, expectedTeam, expectedName := req.PathParams["volumeID"], req.QueryParams["teamID"], ""
-		if req.ApiName == "CreateVolume" {
+		if req.ApiName == "CreateVolume" || req.ApiName == "UpdateVolume" {
 			body, ok := req.BodyValue().(map[string]any)
 			if !ok {
 				return invalid()
@@ -402,12 +410,14 @@ func (c *OpenAPICaller) fcVolumeResponseError(req *openAPIRequest, response map[
 			if team, ok := body["teamID"].(string); ok {
 				expectedTeam = team
 			}
-			expectedName, _ = body["volumeName"].(string)
+			if req.ApiName == "CreateVolume" {
+				expectedName, _ = body["volumeName"].(string)
+			}
 		}
 		if _, ok := validVolume(response["volume"], expectedID, expectedTeam, expectedName); !ok {
 			return invalid()
 		}
-		if req.ApiName == "CreateVolume" {
+		if req.ApiName == "CreateVolume" || req.ApiName == "UpdateVolume" {
 			volume := response["volume"].(map[string]any)
 			if team, _ := volume["teamID"].(string); team == "" {
 				return invalid()

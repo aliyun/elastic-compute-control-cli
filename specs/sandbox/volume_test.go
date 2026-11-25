@@ -22,10 +22,10 @@ func TestVolumeSpecContract(t *testing.T) {
 	if resource.Provider != "aliyun" || resource.APIProduct != "FCSandbox" || resource.Kind != "regional" {
 		t.Fatalf("wrong FC route: %+v", resource)
 	}
-	if len(resource.Operations) != 4 {
-		t.Fatalf("Volume operations = %d, want four", len(resource.Operations))
+	if len(resource.Operations) != 5 {
+		t.Fatalf("Volume operations = %d, want five", len(resource.Operations))
 	}
-	for action, api := range map[string]string{"create": "CreateVolume", "get": "GetVolume", "list": "ListVolumes", "delete": "DeleteVolume"} {
+	for action, api := range map[string]string{"create": "CreateVolume", "get": "GetVolume", "list": "ListVolumes", "delete": "DeleteVolume", "update": "UpdateVolume"} {
 		if _, ok := resource.Operations[action]; !ok {
 			t.Errorf("missing %s", action)
 		}
@@ -40,8 +40,19 @@ func TestVolumeSpecContract(t *testing.T) {
 			t.Errorf("missing %s mapping", api)
 		}
 	}
-	if _, present := resource.Operations["update"]; present {
-		t.Fatal("cross-Team Volume update is deferred from the first release")
+	update := resource.Operations["update"]
+	updateBody, _ := resource.Bindings["update_volume"].Request["body"].(map[string]any)
+	if len(updateBody) != 2 || updateBody["status"] != "$.status" || updateBody["teamID"] != "$.team_id" {
+		t.Fatalf("UpdateVolume body must expose only status and teamID: %+v", updateBody)
+	}
+	if resource.Bindings["update_volume"].Request["volumeID"] != "$.id" {
+		t.Fatal("UpdateVolume must keep the path identity")
+	}
+	if resource.Probes["update_detail"].Request["teamID"] != "$context.updated_team_id" {
+		t.Fatal("UpdateVolume readback must use the destination Team scope")
+	}
+	if len(update.Input.Fields) != 3 {
+		t.Fatalf("update input must expose only id, status and team_id: %+v", update.Input.Fields)
 	}
 	if resource.Probes["detail"].Request["volumeID"] != "$.id" || resource.Bindings["delete_volume"].Request["volumeID"] != "$.id" {
 		t.Fatal("Volume ID must be the path identity")

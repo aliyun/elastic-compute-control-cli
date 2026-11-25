@@ -215,10 +215,59 @@ func TestVolumeListAllFollowsOpaqueToken(t *testing.T) {
 	}
 }
 
-func TestVolumeUpdateDeferred(t *testing.T) {
+func volumeTeamResponse(team, status, requestID string) map[string]any {
+	return map[string]any{"code": "200", "requestId": requestID, "volume": map[string]any{
+		"volumeID": "vol-1", "volumeName": "workspace", "teamID": team, "status": status,
+	}}
+}
+
+func TestVolumeUpdateTransfersAndReadsBackDestination(t *testing.T) {
+	fake := &fakeCaller{responses: []map[string]any{volumeTeamResponse("team-2", "AVAILABLE", "req-update"), volumeTeamResponse("team-2", "AVAILABLE", "req-read")}}
+	result, err := NewExecutor(loadVolumeSpec(t), fake).Execute(context.Background(), Request{Action: "update", Input: map[string]any{"id": "vol-1", "team_id": "team-2"}})
+	if err != nil || result.Item["team_id"] != "team-2" || result.ID != "vol-1" || len(fake.calls) != 2 {
+		t.Fatalf("Volume transfer: result=%+v err=%v calls=%+v", result, err, fake.calls)
+	}
+	if fake.calls[0].operation != "UpdateVolume" || fake.calls[0].request["volumeID"] != "vol-1" || fake.calls[0].request["body.teamID"] != "team-2" {
+		t.Fatalf("update request: %+v", fake.calls[0])
+	}
+	if _, sent := fake.calls[0].request["body.status"]; sent {
+		t.Fatalf("transfer sent an unrequested status: %+v", fake.calls[0])
+	}
+	if fake.calls[1].operation != "GetVolume" || fake.calls[1].request["volumeID"] != "vol-1" || fake.calls[1].request["teamID"] != "team-2" {
+		t.Fatalf("readback lost destination Team scope: %+v", fake.calls[1])
+	}
+}
+
+func TestVolumeUpdateStatusOnlyReadsBackAcceptedTeam(t *testing.T) {
+	fake := &fakeCaller{responses: []map[string]any{volumeTeamResponse("team-1", "AVAILABLE", "req-update"), volumeTeamResponse("team-1", "AVAILABLE", "req-read")}}
+	result, err := NewExecutor(loadVolumeSpec(t), fake).Execute(context.Background(), Request{Action: "update", Input: map[string]any{"id": "vol-1", "status": "AVAILABLE"}})
+	if err != nil || result.Item["team_id"] != "team-1" || len(fake.calls) != 2 {
+		t.Fatalf("status update: result=%+v err=%v calls=%+v", result, err, fake.calls)
+	}
+	if fake.calls[0].request["body.status"] != "AVAILABLE" {
+		t.Fatalf("status not sent: %+v", fake.calls[0])
+	}
+	if _, sent := fake.calls[0].request["body.teamID"]; sent {
+		t.Fatalf("status-only update sent a Team: %+v", fake.calls[0])
+	}
+	if fake.calls[1].request["teamID"] != "team-1" {
+		t.Fatalf("readback did not use the accepted Team: %+v", fake.calls[1])
+	}
+}
+
+func TestVolumeUpdateRequiresStatusOrTeam(t *testing.T) {
 	fake := &fakeCaller{}
-	_, err := NewExecutor(loadVolumeSpec(t), fake).Execute(context.Background(), Request{Action: "update", Input: map[string]any{"id": "vol-1", "team_id": "team-1"}})
+	_, err := NewExecutor(loadVolumeSpec(t), fake).Execute(context.Background(), Request{Action: "update", Input: map[string]any{"id": "vol-1"}})
 	if err == nil || len(fake.calls) != 0 {
-		t.Fatalf("deferred update reached provider: err=%v calls=%+v", err, fake.calls)
+		t.Fatalf("empty update reached provider: err=%v calls=%+v", err, fake.calls)
+	}
+}
+
+func TestVolumeUpdateBusinessErrorFails(t *testing.T) {
+	fake := &fakeCaller{errors: []error{ecerrors.Service("CloudAPIError", "denied", false, ecerrors.WithRequestID("req-update"))}}
+	result, err := NewExecutor(loadVolumeSpec(t), fake).Execute(context.Background(), Request{Action: "update", Input: map[string]any{"id": "vol-1", "team_id": "team-2"}})
+	var app *ecerrors.AppError
+	if !errors.As(err, &app) || result.Item != nil || len(fake.calls) != 1 || fake.calls[0].operation != "UpdateVolume" {
+		t.Fatalf("business error became success: result=%+v err=%v calls=%+v", result, err, fake.calls)
 	}
 }

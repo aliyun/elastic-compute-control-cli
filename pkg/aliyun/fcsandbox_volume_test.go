@@ -386,6 +386,47 @@ func TestFCSandboxVolumeBusinessResponses(t *testing.T) {
 	}
 }
 
+func TestFCSandboxVolumeUpdateProof(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		request  map[string]any
+		response string
+		wantErr  bool
+	}{
+		{"transfer", map[string]any{"volumeID": "vol-1", "body.teamID": "team-2"}, `{"code":"200","requestId":"req-update","volume":{"volumeID":"vol-1","volumeName":"workspace","teamID":"team-2","status":"AVAILABLE"}}`, false},
+		{"status only", map[string]any{"volumeID": "vol-1", "body.status": "AVAILABLE"}, `{"code":"200","requestId":"req-update","volume":{"volumeID":"vol-1","volumeName":"workspace","teamID":"team-1","status":"AVAILABLE"}}`, false},
+		{"wrong destination", map[string]any{"volumeID": "vol-1", "body.teamID": "team-2"}, `{"code":"200","requestId":"req-update","volume":{"volumeID":"vol-1","volumeName":"workspace","teamID":"team-1","status":"AVAILABLE"}}`, true},
+		{"missing team", map[string]any{"volumeID": "vol-1", "body.teamID": "team-2"}, `{"code":"200","requestId":"req-update","volume":{"volumeID":"vol-1","volumeName":"workspace","status":"AVAILABLE"}}`, true},
+		{"wrong volume", map[string]any{"volumeID": "vol-1", "body.teamID": "team-2"}, `{"code":"200","requestId":"req-update","volume":{"volumeID":"other","teamID":"team-2","status":"AVAILABLE"}}`, true},
+		{"business error", map[string]any{"volumeID": "vol-1", "body.teamID": "team-2"}, `{"code":"403","message":"denied","requestId":"req-update"}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caller := &OpenAPICaller{Product: "FCSandbox", Resource: "volume", Region: "cn-hangzhou", executor: &fakeOpenAPIExecutor{response: tc.response}}
+			_, err := caller.Call(context.Background(), "UpdateVolume", tc.request)
+			if tc.wantErr && err == nil || !tc.wantErr && err != nil {
+				t.Fatalf("UpdateVolume %s: err=%v wantErr=%t", tc.name, err, tc.wantErr)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name, field string
+		request     map[string]any
+	}{
+		{"bad path", "id", map[string]any{"volumeID": "vol/1", "body.teamID": "team-2"}},
+		{"nontext team", "team_id", map[string]any{"volumeID": "vol-1", "body.teamID": 42}},
+		{"nontext status", "status", map[string]any{"volumeID": "vol-1", "body.status": 42}},
+	} {
+		t.Run("invalid "+tc.name, func(t *testing.T) {
+			caller := &OpenAPICaller{Product: "FCSandbox", Resource: "volume", Region: "cn-hangzhou", executor: &fakeOpenAPIExecutor{response: `{"code":"200"}`}}
+			_, err := caller.Call(context.Background(), "UpdateVolume", tc.request)
+			var app *ecerrors.AppError
+			if !errors.As(err, &app) || app.Payload().Code != "InvalidVolumeInput" || app.Payload().Field != tc.field {
+				t.Fatalf("invalid %s reached provider: %v", tc.field, err)
+			}
+		})
+	}
+}
+
 func TestFCSandboxVolumeCreateHTTPStatusRequiresAcceptedIdentity(t *testing.T) {
 	request := map[string]any{"body.volumeName": "workspace", "body.teamID": "team-1"}
 	for _, tc := range []struct {

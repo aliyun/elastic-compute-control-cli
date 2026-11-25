@@ -36,6 +36,7 @@ func TestSandboxVolumeNestedConfigurationOutputKeepsProviderShape(t *testing.T) 
 		{"list", []string{"list"}, []map[string]any{{"code": "200", "volumes": []any{provider}}}, []string{"ListVolumes"}},
 		{"waited create", []string{"create", "--name", "workspace"}, []map[string]any{{"code": "200", "volume": provider}, {"code": "200", "volume": provider}}, []string{"CreateVolume", "GetVolume"}},
 		{"no-wait create", []string{"create", "--name", "workspace", "--no-wait"}, []map[string]any{{"code": "200", "volume": provider}}, []string{"CreateVolume"}},
+		{"update transfer", []string{"update", "vol-1", "--team-id", "team-1"}, []map[string]any{{"code": "200", "volume": provider}, {"code": "200", "volume": provider}}, []string{"UpdateVolume", "GetVolume"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := &fakeSpecCaller{responses: tc.responses}
