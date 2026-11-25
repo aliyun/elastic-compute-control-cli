@@ -40,6 +40,18 @@ pending; `ERROR` fails with `statusReason`. `--no-wait` returns the accepted
 Volume's ID and current status without claiming readiness. If waiting fails
 after CreateVolume was accepted, inspect the Volume before retrying create.
 
+## `ecctl sandbox volume update`
+
+Update accepts only `--status` and `--team-id`; at least one is required. It
+does not update the volume name or storage backend configuration. Setting
+`--team-id` transfers the volume to that Team. After `UpdateVolume` is
+accepted, the CLI reads the volume back with `GetVolume` in the destination
+Team scope (the Team returned by `UpdateVolume` when `--team-id` is omitted)
+and returns that readback. A business `code` other than `"200"` fails the
+command; the readback preserves the sanitized `requestId` and the provider
+volume fields. A scoped readback does not prove the volume is absent from its
+previous Team.
+
 ## `ecctl sandbox volume delete`
 
 Delete waits by default for a scoped `GetVolume` to report the Volume-specific
@@ -57,18 +69,6 @@ absence.
 `get` returns `id`, `name`, `team_id`, `resource_group`, `storage_class`, the
 storage and mount configuration objects, `created_at`, `updated_at`,
 `user_id`, `status`, and `status_reason` when supplied by the service.
-
-## `ecctl sandbox volume update`
-
-Update accepts only `--status` and `--team-id`; at least one is required. It
-does not update the volume name or storage backend configuration. Setting
-`--team-id` transfers the volume to that Team. After `UpdateVolume` is
-accepted, the CLI reads the volume back with `GetVolume` in the destination
-Team scope (the Team returned by `UpdateVolume` when `--team-id` is omitted)
-and returns that readback. A business `code` other than `"200"` fails the
-command; the readback preserves the sanitized `requestId` and the provider
-volume fields. A scoped readback does not prove the volume is absent from its
-previous Team.
 
 ## `ecctl sandbox volume list`
 
