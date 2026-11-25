@@ -13,8 +13,8 @@ import (
 type VolumeUpdateRequest struct {
 	ID, TeamID, Region, Profile, Output                         string
 	TeamSet, RegionSet, ProfileSet, OutputSet, AgentEnvelopeSet bool
-	AgentEnvelope                                             bool
-	Configurations                                            int
+	AgentEnvelope                                               bool
+	Configurations                                              int
 }
 
 func ParseVolumeUpdateRequest(command string) (VolumeUpdateRequest, error) {
