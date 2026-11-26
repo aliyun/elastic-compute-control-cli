@@ -8,7 +8,7 @@ description: Install ecctl with Homebrew, download a release, or build it from s
 ## Requirements
 
 - Homebrew on macOS for the recommended installation method.
-- Go 1.25 or later only when building from source.
+- Go 1.26 or later only when building from source.
 - Alibaba Cloud credentials for commands that call cloud APIs.
 - Optional: an existing compatible `aliyun` CLI configuration file.
 
