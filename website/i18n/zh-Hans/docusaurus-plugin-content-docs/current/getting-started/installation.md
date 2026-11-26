@@ -8,7 +8,7 @@ description: 用 Homebrew 安装 ecctl、下载预构建版本，或从源码构
 ## 要求
 
 - macOS 上推荐使用 Homebrew 安装。
-- 仅从源码构建时需要 Go 1.25 或更高版本。
+- 仅从源码构建时需要 Go 1.26 或更高版本。
 - 调用云 API 的命令需要阿里云凭证。
 - 可选：已有兼容的 `aliyun` CLI 配置文件。
 
