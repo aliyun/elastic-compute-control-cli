@@ -8,6 +8,7 @@ REVIEW_GOPROXY ?= https://proxy.golang.org,direct
 REVIEW_ENV = env GOPATH="$(REVIEW_GOPATH)" GOCACHE="$(REVIEW_GOCACHE)" GOMODCACHE="$(REVIEW_GOMODCACHE)" GOPROXY="$(REVIEW_GOPROXY)" npm_config_cache="$(REVIEW_NPM_CACHE)"
 
 .PHONY: help install build test coverage branch-coverage branch-coverage-report ci-test lint fmt clean generate metadata-prepare metadata-check metadata-sync drift drift-baseline drift-check specdrift prepare-public-release check-public-release check-release-version review-final review-dsh-plugin review-e2e review-website
+.PHONY: review-dependabot test-dependabot-report
 
 install: ## Install git pre-commit hook
 	git config core.hooksPath .githooks
@@ -102,11 +103,18 @@ lint: metadata-check specdrift ## Run formatting, vet, generated-code, and offli
 review-final: ## Run the complete offline review gates once for a final candidate SHA
 	@mkdir -p "$(REVIEW_GOPATH)" "$(REVIEW_GOCACHE)" "$(REVIEW_GOMODCACHE)" "$(REVIEW_NPM_CACHE)"
 	@printf 'review cache: %s\n' "$(REVIEW_CACHE_DIR)"
+	$(REVIEW_ENV) $(MAKE) test-dependabot-report
 	$(REVIEW_ENV) $(MAKE) lint
 	$(REVIEW_ENV) $(MAKE) test
 	$(REVIEW_ENV) $(MAKE) review-dsh-plugin
 	$(REVIEW_ENV) $(MAKE) review-e2e
 	$(REVIEW_ENV) $(MAKE) review-website
+
+review-dependabot: ## Read the open Dependabot alert queue with authorized gh access
+	@node .github/scripts/dependabot-alerts.mjs
+
+test-dependabot-report: ## Exercise the Dependabot report offline
+	node --test .github/scripts/dependabot-alerts.test.mjs
 
 review-dsh-plugin: ## Install, test, and inspect the DSH plugin package
 	npm --prefix dsh-plugin ci --ignore-scripts --registry=https://registry.npmjs.org
