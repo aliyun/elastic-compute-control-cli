@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/aliyun/elastic-compute-control-cli/actions/workflows/ci.yml"><img src="https://github.com/aliyun/elastic-compute-control-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://aliyun.github.io/elastic-compute-control-cli/"><img src="https://img.shields.io/badge/docs-online-3d8bfd" alt="Documentation"></a>
-  <img src="https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white" alt="Go 1.25 or later">
+  <img src="https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white" alt="Go 1.26 or later">
 </p>
 <p align="center">
   <strong>Documentation</strong>: <a href="https://aliyun.github.io/elastic-compute-control-cli/">English</a> | <a href="https://aliyun.github.io/elastic-compute-control-cli/zh-Hans/">简体中文</a>
@@ -42,7 +42,7 @@ Check for or install a newer release with `ecctl update --check` and
 `ecctl update`. The command supports both direct binary and Homebrew
 installations.
 
-Or build from source with Go 1.25.8 or later:
+Or build from source with Go 1.26 or later:
 
 ```bash
 git clone https://github.com/aliyun/elastic-compute-control-cli.git
