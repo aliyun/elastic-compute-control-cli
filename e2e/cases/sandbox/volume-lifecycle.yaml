@@ -113,6 +113,35 @@ steps:
       - 'len($.volumes[?(@.id == "{{.volume_id}}" && @.team_id == "{{.first_team_id}}")]) == 1'
       - 'len($.volumes[?(@.id == "{{.second_volume_id}}" && @.team_id == "{{.first_team_id}}")]) == 1'
 
+  - name: update first Volume storage configuration
+    run: >
+      ecctl sandbox volume update {{.volume_id}}
+      --team-id {{.first_team_id}}
+      --oss-volume-config '{"bucketName":"{{.stack.volume_bucket_name}}","bucketPath":"/","endpoint":"https://{{.stack.volume_bucket_endpoint}}","readOnly":false}'
+      --mount-config '{"role":"{{.stack.volume_role_arn}}"}'
+      --output=json
+    at: $.volume
+    expect:
+      id: {eq: "{{.volume_id}}"}
+      team_id: {eq: "{{.first_team_id}}"}
+      status: {eq: AVAILABLE}
+      oss_volume_config.readOnly: {eq: false}
+      $.actions[0].action_name: {eq: UpdateVolume}
+      $.actions[0].request_id: {type: string, min_len: 1}
+
+  - name: get updated Volume in the same Team
+    run: ecctl sandbox volume get {{.volume_id}} --team-id {{.first_team_id}} --output=json
+    at: $.volume
+    expect:
+      id: {eq: "{{.volume_id}}"}
+      team_id: {eq: "{{.first_team_id}}"}
+      status: {eq: AVAILABLE}
+      oss_volume_config.bucketName: {eq: "{{.stack.volume_bucket_name}}"}
+      oss_volume_config.bucketPath: {eq: /}
+      oss_volume_config.endpoint: {eq: "https://{{.stack.volume_bucket_endpoint}}"}
+      oss_volume_config.readOnly: {eq: false}
+      mount_config.role: {eq: "{{.stack.volume_role_arn}}"}
+
   - name: delete
     run: >
       ecctl sandbox volume delete {{.volume_id}}

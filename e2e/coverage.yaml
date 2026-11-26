@@ -4,10 +4,10 @@ generated:
   cases_dir: cases
 summary:
   surface: public
-  resources: 65
-  operations: 306
+  resources: 66
+  operations: 313
   missing_cases: 0
-  passed: 287
+  passed: 294
   not_passed: 19
 resources:
   ack:
@@ -1570,6 +1570,44 @@ resources:
           time: "2026-07-28T16:50:04.565315+08:00"
           reason: live-verified
   sandbox:
+    api-key:
+      operations:
+        create:
+          status: live-pass
+          case: cases/sandbox/api-key-lifecycle.yaml
+          fingerprint: sha256:7cc065bacd63340da4dad8658263a2a6bdc073af43baf07afa3ca40e27f2429e
+          time: "2026-11-25T18:10:26+08:00"
+          reason: live-verified
+        delete:
+          status: live-pass
+          case: cases/sandbox/api-key-lifecycle.yaml
+          fingerprint: sha256:7cc065bacd63340da4dad8658263a2a6bdc073af43baf07afa3ca40e27f2429e
+          time: "2026-11-25T18:10:26+08:00"
+          reason: live-verified
+        get:
+          status: live-pass
+          case: cases/sandbox/api-key-lifecycle.yaml
+          fingerprint: sha256:7cc065bacd63340da4dad8658263a2a6bdc073af43baf07afa3ca40e27f2429e
+          time: "2026-11-25T18:10:26+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/sandbox/api-key-lifecycle.yaml
+          fingerprint: sha256:7cc065bacd63340da4dad8658263a2a6bdc073af43baf07afa3ca40e27f2429e
+          time: "2026-11-25T18:10:26+08:00"
+          reason: live-verified
+        reset:
+          status: live-pass
+          case: cases/sandbox/api-key-lifecycle.yaml
+          fingerprint: sha256:7cc065bacd63340da4dad8658263a2a6bdc073af43baf07afa3ca40e27f2429e
+          time: "2026-11-25T18:10:26+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/sandbox/api-key-lifecycle.yaml
+          fingerprint: sha256:7cc065bacd63340da4dad8658263a2a6bdc073af43baf07afa3ca40e27f2429e
+          time: "2026-11-25T18:10:26+08:00"
+          reason: live-verified
     quota:
       operations:
         delete:
@@ -1807,26 +1845,32 @@ resources:
         create:
           status: live-pass
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451
-          time: "2026-11-20T15:09:13.697319535+00:00"
+          fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
+          time: "2026-11-25T18:12:12+08:00"
           reason: live-verified
         delete:
           status: live-pass
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451
-          time: "2026-11-20T15:09:13.697319535+00:00"
+          fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
+          time: "2026-11-25T18:12:12+08:00"
           reason: live-verified
         get:
           status: live-pass
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451
-          time: "2026-11-20T15:09:13.697319535+00:00"
+          fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
+          time: "2026-11-25T18:12:12+08:00"
           reason: live-verified
         list:
           status: live-pass
           case: cases/sandbox/volume-lifecycle.yaml
-          fingerprint: sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451
-          time: "2026-11-20T15:09:13.697319535+00:00"
+          fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
+          time: "2026-11-25T18:12:12+08:00"
+          reason: live-verified
+        update:
+          status: live-pass
+          case: cases/sandbox/volume-lifecycle.yaml
+          fingerprint: sha256:beba0bed0fa4f4572e22fdd14b8103ac36e3cafc085f6bc09576edb2ea8548c2
+          time: "2026-11-25T18:12:12+08:00"
           reason: live-verified
   tag:
     associated-resource-rule:

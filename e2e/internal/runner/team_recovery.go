@@ -367,7 +367,7 @@ func (c *cleanup) volumeTeamChildContext(item *cleanupItem) (string, report.Clea
 	}
 	index := -1
 	for i, entry := range journal.Entries {
-		if entry.Teardown == item.cmd && entry.Scope == item.scope && entry.VolumeTeamBound && entry.TeamCreateConfirmed {
+		if entry.Teardown == item.cmd && entry.Scope == item.scope && entry.TeamCreateConfirmed {
 			if index >= 0 {
 				return "", report.CleanupJournal{}, report.Resource{}, fmt.Errorf("Volume Team child finalizer is ambiguous")
 			}
@@ -700,27 +700,29 @@ func journalRootMatchesPath(root *os.Root, path string) error {
 // Team has no create idempotency key and no tag sweep. Keep uncertain create
 // ownership separate from the strictly delete-only cleanup journal.
 type teamCreateIntent struct {
-	Version          int                            `json:"version"`
-	RunID            string                         `json:"run_id"`
-	ExecutionID      string                         `json:"execution_id"`
-	Region           string                         `json:"region"`
-	Surface          string                         `json:"surface"`
-	EcctlBin         string                         `json:"ecctl_bin"`
-	Name             string                         `json:"name"`
-	Description      string                         `json:"description"`
-	Input            []string                       `json:"input"`
-	CaseScope        string                         `json:"case_scope,omitempty"`
-	Teardown         string                         `json:"teardown,omitempty"`
-	AcceptedID       string                         `json:"accepted_id,omitempty"`
-	ProbeBinSHA256   string                         `json:"probe_bin_sha256,omitempty"`
-	Dispatched       bool                           `json:"dispatched,omitempty"`
-	DispatchProtocol int                            `json:"dispatch_protocol,omitempty"`
-	QuotaBinding     *report.QuotaCredentialBinding `json:"quota_binding,omitempty"`
-	VolumeBinding    *report.QuotaCredentialBinding `json:"volume_binding,omitempty"`
-	CreatedAt        time.Time                      `json:"created_at"`
-	path             string
-	journalPath      string
-	parent           os.FileInfo
+	Version                     int                            `json:"version"`
+	RunID                       string                         `json:"run_id"`
+	ExecutionID                 string                         `json:"execution_id"`
+	Region                      string                         `json:"region"`
+	Surface                     string                         `json:"surface"`
+	EcctlBin                    string                         `json:"ecctl_bin"`
+	Name                        string                         `json:"name"`
+	Description                 string                         `json:"description"`
+	Input                       []string                       `json:"input"`
+	CaseScope                   string                         `json:"case_scope,omitempty"`
+	Teardown                    string                         `json:"teardown,omitempty"`
+	AcceptedID                  string                         `json:"accepted_id,omitempty"`
+	ProbeBinSHA256              string                         `json:"probe_bin_sha256,omitempty"`
+	Dispatched                  bool                           `json:"dispatched,omitempty"`
+	DispatchProtocol            int                            `json:"dispatch_protocol,omitempty"`
+	QuotaBinding                *report.QuotaCredentialBinding `json:"quota_binding,omitempty"`
+	VolumeBinding               *report.QuotaCredentialBinding `json:"volume_binding,omitempty"`
+	OwnerBinding                *report.QuotaCredentialBinding `json:"owner_binding,omitempty"`
+	TeamProviderTemplateCleanup bool                           `json:"team_provider_template_cleanup,omitempty"`
+	CreatedAt                   time.Time                      `json:"created_at"`
+	path                        string
+	journalPath                 string
+	parent                      os.FileInfo
 }
 
 var (
@@ -1166,15 +1168,18 @@ func reserveTeamCreate(cmd string, data map[string]any, cfg execpkg.Config, cl *
 	if strings.Count(teardown, "intent-validation") != 1 || caseScope(data) == "" || strings.ContainsAny(caseScope(data), "\r\n") {
 		return nil, fmt.Errorf("Team recovery teardown or case scope is not stable")
 	}
-	if len(credentialBindings) > 2 {
+	if len(credentialBindings) > 3 {
 		return nil, fmt.Errorf("unsupported Team credential binding count")
 	}
-	var binding, volumeBinding *report.QuotaCredentialBinding
+	var binding, volumeBinding, ownerBinding *report.QuotaCredentialBinding
 	if len(credentialBindings) > 0 {
 		binding = credentialBindings[0]
 	}
 	if len(credentialBindings) > 1 {
 		volumeBinding = credentialBindings[1]
+	}
+	if len(credentialBindings) > 2 {
+		ownerBinding = credentialBindings[2]
 	}
 	if binding != nil && volumeBinding != nil && !reflect.DeepEqual(binding, volumeBinding) {
 		return nil, fmt.Errorf("Team Quota and Volume credential bindings differ")
@@ -1190,7 +1195,22 @@ func reserveTeamCreate(cmd string, data map[string]any, cfg execpkg.Config, cl *
 			return nil, err
 		}
 	}
-	intent := &teamCreateIntent{Version: 1, RunID: meta.RunID, ExecutionID: meta.ExecutionID, Region: cfg.Region, Surface: meta.Surface, EcctlBin: cfg.Bin, Name: name, Description: description, Input: args, CaseScope: caseScope(data), Teardown: teardown, QuotaBinding: binding, VolumeBinding: volumeBinding, CreatedAt: time.Now().UTC(), path: cl.journal + ".team-create-" + name[8:] + ".json"}
+	providerTemplates, _ := data["team_provider_template_cleanup"].(bool)
+	if ownerBinding != nil {
+		if !providerTemplates || binding != nil || volumeBinding != nil {
+			return nil, fmt.Errorf("owned Team credential binding requires an opt-in plain Team")
+		}
+		if cfg.Profile != ownerBinding.Profile || cfg.ExpectedIdentity == nil || *cfg.ExpectedIdentity != ownerBinding.Identity {
+			return nil, fmt.Errorf("owned Team create did not retain its verified credential")
+		}
+		if err := journalfile.ValidateQuotaBinding(ownerBinding, sourceEnv); err != nil {
+			return nil, err
+		}
+	}
+	if providerTemplates && binding == nil && volumeBinding == nil && ownerBinding == nil {
+		return nil, fmt.Errorf("provider Template cleanup requires a retained Team credential binding")
+	}
+	intent := &teamCreateIntent{Version: 1, RunID: meta.RunID, ExecutionID: meta.ExecutionID, Region: cfg.Region, Surface: meta.Surface, EcctlBin: cfg.Bin, Name: name, Description: description, Input: args, CaseScope: caseScope(data), Teardown: teardown, QuotaBinding: binding, VolumeBinding: volumeBinding, OwnerBinding: ownerBinding, TeamProviderTemplateCleanup: providerTemplates, CreatedAt: time.Now().UTC(), path: cl.journal + ".team-create-" + name[8:] + ".json"}
 	if volumeBinding != nil {
 		intent.DispatchProtocol = 1
 	}

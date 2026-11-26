@@ -19,6 +19,7 @@ import (
 )
 
 func TestNativeTeamLifecycleBuildAndListWithBuiltins(t *testing.T) {
+	t.Setenv("ECCTL_DISPLAY_MODE", "Human")
 	cfg, cl, dir := nativeCleanupFixture(t, true)
 	suites, err := scenario.LoadDir("../../cases/sandbox")
 	if err != nil {
@@ -79,20 +80,29 @@ func TestNativeTeamLifecycleBuildAndListWithBuiltins(t *testing.T) {
  exit 0
 fi
 echo '{}'`, 1)
-	if err := os.WriteFile(cfg.Bin, []byte(script), 0o755); err != nil {
+	if err := os.WriteFile(cfg.Bin, []byte(issue128HumanOutput(script, "template create")), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	var scope []*cleanupItem
 	opt := Options{Logf: func(string, ...any) {}}
-	if result, ok := runStep(context.Background(), opt, cfg, cl, &scope, data, create, time.Second); !ok {
+	if result, ok := runStep(context.Background(), opt, cfg, cl, &scope, data, create, time.Second); !ok || !json.Valid([]byte(result.Stdout)) {
 		t.Fatalf("actual native create fixture failed: %+v", result)
 	}
 	if data["native_template_id"] != "tpl-1" {
 		t.Fatalf("actual creation did not capture its owned ID: %+v", data)
 	}
+
+	entries := readJournalEntries(t, cl.journal)
+	if len(entries) != 1 || !strings.Contains(entries[0].Teardown, "'template' 'delete' 'tpl-1'") {
+		t.Fatalf("native Template response did not leave its exact finalizer: %+v", entries)
+	}
 	createdArgs, err := os.ReadFile(filepath.Join(dir, "lifecycle-create-args"))
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	if !strings.Contains("\n"+string(createdArgs), "\n--no-color=true\n") {
+		t.Fatalf("native Template executed argv lacks --no-color=true: %s", createdArgs)
 	}
 	actualFlags := templateCreateFlags()
 	if err := actualFlags.Parse(strings.Split(strings.TrimSuffix(string(createdArgs), "\n"), "\n")); err != nil {
@@ -205,7 +215,7 @@ func TestNativeTemplateAcceptedRecoveryKeepsComplexProfile(t *testing.T) {
 						}
 						values[key] = value
 					}
-					wantValues := map[string]string{"--openapi": "true", "--region": "cn-hangzhou", "--team-id": "team-1", "--profile": profile}
+					wantValues := map[string]string{"--openapi": "true", "--region": "cn-hangzhou", "--team-id": "team-1", "--profile": profile, "--no-color": "true"}
 					if len(argv) < 4 || !reflect.DeepEqual(argv[:4], want[1:5]) || !reflect.DeepEqual(values, wantValues) || len(journal.Entries) != 0 {
 						t.Fatalf("cleanup did not use original binding: %s %v %s", deleted, err, data)
 					}
@@ -361,4 +371,35 @@ steps:
 	if result.Summary.Failed != 1 || !strings.Contains(result.Cases[0].Steps[0].Stdout, "FCTemplateBuildFailed") {
 		t.Fatalf("terminal failure lost: %+v", result)
 	}
+}
+
+// issue128HumanOutput makes only the named fixture responses follow the
+// production Human display behavior, retaining the provider's original exit.
+func issue128HumanOutput(script string, commands ...string) string {
+	const header = "#!/usr/bin/env bash\n"
+	patterns := make([]string, 0, len(commands))
+	for _, command := range commands {
+		patterns = append(patterns, `*" `+command+` "*`)
+	}
+	return header + `issue128_provider() {
+` + strings.TrimPrefix(script, header) + `
+}
+if [[ "$ECCTL_DISPLAY_MODE" == Human ]]; then
+    case " $* " in
+    ` + strings.Join(patterns, "|") + `)
+        for option in "$@"; do
+            if [[ "$option" == --no-color=true ]]; then
+                issue128_provider "$@"
+                exit $?
+            fi
+        done
+        text="$(issue128_provider "$@")"
+        status=$?
+        printf '\033[32m%s\033[0m\n' "$text"
+        exit "$status"
+        ;;
+    esac
+fi
+issue128_provider "$@"
+`
 }

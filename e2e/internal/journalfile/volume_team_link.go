@@ -18,24 +18,26 @@ import (
 // volumeTeamReceipt is the private, accepted create record. The nonce ledger
 // alone cannot prove that the confirmed Team came from this execution.
 type volumeTeamReceipt struct {
-	Version          int                            `json:"version"`
-	RunID            string                         `json:"run_id"`
-	ExecutionID      string                         `json:"execution_id"`
-	Region           string                         `json:"region"`
-	Surface          string                         `json:"surface"`
-	EcctlBin         string                         `json:"ecctl_bin"`
-	Name             string                         `json:"name"`
-	Description      string                         `json:"description"`
-	Input            []string                       `json:"input"`
-	CaseScope        string                         `json:"case_scope,omitempty"`
-	Teardown         string                         `json:"teardown,omitempty"`
-	AcceptedID       string                         `json:"accepted_id,omitempty"`
-	ProbeBinSHA256   string                         `json:"probe_bin_sha256,omitempty"`
-	Dispatched       bool                           `json:"dispatched,omitempty"`
-	DispatchProtocol int                            `json:"dispatch_protocol,omitempty"`
-	QuotaBinding     *report.QuotaCredentialBinding `json:"quota_binding,omitempty"`
-	VolumeBinding    *report.QuotaCredentialBinding `json:"volume_binding,omitempty"`
-	CreatedAt        time.Time                      `json:"created_at"`
+	Version                     int                            `json:"version"`
+	RunID                       string                         `json:"run_id"`
+	ExecutionID                 string                         `json:"execution_id"`
+	Region                      string                         `json:"region"`
+	Surface                     string                         `json:"surface"`
+	EcctlBin                    string                         `json:"ecctl_bin"`
+	Name                        string                         `json:"name"`
+	Description                 string                         `json:"description"`
+	Input                       []string                       `json:"input"`
+	CaseScope                   string                         `json:"case_scope,omitempty"`
+	Teardown                    string                         `json:"teardown,omitempty"`
+	AcceptedID                  string                         `json:"accepted_id,omitempty"`
+	ProbeBinSHA256              string                         `json:"probe_bin_sha256,omitempty"`
+	Dispatched                  bool                           `json:"dispatched,omitempty"`
+	DispatchProtocol            int                            `json:"dispatch_protocol,omitempty"`
+	QuotaBinding                *report.QuotaCredentialBinding `json:"quota_binding,omitempty"`
+	VolumeBinding               *report.QuotaCredentialBinding `json:"volume_binding,omitempty"`
+	OwnerBinding                *report.QuotaCredentialBinding `json:"owner_binding,omitempty"`
+	TeamProviderTemplateCleanup bool                           `json:"team_provider_template_cleanup,omitempty"`
+	CreatedAt                   time.Time                      `json:"created_at"`
 }
 
 // CheckVolumeTeamCreationLink requires one settled nonce and its private

@@ -100,8 +100,14 @@ jobs:
           path: reports/testcase.xml
           if-no-files-found: error
 
+      # Dependabot and fork PRs retain GitHub artifacts but cannot use the Actions secret.
       - name: Upload main test results to Codecov
-        if: ${{ !cancelled() && hashFiles('reports/testcase.xml') != '' }}
+        if: >-
+          ${{ !cancelled() && github.actor != 'dependabot[bot]' &&
+              (github.event_name != 'pull_request' ||
+               (github.event.pull_request.user.login != 'dependabot[bot]' &&
+                github.event.pull_request.head.repo.full_name == github.repository)) &&
+              hashFiles('reports/testcase.xml') != '' }}
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -130,7 +136,12 @@ jobs:
           if-no-files-found: error
 
       - name: Upload main coverage to Codecov
-        if: ${{ !cancelled() && hashFiles('reports/coverage.xml') != '' }}
+        if: >-
+          ${{ !cancelled() && github.actor != 'dependabot[bot]' &&
+              (github.event_name != 'pull_request' ||
+               (github.event.pull_request.user.login != 'dependabot[bot]' &&
+                github.event.pull_request.head.repo.full_name == github.repository)) &&
+              hashFiles('reports/coverage.xml') != '' }}
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

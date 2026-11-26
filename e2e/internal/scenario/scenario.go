@@ -45,20 +45,21 @@ func (m ExecutionMode) Valid() bool {
 
 // Suite is one case file: a resource and the steps that exercise it.
 type Suite struct {
-	Surface               Surface                      `yaml:"surface"` // public (default) or full
-	Execution             ExecutionMode                `yaml:"execution"`
-	Resource              string                       `yaml:"resource"`
-	Covers                []string                     `yaml:"covers"`                 // additional resources exercised as part of this lifecycle
-	Timeout               string                       `yaml:"timeout"`                // optional per-case step timeout override
-	Serial                bool                         `yaml:"serial"`                 // run outside the parallel pool
-	Needs                 []string                     `yaml:"needs"`                  // requested shared-stack node IDs; dependencies are included transitively
-	RequiresGlobal        []string                     `yaml:"requires_global"`        // dotted run-level value keys
-	RequiresParams        []string                     `yaml:"requires_params"`        // dotted dynamic parameter keys
-	ParameterConstraints  ParameterConstraints         `yaml:"parameter_constraints"`  // capability requirements for dynamic parameters
-	RequiresPrerequisites []string                     `yaml:"requires_prerequisites"` // primary-region prerequisite bundles
-	RegionRequirements    map[string]RegionRequirement `yaml:"region_requirements"`    // additional named region roles
-	Steps                 []Step                       `yaml:"steps"`
-	Path                  string                       `yaml:"-"` // source file, for reports
+	Surface                  Surface                      `yaml:"surface"` // public (default) or full
+	Execution                ExecutionMode                `yaml:"execution"`
+	Resource                 string                       `yaml:"resource"`
+	Covers                   []string                     `yaml:"covers"`                     // additional resources exercised as part of this lifecycle
+	Timeout                  string                       `yaml:"timeout"`                    // optional per-case step timeout override
+	Serial                   bool                         `yaml:"serial"`                     // run outside the parallel pool
+	CleanupProviderTemplates bool                         `yaml:"cleanup_provider_templates"` // clear provider-default Templates before owned Team delete
+	Needs                    []string                     `yaml:"needs"`                      // requested shared-stack node IDs; dependencies are included transitively
+	RequiresGlobal           []string                     `yaml:"requires_global"`            // dotted run-level value keys
+	RequiresParams           []string                     `yaml:"requires_params"`            // dotted dynamic parameter keys
+	ParameterConstraints     ParameterConstraints         `yaml:"parameter_constraints"`      // capability requirements for dynamic parameters
+	RequiresPrerequisites    []string                     `yaml:"requires_prerequisites"`     // primary-region prerequisite bundles
+	RegionRequirements       map[string]RegionRequirement `yaml:"region_requirements"`        // additional named region roles
+	Steps                    []Step                       `yaml:"steps"`
+	Path                     string                       `yaml:"-"` // source file, for reports
 }
 
 // ParameterConstraints narrows dynamic inventory selection for cases whose

@@ -244,6 +244,21 @@ func (d apiConditionDescriber) describeComparison(left, right, operator string) 
 		}
 	}
 	if !ok {
+		if contextName, isContext := contextPathName(left); isContext {
+			field := ""
+			if parts := strings.SplitN(contextName, ".", 2); len(parts) == 2 {
+				contextName, field = parts[0], parts[1]
+			}
+			id := "SchemaAPICallCondition.ContextEquals"
+			if operator == "!=" {
+				id = "SchemaAPICallCondition.ContextNotEquals"
+			}
+			return d.localizer.MessageData(id, map[string]any{
+				"Name":  contextName,
+				"Field": field,
+				"Value": value,
+			}), true
+		}
 		return "", false
 	}
 	if value == "" {

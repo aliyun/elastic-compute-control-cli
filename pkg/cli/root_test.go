@@ -1533,7 +1533,7 @@ func TestCallListProductsIncludesMetadata(t *testing.T) {
 }
 
 func TestAPIProductHasCallableOperations(t *testing.T) {
-	for name, wantDeprecated := range map[string]bool{"AddTags": true, "DescribeInstances": false} {
+	for name, wantDeprecated := range map[string]bool{"DescribeEipAddresses": true, "DescribeInstances": false} {
 		summary, ok := aliyun.OpenAPIOperationSummaryFor("en", "ecs", name)
 		if !ok || summary.Deprecated != wantDeprecated {
 			t.Fatalf("invalid operation fixture %s: %#v, found=%v", name, summary, ok)
@@ -1546,9 +1546,9 @@ func TestAPIProductHasCallableOperations(t *testing.T) {
 	}{
 		{name: "nil operations"},
 		{name: "empty operations", apis: []string{}},
-		{name: "only deprecated", apis: []string{"AddTags"}},
+		{name: "only deprecated", apis: []string{"DescribeEipAddresses"}},
 		{name: "callable", apis: []string{"DescribeInstances"}, want: true},
-		{name: "deprecated then callable", apis: []string{"AddTags", "DescribeInstances"}, want: true},
+		{name: "deprecated then callable", apis: []string{"DescribeEipAddresses", "DescribeInstances"}, want: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			product := aliyun.OpenAPIProduct{Code: "ecs", APINames: tt.apis}

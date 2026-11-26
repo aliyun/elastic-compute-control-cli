@@ -769,6 +769,24 @@ func TestVolumeMutationsRejectForeignTargetsBeforeProvider(t *testing.T) {
 	}
 }
 
+func TestVolumeUpdateAdmitsOwnedSameTeamConfiguration(t *testing.T) {
+	cfg, cl, dir, scope := volumeRecoveryFixture(t)
+	createOwnedVolumeForMutation(t, cfg, cl, scope)
+	before := readJournalEntries(t, cl.journal)
+	step := scenario.Step{Name: "owned update", Run: `ecctl sandbox volume update vol-owned --team-id team-1 --oss-volume-config '{"bucketName":"bucket","readOnly":false}' --output=json`}
+	result, ok := runStep(context.Background(), Options{volumeLifecycle: true, Logf: func(string, ...any) {}}, cfg, cl, scope, map[string]any{}, step, time.Second)
+	if !ok || result.Exit != 0 {
+		t.Fatalf("owned same-Team update was rejected: %+v", result)
+	}
+	calls, _ := os.ReadFile(filepath.Join(dir, "calls"))
+	if !strings.Contains(string(calls), "volume-update:vol-owned") {
+		t.Fatalf("owned update did not reach provider: %s", calls)
+	}
+	if after := readJournalEntries(t, cl.journal); !reflect.DeepEqual(after, before) || (*scope)[1].done {
+		t.Fatalf("owned update consumed or changed the finalizer: before=%+v after=%+v", before, after)
+	}
+}
+
 func TestVolumeDeleteRejectsChangedExecutionConfig(t *testing.T) {
 	cfg, cl, dir, scope := volumeRecoveryFixture(t)
 	createOwnedVolumeForMutation(t, cfg, cl, scope)
@@ -1077,6 +1095,176 @@ func TestHistoricalVolumeTransferMarkerBlocksNewDelete(t *testing.T) {
 	}
 }
 
+func TestReplayRetainsHistoricalVolumeTransfer(t *testing.T) {
+	const sourceTeam, destinationTeam = "team-1", "team-destination"
+	for _, tc := range []struct {
+		name    string
+		pending bool
+	}{
+		{name: "pending", pending: true},
+		{name: "settled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, cl, dir, scope := volumeRecoveryFixture(t, func(script string) string {
+				const deleteLog = `echo "volume-delete:$id" >> "$FAKE_NATIVE_DIR/calls"`
+				if !strings.Contains(script, deleteLog) {
+					t.Fatal("fixture lacks a fake Volume delete handler")
+				}
+				return strings.Replace(script, deleteLog, `printf 'volume-delete-argv %s\n' "$*" >> "$FAKE_NATIVE_DIR/calls"
+ cat "$FAKE_NATIVE_DIR/journal.json" > "$FAKE_NATIVE_DIR/journal-at-delete.json" || exit 91
+ `+deleteLog, 1)
+			}, func(script string) string {
+				return strings.Replace(script, "\necho '{}'\n", `
+if [[ "$*" == *"ecs instance delete i-independent "* ]]; then
+ echo independent-delete >> "$FAKE_NATIVE_DIR/calls"
+ echo '{"deleted":true}'; exit 0
+fi
+echo '{}'
+`, 1)
+			})
+			for _, selector := range []string{"ECCTL_CONFIG_PATH", "ECCTL_ALIYUN_CONFIG_PATH"} {
+				path := filepath.Join(dir, selector+".json")
+				if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+					t.Fatalf("write synthetic config: %v", err)
+				}
+				t.Setenv(selector, path)
+			}
+			for _, selector := range []string{"ALIBABA_CLOUD_CONFIG_PATH", "ALIBABACLOUD_CONFIG_PATH", "ALICLOUD_CONFIG_PATH"} {
+				t.Setenv(selector, "")
+			}
+			t.Setenv("FAKE_VOLUME_MODE", "success")
+			t.Setenv("FAKE_VOLUME_STATUS", "AVAILABLE")
+			create := scenario.Step{
+				Name:     "create",
+				Run:      "ecctl sandbox volume create --name authored --team-id " + sourceTeam + " --output=json",
+				Teardown: "ecctl sandbox volume delete {{.volume_id}} --output=json",
+			}
+			if result, ok := runStep(context.Background(), Options{volumeLifecycle: true, Logf: func(string, ...any) {}}, cfg, cl, scope, map[string]any{}, create, 5*time.Second); !ok {
+				t.Fatalf("fixture Volume creation: %+v", result)
+			}
+			destinationDelete := "ecctl sandbox team delete " + destinationTeam + " --timeout 5m --output=json"
+			if _, err := cl.pushItem(scope, "case", destinationDelete, "primary", nil, false, true, false); err != nil {
+				t.Fatalf("fixture destination Team registration: %v", err)
+			}
+			journal, legacy, err := readRunnerJournal(cl.journal)
+			if err != nil || legacy || journal.Version != 2 || journal.JournalPath != cl.journal || journal.NativeJournalPath != cl.journal ||
+				journal.Surface != "public" || journal.Region != "cn-hangzhou" || journal.EcctlBin != cfg.Bin || journal.EcctlBinSHA256 == "" ||
+				len(journal.NativeIntentPaths) != 1 || len(journal.Entries) != 3 {
+				t.Fatalf("fixture v2 journal bindings: journal=%+v err=%v", journal, err)
+			}
+			var volumeEntry report.Resource
+			destinationIndex := -1
+			for i, entry := range journal.Entries {
+				if journalfile.IsNativeVolumeDelete(entry.Teardown) {
+					volumeEntry = entry
+				}
+				if entry.Teardown == destinationDelete && entry.TeamCreateConfirmed {
+					destinationIndex = i
+				}
+			}
+			intent, err := journalfile.VolumeDeleteBinding(cl.journal, journal, cfg.Env, volumeEntry.Teardown)
+			if err != nil || destinationIndex < 0 || !intent.VolumeObserved || intent.TeamID != sourceTeam || intent.AcceptedVolumeID == "" || volumeEntry.VolumeDeleteAttempted {
+				t.Fatalf("fixture must have an observed Volume, an unused attempt and a confirmed destination Team: intent=%+v err=%v", intent, err)
+			}
+			journal.VolumeScopeBindings = map[string][]string{intent.Name: {destinationTeam}}
+			journal.VolumeTeamBindings = map[string]string{destinationTeam: intent.Name}
+			journal.VolumeTransferHistory = map[string]map[string]bool{intent.Name: {destinationTeam: tc.pending}}
+			journal.Entries[destinationIndex].VolumeTransferIntent = intent.Name
+			journal.Entries[destinationIndex].VolumeTransferPending = tc.pending
+			if err := writeRunnerJournal(cl.journal, journal); err != nil {
+				t.Fatalf("persist fixture transfer history: %v", err)
+			}
+			retained, err := journalfile.VolumeDeleteBinding(cl.journal, journal, cfg.Env, volumeEntry.Teardown)
+			if err != nil || !reflect.DeepEqual(retained, intent) {
+				t.Fatalf("fixture transfer journal does not decode with its original owner: %v", err)
+			}
+			if teams, err := journalfile.VolumePossibleTeams(journal, retained); err != nil || !reflect.DeepEqual(teams, []string{sourceTeam, destinationTeam}) {
+				t.Fatalf("fixture must admit both owned Team scopes: teams=%v err=%v", teams, err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "volume-team-"+intent.AcceptedVolumeID), []byte(destinationTeam), 0o600); err != nil {
+				t.Fatalf("place fake Volume in the recorded destination: %v", err)
+			}
+
+			readFixture := func(path string) []byte {
+				t.Helper()
+				body, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatalf("read fixture %s: %v", filepath.Base(path), err)
+				}
+				return body
+			}
+			sidecar, callsPath := journal.NativeIntentPaths[0], filepath.Join(dir, "calls")
+			before, intentBefore := readFixture(cl.journal), readFixture(sidecar)
+			opt := sweeper.ReplayOptions{Config: cfg, RunID: journal.RunID, Surface: journal.Surface}
+			for _, round := range []string{"initial", "restart"} {
+				if err := os.WriteFile(callsPath, nil, 0o600); err != nil {
+					t.Fatalf("reset fake provider call log: %v", err)
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				result, replayErr := sweeper.ReplayJournalWithOptions(ctx, cl.journal, opt)
+				cancel()
+				calls := string(readFixture(callsPath))
+				unchanged := bytes.Equal(readFixture(cl.journal), before)
+				if !unchanged || !bytes.Equal(readFixture(sidecar), intentBefore) {
+					t.Errorf("%s replay changed the retained journal or ownership sidecar", round)
+				}
+				if result != nil && result.Deleted != 0 || strings.Contains(calls, "team-delete") {
+					t.Errorf("%s replay deleted a retained finalizer or Team dependency: result=%+v calls=%s", round, result, calls)
+				}
+
+				if start := strings.Index(calls, "volume-delete-argv "); start >= 0 {
+					argv, _, _ := strings.Cut(calls[start:], "\n")
+					var dispatched report.CleanupJournal
+					if err := json.Unmarshal(readFixture(filepath.Join(dir, "journal-at-delete.json")), &dispatched); err != nil {
+						t.Fatalf("decode durable journal captured at fake delete: %v", err)
+					}
+					attempted := false
+					for _, entry := range dispatched.Entries {
+						if entry.Teardown == volumeEntry.Teardown {
+							attempted = entry.VolumeDeleteAttempted
+						}
+					}
+					pending, recorded := dispatched.VolumeTransferHistory[intent.Name][destinationTeam]
+					getPrefix := "sandbox volume get " + intent.AcceptedVolumeID + " --team-id "
+					sourceRead := strings.Index(calls[:start], getPrefix+sourceTeam+" ")
+					destinationRead := strings.Index(calls[:start], getPrefix+destinationTeam+" ")
+					if !attempted || !recorded || pending || sourceRead < 0 || destinationRead <= sourceRead ||
+						!strings.Contains(argv, "sandbox volume delete "+intent.AcceptedVolumeID+" ") || !strings.Contains(argv, "--team-id "+destinationTeam+" ") {
+						t.Errorf("%s fake delete lacks proof of the target replay path: attempt=%t history_recorded=%t pending=%t calls=%s", round, attempted, recorded, pending, calls)
+					} else {
+						t.Errorf("%s historical transfer reached fake DeleteVolume after both scoped reads with a durable attempt and settled history: %s", round, argv)
+					}
+				}
+				if replayErr != nil && !strings.Contains(replayErr.Error(), "historical Volume transfer") {
+					t.Errorf("%s replay preflight or execution failed outside the historical transfer decision: %v", round, replayErr)
+				}
+				if unchanged && replayErr == nil && (result == nil || result.Errors > 0 && !strings.Contains(strings.Join(result.Details, "\n"), "historical Volume transfer")) {
+					t.Errorf("%s replay did not establish retention of a valid historical transfer: result=%+v calls=%s", round, result, calls)
+				}
+			}
+			if tc.pending {
+				if _, err := cl.pushItem(scope, "independent", "ecctl ecs instance delete i-independent --output=json", "primary", nil, false, false, false); err != nil {
+					t.Fatalf("fixture independent finalizer: %v", err)
+				}
+				if err := os.WriteFile(callsPath, nil, 0o600); err != nil {
+					t.Fatalf("reset fake provider call log: %v", err)
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				result, err := sweeper.ReplayJournalWithOptions(ctx, cl.journal, opt)
+				calls := string(readFixture(callsPath))
+				if err != nil || result == nil || result.Errors != 1 || result.Deleted != 1 ||
+					strings.Count(calls, "independent-delete\n") != 1 || strings.Contains(calls, "volume-delete") || strings.Contains(calls, "team-delete") {
+					t.Fatalf("mixed journal must delete only the independent resource: result=%+v err=%v calls=%s", result, err, calls)
+				}
+				if !bytes.Equal(readFixture(cl.journal), before) || !bytes.Equal(readFixture(sidecar), intentBefore) {
+					t.Fatal("independent cleanup changed the retained Volume or Team dependencies")
+				}
+			}
+		})
+	}
+}
+
 func TestObservedVolumeNotFoundDeleteRetiresChild(t *testing.T) {
 	cfg, cl, dir, scope := volumeRecoveryFixture(t)
 	create := scenario.Step{Name: "create", Run: "ecctl sandbox volume create --name authored --team-id team-1 --no-wait --output=json", Teardown: "ecctl sandbox volume delete {{.volume_id}} --output=json"}
@@ -1243,18 +1431,36 @@ func TestOwnedVolumeReadRejectsSelectorConfigPrincipalAndSourceConflicts(t *test
 }
 
 func TestVolumeTwoOwnedCreatesKeepDistinctDurableTargets(t *testing.T) {
-	cfg, cl, dir, scope := volumeRecoveryFixture(t)
+	t.Setenv("ECCTL_DISPLAY_MODE", "Human")
+	cfg, cl, dir, scope := volumeRecoveryFixture(t, func(script string) string { return issue128HumanOutput(script, "volume create") })
 	t.Setenv("FAKE_VOLUME_MODE", "success-two")
 	step := scenario.Step{Name: "create", Run: "ecctl sandbox volume create --name authored --team-id team-1 --output=json", Teardown: "ecctl sandbox volume delete {{.volume_id}} --output=json"}
 	for i := 0; i < 2; i++ {
 		data := map[string]any{}
-		if result, ok := runStep(context.Background(), Options{volumeLifecycle: true, Logf: func(string, ...any) {}}, cfg, cl, scope, data, step, time.Second); !ok {
+		if result, ok := runStep(context.Background(), Options{volumeLifecycle: true, Logf: func(string, ...any) {}}, cfg, cl, scope, data, step, time.Second); !ok || !json.Valid([]byte(result.Stdout)) || !strings.Contains(result.Command, " --no-color=true") {
 			t.Fatalf("owned Volume %d: %+v", i+1, result)
 		}
 	}
 	entries := readJournalEntries(t, cl.journal)
 	if len(entries) != 3 || entries[1].Teardown != "'ecctl' 'sandbox' 'volume' 'delete' 'vol-owned' '--region' 'cn-hangzhou' '--profile' 'account-a'" || entries[2].Teardown != "'ecctl' 'sandbox' 'volume' 'delete' 'vol-owned-2' '--region' 'cn-hangzhou' '--profile' 'account-a'" {
 		t.Fatalf("two owned Volumes did not retain distinct delete targets: %+v", entries)
+	}
+
+	receipts, err := filepath.Glob(cl.journal + ".template-create-*.json")
+	if err != nil || len(receipts) != 2 {
+		t.Fatalf("expected two persisted create receipts: paths=%q err=%v", receipts, err)
+	}
+	accepted := map[string]bool{}
+	for _, path := range receipts {
+		var receipt journalfile.TemplateCreateIntent
+		body, err := os.ReadFile(path)
+		if err != nil || json.Unmarshal(body, &receipt) != nil || receipt.State != "journaled" || receipt.StdoutSHA256 == "" {
+			t.Fatalf("Volume create receipt did not retain its output evidence: %q err=%v receipt=%+v", path, err, receipt)
+		}
+		accepted[receipt.AcceptedVolumeID] = true
+	}
+	if !accepted["vol-owned"] || !accepted["vol-owned-2"] {
+		t.Fatalf("durable Volume finalizers do not have their invocation-linked IDs: %+v", accepted)
 	}
 	if err := journalfile.CheckTemplateCreateIntents(cl.journal, report.CleanupJournal{}, cfg.Env); err != nil {
 		t.Fatalf("second reservation broke native ledger: %v", err)

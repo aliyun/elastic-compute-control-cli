@@ -1,0 +1,138 @@
+resource: sandbox/api-key
+serial: true
+timeout: 15m
+cleanup_provider_templates: true
+
+steps:
+  - name: create first owned Team
+    run: >
+      ecctl sandbox team create --name {{.team_name}}
+      --description "{{.team_owner}}" --output=json
+    at: $.team
+    expect:
+      id: {type: string, min_len: 1}
+      status: {eq: active}
+    capture:
+      first_team_id: id
+    teardown: ecctl sandbox team delete {{.team_id}} --timeout 5m --output=json
+
+  - name: create
+    run: >
+      ecctl sandbox api-key create --name {{.resource_prefix}}-fc-key
+      --team-id {{.first_team_id}} --output=json
+    at: $.api_key
+    expect:
+      id: {type: string, min_len: 1}
+      name: {eq: "{{.resource_prefix}}-fc-key"}
+      team_id: {eq: "{{.first_team_id}}"}
+      status: {eq: active}
+      api_key_mask: {type: string, min_len: 1}
+      api_key_value: {exists: false}
+    capture:
+      api_key_id: id
+      first_api_key_mask: api_key_mask
+    teardown: ecctl sandbox api-key delete {{.api_key_id}} --timeout 5m --output=json
+
+  - name: get
+    run: ecctl sandbox api-key get {{.api_key_id}} --output=json
+    at: $.api_key
+    expect:
+      id: {eq: "{{.api_key_id}}"}
+      name: {eq: "{{.resource_prefix}}-fc-key"}
+      team_id: {eq: "{{.first_team_id}}"}
+      status: {eq: active}
+      api_key_mask: {type: string, min_len: 1}
+      api_key_value: {exists: false}
+
+  - name: create second owned key
+    run: >
+      ecctl sandbox api-key create --name {{.resource_prefix}}-fc-key-2
+      --team-id {{.first_team_id}} --output=json
+    at: $.api_key
+    expect:
+      id: {type: string, min_len: 1, ne: "{{.api_key_id}}"}
+      team_id: {eq: "{{.first_team_id}}"}
+      api_key_value: {exists: false}
+    capture:
+      second_api_key_id: id
+    teardown: ecctl sandbox api-key delete {{.second_api_key_id}} --timeout 5m --output=json
+
+  - name: first list page
+    run: >
+      ecctl sandbox api-key list --team-id {{.first_team_id}}
+      --limit 1 --page 1 --output=json
+    expect:
+      $.pagination.limit: {eq: 1}
+      $.pagination.returned: {eq: 1}
+      $.pagination.has_more: {eq: true}
+      $.total: {eq: 2}
+      $.api_keys[0].id: {type: string, min_len: 1}
+      $.api_keys[0].api_key_value: {exists: false}
+
+  - name: all list pages contain both owned keys
+    run: >
+      ecctl sandbox api-key list --team-id {{.first_team_id}}
+      --limit 1 --all --output=json
+    expect:
+      $.pagination.limit: {eq: 1}
+      $.pagination.returned: {eq: 2}
+      $.pagination.has_more: {eq: false}
+    assert:
+      - 'len($.api_keys[?(@.id == "{{.api_key_id}}" && @.team_id == "{{.first_team_id}}")]) == 1'
+      - 'len($.api_keys[?(@.id == "{{.second_api_key_id}}" && @.team_id == "{{.first_team_id}}")]) == 1'
+
+  - name: update
+    run: >
+      ecctl sandbox api-key update {{.api_key_id}}
+      --status inactive --output=json
+    at: $.api_key
+    expect:
+      id: {eq: "{{.api_key_id}}"}
+      status: {eq: inactive}
+      api_key_value: {exists: false}
+
+  - name: reset
+    run: ecctl sandbox api-key reset {{.api_key_id}} --output=json
+    at: $.api_key
+    expect:
+      id: {eq: "{{.api_key_id}}"}
+      status: {eq: active}
+      api_key_mask: {type: string, min_len: 1, ne: "{{.first_api_key_mask}}"}
+      api_key_value: {exists: false}
+
+  - name: delete
+    run: ecctl sandbox api-key delete {{.api_key_id}} --timeout 5m --output=json
+    expect:
+      $.deleted: {eq: true}
+      $.actions[0].action_name: {eq: DescribeApiKey}
+      $.actions[1].action_name: {eq: UpdateApiKey}
+      $.actions[2].action_name: {eq: DeleteApiKey}
+      $.actions[2].request_id: {type: string, min_len: 1}
+
+  - name: deleted key is absent
+    run: ecctl sandbox api-key get {{.api_key_id}} --output=json
+    exit: 4
+    expect:
+      $.error.kind: {eq: not_found}
+      $.actions[0].action_name: {eq: DescribeApiKey}
+      $.actions[0].request_id: {type: string, min_len: 1}
+
+  - name: deactivate second owned key
+    run: >
+      ecctl sandbox api-key update {{.second_api_key_id}}
+      --status inactive --output=json
+    at: $.api_key
+    expect:
+      id: {eq: "{{.second_api_key_id}}"}
+      status: {eq: inactive}
+      api_key_value: {exists: false}
+
+  - name: delete second owned key
+    run: ecctl sandbox api-key delete {{.second_api_key_id}} --timeout 5m --output=json
+    expect:
+      $.deleted: {eq: true}
+      $.actions[0].action_name: {eq: DescribeApiKey}
+      $.actions[1].action_name: {eq: DeleteApiKey}
+      $.actions[1].request_id: {type: string, min_len: 1}
+    assert:
+      - 'len($.actions[?(@.action_name == "UpdateApiKey")]) == 0'

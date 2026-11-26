@@ -294,7 +294,7 @@ func strictProviderProofOperation(req *openAPIRequest) bool {
 	switch {
 	case strings.EqualFold(req.Product, "FCSandbox") && req.Version == "2026-05-09":
 		switch req.ApiName {
-		case "GetVolume", "ListVolumes", "CreateVolume", "DeleteVolume", "GetTeam", "CreateTeam", "DeleteTeam":
+		case "GetVolume", "ListVolumes", "CreateVolume", "UpdateVolume", "DeleteVolume", "GetTeam", "CreateTeam", "DeleteTeam":
 			return true
 		}
 	case strings.EqualFold(req.Product, "ram") && req.Version == "2015-05-01":
@@ -311,7 +311,7 @@ func protectedProofMutation(req *openAPIRequest) bool {
 		return false
 	}
 	switch req.ApiName {
-	case "CreateVolume", "DeleteVolume", "CreateTeam", "DeleteTeam", "CreateRole", "DeleteRole", "CreatePolicy", "DeletePolicy", "AttachPolicyToRole", "DetachPolicyFromRole":
+	case "CreateVolume", "UpdateVolume", "DeleteVolume", "CreateTeam", "DeleteTeam", "CreateRole", "DeleteRole", "CreatePolicy", "DeletePolicy", "AttachPolicyToRole", "DetachPolicyFromRole":
 		return true
 	}
 	return false
@@ -503,7 +503,7 @@ func (e *darabonbaExecutor) ExecuteOpenAPI(ctx context.Context, req *openAPIRequ
 		}
 	}
 	normalized, err := normalizeDarabonbaResponseForOperation(response, strings.EqualFold(req.Product, "FCSandbox") &&
-		(req.ApiName == "CreateVolume" || req.ApiName == "GetVolume" || req.ApiName == "ListVolumes"), strictProviderProofOperation(req))
+		(req.ApiName == "CreateVolume" || req.ApiName == "UpdateVolume" || req.ApiName == "GetVolume" || req.ApiName == "ListVolumes"), strictProviderProofOperation(req))
 	if err != nil {
 		return nil, err
 	}
@@ -529,6 +529,10 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 			c.templateMu.Unlock()
 		}
 		c.rememberTemplateSecrets(request, false)
+	}
+	revealAPIKeyValue := false
+	if c.isFCSandboxAPIKey() {
+		request, revealAPIKeyValue = extractAPIKeyReveal(request)
 	}
 	req, err := c.commonRequest(operation, request)
 	if err != nil {
@@ -601,6 +605,9 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		}
 		if c.isFCSandboxQuota() {
 			notFound = req.ApiName == "DescribeQuota" && quotaAbsenceCode(code)
+		}
+		if c.isFCSandboxAPIKey() {
+			notFound = req.ApiName == "DescribeApiKey" && apiKeyAbsenceCode(code)
 		}
 		if c.isFCSandboxVolume() {
 			guardedAbsence = req.ApiName == "GetVolume"
@@ -680,6 +687,9 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 	if c.isFCSandboxVolume() {
 		resp = scrubVolumeResponse(resp)
 	}
+	if c.isFCSandboxAPIKey() {
+		resp = scrubAPIKeyResponse(resp, req.ApiName, revealAPIKeyValue)
+	}
 	if c.Resource != "" {
 		if err := c.resourceResponseError(req, resp); err != nil {
 			if c.isFCSandboxVolume() && req.ApiName == "CreateVolume" {
@@ -702,7 +712,7 @@ func (c *OpenAPICaller) CallRaw(ctx context.Context, operation string, request m
 		}
 		c.templateMu.Unlock()
 	}
-	if c.isFCSandboxTeam() || c.isFCSandboxTemplateCache() || c.isFCSandboxQuota() || c.isFCSandboxVolume() {
+	if c.isFCSandboxTeam() || c.isFCSandboxTemplateCache() || c.isFCSandboxQuota() || c.isFCSandboxVolume() || c.isFCSandboxAPIKey() {
 		// Hooks and probes retain successful request IDs in later errors.
 		// Normalize at the provider boundary before any consumer can retain it.
 		if requestID, ok := resp["requestId"].(string); ok {

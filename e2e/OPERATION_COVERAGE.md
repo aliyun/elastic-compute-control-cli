@@ -23,9 +23,12 @@ The `sandbox/volume` resource has one authored public lifecycle case covering
 exercise token pagination. OSS/RAM fixtures use execution-scoped names,
 durable reservations, pinned identity, and named target checks before
 name-based cleanup. Each Volume finalizer requires an exact provider-verified
-`VolumeNotFound` read under the original Team. All four registry entries
-remain `offline/not-run` pending authorized live validation. Their fingerprint is the SHA-256 of
-`cases/sandbox/volume-lifecycle.yaml`.
+`VolumeNotFound` read under the original Team. All four registry entries are
+`live-pass`, recorded on 2026-11-20 with reason `live-verified`. The record is
+bound to the matching public case fingerprint, the SHA-256 of
+`cases/sandbox/volume-lifecycle.yaml`
+(`sha256:7ec0fabd680083964376fe014b1d971173dd00feba044394d8764a1c1c34b451`);
+a case change requires live re-verification under the new fingerprint.
 
 ## Gap closure and prerequisite model
 

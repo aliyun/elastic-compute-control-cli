@@ -120,9 +120,7 @@ func VolumeMutationAction(command string) (string, error) {
 		return "", err
 	}
 	switch action {
-	case "update":
-		return "", fmt.Errorf("Volume update is deferred from the single-Team lifecycle")
-	case "create", "new", "delete", "rm", "remove":
+	case "create", "new", "update", "delete", "rm", "remove":
 		return action, nil
 	default:
 		return "", nil

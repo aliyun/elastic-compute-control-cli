@@ -386,6 +386,48 @@ func TestFCSandboxVolumeBusinessResponses(t *testing.T) {
 	}
 }
 
+func TestFCSandboxVolumeUpdateProof(t *testing.T) {
+	ossConfig := map[string]any{"bucketName": "bucket", "bucketPath": "/", "endpoint": "https://oss.example", "readOnly": true}
+	for _, tc := range []struct {
+		name     string
+		request  map[string]any
+		response string
+		wantErr  bool
+	}{
+		{"same-team config", map[string]any{"volumeID": "vol-1", "teamID": "team-1", "body.ossVolumeConfig": ossConfig}, `{"code":"200","requestId":"req-update","volume":{"volumeID":"vol-1","volumeName":"workspace","teamID":"team-1","status":"AVAILABLE"}}`, false},
+		{"wrong scope", map[string]any{"volumeID": "vol-1", "teamID": "team-1", "body.ossVolumeConfig": ossConfig}, `{"code":"200","requestId":"req-update","volume":{"volumeID":"vol-1","volumeName":"workspace","teamID":"team-2","status":"AVAILABLE"}}`, true},
+		{"missing team", map[string]any{"volumeID": "vol-1", "teamID": "team-1", "body.ossVolumeConfig": ossConfig}, `{"code":"200","requestId":"req-update","volume":{"volumeID":"vol-1","volumeName":"workspace","status":"AVAILABLE"}}`, true},
+		{"wrong volume", map[string]any{"volumeID": "vol-1", "teamID": "team-1", "body.ossVolumeConfig": ossConfig}, `{"code":"200","requestId":"req-update","volume":{"volumeID":"other","teamID":"team-1","status":"AVAILABLE"}}`, true},
+		{"business error", map[string]any{"volumeID": "vol-1", "teamID": "team-1", "body.ossVolumeConfig": ossConfig}, `{"code":"403","message":"denied","requestId":"req-update"}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caller := &OpenAPICaller{Product: "FCSandbox", Resource: "volume", Region: "cn-hangzhou", executor: &fakeOpenAPIExecutor{response: tc.response}}
+			_, err := caller.Call(context.Background(), "UpdateVolume", tc.request)
+			if tc.wantErr && err == nil || !tc.wantErr && err != nil {
+				t.Fatalf("UpdateVolume %s: err=%v wantErr=%t", tc.name, err, tc.wantErr)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name, field string
+		request     map[string]any
+	}{
+		{"bad path", "id", map[string]any{"volumeID": "vol/1", "teamID": "team-1", "body.ossVolumeConfig": ossConfig}},
+		{"missing scope", "team_id", map[string]any{"volumeID": "vol-1", "body.ossVolumeConfig": ossConfig}},
+		{"bad scope", "team_id", map[string]any{"volumeID": "vol-1", "teamID": "team/1", "body.ossVolumeConfig": ossConfig}},
+		{"missing body", "body", map[string]any{"volumeID": "vol-1", "teamID": "team-1"}},
+	} {
+		t.Run("invalid "+tc.name, func(t *testing.T) {
+			caller := &OpenAPICaller{Product: "FCSandbox", Resource: "volume", Region: "cn-hangzhou", executor: &fakeOpenAPIExecutor{response: `{"code":"200"}`}}
+			_, err := caller.Call(context.Background(), "UpdateVolume", tc.request)
+			var app *ecerrors.AppError
+			if !errors.As(err, &app) || app.Payload().Code != "InvalidVolumeInput" || app.Payload().Field != tc.field {
+				t.Fatalf("invalid %s reached provider: %v", tc.field, err)
+			}
+		})
+	}
+}
+
 func TestFCSandboxVolumeCreateHTTPStatusRequiresAcceptedIdentity(t *testing.T) {
 	request := map[string]any{"body.volumeName": "workspace", "body.teamID": "team-1"}
 	for _, tc := range []struct {
