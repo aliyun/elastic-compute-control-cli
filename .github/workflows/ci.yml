@@ -26,6 +26,15 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
+      - name: Review dependency changes
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
+        with:
+          fail-on-severity: high
+          fail-on-scopes: runtime, development, unknown
+          license-check: false
+          show-openssf-scorecard: false
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -74,6 +83,9 @@ jobs:
 
       - name: Lint
         run: make lint
+
+      - name: Test Dependabot reporting
+        run: make test-dependabot-report
 
       - name: Test and enforce 95% UT coverage
         run: make ci-test

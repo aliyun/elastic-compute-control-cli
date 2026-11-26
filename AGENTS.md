@@ -80,6 +80,14 @@ Keep generated metadata and downloaded source archives out of Git.
 Use `go test ./...` when validating the whole open-source tree. Avoid live cloud
 API calls in default tests.
 
+## Dependency Security
+
+- Use `make review-dependabot` and the [dependency security runbook](docs/testing/dependency-security.md)
+  when triaging alerts or preparing a security dependency update.
+- Review changes to Go modules, npm lockfiles, and GitHub Actions with the
+  required `CI / test` dependency review step. Validate security upgrades on the
+  affected build or release surface before merging.
+
 ## Credential Configuration Safety
 
 - Route every credential-config write through the shared resolved-target lock
