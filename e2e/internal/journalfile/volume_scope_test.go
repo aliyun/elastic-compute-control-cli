@@ -142,6 +142,9 @@ func TestVolumeSingleTeamTerminalEligibility(t *testing.T) {
 		{"another scope", func(j *report.CleanupJournal, i *TemplateCreateIntent, _ *report.Resource) {
 			j.VolumeScopeBindings = map[string][]string{i.Name: {"team-other"}}
 		}},
+		{"original Team has another transfer binding", func(j *report.CleanupJournal, i *TemplateCreateIntent, _ *report.Resource) {
+			j.VolumeTeamBindings = map[string]string{i.TeamID: "other-volume"}
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			copyJournal, copyIntent, copyEntry := journal, intent, entry
@@ -149,6 +152,47 @@ func TestVolumeSingleTeamTerminalEligibility(t *testing.T) {
 			tc.edit(&copyJournal, &copyIntent, &copyEntry)
 			if VolumeAbsenceTerminal(copyJournal, copyIntent, copyEntry) {
 				t.Fatal("unbound or transferred Volume was eligible for terminal absence")
+			}
+		})
+	}
+}
+
+func TestHistoricalVolumeTransferIsScopedToTheBoundVolume(t *testing.T) {
+	intent := TemplateCreateIntent{Name: "ecctl-p-0123456789abcdef01234567", TeamID: "team-owned"}
+	entry := report.Resource{Teardown: "ecctl sandbox volume delete vol-owned --region cn-hangzhou --profile owner"}
+	for _, tc := range []struct {
+		name    string
+		journal report.CleanupJournal
+		want    bool
+	}{
+		{name: "destination scope", journal: report.CleanupJournal{
+			VolumeScopeBindings: map[string][]string{intent.Name: {"team-destination"}},
+		}, want: true},
+		{name: "pending history", journal: report.CleanupJournal{
+			VolumeTransferHistory: map[string]map[string]bool{intent.Name: {"team-destination": true}},
+		}, want: true},
+		{name: "settled history", journal: report.CleanupJournal{
+			VolumeTransferHistory: map[string]map[string]bool{intent.Name: {"team-destination": false}},
+		}, want: true},
+		{name: "destination Team binding", journal: report.CleanupJournal{
+			VolumeTeamBindings: map[string]string{"team-destination": intent.Name},
+		}, want: true},
+		{name: "retained transfer marker", journal: report.CleanupJournal{
+			Entries: []report.Resource{{VolumeTransferIntent: intent.Name}},
+		}, want: true},
+		{name: "pending finalizer", journal: report.CleanupJournal{
+			Entries: []report.Resource{{Teardown: entry.Teardown, VolumeTransferPending: true}},
+		}, want: true},
+		{name: "independent Volume", journal: report.CleanupJournal{
+			VolumeScopeBindings:   map[string][]string{"other-volume": {"team-other"}},
+			VolumeTransferHistory: map[string]map[string]bool{"other-volume": {"team-other": false}},
+			VolumeTeamBindings:    map[string]string{"team-other": "other-volume"},
+			Entries:               []report.Resource{{Teardown: "other-finalizer", VolumeTransferIntent: "other-volume", VolumeTransferPending: true}},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := HasHistoricalVolumeTransfer(tc.journal, intent, entry); got != tc.want {
+				t.Fatalf("retained transfer for bound Volume = %t, want %t", got, tc.want)
 			}
 		})
 	}

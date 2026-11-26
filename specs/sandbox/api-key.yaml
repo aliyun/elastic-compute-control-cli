@@ -1,0 +1,360 @@
+schema_version: 2
+product: sandbox
+provider: aliyun
+api_product: FCSandbox
+resource: api-key
+kind: regional
+aliases: [apikey]
+display_name: {en: API key, zh-CN: 访问密钥}
+description: {en: Manage native FC sandbox API keys., zh-CN: 管理原生 FC 沙箱访问密钥。}
+examples:
+  - ecctl sandbox api-key list --region cn-hangzhou
+  - ecctl sandbox api-key create --name dev --team-id <team-id> --region cn-hangzhou
+  - ecctl sandbox api-key reset <api-key-id> --show-value --region cn-hangzhou
+
+identity:
+  field: id
+  output_root: {one: api_key, many: api_keys}
+
+schema:
+  fields:
+    id:
+      type: string
+      description: {en: API key ID, zh-CN: 访问密钥 ID}
+    name:
+      type: string
+      description: {en: API key name, zh-CN: 访问密钥名称}
+    team_id:
+      type: string
+      description: {en: owning Team ID, zh-CN: 所属团队 ID}
+    team_name:
+      type: string
+      description: {en: owning Team name, zh-CN: 所属团队名称}
+    team_plan:
+      type: string
+      description: {en: owning Team subscription plan, zh-CN: 所属团队订阅计划}
+    resource_group:
+      type: string
+      description: {en: resource group ID, zh-CN: 资源组 ID}
+    user_id:
+      type: string
+      description: {en: creator user ID, zh-CN: 创建者用户 ID}
+    username:
+      type: string
+      description: {en: creator username, zh-CN: 创建者用户名}
+    source:
+      type: string
+      description: {en: provider key source, zh-CN: 服务端密钥来源}
+    status:
+      type: string
+      enum: [active, inactive]
+      description: {en: API key status (active or inactive), zh-CN: 访问密钥状态（active 或 inactive）}
+    created_time:
+      type: string
+      description: {en: creation time, zh-CN: 创建时间}
+    expire_time:
+      type: string
+      description: {en: expiration time, zh-CN: 过期时间}
+    last_used_time:
+      type: string
+      description: {en: last used time, zh-CN: 上次使用时间}
+    api_key_mask:
+      type: string
+      description: {en: masked display value of the API key, zh-CN: 访问密钥脱敏展示值}
+    api_key_value:
+      type: string
+      description: {en: plaintext API key, returned only on explicit create/reset request, zh-CN: 访问密钥明文，仅在显式请求创建或重置时返回}
+    ip_whitelist:
+      type: array
+      description: {en: IP whitelist rules, zh-CN: IP 白名单规则}
+      items:
+        type: object
+        fields:
+          ipAddress: {type: string}
+          description: {type: string}
+    ip_blacklist:
+      type: array
+      description: {en: IP blacklist rules, zh-CN: IP 黑名单规则}
+      items:
+        type: object
+        fields:
+          ipAddress: {type: string}
+          description: {type: string}
+    permission_policy:
+      type: object
+      description: {en: server-reported permission policy, zh-CN: 服务端返回的权限策略}
+    effective_permissions:
+      type: object
+      description: {en: server-reported effective permissions, zh-CN: 服务端返回的有效权限}
+
+controls:
+  limit:
+    type: integer
+    default: 50
+    max: 50
+    description: {en: maximum API keys per page (pageSize; CLI cap 50), zh-CN: 每页最多返回的访问密钥数量（pageSize；CLI 上限 50）}
+  page:
+    type: integer
+    default: 1
+    description: {en: results page to return, zh-CN: 返回结果页码}
+  all:
+    type: boolean
+    description: {en: fetch all pages from page 1, zh-CN: 从第一页获取所有结果}
+  show_value:
+    type: boolean
+    description: {en: reveal the plaintext API key on create or reset, zh-CN: 创建或重置时展示访问密钥明文}
+  no_wait:
+    type: boolean
+    description: {en: return after the deletion request is accepted, zh-CN: 删除请求被接受后立即返回}
+  timeout:
+    type: duration
+    default: 300s
+    description: {en: deletion wait timeout, zh-CN: 删除等待超时时间}
+
+probes:
+  detail:
+    api: DescribeApiKey
+    request: {apiKeyID: $.id}
+    response:
+      item: $.apiKey
+      request_id: $.requestId
+      id: $.apiKeyID
+      state: $.status
+      fields: &api_key_fields
+        id: $.apiKeyID
+        name: $.apiKeyName
+        team_id: $.teamID
+        team_name: $.teamName
+        team_plan: $.teamPlan
+        resource_group: $.resourceGroupID
+        user_id: $.userID
+        username: $.username
+        source: $.source
+        status: $.status
+        created_time: $.createdTime
+        expire_time: $.expireTime
+        last_used_time: $.lastUsedTime
+        api_key_mask: $.apiKeyMask
+        api_key_value: $.apiKeyValue
+        ip_whitelist: $.ipWhitelist
+        ip_blacklist: $.ipBlacklist
+      extra_fields:
+        permission_policy: $.permissionPolicy
+        effective_permissions: $.effectivePermissions
+  list:
+    api: ListApiKeys
+    request:
+      apiKeyName: $.name
+      status: $.status
+      teamID: $.team_id
+      resourceGroupID: $.resource_group
+      userID: $.user_id
+      pageNumber: $.page
+      pageSize: $.limit
+    response:
+      items: $.apiKeys
+      total: $.total
+      request_id: $.requestId
+      id: $.apiKeyID
+      state: $.status
+      fields: *api_key_fields
+
+waiters:
+  absent_after_delete:
+    probe: detail
+    target: absent
+    interval: 2s
+    timeout: 300s
+
+bindings:
+  create_api_key:
+    api: CreateApiKey
+    request:
+      body:
+        apiKeyName: $.name
+        teamID: $.team_id
+        expireTime: $.expire_time
+        ipWhitelist: $.ip_whitelist
+        ipBlacklist: $.ip_blacklist
+      ShowValue: $.show_value
+    require_all: [{request: body.apiKeyName}]
+    id_from: $.apiKey.apiKeyID
+    context_from: {created_api_key: $.apiKey}
+    request_id_from: $.requestId
+  update_api_key:
+    api: UpdateApiKey
+    request:
+      apiKeyID: $.id
+      body:
+        apiKeyName: $.name
+        status: $.status
+        expireTime: $.expire_time
+        ipWhitelist: $.ip_whitelist
+        ipBlacklist: $.ip_blacklist
+    require_all: [{request: apiKeyID}]
+    require_any:
+      - {request: body.apiKeyName}
+      - {request: body.status}
+      - {request: body.expireTime}
+      - {request: body.ipWhitelist}
+      - {request: body.ipBlacklist}
+    request_id_from: $.requestId
+  delete_api_key:
+    api: DeleteApiKey
+    request: {apiKeyID: $.id}
+    require_all: [{request: apiKeyID}]
+    request_id_from: $.requestId
+    wait: absent_after_delete
+  deactivate_api_key:
+    api: UpdateApiKey
+    request:
+      apiKeyID: $.id
+      body:
+        status: inactive
+    require_all: [{request: apiKeyID}]
+    request_id_from: $.requestId
+  reset_api_key:
+    api: ResetApiKey
+    request: {apiKeyID: $.id, ShowValue: $.show_value}
+    require_all: [{request: apiKeyID}]
+    id_from: $.apiKey.apiKeyID
+    context_from: {reset_api_key: $.apiKey}
+    request_id_from: $.requestId
+
+operations:
+  create:
+    description: {en: Create a native FC sandbox API key, zh-CN: 创建原生 FC 沙箱访问密钥}
+    help:
+      en: The plaintext key is hidden by default and shown only with --show-value. IP rules accept one JSON object or @file per --ip-whitelist/--ip-blacklist flag.
+      zh-CN: 默认隐藏明文密钥，仅在使用 --show-value 时展示。IP 规则通过 --ip-whitelist/--ip-blacklist 传入，每个标志接受一个 JSON 对象或 @file。
+    input:
+      fields:
+        - name: {required: true}
+        - team_id
+        - expire_time
+        - ip_whitelist
+        - ip_blacklist
+      controls: [show_value]
+    workflow:
+      - binding: create_api_key
+      - emit:
+          fields:
+            id: $context.created_api_key.apiKeyID
+            name: $context.created_api_key.apiKeyName
+            team_id: $context.created_api_key.teamID
+            team_name: $context.created_api_key.teamName
+            team_plan: $context.created_api_key.teamPlan
+            resource_group: $context.created_api_key.resourceGroupID
+            user_id: $context.created_api_key.userID
+            username: $context.created_api_key.username
+            source: $context.created_api_key.source
+            status: $context.created_api_key.status
+            created_time: $context.created_api_key.createdTime
+            expire_time: $context.created_api_key.expireTime
+            last_used_time: $context.created_api_key.lastUsedTime
+            api_key_mask: $context.created_api_key.apiKeyMask
+            api_key_value: $context.created_api_key.apiKeyValue
+            ip_whitelist: $context.created_api_key.ipWhitelist
+            ip_blacklist: $context.created_api_key.ipBlacklist
+    examples: [ecctl sandbox api-key create --name dev --team-id <team-id> --region cn-hangzhou]
+  update:
+    description: {en: Update a native FC sandbox API key, zh-CN: 更新原生 FC 沙箱访问密钥}
+    help:
+      en: Change the name, expiration, IP rules, or active/inactive status. At least one mutable field is required.
+      zh-CN: 修改名称、过期时间、IP 规则或 active/inactive 状态。至少需要一个可修改字段。
+    input:
+      fields:
+        - id: {required: true, positional: true}
+        - name
+        - status
+        - expire_time
+        - ip_whitelist
+        - ip_blacklist
+    workflow:
+      - binding: update_api_key
+      - probe: detail
+        ids: [$input.id]
+        not_found: error
+    examples: [ecctl sandbox api-key update <api-key-id> --status inactive --region cn-hangzhou]
+  delete:
+    description: {en: Delete a native FC sandbox API key, zh-CN: 删除原生 FC 沙箱访问密钥}
+    help:
+      en: The service only deletes inactive keys, so an active key is first deactivated with UpdateApiKey. Wait for DescribeApiKey to confirm absence by default. --no-wait reports only request acceptance.
+      zh-CN: 服务端仅允许删除 inactive 密钥，active 密钥会先通过 UpdateApiKey 置为 inactive。默认等待 DescribeApiKey 确认不存在；--no-wait 仅报告请求已受理。
+    input:
+      fields:
+        - id: {required: true, positional: true}
+      controls: [no_wait, timeout]
+    workflow:
+      - probe: detail
+        ids: [$input.id]
+        as: current_api_key
+        not_found: error
+      - binding: deactivate_api_key
+        when: context.current_api_key.status == active
+      - binding: delete_api_key
+        wait_unless: input.no_wait
+      - emit:
+          fields: {id: $input.id}
+          deleted: true
+        unless: input.no_wait
+    output:
+      fields:
+        actions: $result.actions
+        api_key: {id: $input.id}
+        deleted: {value: $result.deleted, unless: $input.no_wait}
+        deletion_requested: {value: true, when: $input.no_wait}
+    examples: [ecctl sandbox api-key delete <api-key-id> --region cn-hangzhou]
+  get:
+    aliases: [show, describe]
+    description: {en: Get a native FC sandbox API key, zh-CN: 获取原生 FC 沙箱访问密钥}
+    input:
+      fields:
+        - id: {required: true, positional: true}
+    workflow:
+      - probe: detail
+        ids: [$input.id]
+        not_found: error
+    examples: [ecctl sandbox api-key get <api-key-id> --region cn-hangzhou]
+  list:
+    description: {en: List native FC sandbox API keys, zh-CN: 列出原生 FC 沙箱访问密钥}
+    input:
+      fields: [name, status, team_id, resource_group, user_id]
+      controls: [limit, page, all]
+    workflow:
+      - probe: list
+        many: true
+    examples:
+      - ecctl sandbox api-key list --team-id <team-id> --limit 50 --page 1 --region cn-hangzhou
+      - ecctl sandbox api-key list --status active --all --region cn-hangzhou
+  reset:
+    description: {en: Reset a native FC sandbox API key, zh-CN: 重置原生 FC 沙箱访问密钥}
+    help:
+      en: Generate a new key value and reactivate the key (status becomes active). The plaintext key is hidden by default and shown only with --show-value.
+      zh-CN: 生成新的密钥值并使密钥重新变为 active。默认隐藏明文密钥，仅在使用 --show-value 时展示。
+    input:
+      fields:
+        - id: {required: true, positional: true}
+      controls: [show_value]
+    workflow:
+      - binding: reset_api_key
+      - emit:
+          fields:
+            id: $context.reset_api_key.apiKeyID
+            name: $context.reset_api_key.apiKeyName
+            team_id: $context.reset_api_key.teamID
+            team_name: $context.reset_api_key.teamName
+            team_plan: $context.reset_api_key.teamPlan
+            resource_group: $context.reset_api_key.resourceGroupID
+            user_id: $context.reset_api_key.userID
+            username: $context.reset_api_key.username
+            source: $context.reset_api_key.source
+            status: $context.reset_api_key.status
+            created_time: $context.reset_api_key.createdTime
+            expire_time: $context.reset_api_key.expireTime
+            last_used_time: $context.reset_api_key.lastUsedTime
+            api_key_mask: $context.reset_api_key.apiKeyMask
+            api_key_value: $context.reset_api_key.apiKeyValue
+            ip_whitelist: $context.reset_api_key.ipWhitelist
+            ip_blacklist: $context.reset_api_key.ipBlacklist
+    examples: [ecctl sandbox api-key reset <api-key-id> --show-value --region cn-hangzhou]

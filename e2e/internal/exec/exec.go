@@ -1,6 +1,6 @@
 // Package exec runs a rendered ecctl command line as a subprocess and parses
-// its JSON stdout. It mirrors the badcases harness: it strips dev-shell color
-// forcers and sets NO_COLOR so JSON output is clean regardless of host setup.
+// its JSON stdout. It strips inherited color forcers and passes an explicit
+// no-color option for protected machine output.
 package exec
 
 import (
@@ -9,6 +9,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -164,7 +165,8 @@ func prepareCommandArgs(cfg Config, rendered string) (string, []string, bool, er
 		// Machine proofs must stay parseable even when the caller's display mode
 		// requests colored JSON. Keep this on the actual executed argv.
 		selected, count, separator, colorErr := scanStringOption(args, "--no-color", false)
-		if colorErr != nil || count > 1 || count == 1 && selected != "true" {
+		noColor, valueErr := strconv.ParseBool(selected)
+		if colorErr != nil || count > 1 || count == 1 && (valueErr != nil || !noColor) {
 			return "", nil, false, fmt.Errorf("machine output color selector changed")
 		}
 		if count == 0 {
@@ -199,7 +201,52 @@ func machineProofCommand(cfg Config, args []string) bool {
 	if args[0] == "call" && (args[1] == "oss" || args[1] == "ram") {
 		return true
 	}
-	return (args[0] == "sandbox" || args[0] == "sbx") && (args[1] == "team" || args[1] == "volume")
+	path := sandboxProofCommandPath(args)
+	if path[0] != "sandbox" && path[0] != "sbx" {
+		return false
+	}
+	switch path[1] {
+	case "team", "volume":
+		return true
+	case "template", "tpl":
+		switch path[2] {
+		case "create", "new", "list", "ls", "get", "show", "describe", "delete", "rm", "remove":
+			selected, _, _, err := scanStringOption(args, "--openapi", false)
+			native, boolErr := strconv.ParseBool(selected)
+			return err == nil && boolErr == nil && native
+		}
+	}
+	return false
+}
+
+// Match the command words across root options and the native Template selector.
+// Split string options consume even flag-shaped values. An actual -- ends
+// option parsing, so words beyond it cannot identify a subcommand.
+func sandboxProofCommandPath(args []string) [3]string {
+	var path [3]string
+	next := 0
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		name, _, inline := strings.Cut(arg, "=")
+		switch name {
+		case "--region", "--profile", "--lang", "--output":
+			if !inline {
+				index++
+			}
+		case "--agent-envelope", "--json", "--no-color", "--help", "-h", "--version", "-v", "--openapi":
+			// Booleans use a bare flag or an inline value.
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return path
+			}
+			path[next] = arg
+			next++
+			if next == len(path) {
+				return path
+			}
+		}
+	}
+	return path
 }
 
 type boundedCommandOutput struct {

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"time"
 
 	execpkg "github.com/aliyun/elastic-compute-control-cli/e2e/internal/exec"
@@ -56,13 +57,165 @@ func volumeTeamDefaultName(name string) bool {
 	return name == "base" || name == "code-interpreter-v1"
 }
 
-func volumeTeamName(meta report.CleanupJournal, teamID string) string {
-	for name, id := range meta.VolumeTeamCreateIDs {
+// ErrOwnedTeamChildNoIntent marks a confirmed plain Team that has no retained
+// create-intent proof. Provider-default Template cleanup is only authorized by
+// that proof; without it the finalizer remains a plain Team delete.
+var ErrOwnedTeamChildNoIntent = errors.New("owned Team child cleanup has no retained create intent")
+
+// teamChildrenReceipt resolves the accepted creation link for any run-owned
+// Team. Volume Teams keep their pinned fixture credential; other confirmed
+// Teams prove ownership through their retained create intent and the run
+// identity, so provider-default Template cleanup applies to every owned Team.
+func teamChildrenReceipt(meta report.CleanupJournal, entry report.Resource, cfg execpkg.Config) (volumeTeamReceipt, string, error) {
+	if entry.VolumeTeamBound {
+		return volumeTeamChildrenReceipt(meta, entry, cfg)
+	}
+	return ownedTeamChildrenReceipt(meta, entry, cfg)
+}
+
+// ownedTeamCreateIntent proves a confirmed non-Volume Team came from this
+// execution by matching its retained create intent sidecar. The intent is
+// written before CreateTeam dispatch and kept for the run, so the rendered
+// delete, nonce name, case scope and run binding pin one exact owner without a
+// fixture credential. The intent must also retain the run credential binding
+// captured before dispatch; legacy intents without it stay plain deletes.
+func ownedTeamCreateIntent(meta report.CleanupJournal, entry report.Resource) (volumeTeamReceipt, string, error) {
+	id, err := TeamDeleteTarget(entry.Teardown)
+	if err != nil {
+		return volumeTeamReceipt{}, "", fmt.Errorf("owned Team child cleanup lacks a validated delete target: %v", err)
+	}
+	if !entry.TeamCreateConfirmed || entry.VolumeTeamBound || !safeTemplateID(id) || !filepath.IsAbs(meta.JournalPath) || filepath.Clean(meta.JournalPath) != meta.JournalPath {
+		return volumeTeamReceipt{}, "", fmt.Errorf("owned Team child cleanup lacks confirmed creation ownership")
+	}
+	if entry.ExecutionID != meta.ExecutionID || entry.Region != meta.Region || entry.RegionRole != meta.RegionRole {
+		return volumeTeamReceipt{}, "", fmt.Errorf("owned Team child cleanup entry differs from journal ownership")
+	}
+	root, err := os.OpenRoot(filepath.Dir(meta.JournalPath))
+	if err != nil {
+		return volumeTeamReceipt{}, "", err
+	}
+	defer root.Close()
+	entries, err := readRootInventory(root)
+	if err != nil {
+		return volumeTeamReceipt{}, "", err
+	}
+	base := filepath.Base(meta.JournalPath)
+	var receipt volumeTeamReceipt
+	matches := 0
+	for _, dirEntry := range entries {
+		name := dirEntry.Name()
+		if !strings.HasPrefix(name, base+".team-create-") || !strings.HasSuffix(name, ".json") || !dirEntry.Type().IsRegular() {
+			continue
+		}
+		nonce := strings.TrimSuffix(strings.TrimPrefix(name, base+".team-create-"), ".json")
+		if len(nonce) != 24 {
+			continue
+		}
+		if _, err := hex.DecodeString(nonce); err != nil {
+			continue
+		}
+		snapshot, err := ReadPrivateRecoverySnapshotRoot(root, name)
+		if err != nil {
+			return volumeTeamReceipt{}, "", err
+		}
+		if _, err := execpkg.DecodeStrictJSON(snapshot.Body); err != nil {
+			return volumeTeamReceipt{}, "", err
+		}
+		var candidate volumeTeamReceipt
+		decoder := json.NewDecoder(bytes.NewReader(snapshot.Body))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&candidate); err != nil {
+			return volumeTeamReceipt{}, "", err
+		}
+		if err := decoder.Decode(new(any)); err != io.EOF {
+			return volumeTeamReceipt{}, "", fmt.Errorf("owned Team create intent has trailing data")
+		}
+		if candidate.Version != 1 || candidate.CreatedAt.IsZero() || candidate.Dispatched || candidate.DispatchProtocol != 0 || candidate.AcceptedID != "" || candidate.VolumeBinding != nil || candidate.OwnerBinding == nil || candidate.ProbeBinSHA256 != "" || candidate.Name != "ecctl-t-"+nonce || candidate.Description != "ecctl E2E Team owner="+nonce || candidate.RunID != meta.RunID || candidate.ExecutionID != meta.ExecutionID || candidate.Region != meta.Region || candidate.Surface != meta.Surface || candidate.EcctlBin != meta.EcctlBin || candidate.CaseScope == "" || strings.ContainsAny(candidate.CaseScope, "\r\n") || candidate.CaseScope != entry.Scope {
+			continue
+		}
+		if len(candidate.Input) == 0 || candidate.Input[0] != "ecctl" || strings.Count(candidate.Teardown, "intent-validation") != 1 {
+			continue
+		}
+		command := strings.Replace(candidate.Teardown, "intent-validation", id, 1)
+		if target, err := TeamDeleteTarget(command); err != nil || target != id || command != entry.Teardown {
+			continue
+		}
+		receipt = candidate
+		matches++
+	}
+	if matches == 0 {
+		return volumeTeamReceipt{}, "", ErrOwnedTeamChildNoIntent
+	}
+	if matches != 1 {
+		return volumeTeamReceipt{}, "", fmt.Errorf("owned Team child cleanup has ambiguous accepted creation links")
+	}
+	return receipt, id, nil
+}
+
+// ownedTeamChildrenReceipt additionally pins the presented cleanup credential
+// to the run identity retained in the matched create intent.
+func ownedTeamChildrenReceipt(meta report.CleanupJournal, entry report.Resource, cfg execpkg.Config) (volumeTeamReceipt, string, error) {
+	if cfg.Bin != meta.EcctlBin || cfg.ExpectedBinSHA256 != meta.EcctlBinSHA256 || !validHistoricalDigest(meta.EcctlBinSHA256) || cfg.Region != meta.Region || cfg.ExpectedIdentity == nil {
+		return volumeTeamReceipt{}, "", fmt.Errorf("owned Team child cleanup lacks its pinned binary and identity")
+	}
+	receipt, id, err := ownedTeamCreateIntent(meta, entry)
+	if err != nil {
+		return volumeTeamReceipt{}, "", err
+	}
+	if cfg.Profile != receipt.OwnerBinding.Profile || *cfg.ExpectedIdentity != receipt.OwnerBinding.Identity {
+		return volumeTeamReceipt{}, "", fmt.Errorf("owned Team child cleanup credential differs from its retained create identity")
+	}
+	return receipt, id, nil
+}
+
+// OwnedTeamCreatorConfig rebuilds the pinned run credential for a confirmed
+// opt-in plain Team from its retained create intent, probing the selected
+// profile and trusted principal before any provider call. Volume Teams keep
+// their fixture path; Teams without a retained owner binding stay plain
+// deletes.
+func OwnedTeamCreatorConfig(ctx context.Context, meta report.CleanupJournal, cfg execpkg.Config, teamID string) (execpkg.Config, bool, error) {
+	count := 0
+	var finalizer report.Resource
+	for _, entry := range meta.Entries {
+		if !entry.TeamCreateConfirmed {
+			continue
+		}
+		id, err := TeamDeleteTarget(entry.Teardown)
+		if err != nil {
+			return cfg, false, err
+		}
 		if id == teamID {
-			return name
+			count++
+			finalizer = entry
 		}
 	}
-	return ""
+	if count > 1 {
+		return cfg, false, fmt.Errorf("owned Team creator is ambiguous")
+	}
+	if count == 0 || finalizer.VolumeTeamBound || !finalizer.TeamProviderTemplateCleanup {
+		return cfg, false, nil
+	}
+	receipt, _, err := ownedTeamCreateIntent(meta, finalizer)
+	if errors.Is(err, ErrOwnedTeamChildNoIntent) {
+		return cfg, false, nil
+	}
+	if err != nil {
+		return cfg, false, err
+	}
+	bound, err := ProbeQuotaBinding(ctx, receipt.OwnerBinding, cfg)
+	return bound, true, err
+}
+
+// OwnedTeamChildCleanupApplicable reports whether a confirmed Team finalizer
+// holds the ownership proof required for provider-default Template cleanup.
+// Volume Teams always qualify through their fixture receipt; plain Teams
+// require a retained create intent, so legacy finalizers stay plain deletes.
+func OwnedTeamChildCleanupApplicable(meta report.CleanupJournal, entry report.Resource, cfg execpkg.Config) bool {
+	if entry.VolumeTeamBound {
+		return true
+	}
+	_, _, err := ownedTeamChildrenReceipt(meta, entry, cfg)
+	return err == nil
 }
 
 func volumeTeamChildrenPath(path, teamID string) string {
@@ -124,7 +277,7 @@ func volumeTeamChildResult(result execpkg.Result, digest string) (map[string]any
 	return root, nil
 }
 
-func volumeTeamChildList(ctx context.Context, meta report.CleanupJournal, cfg execpkg.Config, teamID string, run func(context.Context, execpkg.Config, string) execpkg.Result, lower time.Time) ([]volumeTeamChild, string, error) {
+func volumeTeamChildList(ctx context.Context, meta report.CleanupJournal, cfg execpkg.Config, teamID, teamName string, run func(context.Context, execpkg.Config, string) execpkg.Result, lower time.Time) ([]volumeTeamChild, string, error) {
 	var children []volumeTeamChild
 	var pages []any
 	seenIDs, seenNames, seenTokens := map[string]bool{}, map[string]bool{}, map[string]bool{}
@@ -154,7 +307,7 @@ func volumeTeamChildList(ctx context.Context, meta report.CleanupJournal, cfg ex
 			name, nameOK := item["name"].(string)
 			created, timeOK := item["created_time"].(string)
 			createdAt, parseErr := time.Parse(time.RFC3339Nano, created)
-			if !ok || !idOK || !safeTemplateID(id) || seenIDs[id] || !nameOK || !volumeTeamDefaultName(name) || seenNames[name] || item["team_id"] != teamID || item["team_name"] != volumeTeamName(meta, teamID) || !timeOK || parseErr != nil || createdAt.Before(lower) || createdAt.After(lower.Add(2*time.Minute)) || createdAt.After(time.Now().Add(2*time.Minute)) {
+			if !ok || !idOK || !safeTemplateID(id) || seenIDs[id] || !nameOK || !volumeTeamDefaultName(name) || seenNames[name] || item["team_id"] != teamID || item["team_name"] != teamName || !timeOK || parseErr != nil || createdAt.Before(lower) || createdAt.After(lower.Add(2*time.Minute)) || createdAt.After(time.Now().Add(2*time.Minute)) {
 				return nil, "", fmt.Errorf("Volume Team Template is not proven to be a new child of the accepted Team")
 			}
 			seenIDs[id] = true
@@ -243,7 +396,7 @@ func writeVolumeTeamChildren(path string, state volumeTeamChildren, exclusive bo
 	return nil
 }
 
-func volumeTeamChildGet(ctx context.Context, meta report.CleanupJournal, cfg execpkg.Config, teamID string, child volumeTeamChild, run func(context.Context, execpkg.Config, string) execpkg.Result) (bool, error) {
+func volumeTeamChildGet(ctx context.Context, meta report.CleanupJournal, cfg execpkg.Config, teamID, teamName string, child volumeTeamChild, run func(context.Context, execpkg.Config, string) execpkg.Result) (bool, error) {
 	command := "ecctl sandbox template get " + quoteVolumeArg(child.ID) + " --openapi --team-id " + quoteVolumeArg(teamID) + " --region " + quoteVolumeArg(meta.Region) + " --profile " + quoteVolumeArg(cfg.Profile) + " --output=json --agent-envelope=false"
 	res := run(ctx, cfg, command)
 	root, err := volumeTeamChildResult(res, meta.EcctlBinSHA256)
@@ -266,7 +419,7 @@ func volumeTeamChildGet(ctx context.Context, meta report.CleanupJournal, cfg exe
 	item, _ := root["template"].(map[string]any)
 	created, _ := item["created_time"].(string)
 	createdAt, parseErr := time.Parse(time.RFC3339Nano, created)
-	if res.Exit != 0 || item["id"] != child.ID || item["name"] != child.Name || item["team_id"] != teamID || item["team_name"] != volumeTeamName(meta, teamID) || parseErr != nil || !createdAt.Equal(child.CreatedAt) {
+	if res.Exit != 0 || item["id"] != child.ID || item["name"] != child.Name || item["team_id"] != teamID || item["team_name"] != teamName || parseErr != nil || !createdAt.Equal(child.CreatedAt) {
 		return false, fmt.Errorf("Volume Team child read differs from its durable inventory")
 	}
 	return false, nil
@@ -276,7 +429,10 @@ func volumeTeamChildGet(ctx context.Context, meta report.CleanupJournal, cfg exe
 // then reconciles exact attempted children read-only. It reports a Team already
 // absent so callers can consume their Team finalizer without a new delete.
 func PrepareVolumeTeamChildren(ctx context.Context, path string, meta report.CleanupJournal, entry report.Resource, cfg execpkg.Config, run func(context.Context, execpkg.Config, string) execpkg.Result) (bool, error) {
-	receipt, teamID, err := volumeTeamChildrenReceipt(meta, entry, cfg)
+	receipt, teamID, err := teamChildrenReceipt(meta, entry, cfg)
+	if errors.Is(err, ErrOwnedTeamChildNoIntent) {
+		return false, err
+	}
 	if err != nil || path != meta.JournalPath {
 		return false, fmt.Errorf("Volume Team child journal is invalid: %v", err)
 	}
@@ -304,7 +460,7 @@ func PrepareVolumeTeamChildren(ctx context.Context, path string, meta report.Cle
 	err = WithExistingParentLock(ctx, path, func() error {
 		state, err := readVolumeTeamChildren(path, meta, receipt, teamID)
 		if errors.Is(err, os.ErrNotExist) {
-			children, digest, err := volumeTeamChildList(ctx, meta, cfg, teamID, run, teamCreatedAt)
+			children, digest, err := volumeTeamChildList(ctx, meta, cfg, teamID, receipt.Name, run, teamCreatedAt)
 			if err != nil {
 				return err
 			}
@@ -330,7 +486,7 @@ func PrepareVolumeTeamChildren(ctx context.Context, path string, meta report.Cle
 			if child.State == "absent" {
 				continue
 			}
-			absent, err := volumeTeamChildGet(ctx, meta, cfg, teamID, child, run)
+			absent, err := volumeTeamChildGet(ctx, meta, cfg, teamID, receipt.Name, child, run)
 			if err != nil {
 				return err
 			}
@@ -360,7 +516,7 @@ func PrepareVolumeTeamChildren(ctx context.Context, path string, meta report.Cle
 					return fmt.Errorf("Volume Team child delete returned a different target")
 				}
 			}
-			absent, err = volumeTeamChildGet(ctx, meta, cfg, teamID, child, run)
+			absent, err = volumeTeamChildGet(ctx, meta, cfg, teamID, receipt.Name, child, run)
 			if err != nil || !absent {
 				return fmt.Errorf("Volume Team child absence is unproven: %v", err)
 			}
@@ -369,7 +525,7 @@ func PrepareVolumeTeamChildren(ctx context.Context, path string, meta report.Cle
 				return err
 			}
 		}
-		remaining, digest, err := volumeTeamChildList(ctx, meta, cfg, teamID, run, teamCreatedAt)
+		remaining, digest, err := volumeTeamChildList(ctx, meta, cfg, teamID, receipt.Name, run, teamCreatedAt)
 		if err != nil || len(remaining) != 0 {
 			return fmt.Errorf("Volume Team Template inventory is not empty after child cleanup: %v", err)
 		}
@@ -422,7 +578,10 @@ func VolumeTeamChildrenReady(path string, meta report.CleanupJournal, entry repo
 // ReserveVolumeTeamDelete durably bounds the Team mutation to one attempt and
 // one retry after a verified TeamHasTemplates result and a later empty list.
 func ReserveVolumeTeamDelete(ctx context.Context, path string, meta report.CleanupJournal, entry report.Resource, cfg execpkg.Config) error {
-	receipt, teamID, err := volumeTeamChildrenReceipt(meta, entry, cfg)
+	receipt, teamID, err := teamChildrenReceipt(meta, entry, cfg)
+	if errors.Is(err, ErrOwnedTeamChildNoIntent) {
+		return err
+	}
 	if err != nil || path != meta.JournalPath {
 		return fmt.Errorf("Volume Team delete reservation lacks ownership: %v", err)
 	}
@@ -431,8 +590,13 @@ func ReserveVolumeTeamDelete(ctx context.Context, path string, meta report.Clean
 		if err != nil {
 			return err
 		}
-		if err := VolumeTeamChildrenReady(path, meta, entry); err != nil {
-			return err
+		if state.EmptyListSHA256 == "" || state.EmptyGeneration == 0 {
+			return fmt.Errorf("Volume Team child absence is not durable")
+		}
+		for _, child := range state.Children {
+			if child.State != "absent" {
+				return fmt.Errorf("Volume Team child %s is still pending", child.ID)
+			}
 		}
 		switch state.TeamAttempts {
 		case 0:
@@ -461,7 +625,10 @@ func ReserveVolumeTeamDelete(ctx context.Context, path string, meta report.Clean
 // unlock the single bounded retry. The failed result remains a failure to the
 // caller and is never turned into a synthetic success.
 func RecordVolumeTeamConflict(ctx context.Context, path string, meta report.CleanupJournal, entry report.Resource, cfg execpkg.Config, result execpkg.Result) error {
-	receipt, teamID, err := volumeTeamChildrenReceipt(meta, entry, cfg)
+	receipt, teamID, err := teamChildrenReceipt(meta, entry, cfg)
+	if errors.Is(err, ErrOwnedTeamChildNoIntent) {
+		return err
+	}
 	if err != nil || path != meta.JournalPath {
 		return fmt.Errorf("Volume Team conflict journal is invalid: %v", err)
 	}

@@ -372,8 +372,8 @@ func TestCanonicalSnapshotAllProductsLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog) != 351 {
-		t.Fatalf("snapshot products = %d, want 351", len(catalog))
+	if len(catalog) != 355 {
+		t.Fatalf("snapshot products = %d, want 355", len(catalog))
 	}
 	products, err := OpenAPIProducts("en")
 	if err != nil {
@@ -417,8 +417,8 @@ func TestCanonicalSnapshotAllProductsLoad(t *testing.T) {
 			}
 		}
 	}
-	if operationCount != 26231 {
-		t.Fatalf("snapshot operations = %d, want 26231", operationCount)
+	if operationCount != 26917 {
+		t.Fatalf("snapshot operations = %d, want 26917", operationCount)
 	}
 }
 
@@ -475,13 +475,13 @@ func TestCanonicalDefaultVersionEndpointsAndLanguages(t *testing.T) {
 				t.Fatalf("%s parameter %s not localized from canonical", language, parameter.RawName)
 			}
 		}
-		deprecated, ok := OpenAPIOperationSummaryFor(language, "ecs", "AddTags")
-		if !ok || !deprecated.Deprecated || deprecated.Title != "AddTags" {
+		deprecated, ok := OpenAPIOperationSummaryFor(language, "ecs", "DescribeEipAddresses")
+		if !ok || !deprecated.Deprecated || deprecated.Title != "DescribeEipAddresses" {
 			t.Fatalf("deprecated summary = %#v", deprecated)
 		}
-		addTags, ok := OpenAPIOperationDetailFor(language, product, "AddTags")
-		if !ok || !addTags.Deprecated {
-			t.Fatal("AddTags lost deprecated flag")
+		deprecatedDetail, ok := OpenAPIOperationDetailFor(language, product, "DescribeEipAddresses")
+		if !ok || !deprecatedDetail.Deprecated {
+			t.Fatal("DescribeEipAddresses lost deprecated flag")
 		}
 	}
 	ram, ok := OpenAPIProductByCode("ram", "en")

@@ -193,6 +193,25 @@ func CheckVolumeDeleteTeamEvidence(meta report.CleanupJournal, intent TemplateCr
 	return nil
 }
 
+// HasHistoricalVolumeTransfer reports whether the journal retains transfer
+// evidence for this Volume. A settled history entry still records a transfer.
+func HasHistoricalVolumeTransfer(meta report.CleanupJournal, intent TemplateCreateIntent, entry report.Resource) bool {
+	if len(meta.VolumeScopeBindings[intent.Name]) != 0 || len(meta.VolumeTransferHistory[intent.Name]) != 0 {
+		return true
+	}
+	for _, name := range meta.VolumeTeamBindings {
+		if name == intent.Name {
+			return true
+		}
+	}
+	for _, candidate := range meta.Entries {
+		if candidate.VolumeTransferIntent == intent.Name || candidate.VolumeTransferPending && candidate.Teardown == entry.Teardown {
+			return true
+		}
+	}
+	return false
+}
+
 // A scoped GetVolume absence can retire only a Volume whose journal still
 // records exactly its original Team and no possible transfer. Callers must
 // obtain a fresh, provider-verified VolumeNotFound for that exact ID and Team
@@ -205,18 +224,8 @@ func VolumeAbsenceTerminal(meta report.CleanupJournal, intent TemplateCreateInte
 		intent.Surface != meta.Surface || intent.EcctlBin != meta.EcctlBin ||
 		entry.Scope != intent.CaseScope || entry.ExecutionID != meta.ExecutionID || entry.RegionRole != meta.RegionRole || entry.Region != meta.Region ||
 		intent.ValidateDelete(entry.Teardown) != nil || !sameTemplateDelete(intent.Deletes[0], entry.Teardown) ||
-		len(meta.VolumeScopeBindings[intent.Name]) != 0 || len(meta.VolumeTransferHistory[intent.Name]) != 0 {
+		HasHistoricalVolumeTransfer(meta, intent, entry) || meta.VolumeTeamBindings[intent.TeamID] != "" {
 		return false
-	}
-	for team, name := range meta.VolumeTeamBindings {
-		if name == intent.Name || team == intent.TeamID && name != "" {
-			return false
-		}
-	}
-	for _, candidate := range meta.Entries {
-		if candidate.VolumeTransferIntent == intent.Name || candidate.VolumeTransferPending && candidate.Teardown == entry.Teardown {
-			return false
-		}
 	}
 	request, err := ParseVolumeDeleteRequest(entry.Teardown)
 	if err != nil || request.ID != intent.AcceptedVolumeID {

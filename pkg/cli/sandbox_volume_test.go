@@ -207,6 +207,132 @@ func TestFCSandboxVolumeNestedInputUsesProviderSchema(t *testing.T) {
 	}
 }
 
+func TestAPIShapedInputLocalizedDiagnostics(t *testing.T) {
+	t.Setenv("ECCTL_DISABLE_TELEMETRY", "1")
+	t.Setenv("ECCTL_DISABLE_UPDATE_CHECK", "1")
+	t.Setenv("ECCTL_SPEC_DIR", "")
+
+	duplicateFile := filepath.Join(t.TempDir(), "duplicate.json")
+	if err := os.WriteFile(duplicateFile, []byte(`{"vpcConfig":{"vpcId":"vpc-a","vpcId":"vpc-b"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name           string
+		flag           string
+		value          string
+		path           string
+		english        string
+		chinese        string
+		englishMessage string
+		chineseMessage string
+		genericControl bool
+	}{
+		{
+			name:           "wrong-read-only-type",
+			flag:           "--oss-volume-config",
+			value:          `{"readOnly":"true"}`,
+			path:           "oss-volume-config.readOnly",
+			english:        "does not match the API JSON schema",
+			chinese:        "不符合 API JSON 结构",
+			englishMessage: "--oss-volume-config.readOnly does not match the API JSON schema",
+			chineseMessage: "--oss-volume-config.readOnly 的值不符合 API JSON 结构",
+		},
+		{
+			name:           "unknown-nested-member",
+			flag:           "--mount-config",
+			value:          `{"vpcConfig":{"vpcID":"vpc-fixture"}}`,
+			path:           "mount-config.vpcConfig.vpcID",
+			english:        "unsupported API JSON member",
+			chinese:        "不支持 API JSON 成员",
+			englishMessage: "unsupported API JSON member --mount-config.vpcConfig.vpcID",
+			chineseMessage: "不支持 API JSON 成员 --mount-config.vpcConfig.vpcID",
+		},
+		{
+			name:           "duplicate-inline-member",
+			flag:           "--oss-volume-config",
+			value:          `{"readOnly":true,"readOnly":false}`,
+			path:           "oss-volume-config",
+			english:        "one unambiguous JSON object",
+			chinese:        "单个无歧义的 JSON 对象",
+			englishMessage: "--oss-volume-config must be one unambiguous JSON object",
+			chineseMessage: "--oss-volume-config 必须是单个无歧义的 JSON 对象",
+		},
+		{
+			name:           "duplicate-file-member",
+			flag:           "--mount-config",
+			value:          "@" + duplicateFile,
+			path:           "mount-config",
+			english:        "one unambiguous JSON object",
+			chinese:        "单个无歧义的 JSON 对象",
+			englishMessage: "--mount-config must be one unambiguous JSON object",
+			chineseMessage: "--mount-config 必须是单个无歧义的 JSON 对象",
+		},
+		{
+			name:           "generic-invalid-parameter",
+			flag:           "--oss-volume-config",
+			value:          "",
+			path:           "oss-volume-config",
+			english:        "parameter is invalid",
+			chinese:        "参数无效",
+			genericControl: true,
+		},
+	} {
+		for _, locale := range []struct{ lang, reason, message string }{
+			{"en", tc.english, tc.englishMessage},
+			{"zh-CN", tc.chinese, tc.chineseMessage},
+		} {
+			t.Run(tc.name+"/"+locale.lang, func(t *testing.T) {
+				fake := &callOnlyAPICaller{}
+				factoryCalls := 0
+				factory := func(string, string, spec.ResourceSpec, string, func(string) string) (engine.Caller, error) {
+					factoryCalls++
+					return fake, nil
+				}
+				stdout, stderr, exit := runCLIWith(factory, "--lang", locale.lang, "--output=json",
+					"sandbox", "volume", "create", "--name", "workspace", "--team-id", "team-1",
+					"--region", "cn-hangzhou", tc.flag, tc.value)
+				t.Logf("exit=%d factory_calls=%d caller_calls=%d stdout=%s stderr=%q",
+					exit, factoryCalls, fake.calls, stdout, stderr)
+
+				if exit != 1 || factoryCalls != 0 || fake.calls != 0 {
+					t.Fatalf("CLI rejection contract: got exit=%d factory_calls=%d caller_calls=%d, want exit=1 and zero calls",
+						exit, factoryCalls, fake.calls)
+				}
+				var envelope struct {
+					Error struct {
+						Code      string `json:"code"`
+						Kind      string `json:"kind"`
+						Retryable *bool  `json:"retryable"`
+						Field     string `json:"field"`
+						Message   string `json:"message"`
+					} `json:"error"`
+				}
+				if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+					t.Fatalf("CLI rejection contract: decode JSON stdout: %v", err)
+				}
+				got := envelope.Error
+				if got.Code != "InvalidParameter" || got.Kind != "client" || got.Retryable == nil || *got.Retryable {
+					t.Fatalf("CLI rejection contract: expected InvalidParameter/client/retryable=false, got stdout=%s", stdout)
+				}
+
+				if tc.genericControl {
+					if got.Field != tc.path || got.Message != locale.reason {
+						t.Errorf("generic InvalidParameter control: got field=%q message=%q, want field=%q message=%q",
+							got.Field, got.Message, tc.path, locale.reason)
+					}
+					return
+				}
+				if got.Field != tc.path || got.Message != locale.message ||
+					!strings.Contains(got.Message, "--"+tc.path) || !strings.Contains(got.Message, locale.reason) {
+					t.Errorf("localized API JSON diagnostic: got field=%q message=%q, want field=%q message=%q containing %q and %q",
+						got.Field, got.Message, tc.path, locale.message, "--"+tc.path, locale.reason)
+				}
+			})
+		}
+	}
+}
+
 func TestFCSandboxVolumeRejectsExplicitNonpositiveMutationTimeout(t *testing.T) {
 	for _, action := range []string{"create", "delete"} {
 		for _, noWait := range []bool{false, true} {
@@ -437,13 +563,95 @@ func TestFCSandboxVolumeInitialErrorUsesSelectedLanguage(t *testing.T) {
 	}
 }
 
-func TestFCSandboxVolumeUpdateDeferred(t *testing.T) {
-	fake := &fakeAPICaller{}
+type volumeUpdateCall struct {
+	operation string
+	request   map[string]any
+}
+
+type volumeUpdateCaller struct {
+	calls    []volumeUpdateCall
+	response map[string]any
+}
+
+func (f *volumeUpdateCaller) Call(_ context.Context, operation string, request map[string]any) (map[string]any, error) {
+	f.calls = append(f.calls, volumeUpdateCall{operation: operation, request: request})
+	return f.response, nil
+}
+
+func TestFCSandboxVolumeUpdateReplacesConfigAndReadsBack(t *testing.T) {
+	fake := &volumeUpdateCaller{response: map[string]any{"code": "200", "requestId": "req-update", "volume": map[string]any{
+		"volumeID": "vol-1", "volumeName": "workspace", "teamID": "team-1", "status": "AVAILABLE",
+	}}}
 	factory := func(string, string, spec.ResourceSpec, string, func(string) string) (engine.Caller, error) {
 		return fake, nil
 	}
-	stdout, stderr, code := runCLIWith(factory, "--lang", "en", "sandbox", "volume", "update", "vol-1", "--team-id", "team-2", "--region", "cn-hangzhou", "--output=json")
-	if code == 0 || fake.operation != "" {
-		t.Fatalf("deferred Volume update reached provider: code=%d stdout=%s stderr=%s operation=%s", code, stdout, stderr, fake.operation)
+	stdout, stderr, code := runCLIWith(factory, "--lang", "en", "sandbox", "volume", "update", "vol-1", "--team-id", "team-1",
+		"--oss-volume-config", `{"bucketName":"bucket","bucketPath":"/","endpoint":"https://oss.example","readOnly":false}`,
+		"--region", "cn-hangzhou", "--output=json")
+	if code != 0 || stderr != "" || len(fake.calls) != 2 {
+		t.Fatalf("Volume update: code=%d stdout=%s stderr=%s calls=%+v", code, stdout, stderr, fake.calls)
+	}
+	if fake.calls[0].operation != "UpdateVolume" || fake.calls[0].request["volumeID"] != "vol-1" || fake.calls[0].request["teamID"] != "team-1" {
+		t.Fatalf("update request: %+v", fake.calls[0])
+	}
+	if sent, _ := fake.calls[0].request["body.ossVolumeConfig"].(string); !strings.Contains(sent, `"readOnly":false`) {
+		t.Fatalf("update did not send the storage configuration body: %+v", fake.calls[0])
+	}
+	if fake.calls[1].operation != "GetVolume" || fake.calls[1].request["teamID"] != "team-1" {
+		t.Fatalf("readback lost the same-Team scope: %+v", fake.calls[1])
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("invalid JSON: %s: %v", stdout, err)
+	}
+	volume, _ := payload["volume"].(map[string]any)
+	if volume["team_id"] != "team-1" || volume["id"] != "vol-1" {
+		t.Fatalf("update output lost the updated volume: %s", stdout)
+	}
+}
+
+func TestFCSandboxVolumeUpdateRequiresTeamScopeAndConfiguration(t *testing.T) {
+	fake := &volumeUpdateCaller{}
+	factory := func(string, string, spec.ResourceSpec, string, func(string) string) (engine.Caller, error) {
+		return fake, nil
+	}
+	for _, args := range [][]string{
+		{"--region", "cn-hangzhou", "--output=json"},
+		{"--team-id", "team-1", "--region", "cn-hangzhou", "--output=json"},
+		{"--oss-volume-config", `{"bucketName":"bucket"}`, "--region", "cn-hangzhou", "--output=json"},
+	} {
+		args = append([]string{"--lang", "en", "sandbox", "volume", "update", "vol-1"}, args...)
+		stdout, stderr, code := runCLIWith(factory, args...)
+		if code == 0 || len(fake.calls) != 0 {
+			t.Fatalf("incomplete Volume update reached provider: code=%d stdout=%s stderr=%s calls=%+v", code, stdout, stderr, fake.calls)
+		}
+	}
+}
+
+func TestIssue128HumanMachineJSON(t *testing.T) {
+	t.Setenv("ECCTL_DISPLAY_MODE", "Human")
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("ECCTL_DISABLE_TELEMETRY", "1")
+	t.Setenv("ECCTL_DISABLE_UPDATE_CHECK", "1")
+	for _, noColor := range []bool{false, true} {
+		fake := &fakeAPICaller{response: map[string]any{
+			"code": "200", "requestId": "req-create",
+			"volume": map[string]any{"volumeID": "vol-1", "volumeName": "workspace", "teamID": "team-1", "status": "CREATING"},
+		}}
+		factory := func(string, string, spec.ResourceSpec, string, func(string) string) (engine.Caller, error) {
+			return fake, nil
+		}
+		args := []string{"--output=json", "--agent-envelope=false", "--region", "cn-hangzhou", "sbx", "--lang", "en",
+			"volume", "create", "--name", "workspace", "--team-id", "team-1", "--no-wait"}
+		if noColor {
+			args = append(args, "--no-color=true")
+		}
+		stdout, stderr, code := runCLIWith(factory, args...)
+		if code != 0 || fake.operation != "CreateVolume" {
+			t.Fatalf("real CLI did not execute the inert CreateVolume: --no-color=%v exit=%d stderr=%q stdout=%q", noColor, code, stderr, stdout)
+		}
+		if json.Valid([]byte(stdout)) != noColor || strings.Contains(stdout, "\x1b[") == noColor {
+			t.Errorf("real CLI output disagrees with --no-color=%v: %q", noColor, stdout)
+		}
 	}
 }

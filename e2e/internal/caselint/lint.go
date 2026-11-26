@@ -441,6 +441,9 @@ func checkSuite(rep *Report, suite *scenario.Suite, inputsDir string, resources 
 		rep.add(suite.Path, "", "invalid_inputs", err.Error())
 		return
 	}
+	if suite.CleanupProviderTemplates && suite.Execution == scenario.ExecutionDAG {
+		rep.add(suite.Path, "", "invalid_provider_template_cleanup", "cleanup_provider_templates requires a sequential lifecycle")
+	}
 	declaredGlobal := map[string]bool{}
 	for _, key := range suite.RequiresGlobal {
 		declaredGlobal[key] = true
@@ -512,7 +515,7 @@ func checkSuite(rep *Report, suite *scenario.Suite, inputsDir string, resources 
 			}
 		}
 		effectiveNeeds = append(effectiveNeeds, st.Needs...)
-		if suite.Resource == "sandbox/team" || suite.Resource == "sandbox/template-cache" || suite.Resource == "sandbox/quota" || suite.Resource == "sandbox/volume" || quotaLifecycle {
+		if suite.Resource == "sandbox/team" || suite.Resource == "sandbox/template-cache" || suite.Resource == "sandbox/quota" || suite.Resource == "sandbox/volume" || suite.Resource == "sandbox/api-key" || quotaLifecycle {
 			stepDefined["team_name"] = true
 			stepDefined["team_owner"] = true
 		}
@@ -783,6 +786,7 @@ func checkCreateTags(rep *Report, path, step, resource, run string) {
 		resource == "sandbox/quota" ||
 		resource == "sandbox/volume" ||
 		resource == "sandbox/sandbox" ||
+		resource == "sandbox/api-key" ||
 		resource == "lingjun/net-test" ||
 		resource == "lingjun/node-group" {
 		return

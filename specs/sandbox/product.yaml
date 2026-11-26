@@ -9,12 +9,13 @@ resources:
   - team
   - quota
   - volume
+  - api-key
 expose_default_resource: true
 description:
-  en: Manage E2B sandboxes and templates, and native FC OpenAPI templates, template caches, teams, quotas, and volumes.
-  zh-CN: 管理 E2B 沙箱及模板，以及原生 FC OpenAPI 模板、模板缓存、团队、配额和存储卷。
+  en: Manage E2B sandboxes and templates, and native FC OpenAPI templates, template caches, teams, quotas, volumes, and API keys.
+  zh-CN: 管理 E2B 沙箱及模板，以及原生 FC OpenAPI 模板、模板缓存、团队、配额、存储卷和访问密钥。
 examples:
   - ecctl sandbox list --filter state=running
   - ecctl sbx template create --name python --from-image python:3.12
   - ecctl sandbox team list --region cn-hangzhou
-  - ecctl sbx team create --name dev --region cn-hangzhou
+  - ecctl sandbox api-key list --region cn-hangzhou

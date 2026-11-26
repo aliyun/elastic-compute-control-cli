@@ -245,6 +245,7 @@ type Resource struct {
 	ExecutionID                   string `json:"execution_id,omitempty"`
 	CacheCreatePending            bool   `json:"cache_create_pending,omitempty"`
 	TeamCreateConfirmed           bool   `json:"team_create_confirmed,omitempty"`
+	TeamProviderTemplateCleanup   bool   `json:"team_provider_template_cleanup,omitempty"`
 	VolumeTeamBound               bool   `json:"volume_team_bound,omitempty"`
 	QuotaBound                    bool   `json:"quota_bound,omitempty"`
 	QuotaReserved                 bool   `json:"quota_reserved,omitempty"`

@@ -1623,7 +1623,7 @@ func structuredObjectFlagValue(raw string, flag string, field spec.SchemaField, 
 		if field.InputStyle == "json|@file" {
 			value, err := aliyun.DecodeStrictJSONWithNumbers([]byte(raw))
 			if err != nil {
-				return nil, assigned, ecerrors.Client("InvalidParameter", "--"+flag+" must be one unambiguous JSON object")
+				return nil, assigned, ecerrors.Client("InvalidParameter", "APIJSONUnambiguousObjectRequired", ecerrors.WithField(flag))
 			}
 			var ok bool
 			decoded, ok = value.(map[string]any)
@@ -1721,7 +1721,7 @@ func validateStructuredObject(object map[string]any, flag string, field spec.Sch
 
 func validateAPIShapedValue(value any, path string, field spec.SchemaField) error {
 	invalid := func() error {
-		return ecerrors.Client("InvalidParameter", "--"+path+" does not match the API JSON schema")
+		return ecerrors.Client("InvalidParameter", "APIJSONSchemaMismatch", ecerrors.WithField(path))
 	}
 	if value == nil {
 		if field.Nullable {
@@ -1741,7 +1741,7 @@ func validateAPIShapedValue(value any, path string, field spec.SchemaField) erro
 		for name, childValue := range object {
 			child, known := field.Fields[name]
 			if len(field.Fields) > 0 && !known {
-				return ecerrors.Client("InvalidParameter", "--"+path+" field "+name+" is not supported")
+				return ecerrors.Client("InvalidParameter", "APIJSONUnsupportedMember", ecerrors.WithField(path+"."+name))
 			}
 			if known {
 				if err := validateAPIShapedValue(childValue, path+"."+name, child); err != nil {
