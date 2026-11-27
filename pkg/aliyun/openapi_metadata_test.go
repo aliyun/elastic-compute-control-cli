@@ -372,8 +372,8 @@ func TestCanonicalSnapshotAllProductsLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog) != 355 {
-		t.Fatalf("snapshot products = %d, want 355", len(catalog))
+	if len(catalog) != 361 {
+		t.Fatalf("snapshot products = %d, want 361", len(catalog))
 	}
 	products, err := OpenAPIProducts("en")
 	if err != nil {
@@ -417,8 +417,8 @@ func TestCanonicalSnapshotAllProductsLoad(t *testing.T) {
 			}
 		}
 	}
-	if operationCount != 26917 {
-		t.Fatalf("snapshot operations = %d, want 26917", operationCount)
+	if operationCount != 27369 {
+		t.Fatalf("snapshot operations = %d, want 27369", operationCount)
 	}
 }
 

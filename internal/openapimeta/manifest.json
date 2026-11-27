@@ -1,12 +1,12 @@
 {
   "format_version": 2,
   "repository": "aliyun/aliyun-openapi-meta",
-  "revision": "a8f464ed0c1868483b6db6ef3cdc4240afb368f0",
-  "index_sha256": "ac85bbd5ba6e1480e7a4a38ff052d3013ad29411c429f06955ed83373a6bf188",
-  "products": 355,
-  "operations": 26917,
-  "files": 27274,
-  "uncompressed_bytes": 186904518,
+  "revision": "77bb12a9a78a6620000924a9af5c5a5235f28c19",
+  "index_sha256": "132682d7e5d4e46bba104c2ee3649258b94d36afe5b295ac8188581357678eb3",
+  "products": 361,
+  "operations": 27369,
+  "files": 27732,
+  "uncompressed_bytes": 193239688,
   "default_versions": [
     {
       "code": "acc",
@@ -36,7 +36,7 @@
       "code": "Ada",
       "canonical_code": "ada",
       "version": "2026-07-01",
-      "operations": 12
+      "operations": 25
     },
     {
       "code": "adb",
@@ -78,7 +78,7 @@
       "code": "AgentCore",
       "canonical_code": "agentcore",
       "version": "2026-08-04",
-      "operations": 171
+      "operations": 194
     },
     {
       "code": "AgentExplorer",
@@ -87,10 +87,16 @@
       "operations": 3
     },
     {
+      "code": "AgentHITLData",
+      "canonical_code": "agenthitldata",
+      "version": "2026-08-10",
+      "operations": 3
+    },
+    {
       "code": "AgenticBAS",
       "canonical_code": "agenticbas",
       "version": "2026-06-30",
-      "operations": 4
+      "operations": 6
     },
     {
       "code": "AgentIdentity",
@@ -102,7 +108,7 @@
       "code": "AgentLoop",
       "canonical_code": "agentloop",
       "version": "2026-05-20",
-      "operations": 75
+      "operations": 83
     },
     {
       "code": "AgentRetailVision",
@@ -138,13 +144,13 @@
       "code": "AIDeepSign",
       "canonical_code": "aideepsign",
       "version": "2026-05-11",
-      "operations": 26
+      "operations": 28
     },
     {
       "code": "Aidge",
       "canonical_code": "aidge",
       "version": "2026-04-28",
-      "operations": 55
+      "operations": 60
     },
     {
       "code": "AIMath",
@@ -264,7 +270,7 @@
       "code": "APIG",
       "canonical_code": "apig",
       "version": "2024-03-27",
-      "operations": 233
+      "operations": 280
     },
     {
       "code": "appflow",
@@ -342,7 +348,7 @@
       "code": "cams",
       "canonical_code": "cams",
       "version": "2020-06-06",
-      "operations": 173
+      "operations": 175
     },
     {
       "code": "captcha",
@@ -372,7 +378,7 @@
       "code": "Cbn",
       "canonical_code": "cbn",
       "version": "2017-09-12",
-      "operations": 160
+      "operations": 171
     },
     {
       "code": "CC5G",
@@ -414,7 +420,7 @@
       "code": "clickhouse",
       "canonical_code": "clickhouse",
       "version": "2023-05-22",
-      "operations": 70
+      "operations": 71
     },
     {
       "code": "cloud-siem",
@@ -456,7 +462,7 @@
       "code": "Cloudfw",
       "canonical_code": "cloudfw",
       "version": "2017-12-07",
-      "operations": 281
+      "operations": 305
     },
     {
       "code": "cloudphone",
@@ -474,7 +480,7 @@
       "code": "Cms",
       "canonical_code": "cms",
       "version": "2019-01-01",
-      "operations": 161
+      "operations": 155
     },
     {
       "code": "cms-export",
@@ -534,13 +540,13 @@
       "code": "CS",
       "canonical_code": "cs",
       "version": "2015-12-15",
-      "operations": 146
+      "operations": 149
     },
     {
       "code": "csas",
       "canonical_code": "csas",
       "version": "2023-01-20",
-      "operations": 220
+      "operations": 223
     },
     {
       "code": "CsasEdr",
@@ -570,7 +576,7 @@
       "code": "DataLake",
       "canonical_code": "datalake",
       "version": "2020-07-10",
-      "operations": 94
+      "operations": 87
     },
     {
       "code": "dataphin-public",
@@ -582,7 +588,7 @@
       "code": "dataworks-public",
       "canonical_code": "dataworks-public",
       "version": "2024-05-18",
-      "operations": 401
+      "operations": 452
     },
     {
       "code": "DBFS",
@@ -624,7 +630,7 @@
       "code": "Dds",
       "canonical_code": "dds",
       "version": "2015-12-01",
-      "operations": 135
+      "operations": 137
     },
     {
       "code": "devops",
@@ -666,7 +672,7 @@
       "code": "Dms",
       "canonical_code": "dms",
       "version": "2025-04-14",
-      "operations": 134
+      "operations": 139
     },
     {
       "code": "dms-dg",
@@ -678,7 +684,7 @@
       "code": "dms-enterprise",
       "canonical_code": "dms-enterprise",
       "version": "2018-11-01",
-      "operations": 338
+      "operations": 339
     },
     {
       "code": "documentAutoml",
@@ -708,7 +714,7 @@
       "code": "Dts",
       "canonical_code": "dts",
       "version": "2020-01-01",
-      "operations": 130
+      "operations": 131
     },
     {
       "code": "DtsAI",
@@ -720,7 +726,7 @@
       "code": "Dyplsapi",
       "canonical_code": "dyplsapi",
       "version": "2017-05-25",
-      "operations": 60
+      "operations": 62
     },
     {
       "code": "Dypnsapi",
@@ -768,7 +774,7 @@
       "code": "eas",
       "canonical_code": "eas",
       "version": "2021-07-01",
-      "operations": 119
+      "operations": 120
     },
     {
       "code": "EasyGene",
@@ -789,6 +795,12 @@
       "operations": 3
     },
     {
+      "code": "EcdBiz",
+      "canonical_code": "ecdbiz",
+      "version": "2024-09-29",
+      "operations": 2
+    },
+    {
       "code": "Eci",
       "canonical_code": "eci",
       "version": "2018-08-08",
@@ -798,7 +810,7 @@
       "code": "Ecs",
       "canonical_code": "ecs",
       "version": "2014-05-26",
-      "operations": 303
+      "operations": 304
     },
     {
       "code": "ecs-workbench",
@@ -816,7 +828,7 @@
       "code": "eds-aic",
       "canonical_code": "eds-aic",
       "version": "2023-09-30",
-      "operations": 133
+      "operations": 137
     },
     {
       "code": "eds-user",
@@ -870,7 +882,7 @@
       "code": "Eiam",
       "canonical_code": "eiam",
       "version": "2021-12-01",
-      "operations": 357
+      "operations": 375
     },
     {
       "code": "Eiam-developerapi",
@@ -888,7 +900,7 @@
       "code": "elasticsearch",
       "canonical_code": "elasticsearch",
       "version": "2017-06-13",
-      "operations": 207
+      "operations": 213
     },
     {
       "code": "emas-appmonitor",
@@ -906,7 +918,7 @@
       "code": "emr-serverless-spark",
       "canonical_code": "emr-serverless-spark",
       "version": "2023-08-08",
-      "operations": 88
+      "operations": 92
     },
     {
       "code": "EMRASSISTANT",
@@ -948,13 +960,13 @@
       "code": "ESA",
       "canonical_code": "esa",
       "version": "2024-09-10",
-      "operations": 478
+      "operations": 483
     },
     {
       "code": "Ess",
       "canonical_code": "ess",
       "version": "2014-08-28",
-      "operations": 89
+      "operations": 94
     },
     {
       "code": "eventbridge",
@@ -966,7 +978,7 @@
       "code": "ExpressConnectRouter",
       "canonical_code": "expressconnectrouter",
       "version": "2023-09-01",
-      "operations": 38
+      "operations": 42
     },
     {
       "code": "facebody",
@@ -1008,7 +1020,7 @@
       "code": "foasconsole",
       "canonical_code": "foasconsole",
       "version": "2021-10-28",
-      "operations": 31
+      "operations": 32
     },
     {
       "code": "Ga",
@@ -1038,7 +1050,7 @@
       "code": "gpdb",
       "canonical_code": "gpdb",
       "version": "2016-05-03",
-      "operations": 301
+      "operations": 305
     },
     {
       "code": "grace",
@@ -1197,6 +1209,12 @@
       "operations": 111
     },
     {
+      "code": "InternetBankOpen",
+      "canonical_code": "internetbankopen",
+      "version": "2024-06-12",
+      "operations": 3
+    },
+    {
       "code": "Iot",
       "canonical_code": "iot",
       "version": "2018-01-20",
@@ -1218,7 +1236,7 @@
       "code": "IQS",
       "canonical_code": "iqs",
       "version": "2024-11-11",
-      "operations": 14
+      "operations": 13
     },
     {
       "code": "ivpd",
@@ -1302,7 +1320,7 @@
       "code": "MaasQIService",
       "canonical_code": "maasqiservice",
       "version": "2026-08-31",
-      "operations": 3
+      "operations": 5
     },
     {
       "code": "Market",
@@ -1314,7 +1332,7 @@
       "code": "MaxCompute",
       "canonical_code": "maxcompute",
       "version": "2022-01-04",
-      "operations": 113
+      "operations": 153
     },
     {
       "code": "metaspace",
@@ -1536,7 +1554,7 @@
       "code": "OutboundBot",
       "canonical_code": "outboundbot",
       "version": "2019-12-26",
-      "operations": 175
+      "operations": 178
     },
     {
       "code": "pai-dlc",
@@ -1632,7 +1650,7 @@
       "code": "polardb",
       "canonical_code": "polardb",
       "version": "2017-08-01",
-      "operations": 485
+      "operations": 561
     },
     {
       "code": "polardbx",
@@ -1662,7 +1680,7 @@
       "code": "pvtz",
       "canonical_code": "pvtz",
       "version": "2018-01-01",
-      "operations": 57
+      "operations": 62
     },
     {
       "code": "Qualitycheck",
@@ -1680,19 +1698,37 @@
       "code": "quickbi-public",
       "canonical_code": "quickbi-public",
       "version": "2022-01-01",
-      "operations": 143
+      "operations": 145
     },
     {
       "code": "quotas",
       "canonical_code": "quotas",
       "version": "2020-05-10",
-      "operations": 30
+      "operations": 31
+    },
+    {
+      "code": "QwenB2BChat",
+      "canonical_code": "qwenb2bchat",
+      "version": "2026-11-05",
+      "operations": 3
+    },
+    {
+      "code": "QwenB2BMed",
+      "canonical_code": "qwenb2bmed",
+      "version": "2026-11-16",
+      "operations": 3
+    },
+    {
+      "code": "QwenEduAiSuite",
+      "canonical_code": "qweneduaisuite",
+      "version": "2026-11-02",
+      "operations": 5
     },
     {
       "code": "R-kvstore",
       "canonical_code": "r-kvstore",
       "version": "2015-01-01",
-      "operations": 165
+      "operations": 171
     },
     {
       "code": "RAI",
@@ -1710,7 +1746,7 @@
       "code": "Rds",
       "canonical_code": "rds",
       "version": "2014-08-15",
-      "operations": 369
+      "operations": 370
     },
     {
       "code": "rds-data",
@@ -1722,7 +1758,7 @@
       "code": "RdsAi",
       "canonical_code": "rdsai",
       "version": "2025-05-07",
-      "operations": 126
+      "operations": 131
     },
     {
       "code": "RealTranslationAgent",
@@ -1770,7 +1806,7 @@
       "code": "RocketMQ",
       "canonical_code": "rocketmq",
       "version": "2022-08-01",
-      "operations": 86
+      "operations": 69
     },
     {
       "code": "ROS",
@@ -1788,13 +1824,13 @@
       "code": "rtc-white-board",
       "canonical_code": "rtc-white-board",
       "version": "2020-12-14",
-      "operations": 17
+      "operations": 16
     },
     {
       "code": "sae",
       "canonical_code": "sae",
       "version": "2019-05-06",
-      "operations": 152
+      "operations": 145
     },
     {
       "code": "saf",
@@ -1812,7 +1848,7 @@
       "code": "Sandbox",
       "canonical_code": "sandbox",
       "version": "2026-08-20",
-      "operations": 29
+      "operations": 41
     },
     {
       "code": "Sas",
@@ -1878,7 +1914,7 @@
       "code": "servicemesh",
       "canonical_code": "servicemesh",
       "version": "2020-01-11",
-      "operations": 94
+      "operations": 96
     },
     {
       "code": "sgw",
@@ -1974,7 +2010,7 @@
       "code": "SysOM",
       "canonical_code": "sysom",
       "version": "2023-12-30",
-      "operations": 100
+      "operations": 103
     },
     {
       "code": "Tablestore",
@@ -2040,7 +2076,7 @@
       "code": "vod",
       "canonical_code": "vod",
       "version": "2017-03-21",
-      "operations": 188
+      "operations": 192
     },
     {
       "code": "VoiceNavigator",
@@ -2076,19 +2112,19 @@
       "code": "waf-openapi",
       "canonical_code": "waf-openapi",
       "version": "2021-10-01",
-      "operations": 241
+      "operations": 252
     },
     {
       "code": "WebsiteBuild",
       "canonical_code": "websitebuild",
       "version": "2025-04-29",
-      "operations": 186
+      "operations": 187
     },
     {
       "code": "WinNexo",
       "canonical_code": "winnexo",
       "version": "2026-05-12",
-      "operations": 215
+      "operations": 250
     },
     {
       "code": "Workorder",
@@ -2100,7 +2136,7 @@
       "code": "wss",
       "canonical_code": "wss",
       "version": "2021-12-21",
-      "operations": 11
+      "operations": 14
     },
     {
       "code": "WuyingAI",
@@ -2136,7 +2172,7 @@
       "code": "Yundun-bastionhost",
       "canonical_code": "yundun-bastionhost",
       "version": "2019-12-09",
-      "operations": 193
+      "operations": 194
     }
   ]
 }
