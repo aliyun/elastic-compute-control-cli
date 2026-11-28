@@ -7,8 +7,8 @@ summary:
   resources: 67
   operations: 315
   missing_cases: 0
-  passed: 294
-  not_passed: 21
+  passed: 296
+  not_passed: 19
 resources:
   ack:
     ack:
@@ -495,17 +495,17 @@ resources:
     instance:
       operations:
         get:
-          status: offline
+          status: live-pass
           case: cases/acr/instance-lifecycle.yaml
           fingerprint: sha256:b19473158df87b3e46362b0db331f3b5944c164578e19be6de31bf91c2e756f8
-          time: "2026-11-28T12:40:05.165682377+08:00"
-          reason: case-changed
+          time: "2026-11-28T12:55:08+08:00"
+          reason: live-verified
         list:
-          status: offline
+          status: live-pass
           case: cases/acr/instance-lifecycle.yaml
           fingerprint: sha256:b19473158df87b3e46362b0db331f3b5944c164578e19be6de31bf91c2e756f8
-          time: "2026-11-28T12:40:05.165682377+08:00"
-          reason: case-changed
+          time: "2026-11-28T12:55:08+08:00"
+          reason: live-verified
   agentrun:
     sandbox:
       operations:
