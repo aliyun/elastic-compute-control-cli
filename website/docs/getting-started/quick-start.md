@@ -131,10 +131,12 @@ Public products:
 | Product | Purpose |
 |---|---|
 | `ack` | ACK clusters and cluster lifecycle operations, including access, addons, checks, policies, and tasks |
+| `acr` | Container Registry enterprise edition instances (read-only list and get) |
 | `agentrun` | AgentRun sandbox templates and isolated sandbox instances |
 | `ecs` | ECS instances, disks, images, security groups, ENIs, key pairs, launch templates, snapshots, and Cloud Assistant resources |
 | `lingjun` | Lingjun clusters, node groups, and high-performance network resources |
 | `rg` | Resource groups and governance settings, policies, roles, and notifications |
+| `sandbox` | E2B sandboxes and templates, plus native FC templates, template caches, teams, quotas, volumes, and API keys |
 | `tag` | Cross-product tags, associated-resource tag rules, and tag policies |
 | `vpc` | VPCs and vSwitches |
 

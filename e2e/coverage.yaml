@@ -4,11 +4,11 @@ generated:
   cases_dir: cases
 summary:
   surface: public
-  resources: 66
-  operations: 313
+  resources: 67
+  operations: 315
   missing_cases: 0
   passed: 294
-  not_passed: 19
+  not_passed: 21
 resources:
   ack:
     ack:
@@ -491,6 +491,21 @@ resources:
           fingerprint: sha256:df7ae7065a25546ea726cb3339df372919d0ce30b9aecf2d7dcf312ef61c0be3
           time: "2026-07-28T18:10:09.278946+08:00"
           reason: live-verified
+  acr:
+    instance:
+      operations:
+        get:
+          status: offline
+          case: cases/acr/instance-lifecycle.yaml
+          fingerprint: sha256:f3f9074f799630457c40cda2e887de0bd34c26cdcee3059ab1f03ab0c11e875f
+          time: "2026-11-28T12:06:20.184237098+08:00"
+          reason: not-run
+        list:
+          status: offline
+          case: cases/acr/instance-lifecycle.yaml
+          fingerprint: sha256:f3f9074f799630457c40cda2e887de0bd34c26cdcee3059ab1f03ab0c11e875f
+          time: "2026-11-28T12:06:20.184237098+08:00"
+          reason: not-run
   agentrun:
     sandbox:
       operations:

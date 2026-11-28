@@ -1,0 +1,9 @@
+{
+  "label": "SANDBOX",
+  "position": 7,
+  "link": {
+    "type": "generated-index",
+    "title": "SANDBOX resources",
+    "description": "Manage E2B sandboxes and templates, and native FC OpenAPI templates, template caches, teams, quotas, volumes, and API keys."
+  }
+}

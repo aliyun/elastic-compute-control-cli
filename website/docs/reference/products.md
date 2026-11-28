@@ -41,6 +41,16 @@ Manage Container Service for Kubernetes (ACK) clusters across their full lifecyc
 | [version](./resources/ack/version.md) | Query ACK Kubernetes version metadata |
 | [vuls](./resources/ack/vuls.md) | Manage ACK vulnerability scans and vulnerability views |
 
+## [ACR](../category/acr)
+
+Manage Container Registry enterprise edition resources
+
+**1 resource**
+
+| Resource | Description |
+|---|---|
+| [instance](./resources/acr/instance.md) | Query Container Registry enterprise edition instances |
+
 ## [AGENTRUN](../category/agentrun)
 
 Manage AgentRun sandbox templates and isolated sandbox instances.
@@ -109,6 +119,22 @@ Manage resource group governance resources
 | [role](./resources/rg/role.md) | Manage RAM roles |
 | [service-linked-role](./resources/rg/service-linked-role.md) | Manage service-linked roles |
 | [policy version](./resources/rg/policy-version.md) | Manage policy versions |
+
+## [SANDBOX](../category/sandbox)
+
+Manage E2B sandboxes and templates, and native FC OpenAPI templates, template caches, teams, quotas, volumes, and API keys.
+
+**7 resources**
+
+| Resource | Description |
+|---|---|
+| [api-key](./resources/sandbox/api-key.md) | Manage native FC sandbox API keys. |
+| [quota](./resources/sandbox/quota.md) | Manage native FC sandbox team CPU and memory quotas. |
+| [sandbox](./resources/sandbox/sandbox.md) | Manage the lifecycle and control-plane state of E2B sandboxes. |
+| [team](./resources/sandbox/team.md) | Manage FC Agent Sandbox teams. |
+| [template](./resources/sandbox/template.md) | Manage sandbox templates; use --openapi for native FC templates with Aliyun credentials. |
+| [template-cache](./resources/sandbox/template-cache.md) | Manage native FC sandbox template image caches. |
+| [volume](./resources/sandbox/volume.md) | Manage native FC sandbox volume configurations. |
 
 ## [TAG](../category/tag)
 

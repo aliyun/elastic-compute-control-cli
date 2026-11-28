@@ -114,5 +114,29 @@
   "sidebar.docsSidebar.category.AGENTRUN.link.generated-index.description": {
     "message": "管理 AgentRun 沙箱模板和隔离沙箱实例。",
     "description": "The generated-index page description for category 'AGENTRUN' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.ACR": {
+    "message": "ACR",
+    "description": "The label for category 'ACR' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.ACR.link.generated-index.title": {
+    "message": "ACR 资源",
+    "description": "The generated-index page title for category 'ACR' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.ACR.link.generated-index.description": {
+    "message": "管理容器镜像服务企业版资源",
+    "description": "The generated-index page description for category 'ACR' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.SANDBOX": {
+    "message": "SANDBOX",
+    "description": "The label for category 'SANDBOX' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.SANDBOX.link.generated-index.title": {
+    "message": "SANDBOX 资源",
+    "description": "The generated-index page title for category 'SANDBOX' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.SANDBOX.link.generated-index.description": {
+    "message": "管理 E2B 沙箱及模板，以及原生 FC OpenAPI 模板、模板缓存、团队、配额、存储卷和访问密钥。",
+    "description": "The generated-index page description for category 'SANDBOX' in sidebar 'docsSidebar'"
   }
 }

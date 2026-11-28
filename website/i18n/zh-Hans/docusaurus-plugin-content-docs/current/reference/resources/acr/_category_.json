@@ -1,0 +1,9 @@
+{
+  "label": "ACR",
+  "position": 2,
+  "link": {
+    "type": "generated-index",
+    "title": "ACR 资源",
+    "description": "管理容器镜像服务企业版资源"
+  }
+}
