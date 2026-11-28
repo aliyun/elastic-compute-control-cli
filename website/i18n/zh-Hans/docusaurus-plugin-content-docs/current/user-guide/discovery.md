@@ -19,10 +19,12 @@ ecctl schema --list
 {
   "products": [
     {"name": "ack"},
+    {"name": "acr"},
     {"name": "agentrun"},
     {"name": "ecs"},
     {"name": "lingjun"},
     {"name": "rg"},
+    {"name": "sandbox"},
     {"name": "tag"},
     {"name": "vpc"}
   ]

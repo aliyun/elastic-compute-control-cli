@@ -41,6 +41,16 @@ description: "浏览 ecctl 支持的全部公开产品和资源。"
 | [version](./resources/ack/version.md) | 查询 ACK Kubernetes 版本元数据 |
 | [vuls](./resources/ack/vuls.md) | 管理 ACK 漏洞扫描和漏洞视图 |
 
+## [ACR](../category/acr)
+
+管理容器镜像服务企业版资源
+
+**1 个资源**
+
+| 资源 | 描述 |
+|---|---|
+| [instance](./resources/acr/instance.md) | 查询容器镜像服务企业版实例 |
+
 ## [AGENTRUN](../category/agentrun)
 
 管理 AgentRun 沙箱模板和隔离沙箱实例。
@@ -109,6 +119,22 @@ description: "浏览 ecctl 支持的全部公开产品和资源。"
 | [role](./resources/rg/role.md) | 管理 RAM 角色 |
 | [service-linked-role](./resources/rg/service-linked-role.md) | 管理服务关联角色 |
 | [policy version](./resources/rg/policy-version.md) | 管理权限策略版本 |
+
+## [SANDBOX](../category/sandbox)
+
+管理 E2B 沙箱及模板，以及原生 FC OpenAPI 模板、模板缓存、团队、配额、存储卷和访问密钥。
+
+**7 个资源**
+
+| 资源 | 描述 |
+|---|---|
+| [api-key](./resources/sandbox/api-key.md) | 管理原生 FC 沙箱访问密钥。 |
+| [quota](./resources/sandbox/quota.md) | 管理原生 FC 沙箱团队的 CPU 和内存配额。 |
+| [sandbox](./resources/sandbox/sandbox.md) | 管理 E2B 沙箱的生命周期和控制面状态。 |
+| [team](./resources/sandbox/team.md) | 管理 FC 云沙箱团队。 |
+| [template](./resources/sandbox/template.md) | 管理沙箱模板；使用 --openapi 通过阿里云凭证管理原生 FC 模板。 |
+| [template-cache](./resources/sandbox/template-cache.md) | 管理原生 FC 沙箱模板镜像缓存。 |
+| [volume](./resources/sandbox/volume.md) | 管理原生 FC 沙箱存储卷配置。 |
 
 ## [TAG](../category/tag)
 

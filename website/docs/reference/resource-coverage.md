@@ -53,6 +53,16 @@ ecctl ack list --help
 ecctl ack cluster list --help
 ```
 
+## ACR
+
+```bash
+ecctl schema --list acr
+```
+
+| Resource | Actions |
+|---|---|
+| `instance` | `list`, `get` |
+
 ## AgentRun
 
 ```bash

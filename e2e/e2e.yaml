@@ -18,6 +18,11 @@ regions:
 # AgentRun lifecycle cases create temporary CodeInterpreter templates with the
 # platform-provided image and PUBLIC networking; no local prerequisites apply.
 
+# ACR instance lifecycle cases are read-only and region-bound to a shared
+# enterprise edition instance. Declare the acr.instance prerequisite bundle
+# (mode=lookup, instance_id) under the matching region profile in e2e.local.yaml;
+# the shared instance is never deleted or reconfigured.
+
 # Paths to E2E files in the repository. Relative paths are resolved from this
 # file's directory.
 paths:

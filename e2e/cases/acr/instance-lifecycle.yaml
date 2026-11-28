@@ -1,0 +1,42 @@
+# Read-only ACR enterprise edition instance lifecycle. The shared prerequisite
+# instance is lookup-only: it is never created, deleted, or reconfigured here.
+resource: acr/instance
+requires_prerequisites: [acr.instance]
+serial: true
+timeout: 10m
+
+steps:
+  - name: list
+    run: ecctl acr instance list
+    expect:
+      $.total: {ge: 1}
+      $.instances: {type: array, min_len: 1}
+      $.pagination.page: {eq: 1}
+      $.instances[0].id: {type: string, min_len: 1}
+
+  - name: list first page
+    run: ecctl acr instance list --limit 1
+    expect:
+      $.pagination.limit: {eq: 1}
+      $.pagination.returned: {eq: 1}
+      $.instances: {type: array, len: 1}
+    assert:
+      - '$.pagination.has_more == ($.total > 1)'
+      - '$.pagination.has_more == false || $.pagination.next_page =~ "^2$"'
+
+  - name: list running instances
+    run: ecctl acr instance list --filter status=RUNNING
+    expect:
+      $.instances: {type: array}
+    assert:
+      - 'len($.instances[?(@.id == "{{.prerequisites.acr.instance.instance_id}}")]) == 1'
+      - 'len($.instances[?(@.status != "RUNNING")]) == 0'
+
+  - name: get prerequisite instance
+    run: ecctl acr instance get {{.prerequisites.acr.instance.instance_id}}
+    at: $.instance
+    expect:
+      id: {eq: "{{.prerequisites.acr.instance.instance_id}}"}
+      status: {eq: RUNNING}
+      spec: {regex: "^Enterprise_"}
+      name: {type: string, min_len: 1}

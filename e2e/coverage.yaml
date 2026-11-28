@@ -4,10 +4,10 @@ generated:
   cases_dir: cases
 summary:
   surface: public
-  resources: 66
-  operations: 313
+  resources: 67
+  operations: 315
   missing_cases: 0
-  passed: 294
+  passed: 296
   not_passed: 19
 resources:
   ack:
@@ -490,6 +490,21 @@ resources:
           case: cases/ack/vuls-lifecycle.yaml
           fingerprint: sha256:df7ae7065a25546ea726cb3339df372919d0ce30b9aecf2d7dcf312ef61c0be3
           time: "2026-07-28T18:10:09.278946+08:00"
+          reason: live-verified
+  acr:
+    instance:
+      operations:
+        get:
+          status: live-pass
+          case: cases/acr/instance-lifecycle.yaml
+          fingerprint: sha256:b19473158df87b3e46362b0db331f3b5944c164578e19be6de31bf91c2e756f8
+          time: "2026-11-28T12:55:08+08:00"
+          reason: live-verified
+        list:
+          status: live-pass
+          case: cases/acr/instance-lifecycle.yaml
+          fingerprint: sha256:b19473158df87b3e46362b0db331f3b5944c164578e19be6de31bf91c2e756f8
+          time: "2026-11-28T12:55:08+08:00"
           reason: live-verified
   agentrun:
     sandbox:

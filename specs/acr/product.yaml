@@ -1,0 +1,11 @@
+schema_version: 1
+product: acr
+priority: 8
+resources:
+  - instance
+description:
+  en: Manage Container Registry enterprise edition resources
+  zh-CN: 管理容器镜像服务企业版资源
+examples:
+  - ecctl acr instance list
+  - ecctl acr instance get <cri-id>

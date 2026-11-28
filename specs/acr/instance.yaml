@@ -1,0 +1,147 @@
+schema_version: 2
+product: acr
+api_product: cr
+resource: instance
+kind: regional
+display_name:
+  en: instance
+  zh-CN: 实例
+description:
+  en: Query Container Registry enterprise edition instances
+  zh-CN: 查询容器镜像服务企业版实例
+examples:
+  - ecctl acr instance list
+  - ecctl acr instance list --filter status=RUNNING
+  - ecctl acr instance get <cri-id>
+
+identity:
+  field: id
+  prefix: cri-
+  output_root:
+    one: instance
+    many: instances
+
+schema:
+  fields:
+    id:
+      type: string
+      description:
+        en: instance ID
+        zh-CN: 实例 ID
+    status:
+      type: string
+      description:
+        en: instance status
+        zh-CN: 实例状态
+      enum: [PENDING, INIT_ERROR, STARTING, RUNNING, STOPPING, STOPPED, DELETING, DELETED]
+    resource_group:
+      type: string
+      description:
+        en: resource group ID
+        zh-CN: 资源组 ID
+
+controls:
+  filter:
+    type: key_value
+    repeatable: true
+    description:
+      en: filter expression key=value
+      zh-CN: 过滤表达式 key=value
+  limit:
+    type: integer
+    default: 100
+    max: 100
+    description:
+      en: maximum instances to return
+      zh-CN: 最多返回实例数量
+  page:
+    type: integer
+    default: 1
+    description:
+      en: results page to return
+      zh-CN: 返回结果页码
+
+probes:
+  list:
+    api: ListInstance
+    request:
+      PageNo: $.page
+      PageSize: $.limit
+      InstanceStatus: $.status
+      ResourceGroupId: $.resource_group
+    response:
+      items: $.Instances
+      total: $.TotalCount
+      request_id: $.RequestId
+      id: $.InstanceId
+      state: $.InstanceStatus
+      fields:
+        id: $.InstanceId
+        name: $.InstanceName
+        status: $.InstanceStatus
+        spec: $.InstanceSpecification
+        region: $.RegionId
+        resource_group: $.ResourceGroupId
+        tags: $.Tags
+        create_time: $.CreateTime
+        modified_time: $.ModifiedTime
+        instance_issue: $.InstanceIssue
+  attribute:
+    api: GetInstance
+    request:
+      InstanceId: $.id
+    response:
+      item: $
+      request_id: $.RequestId
+      id: $.InstanceId
+      state: $.InstanceStatus
+      fields:
+        id: $.InstanceId
+        name: $.InstanceName
+        status: $.InstanceStatus
+        spec: $.InstanceSpecification
+        resource_group: $.ResourceGroupId
+        tags: $.Tags
+        create_time: $.CreateTime
+        modified_time: $.ModifiedTime
+        instance_issue: $.InstanceIssue
+
+operations:
+  get:
+    aliases: [show, describe]
+    examples:
+      - ecctl acr instance get <cri-id>
+    description:
+      en: Get an enterprise edition instance
+      zh-CN: 获取企业版实例
+    input:
+      fields:
+        - id:
+            required: true
+            positional: true
+    workflow:
+      - probe: attribute
+        ids:
+          - $input.id
+        not_found: error
+  list:
+    examples:
+      - ecctl acr instance list
+      - ecctl acr instance list --filter status=RUNNING
+      - ecctl acr instance list --filter resource-group=<rg-id> --page 2 --limit 30
+    description:
+      en: List enterprise edition instances
+      zh-CN: 列出企业版实例
+    input:
+      controls:
+        - filter
+        - limit
+        - page
+    filters:
+      status:
+        target: status
+      resource-group:
+        target: resource_group
+    workflow:
+      - probe: list
+        many: true

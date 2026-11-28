@@ -1,0 +1,9 @@
+{
+  "label": "SANDBOX",
+  "position": 7,
+  "link": {
+    "type": "generated-index",
+    "title": "SANDBOX 资源",
+    "description": "管理 E2B 沙箱及模板，以及原生 FC OpenAPI 模板、模板缓存、团队、配额、存储卷和访问密钥。"
+  }
+}
