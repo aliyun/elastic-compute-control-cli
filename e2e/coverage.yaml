@@ -497,15 +497,15 @@ resources:
         get:
           status: offline
           case: cases/acr/instance-lifecycle.yaml
-          fingerprint: sha256:f3f9074f799630457c40cda2e887de0bd34c26cdcee3059ab1f03ab0c11e875f
-          time: "2026-11-28T12:06:20.184237098+08:00"
-          reason: not-run
+          fingerprint: sha256:b19473158df87b3e46362b0db331f3b5944c164578e19be6de31bf91c2e756f8
+          time: "2026-11-28T12:40:05.165682377+08:00"
+          reason: case-changed
         list:
           status: offline
           case: cases/acr/instance-lifecycle.yaml
-          fingerprint: sha256:f3f9074f799630457c40cda2e887de0bd34c26cdcee3059ab1f03ab0c11e875f
-          time: "2026-11-28T12:06:20.184237098+08:00"
-          reason: not-run
+          fingerprint: sha256:b19473158df87b3e46362b0db331f3b5944c164578e19be6de31bf91c2e756f8
+          time: "2026-11-28T12:40:05.165682377+08:00"
+          reason: case-changed
   agentrun:
     sandbox:
       operations:

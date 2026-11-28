@@ -22,7 +22,7 @@ steps:
       $.instances: {type: array, len: 1}
     assert:
       - '$.pagination.has_more == ($.total > 1)'
-      - '$.pagination.has_more == false || $.pagination.next_page == 2'
+      - '$.pagination.has_more == false || $.pagination.next_page =~ "^2$"'
 
   - name: list running instances
     run: ecctl acr instance list --filter status=RUNNING
